@@ -50,6 +50,7 @@ GROUP_STAGE_STATE = "group_stage.state"
 PLANNING_DRAFT_WRITE = "ruleset.planning_draft.write"
 SINGER_CONTESTANT_NUMBER = "singer_contestant.number"
 LIVE_CHALLENGE_STATE = "singer_contest.live_challenge.state"
+PODIUM_TIE_DECISION = "singer_contest.podium_tie_decision"
 
 
 @dataclass(frozen=True)

@@ -268,3 +268,130 @@ class PodiumResultServiceTests(TestCase):
             podium.required_raw_facts["rounds"], (self.first_round.pk, self.final_round.pk)
         )
         self.assertTrue(podium.confirmable)
+
+    def _make_podium_tie(self):
+        """Make the top two finalists carry identical first- and third-round scores."""
+
+        tied = self.singers[:2]
+        first_score = ScoreSummary.objects.get(
+            round=self.first_round, singer=tied[0]
+        ).average_score
+        third_score = ScoreSummary.objects.get(
+            round=self.final_round, singer=tied[0]
+        ).average_score
+        with authority_write(SCORE_SUMMARY_RECALCULATE):
+            for singer in tied:
+                ScoreSummary.objects.filter(round=self.first_round, singer=singer).update(
+                    average_score=first_score
+                )
+                ScoreSummary.objects.filter(round=self.final_round, singer=singer).update(
+                    average_score=third_score
+                )
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+        return tied
+
+    def test_a_podium_tie_needs_an_audited_manual_ordering_before_it_can_confirm(self):
+        from .models import Award
+        from .podium_services import create_podium_tie_decision, persist_podium_result
+        from .services import confirm_stage_result
+
+        tied = self._make_podium_tie()
+        result = build_podium_result(self.version, self.activity)
+        self.assertEqual(result.status, "review")
+        self.assertIn("podium_tie_requires_review", result.reasons)
+        self.assertEqual(result.awards, ())
+
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        self.assertEqual(stage.status, StageResult.Status.REVIEW)
+        with self.assertRaises(ValidationError):
+            confirm_stage_result(stage, confirmed_by=self.staff)
+
+        decision = create_podium_tie_decision(
+            stage,
+            ordering=[tied[1].pk, tied[0].pk],
+            reason="同分，经评委组复议按第三轮表现排序",
+            operator=self.staff,
+            base_input_fingerprint=stage.input_fingerprint,
+        )
+        self.assertEqual(decision.ordering, [tied[1].pk, tied[0].pk])
+
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        rebuilt = build_podium_result(self.version, self.activity)
+        self.assertEqual(rebuilt.status, "ready")
+        self.assertEqual(
+            [row.contestant for row in rebuilt.decisions[:2]],
+            [str(tied[1].pk), str(tied[0].pk)],
+        )
+
+        confirmed = confirm_stage_result(stage, confirmed_by=self.staff)
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+        champion = Award.objects.get(source_stage_result=confirmed, name="冠军")
+        self.assertEqual(champion.singer_id, tied[1].pk)
+
+    def test_a_tie_decision_is_ignored_after_the_raw_scores_change(self):
+        from .podium_services import create_podium_tie_decision, persist_podium_result
+
+        tied = self._make_podium_tie()
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        create_podium_tie_decision(
+            stage,
+            ordering=[tied[1].pk, tied[0].pk],
+            reason="同分裁决",
+            operator=self.staff,
+            base_input_fingerprint=stage.input_fingerprint,
+        )
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+
+        # Still tied, but at a different score: the decision's fingerprint is now stale.
+        with authority_write(SCORE_SUMMARY_RECALCULATE):
+            for singer in tied:
+                ScoreSummary.objects.filter(round=self.final_round, singer=singer).update(
+                    average_score=Decimal("90")
+                )
+
+        rebuilt = build_podium_result(self.version, self.activity)
+        self.assertEqual(rebuilt.status, "review")
+        self.assertIn("podium_tie_requires_review", rebuilt.reasons)
+
+    def test_the_staff_page_records_a_podium_tie_decision(self):
+        from django.urls import reverse
+
+        from .podium_services import persist_podium_result
+
+        tied = self._make_podium_tie()
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:stage_result_podium_tie", args=[stage.pk]),
+            {
+                "base_input_fingerprint": stage.input_fingerprint,
+                f"order_{tied[0].pk}": "2",
+                f"order_{tied[1].pk}": "1",
+                "reason": "同分，经评委组复议按第三轮表现排序",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "已记录人工并列裁决")
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+
+    def test_a_tie_decision_cannot_move_someone_across_score_groups(self):
+        from .podium_services import create_podium_tie_decision, persist_podium_result
+
+        tied = self._make_podium_tie()
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+
+        with self.assertRaisesRegex(ValidationError, "只能针对当前同分组"):
+            create_podium_tie_decision(
+                stage,
+                ordering=[tied[0].pk, tied[1].pk, self.singers[2].pk],
+                reason="跨分数组重排",
+                operator=self.staff,
+                base_input_fingerprint=stage.input_fingerprint,
+            )

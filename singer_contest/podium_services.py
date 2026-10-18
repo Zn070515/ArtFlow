@@ -7,6 +7,8 @@ import json
 from dataclasses import dataclass
 from decimal import Decimal
 
+from accounts.services import require_current_staff
+from common.authority import PODIUM_TIE_DECISION, authority_write
 from common.models import AuditLog
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
@@ -30,7 +32,9 @@ from .models import (
     ContestRound,
     Performance,
     PerformanceScoreState,
+    PodiumTieDecision,
     ScoreSummary,
+    SingerRegistration,
     StageResult,
 )
 from .scoring import official_weighted_score, quantize_official_score
@@ -255,19 +259,9 @@ def _facts(version: RulesetVersion, activity) -> PodiumFacts:
     )
 
 
-def build_podium_result(version: RulesetVersion, activity) -> ResolveResult:
-    """Compute the frozen weighted podium candidate without confirming it."""
+def _scored_rows(facts: PodiumFacts, config: PodiumConfig):
+    """The final entries with their official weighted score, in default order."""
 
-    config = podium_config(version)
-    facts = _facts(version, activity)
-    if facts.reasons:
-        return ResolveResult(
-            status=ResolverState.HOLD,
-            reasons=facts.reasons,
-            input_fingerprint=facts.fingerprint,
-            content_hash=_hash(config.__dict__),
-            schema_version=1,
-        )
     assert facts.third_round is not None
     final_entries = list(facts.third_round.entries.order_by("running_order", "pk"))
     rows = [
@@ -282,10 +276,89 @@ def build_podium_result(version: RulesetVersion, activity) -> ResolveResult:
         )
         for entry in final_entries
     ]
-    ordered = sorted(rows, key=lambda item: (-item[1], item[0].running_order or 0, item[0].pk))
-    has_tie = len({score for _, score in ordered}) != len(ordered)
-    status = ResolverState.REVIEW if has_tie else ResolverState.READY
-    reasons = ("podium_tie_requires_review",) if has_tie else ()
+    return sorted(rows, key=lambda item: (-item[1], item[0].running_order or 0, item[0].pk))
+
+
+def _score_groups(rows) -> dict[Decimal, list]:
+    groups: dict[Decimal, list] = {}
+    for entry, score in rows:
+        groups.setdefault(score, []).append((entry, score))
+    return groups
+
+
+def _valid_tie_decisions(
+    version: RulesetVersion, activity, config: PodiumConfig, fingerprint: str, groups
+) -> dict[Decimal, list[int]]:
+    """Manual orderings that still apply to *these* raw facts, keyed by score.
+
+    A decision is usable only when it was made against the current fingerprint, covers
+    exactly the current tied group, and is a permutation of it. Anything else leaves the
+    group unresolved (REVIEW); the old row stays as audit history.
+    """
+
+    decisions = {
+        decision.tie_score: decision
+        for decision in PodiumTieDecision.objects.filter(
+            activity_id=activity.pk,
+            ruleset_version_id=version.pk,
+            stage_key=config.stage_key,
+            input_fingerprint=fingerprint,
+        )
+    }
+    valid: dict[Decimal, list[int]] = {}
+    for score, members in groups.items():
+        if len(members) < 2:
+            continue
+        decision = decisions.get(score)
+        if decision is None:
+            continue
+        group_ids = sorted(entry.singer_id for entry, _ in members)
+        try:
+            singer_ids = sorted(int(value) for value in (decision.singer_ids or []))
+            ordering = [int(value) for value in (decision.ordering or [])]
+        except (TypeError, ValueError):
+            continue
+        if (
+            singer_ids == group_ids
+            and sorted(ordering) == group_ids
+            and len(set(ordering)) == len(ordering)
+        ):
+            valid[score] = ordering
+    return valid
+
+
+def build_podium_result(version: RulesetVersion, activity) -> ResolveResult:
+    """Compute the frozen weighted podium candidate without confirming it."""
+
+    config = podium_config(version)
+    facts = _facts(version, activity)
+    if facts.reasons:
+        return ResolveResult(
+            status=ResolverState.HOLD,
+            reasons=facts.reasons,
+            input_fingerprint=facts.fingerprint,
+            content_hash=_hash(config.__dict__),
+            schema_version=1,
+        )
+    rows = _scored_rows(facts, config)
+    groups = _score_groups(rows)
+    tie_scores = [score for score, members in groups.items() if len(members) > 1]
+    valid = _valid_tie_decisions(version, activity, config, facts.fingerprint, groups)
+    unresolved = [score for score in tie_scores if score not in valid]
+    manual_positions: dict[int, int] = {}
+    for score in tie_scores:
+        for position, singer_id in enumerate(valid.get(score, ())):
+            manual_positions[singer_id] = position
+    ordered = sorted(
+        rows,
+        key=lambda item: (
+            -item[1],
+            manual_positions.get(item[0].singer_id, item[0].running_order or 0),
+            item[0].pk,
+        ),
+    )
+    status = ResolverState.REVIEW if unresolved else ResolverState.READY
+    reasons = ("podium_tie_requires_review",) if unresolved else ()
     decisions = tuple(
         StageDecision(
             contestant=str(entry.singer_id),
@@ -293,7 +366,13 @@ def build_podium_result(version: RulesetVersion, activity) -> ResolveResult:
             source_node=config.aggregate_node,
             rank=index,
             score=score,
-            reason="同分待人工核定" if has_tie else "",
+            reason=(
+                "同分待人工核定"
+                if score in unresolved
+                else "同分组经人工裁决"
+                if score in tie_scores
+                else ""
+            ),
             schema_version=1,
         )
         for index, (entry, score) in enumerate(ordered, start=1)
@@ -354,6 +433,179 @@ def build_podium_result(version: RulesetVersion, activity) -> ResolveResult:
 
 def podium_current_input_fingerprint(version: RulesetVersion, activity) -> str:
     return _facts(version, activity).fingerprint
+
+
+def podium_tie_groups(version: RulesetVersion, activity) -> list[dict]:
+    """The equal-score groups an operator must order before the podium can be ready."""
+
+    config = podium_config(version)
+    facts = _facts(version, activity)
+    if facts.reasons:
+        return []
+    rows = _scored_rows(facts, config)
+    groups = _score_groups(rows)
+    tie_scores = sorted(
+        (score for score, members in groups.items() if len(members) > 1), reverse=True
+    )
+    if not tie_scores:
+        return []
+    valid = _valid_tie_decisions(version, activity, config, facts.fingerprint, groups)
+    singer_ids = {entry.singer_id for members in groups.values() for entry, _ in members}
+    names = {
+        singer.pk: singer.name
+        for singer in SingerRegistration.objects.filter(pk__in=singer_ids)
+    }
+    result: list[dict] = []
+    for score in tie_scores:
+        members = groups[score]
+        if score in valid:
+            by_id = {entry.singer_id: entry for entry, _ in members}
+            ordered_entries = [by_id[singer_id] for singer_id in valid[score]]
+        else:
+            ordered_entries = [entry for entry, _ in members]
+        result.append(
+            {
+                "score": score,
+                "decided": score in valid,
+                "singers": [
+                    {
+                        "id": entry.singer_id,
+                        "name": names.get(entry.singer_id, str(entry.singer_id)),
+                        "position": position,
+                    }
+                    for position, entry in enumerate(ordered_entries, start=1)
+                ],
+            }
+        )
+    return result
+
+
+@transaction.atomic
+def create_podium_tie_decision(
+    stage: StageResult,
+    *,
+    ordering,
+    reason: str,
+    operator,
+    base_input_fingerprint: str,
+):
+    """Record and audit a manual ordering inside one equal-score podium group.
+
+    Only the *group's internal* order is expressible: the caller's singer set must be
+    exactly one current equal-score group, so a decision can never move a singer past
+    someone with a different score. The decision is stored against the raw-facts
+    fingerprint and the podium is recomputed immediately.
+    """
+
+    current_operator = require_current_staff(operator)
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValidationError("必须说明人工裁决原因。")
+    lock_activity_for_action(stage.activity, ActivityAction.PUBLISH_RESULT)
+    locked = StageResult.objects.select_for_update().get(pk=stage.pk)
+    version = RulesetVersion.objects.select_for_update().get(pk=locked.ruleset_version_id)
+    config = podium_config(version)
+    if locked.activity_id != stage.activity_id or locked.stage_key != config.stage_key:
+        raise ValidationError("赛段结果不是当前最终冠亚季军结果。")
+    if version.status != RulesetVersion.Status.FROZEN or not version.is_current:
+        raise ValidationError("只能裁定基于当前冻结赛制版本生成的最终结果。")
+    latest = StageResult.objects.filter(
+        activity=locked.activity, stage_key=locked.stage_key
+    ).aggregate(m=Max("result_version"))["m"]
+    if locked.result_version != latest:
+        raise ValidationError("该最终结果存在更新版本，请裁定最新结果。")
+    if locked.status == StageResult.Status.CONFIRMED:
+        raise ValidationError("已核定的最终结果不能再做人工裁决。")
+    facts = _facts(version, locked.activity)
+    if facts.reasons:
+        raise ValidationError("最终冠亚季军结果尚未满足正式裁决条件。")
+    if (
+        not str(base_input_fingerprint or "").strip()
+        or base_input_fingerprint != facts.fingerprint
+    ):
+        raise ValidationError("最终结果已被更新，请刷新后重新计算。")
+
+    try:
+        singer_ids = [int(value) for value in ordering]
+    except (TypeError, ValueError):
+        raise ValidationError("人工裁决的选手顺序无效。") from None
+    if len(singer_ids) < 2 or len(set(singer_ids)) != len(singer_ids):
+        raise ValidationError("人工裁决必须为同分组内的全部选手给出唯一顺序。")
+    rows = _scored_rows(facts, config)
+    groups = _score_groups(rows)
+    wanted = set(singer_ids)
+    group = next(
+        (
+            members
+            for members in groups.values()
+            if len(members) > 1
+            and {entry.singer_id for entry, _ in members} == wanted
+        ),
+        None,
+    )
+    if group is None:
+        raise ValidationError("人工裁决只能针对当前同分组内的全部选手。")
+    tie_score = group[0][1]
+
+    with authority_write(PODIUM_TIE_DECISION):
+        decision = (
+            PodiumTieDecision.objects.select_for_update()
+            .filter(
+                activity_id=locked.activity_id,
+                ruleset_version_id=version.pk,
+                stage_key=config.stage_key,
+                tie_score=tie_score,
+                input_fingerprint=facts.fingerprint,
+            )
+            .first()
+        )
+        old_value = ""
+        if decision is None:
+            decision = PodiumTieDecision(
+                activity_id=locked.activity_id,
+                ruleset_version=version,
+                stage_key=config.stage_key,
+                tie_score=tie_score,
+                singer_ids=sorted(singer_ids),
+                ordering=singer_ids,
+                reason=reason,
+                input_fingerprint=facts.fingerprint,
+                is_test_data=locked.is_test_data,
+                created_by=current_operator,
+            )
+        else:
+            old_value = json.dumps(
+                {"ordering": decision.ordering, "reason": decision.reason},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            decision.singer_ids = sorted(singer_ids)
+            decision.ordering = singer_ids
+            decision.reason = reason
+            decision.created_by = current_operator
+        decision.save()
+
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.MANUAL_DECISION,
+        target=f"StageResult:{locked.pk}",
+        old_value=old_value,
+        new_value=json.dumps(
+            {
+                "tie_score": str(tie_score),
+                "ordering": singer_ids,
+                "reason": reason,
+                "input_fingerprint": facts.fingerprint,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        note="podium_tie_decision",
+    )
+    # The decision does not change raw facts, so the persisted candidate row is reused
+    # and it is here that its REVIEW status becomes READY_TO_CONFIRM.
+    persist_podium_result(version, locked.activity, computed_by=current_operator)
+    return decision
 
 
 def podium_required_round_ids(version: RulesetVersion, activity) -> tuple[int, ...]:

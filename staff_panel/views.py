@@ -210,6 +210,7 @@ from singer_contest.models import (
     SingerRegistration,
     StageResult,
 )
+from singer_contest.podium_services import create_podium_tie_decision, podium_tie_groups
 from singer_contest.services import (
     IdempotencyConflictError,
     ResultClosureCode,
@@ -2311,54 +2312,71 @@ def round_edit(request, pk):
                 except ValidationError as error:
                     form.add_error("roster_source_stage", domain_error_messages(error))
             sequence = form.cleaned_data.get("sequence")
-            if (
-                not form.errors
-                and sequence is not None
-                and ContestRound.objects.filter(activity=activity, sequence=sequence)
-                .exclude(pk=contest_round.pk)
-                .exists()
-            ):
-                form.add_error("sequence", "轮次序号已存在，请填写其他序号。")
+            sequence_conflict = False
+            if not form.errors:
+                try:
+                    with transaction.atomic():
+                        # Same serialization rule as round_create: Activity first, then the
+                        # round, then the sequence recheck. Two staff moving two different
+                        # rounds onto one sequence would otherwise both pass an unlocked
+                        # check and only meet at the DB unique constraint (a 500).
+                        locked_activity = lock_activity_for_action(activity)
+                        locked_round = ContestRound.objects.select_for_update().get(
+                            pk=contest_round.pk
+                        )
+                        if locked_round.status != ContestRound.Status.DRAFT:
+                            raise PermissionDenied("轮次已准备，不能修改配置。")
+                        if (
+                            sequence is not None
+                            and ContestRound.objects.filter(
+                                activity=locked_activity, sequence=sequence
+                            )
+                            .exclude(pk=locked_round.pk)
+                            .exists()
+                        ):
+                            sequence_conflict = True
+                        else:
+                            for field in (
+                                "name",
+                                "round_type",
+                                "scoring_mode",
+                                "score_completion_mode",
+                                "advance_count",
+                                "sequence",
+                                "order_policy",
+                                "tie_order_policy",
+                                "roster_source",
+                                "roster_source_stage",
+                                "rubric",
+                            ):
+                                setattr(locked_round, field, form.cleaned_data[field])
+                            locked_round.judge_count = form.cleaned_data["judge_count"]
+                            locked_round.minimum_judge_count = (
+                                form.cleaned_data["minimum_judge_count"]
+                                or form.cleaned_data["judge_count"]
+                            )
+                            locked_round.save(
+                                update_fields=[
+                                    "name",
+                                    "round_type",
+                                    "scoring_mode",
+                                    "score_completion_mode",
+                                    "judge_count",
+                                    "minimum_judge_count",
+                                    "advance_count",
+                                    "sequence",
+                                    "order_policy",
+                                    "tie_order_policy",
+                                    "roster_source",
+                                    "roster_source_stage",
+                                    "rubric",
+                                ]
+                            )
+                except IntegrityError:
+                    sequence_conflict = True
+            if sequence_conflict:
+                form.add_error("sequence", "轮次序号已被其他工作人员使用，请刷新后重试。")
             if form.is_valid():
-                with transaction.atomic():
-                    locked_round = ContestRound.objects.select_for_update().get(pk=contest_round.pk)
-                    if locked_round.status != ContestRound.Status.DRAFT:
-                        raise PermissionDenied("轮次已准备，不能修改配置。")
-                    for field in (
-                        "name",
-                        "round_type",
-                        "scoring_mode",
-                        "score_completion_mode",
-                        "advance_count",
-                        "sequence",
-                        "order_policy",
-                        "tie_order_policy",
-                        "roster_source",
-                        "roster_source_stage",
-                        "rubric",
-                    ):
-                        setattr(locked_round, field, form.cleaned_data[field])
-                    locked_round.judge_count = form.cleaned_data["judge_count"]
-                    locked_round.minimum_judge_count = (
-                        form.cleaned_data["minimum_judge_count"] or form.cleaned_data["judge_count"]
-                    )
-                    locked_round.save(
-                        update_fields=[
-                            "name",
-                            "round_type",
-                            "scoring_mode",
-                            "score_completion_mode",
-                            "judge_count",
-                            "minimum_judge_count",
-                            "advance_count",
-                            "sequence",
-                            "order_policy",
-                            "tie_order_policy",
-                            "roster_source",
-                            "roster_source_stage",
-                            "rubric",
-                        ]
-                    )
                 log_action(
                     request,
                     AuditLog.ActionType.OTHER,
@@ -3097,6 +3115,15 @@ def stage_result_detail(request, pk):
     prime_questionnaire_answers(decision.singer for decision in decisions)
     for decision in decisions:
         decision.song_label = generic_song_label(decision.singer)
+    tie_groups: list[dict] = []
+    if (
+        stage.status == StageResult.Status.REVIEW
+        and "podium_tie_requires_review" in (stage.reasons or [])
+    ):
+        try:
+            tie_groups = podium_tie_groups(stage.ruleset_version, stage.activity)
+        except ValidationError:
+            tie_groups = []
     return render(
         request,
         "staff_panel/stage_result_detail.html",
@@ -3104,9 +3131,11 @@ def stage_result_detail(request, pk):
             "stage": stage,
             "activity": stage.activity,
             "blocks": blocks,
+            "podium_tie_groups": tie_groups,
             # Staff may perform the operational confirmation; only unlocking remains
             # an administrator authority because it reopens an already-final result.
             "can_confirm_stage_result": request.user.is_staff_or_admin,
+            "can_decide_podium_tie": request.user.is_staff_or_admin,
             "can_unlock_stage_result": request.user.is_admin,
         },
     )
@@ -3146,6 +3175,44 @@ def stage_result_confirm(request, pk):
         messages.error(request, f"赛段核定失败：{domain_error_messages(error)}")
     else:
         messages.success(request, "已核定并锁定该赛段结果，可抄主持手卡。")
+    return redirect("staff:stage_result_detail", pk=pk)
+
+
+@staff_required
+@require_POST
+def stage_result_podium_tie(request, pk):
+    """Record an audited manual ordering inside one equal-score podium group."""
+
+    stage = get_object_or_404(StageResult, pk=pk)
+    positions: dict[int, int] = {}
+    try:
+        for key, value in request.POST.items():
+            if not key.startswith("order_"):
+                continue
+            singer_id = int(key[len("order_") :])
+            position = int(value)
+            if position in positions.values():
+                raise ValueError
+            positions[singer_id] = position
+    except (TypeError, ValueError):
+        messages.error(request, "人工裁决名次必须是互不重复的正整数。")
+        return redirect("staff:stage_result_detail", pk=pk)
+    ordering = [
+        singer_id
+        for singer_id, _position in sorted(positions.items(), key=lambda item: item[1])
+    ]
+    try:
+        create_podium_tie_decision(
+            stage,
+            ordering=ordering,
+            reason=request.POST.get("reason", ""),
+            operator=request.user,
+            base_input_fingerprint=request.POST.get("base_input_fingerprint", ""),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"人工裁决失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "已记录人工并列裁决并重新计算结果，请核对后核定。")
     return redirect("staff:stage_result_detail", pk=pk)
 
 
