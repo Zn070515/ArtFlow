@@ -43,6 +43,7 @@ from entry_access.services import (
     revoke_access_grant,
 )
 from realtime.events import schedule_judge_context_event
+from ruleset.models import RulesetVersion
 
 from .judge_entry import judge_entry_activity, judge_entry_authorizes_activity
 from .models import (
@@ -1120,7 +1121,7 @@ def lock_performance_score(
 
 @transaction.atomic
 def reopen_performance_score_for_correction(
-    performance_id: int, *, operator, reason: str
+    stage_result_id: int, performance_id: int, *, operator, reason: str
 ) -> PerformanceScoreState:
     """Admin-only: reopen one locked performance inside an explicitly unlocked result.
 
@@ -1146,17 +1147,29 @@ def reopen_performance_score_for_correction(
     locked_round = ContestRound.objects.select_for_update().get(pk=performance.round_id)
     if locked_round.status != ContestRound.Status.SCORING or locked_round.is_locked:
         raise ValidationError("只有已由赛段结果解锁重新开放的轮次才能进入纠错。")
+    # The caller names the exact unlocked result. Inferring "the newest READY result"
+    # would confuse an ordinary never-confirmed candidate with an admin-unlocked one.
     stage = (
         StageResult.objects.select_for_update()
-        .filter(
-            activity_id=performance.activity_id,
-            status=StageResult.Status.READY_TO_CONFIRM,
-        )
+        .filter(pk=stage_result_id, activity_id=performance.activity_id)
+        .first()
+    )
+    if stage is None:
+        raise ValidationError("纠错所依据的赛段结果不存在。")
+    if stage.status != StageResult.Status.READY_TO_CONFIRM:
+        raise ValidationError("只有已解锁的赛段结果才能进入纠错。")
+    latest = (
+        StageResult.objects.filter(activity_id=performance.activity_id, stage_key=stage.stage_key)
         .order_by("-result_version", "-pk")
         .first()
     )
-    if stage is None or locked_round.pk not in _stage_consumed_facts(stage)["rounds"]:
-        raise ValidationError("该轮次没有被一个已解锁的赛段结果消费，不能进入纠错。")
+    if latest is None or latest.pk != stage.pk:
+        raise ValidationError("该赛段存在更新的结果版本，请从最新结果进入纠错。")
+    version = RulesetVersion.objects.select_for_update().get(pk=stage.ruleset_version_id)
+    if version.status != RulesetVersion.Status.FROZEN or not version.is_current:
+        raise ValidationError("只能对基于当前冻结赛制版本的结果进入纠错。")
+    if locked_round.pk not in _stage_consumed_facts(stage)["rounds"]:
+        raise ValidationError("该轮次没有被指定的赛段结果消费，不能进入纠错。")
     for confirmed in StageResult.objects.filter(
         activity_id=performance.activity_id,
         status=StageResult.Status.CONFIRMED,

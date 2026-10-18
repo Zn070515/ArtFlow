@@ -14,7 +14,7 @@ from common.authority import (
 )
 from core.models import Activity
 from core.services import transition_activity_phase
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
@@ -616,6 +616,7 @@ class PodiumResultServiceTests(TestCase):
 
         target = performances[0]
         correction = reopen_performance_score_for_correction(
+            unlocked.pk,
             target.pk,
             operator=self.staff,
             reason="某评委 91.50 误录为 81.50",
@@ -626,7 +627,13 @@ class PodiumResultServiceTests(TestCase):
             {(target.singer_id, judge_ids[0]): "95.00"},
             self.staff,
         )
+        # A complete matrix is not enough: the reopened gate must be locked first.
+        with self.assertRaisesRegex(PermissionDenied, "仍有表演评分处于开放状态"):
+            lock_round(self.final_round, self.staff)
+        self.final_round.refresh_from_db()
+        self.assertEqual(self.final_round.status, ContestRound.Status.SCORING)
         correction.refresh_from_db()
+        self.assertEqual(correction.state, PerformanceScoreState.State.OPEN)
         lock_performance_score(
             self.final_round.pk,
             target.pk,

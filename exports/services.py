@@ -28,7 +28,7 @@ from incidents.models import IncidentRecord
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
-from public_portal.models import PublicPost
+from public_portal.models import PublicPost, ResultRelease
 from public_portal.services import qr_print_host_warning
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 from singer_contest.group_chorus import (
@@ -942,6 +942,71 @@ def _public_content_index_workbook(activity: Activity) -> Workbook:
     return wb
 
 
+def _result_release_history_workbook(activity: Activity) -> Workbook:
+    """Every release transition, so the ZIP explains a correction without the database.
+
+    ``public_content_index`` only keeps the latest release per post. A superseded release
+    that was later re-published would disappear from that view, and its frozen
+    ``result_snapshot`` is the only surviving record of what the public actually saw.
+    """
+
+    wb = Workbook()
+    ws = _active_worksheet(wb)
+    ws.title = "Result Releases"
+    ws.append(
+        [
+            "Post",
+            "Release ID",
+            "Status",
+            "Result Version",
+            "Candidate Revision",
+            "Ruleset Version",
+            "Released At",
+            "Released By",
+            "Transition At",
+            "Transition By",
+            "Input Fingerprint",
+            "Stage Key",
+            "Snapshot Available",
+            "Snapshot Decisions",
+            "Snapshot Awards",
+            "Note",
+        ]
+    )
+    releases = (
+        ResultRelease.objects.filter(
+            stage_result__activity=activity,
+            stage_result__ruleset_version__ruleset__activity=activity,
+        )
+        .select_related("post", "released_by", "transition_by", "stage_result")
+        .order_by("post_id", "released_at", "pk")
+    )
+    for release in releases:
+        snapshot = release.result_snapshot or {}
+        ws.append(
+            [
+                release.post.title,
+                release.pk,
+                release.get_status_display(),
+                release.result_version,
+                release.candidate_revision,
+                release.ruleset_version_id,
+                release.released_at.strftime("%Y-%m-%d %H:%M"),
+                release.released_by.username if release.released_by else "",
+                (release.transition_at.strftime("%Y-%m-%d %H:%M") if release.transition_at else ""),
+                release.transition_by.username if release.transition_by else "",
+                release.input_fingerprint,
+                snapshot.get("stage_key", release.stage_result.stage_key),
+                "yes" if snapshot else "no (legacy)",
+                json.dumps(snapshot.get("decisions", []), ensure_ascii=False, sort_keys=True),
+                json.dumps(snapshot.get("awards", []), ensure_ascii=False, sort_keys=True),
+                release.note,
+            ]
+        )
+    _autosize_sheet(ws)
+    return wb
+
+
 def build_archive_package(activity: Activity) -> list[PackageArtifact]:
     """Build the post-event archive package (authoritative record)."""
     artifacts = [
@@ -962,6 +1027,10 @@ def build_archive_package(activity: Activity) -> list[PackageArtifact]:
         _xlsx("attachment_index", _attachment_index_workbook(activity)),
         _xlsx("group_chorus", _group_chorus_workbook(activity)),
         _xlsx("public_content_index", _public_content_index_workbook(activity)),
+        _xlsx(
+            "result_release_history",
+            _result_release_history_workbook(activity),
+        ),
     ]
     for doc in scope_runtime(GeneratedDocument.objects.filter(activity=activity), activity):
         if doc.file:
