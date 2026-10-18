@@ -30,6 +30,7 @@ from .models import (
     ContestRound,
     Performance,
     PerformanceScoreState,
+    ScoreRecord,
     ScoreSummary,
     SingerRegistration,
     StageResult,
@@ -650,11 +651,72 @@ class PodiumResultServiceTests(TestCase):
         self.assertContains(detail, "去修改评分")
         self.assertContains(detail, "重新锁定该表演评分")
 
-        apply_scores(
-            self.final_round,
-            {(target.singer_id, judge_ids[0]): "95.00"},
-            self.staff,
+        correction_url = (
+            reverse("staff:round_score_entry", args=[self.final_round.pk])
+            + f"?correction_performance={target.pk}&stage_result_id={unlocked.pk}"
         )
+        correction_page = self.client.get(correction_url)
+        self.assertContains(correction_page, "评分纠错")
+        self.assertContains(correction_page, "保存并返回纠错页")
+        self.assertContains(correction_page, target.singer.name)
+        self.assertNotContains(correction_page, performances[1].singer.name)
+
+        def cell_base(grid, singer_id):
+            row = next(item for item in grid["grid"] if item["singer_id"] == singer_id)
+            return next(cell["score"] for cell in row["cells"] if cell["judge_id"] == judge_ids[0])
+
+        grid = self.client.get(reverse("staff:round_scores_api", args=[self.final_round.pk])).json()
+        response = self.client.post(
+            reverse("staff:round_scores_api", args=[self.final_round.pk]),
+            data=json.dumps(
+                {
+                    "command_id": "podium-correction-1",
+                    "base_version": grid["version"],
+                    "cells": [
+                        {
+                            "singer_id": target.singer_id,
+                            "judge_id": judge_ids[0],
+                            "score": "95.00",
+                            "base": cell_base(grid, target.singer_id),
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # Another performance is still LOCKED; the correction page must not let it change.
+        other = performances[1]
+        fresh_grid = self.client.get(
+            reverse("staff:round_scores_api", args=[self.final_round.pk])
+        ).json()
+        blocked = self.client.post(
+            reverse("staff:round_scores_api", args=[self.final_round.pk]),
+            data=json.dumps(
+                {
+                    "command_id": "podium-correction-blocked",
+                    "base_version": fresh_grid["version"],
+                    "cells": [
+                        {
+                            "singer_id": other.singer_id,
+                            "judge_id": judge_ids[0],
+                            "score": "95.00",
+                            "base": cell_base(fresh_grid, other.singer_id),
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(blocked.status_code, 400)
+        self.assertNotEqual(
+            ScoreRecord.objects.get(
+                round=self.final_round, singer=other.singer, judge_id=judge_ids[0]
+            ).score,
+            Decimal("95.00"),
+        )
+
         # A complete matrix is not enough: the reopened gate must be locked first.
         with self.assertRaisesRegex(PermissionDenied, "仍有表演评分处于开放状态"):
             lock_round(self.final_round, self.staff)
