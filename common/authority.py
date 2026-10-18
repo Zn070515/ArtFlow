@@ -51,6 +51,7 @@ PLANNING_DRAFT_WRITE = "ruleset.planning_draft.write"
 SINGER_CONTESTANT_NUMBER = "singer_contestant.number"
 LIVE_CHALLENGE_STATE = "singer_contest.live_challenge.state"
 PODIUM_TIE_DECISION = "singer_contest.podium_tie_decision"
+RESULT_RELEASE_STATE = "public_portal.result_release.state"
 
 
 @dataclass(frozen=True)

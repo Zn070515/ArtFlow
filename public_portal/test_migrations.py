@@ -1,5 +1,6 @@
 """The release snapshot columns must upgrade an existing, already-published database."""
 
+import json
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -24,7 +25,7 @@ from tests.migration_helpers import MigrationTransactionTestCase
 from public_portal.models import PublicPost
 
 BEFORE = ("public_portal", "0005_media_path_indexes")
-AFTER = ("public_portal", "0008_enrich_active_release_snapshots")
+AFTER = ("public_portal", "0009_normalise_active_snapshot_song_labels")
 
 
 class ResultReleaseSnapshotBackfillTests(MigrationTransactionTestCase):
@@ -71,8 +72,35 @@ class ResultReleaseSnapshotBackfillTests(MigrationTransactionTestCase):
                     version=1,
                     status=RulesetVersion.Status.FROZEN,
                     is_current=True,
-                    definition=(
-                        '{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}'
+                    definition=json.dumps(
+                        {
+                            "schema_version": 1,
+                            "nodes": [{"key": "roster", "type": "ROSTER"}],
+                            "questionnaire": {
+                                "schema_version": 1,
+                                "key": "singer_submission",
+                                "pages": [
+                                    {
+                                        "key": "basic",
+                                        "title": "基本信息",
+                                        "sections": [
+                                            {
+                                                "key": "identity",
+                                                "title": "身份",
+                                                "questions": [
+                                                    {
+                                                        "key": "name",
+                                                        "type": "text",
+                                                        "label": "name",
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        },
+                        ensure_ascii=False,
                     ),
                     authority_hash="a" * 64,
                 )
@@ -143,7 +171,7 @@ class ResultReleaseSnapshotBackfillTests(MigrationTransactionTestCase):
             self.assertEqual(snapshot["decisions"][0]["score"], "98.300000")
             self.assertEqual(snapshot["decisions"][0]["contestant_name"], "Migration singer")
             self.assertEqual(snapshot["decisions"][0]["outcome_label"], "最终晋级")
-            self.assertEqual(snapshot["decisions"][0]["song_label"], "Song")
+            self.assertEqual(snapshot["decisions"][0]["song_label"], "多轮曲目")
             self.assertEqual(snapshot["awards"], [])
 
             self._restore_latest()
