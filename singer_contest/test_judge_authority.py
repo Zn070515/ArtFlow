@@ -1484,8 +1484,9 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
                 activity=self.activity,
                 round_type=ContestRound.RoundType.PRELIMINARY,
                 name="Race round",
-                judge_count=1,
+                judge_count=2,
                 minimum_judge_count=1,
+                score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
             )
         self.singer = SingerRegistration.objects.create(
             activity=self.activity,
@@ -1500,8 +1501,12 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
             is_test_data=True,
         )
         judge = Judge.objects.create(activity=self.activity, name="Race judge")
+        self.other_judge = Judge.objects.create(
+            activity=self.activity, name="Race judge B"
+        )
         RoundEntry.objects.create(round=self.round, singer=self.singer, running_order=1)
         RoundJudge.objects.create(round=self.round, judge=judge)
+        RoundJudge.objects.create(round=self.round, judge=self.other_judge)
         self.performance = Performance.objects.create(
             activity=self.activity,
             round=self.round,
@@ -1515,7 +1520,11 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
             self.round.save(update_fields=["status"])
 
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        self.snapshot = snapshot
         seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        self.judge_a = seat.panel_member.judge
+        other_member = snapshot.members.exclude(seat_key="seat-1").get()
+        self.other_seat = other_member.seats.get()
         issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
         redeemed = redeem_access_grant(issued.token)
         advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
@@ -1577,3 +1586,79 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
         # A conflicting command must surface as a domain error, never a second fact.
         for error in errors:
             self.assertIsInstance(error, (ValidationError, JudgeIdempotencyConflict))
+
+    def test_staff_lock_and_judge_submit_are_linearized(self):
+        """Either the score lands before the lock or the lock refuses the submission."""
+
+        # Another panel member has already scored, so the minimum-valid count is met and
+        # the lock is allowed to win the race instead of always failing as "not ready".
+        with authority_write(SCORE_FACT_WRITE):
+            ScoreRecord.objects.create(
+                round=self.round,
+                singer=self.singer,
+                judge=self.other_judge,
+                score=Decimal("90.00"),
+                notes="",
+                source=ScoreSource.DIRECT_JUDGE,
+                panel_snapshot=self.snapshot,
+                judge_seat=self.other_seat,
+                source_command_id="judge-race-preseed",
+                is_test_data=True,
+            )
+
+        barrier = threading.Barrier(2)
+        outcomes = {}
+
+        def lock_target():
+            try:
+                barrier.wait(timeout=10)
+                outcomes["lock"] = lock_performance_score(
+                    self.round.pk,
+                    self.performance.pk,
+                    operator=self.operator,
+                    expected_context_version=1,
+                )
+            except Exception as error:  # noqa: BLE001 - the assertion is about linearization
+                outcomes["lock_error"] = error
+            finally:
+                connection.close()
+
+        def submit_target():
+            try:
+                barrier.wait(timeout=10)
+                outcomes["submit"] = submit_judge_score(
+                    self.token,
+                    command_id="judge-race-lock",
+                    expected_context_version=1,
+                    expected_performance_id=self.performance.pk,
+                    score_payload={"score": "90.00", "notes": ""},
+                )
+            except Exception as error:  # noqa: BLE001
+                outcomes["submit_error"] = error
+            finally:
+                connection.close()
+
+        threads = [
+            threading.Thread(target=lock_target),
+            threading.Thread(target=submit_target),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+        for thread in threads:
+            self.assertFalse(thread.is_alive(), "a lock/submit race never finished")
+
+        state = PerformanceScoreState.objects.get(performance=self.performance)
+        self.assertEqual(state.state, PerformanceScoreState.State.LOCKED)
+        judge_a_scored = ScoreRecord.objects.filter(
+            round=self.round, singer=self.singer, judge=self.judge_a
+        ).exists()
+        if "submit" in outcomes:
+            # The score landed first; the lock then closed the window behind it.
+            self.assertTrue(judge_a_scored)
+        else:
+            # The lock won; a hidden score written after the lock would violate finality.
+            self.assertFalse(judge_a_scored)
+            self.assertIn("submit_error", outcomes)
+            self.assertIsInstance(outcomes["submit_error"], PermissionDenied)
