@@ -19,7 +19,7 @@
                 <tr class="border-b border-gray-100 {% if file.is_current %}bg-green-50{% endif %}">
                     <td class="py-2 pr-4">{{ file.get_file_purpose_display }}</td>
                     <td class="py-2 pr-4">{% if file.question_key %}{{ file.question_key }}{% else %}—{% endif %}</td>
-                    <td class="py-2 pr-4">{{ file.original_name }}</td>
+                    <td class="py-2 pr-4"><a href="{% url 'controlled_media' file.file.name %}" download="{{ file.original_name }}" class="text-brand hover:underline">{{ file.original_name }}</a></td>
                     <td class="py-2 pr-4">v{{ file.version }}</td>
                     <td class="py-2 pr-4">{% if file.is_current %}当前{% else %}历史{% endif %}</td>
                     <td class="py-2 pr-4">{{ file.uploaded_by|default:"—" }}</td>

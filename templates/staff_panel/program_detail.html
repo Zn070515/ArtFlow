@@ -52,7 +52,7 @@
                 {% if files %}
                 <ul class="space-y-1 mb-4">
                     {% for f in files %}
-            <li class="flex justify-between text-xs"><span>{{ f.original_name }} <span class="text-gray-400">({{ f.get_file_purpose_display }} · v{{ f.version }})</span>{% if f.is_current %}<span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ f.file_size|filesizeformat }}</span></li>
+            <li class="flex justify-between text-xs"><span><a href="{% url 'controlled_media' f.file.name %}" download="{{ f.original_name }}" class="text-brand hover:underline">{{ f.original_name }}</a> <span class="text-gray-400">({{ f.get_file_purpose_display }} · v{{ f.version }})</span>{% if f.is_current %}<span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ f.file_size|filesizeformat }}</span></li>
                     {% endfor %}
                 </ul>
                 {% else %}
