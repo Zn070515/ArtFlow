@@ -3529,6 +3529,38 @@ _LIVE_CHALLENGE_SCORE_ROUND_MSG = (
 )
 
 
+def round_is_live_challenge_history(contest_round) -> bool:
+    """Whether a formal, non-revoked challenge still stands on this round.
+
+    Such a round is frozen challenge history: reopening it would invalidate the
+    session's source score version / roster fingerprint while the session itself stays
+    CONFIRMED. Stage-result unlock therefore skips it instead of rebuilding a mixed
+    authority from a new first-round result and an old challenge process.
+    """
+
+    from .models import ChallengeMatch, ChallengeSession
+
+    if (
+        ChallengeSession._base_manager.filter(
+            activity_id=contest_round.activity_id,
+            source_round_id=contest_round.pk,
+            is_test_data=False,
+        )
+        .exclude(state=ChallengeSession.State.REVOKED)
+        .exists()
+    ):
+        return True
+    return (
+        ChallengeMatch._base_manager.filter(
+            score_round_id=contest_round.pk,
+            session__is_test_data=False,
+        )
+        .exclude(status=ChallengeMatch.Status.REVOKED)
+        .exclude(session__state=ChallengeSession.State.REVOKED)
+        .exists()
+    )
+
+
 def ensure_round_not_consumed_by_live_challenge(contest_round) -> None:
     """Reject un-winding a round a non-revoked formal challenge session stands on.
 
@@ -4020,6 +4052,19 @@ def _release_stage_consumed_facts(stage: StageResult, *, operator) -> None:
     for contest_round in ContestRound.objects.select_for_update().filter(
         activity=stage.activity, pk__in=consumed["rounds"], is_locked=True
     ):
+        if round_is_live_challenge_history(contest_round):
+            # The challenge session's authority is frozen against this round. Keep it
+            # locked and audit the decision; a correction path must never rewrite the
+            # source of a confirmed challenge as a side effect of unlocking a later stage.
+            AuditLog.objects.create(
+                operator=operator,
+                action_type=AuditLog.ActionType.OTHER,
+                target=f"ContestRound:{contest_round.pk}",
+                old_value="locked",
+                new_value="locked",
+                note=f"stage_unlock:{stage.pk}:kept_challenge_source",
+            )
+            continue
         contest_round.is_locked = False
         contest_round.status = ContestRound.Status.SCORING
         with authority_write(CONTEST_ROUND_STATE):
@@ -4046,6 +4091,46 @@ def _release_stage_consumed_facts(stage: StageResult, *, operator) -> None:
             new_value="unlocked",
             note=f"stage_unlock:{stage.pk}",
         )
+
+
+def stage_correction_performances(stage: StageResult) -> list[dict]:
+    """Locked performances whose scores an unlocked stage may reopen for correction.
+
+    Only rounds the unlock actually released (SCORING and unlocked) appear here; a round
+    kept locked as challenge history is intentionally absent. The caller still has to go
+    through the admin-only reopen service for each performance.
+    """
+
+    from .models import PerformanceScoreState
+
+    if stage.status != StageResult.Status.READY_TO_CONFIRM:
+        return []
+    consumed = _stage_consumed_facts(stage)
+    rows: list[dict] = []
+    rounds = ContestRound.objects.filter(
+        activity_id=stage.activity_id, pk__in=consumed["rounds"]
+    ).order_by("sequence", "pk")
+    for contest_round in rounds:
+        if contest_round.status != ContestRound.Status.SCORING or contest_round.is_locked:
+            continue
+        states = (
+            PerformanceScoreState.objects.filter(
+                performance__round=contest_round,
+                state=PerformanceScoreState.State.LOCKED,
+            )
+            .select_related("performance__singer")
+            .order_by("performance__sequence", "performance__pk")
+        )
+        for score_state in states:
+            rows.append(
+                {
+                    "round": contest_round,
+                    "performance": score_state.performance,
+                    "singer": score_state.performance.singer,
+                    "score_state": score_state,
+                }
+            )
+    return rows
 
 
 def _invalidate_downstream_stage_rounds(stage: StageResult, *, operator) -> None:
@@ -4127,8 +4212,18 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     locked.confirmed_by = None
     locked.confirmed_at = None
     locked.status = StageResult.Status.READY_TO_CONFIRM
+    # An unlock is a candidate-lifecycle change too: a confirmation page built from the
+    # previous CONFIRMED candidate must be refused even if the raw facts are unchanged.
+    locked.candidate_revision = (locked.candidate_revision or 0) + 1
     with authority_write(STAGE_RESULT_CONFIRM):
-        locked.save(update_fields=["confirmed_by", "confirmed_at", "status"])
+        locked.save(
+            update_fields=[
+                "confirmed_by",
+                "confirmed_at",
+                "status",
+                "candidate_revision",
+            ]
+        )
     _release_stage_consumed_facts(locked, operator=current_operator)
     _invalidate_downstream_stage_rounds(locked, operator=current_operator)
     from public_portal.services import supersede_releases_for_stage_result

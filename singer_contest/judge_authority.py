@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 from accounts.models import User
-from accounts.services import require_current_staff
+from accounts.services import require_current_admin, require_current_staff
 from common.authority import (
     ACCESS_GRANT_STATE,
     ENTRY_POINT_CONFIG,
@@ -65,6 +65,7 @@ from .models import (
     RubricCriterion,
     ScoreRecord,
     ScoreSource,
+    StageResult,
     _authorize_raw_fact_write,
     _raw_fact_write_authorized,
 )
@@ -73,7 +74,11 @@ from .scoring import (
     ScoreCompletionState,
     assess_score_completeness,
 )
-from .services import ensure_round_executable_under_current_authority, validate_score
+from .services import (
+    _stage_consumed_facts,
+    ensure_round_executable_under_current_authority,
+    validate_score,
+)
 
 
 @dataclass(frozen=True)
@@ -1012,6 +1017,21 @@ def advance_performance_group(round_id: int, group_id: int, *, operator) -> Perf
 
 def _performance_score_completeness(contest_round: ContestRound, performance: Performance):
     snapshot = _current_panel_snapshot(contest_round)
+    if (
+        snapshot is None
+        and contest_round.status == ContestRound.Status.SCORING
+        and not contest_round.is_locked
+    ):
+        # A stage-result unlock reopens the round after lock_round superseded its panel.
+        # The latest snapshot still names the same panel roster, so a corrected score may
+        # be re-locked against it; judges still cannot submit (that path requires ACTIVE).
+        snapshot = (
+            RoundPanelSnapshot._base_manager.filter(
+                round=contest_round, activity_id=contest_round.activity_id
+            )
+            .order_by("-version", "-pk")
+            .first()
+        )
     if snapshot is None:
         raise PermissionDenied("评委组尚未准备，不能锁定表演评分。")
     judge_ids = list(snapshot.members.filter(is_active=True).values_list("judge_id", flat=True))
@@ -1094,6 +1114,84 @@ def lock_performance_score(
         locked.contest_round.pk,
         revision=score_state.context_version,
         actor=_realtime_actor(locked.operator),
+    )
+    return score_state
+
+
+@transaction.atomic
+def reopen_performance_score_for_correction(
+    performance_id: int, *, operator, reason: str
+) -> PerformanceScoreState:
+    """Admin-only: reopen one locked performance inside an explicitly unlocked result.
+
+    This is the correction seam for event day. A stage-result unlock reopens the round,
+    but the per-performance score gate stays LOCKED — otherwise a routine round edit could
+    silently rewrite finalised scores. Reopening therefore needs its own audited admin
+    act, scoped to a performance in a round that a *currently unlocked* result consumed.
+    The panel snapshot, seat and score provenance are kept; only the gate moves.
+    """
+
+    current_operator = require_current_admin(operator)
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValidationError("必须说明重新开放评分的原因。")
+    performance = (
+        Performance._base_manager.select_related("activity", "round")
+        .filter(pk=performance_id)
+        .first()
+    )
+    if performance is None:
+        raise ValidationError("表演不存在。")
+    lock_activity_for_action(performance.activity)
+    locked_round = ContestRound.objects.select_for_update().get(pk=performance.round_id)
+    if locked_round.status != ContestRound.Status.SCORING or locked_round.is_locked:
+        raise ValidationError("只有已由赛段结果解锁重新开放的轮次才能进入纠错。")
+    stage = (
+        StageResult.objects.select_for_update()
+        .filter(
+            activity_id=performance.activity_id,
+            status=StageResult.Status.READY_TO_CONFIRM,
+        )
+        .order_by("-result_version", "-pk")
+        .first()
+    )
+    if stage is None or locked_round.pk not in _stage_consumed_facts(stage)["rounds"]:
+        raise ValidationError("该轮次没有被一个已解锁的赛段结果消费，不能进入纠错。")
+    for confirmed in StageResult.objects.filter(
+        activity_id=performance.activity_id,
+        status=StageResult.Status.CONFIRMED,
+    ):
+        if locked_round.pk in _stage_consumed_facts(confirmed)["rounds"]:
+            raise ValidationError("该轮次仍被其他已核定结果使用，不能进入纠错。")
+    score_state = (
+        PerformanceScoreState.objects.select_for_update()
+        .filter(performance_id=performance.pk)
+        .first()
+    )
+    if score_state is None:
+        raise ValidationError("该表演没有评分状态，不能进入纠错。")
+    if score_state.state == PerformanceScoreState.State.OPEN:
+        return score_state
+    if score_state.state != PerformanceScoreState.State.LOCKED:
+        raise ValidationError("只有已锁定的表演评分可以重新开放。")
+    score_state.state = PerformanceScoreState.State.OPEN
+    score_state.locked_by = None
+    score_state.locked_at = None
+    score_state.context_version = (score_state.context_version or 0) + 1
+    with authority_write(ROUND_PERFORMANCE_STATE):
+        score_state.save(update_fields=["state", "locked_by", "locked_at", "context_version"])
+    _audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.UNLOCK_RESULT,
+        target=f"PerformanceScoreState:{score_state.pk}",
+        old_value=PerformanceScoreState.State.LOCKED,
+        new_value=PerformanceScoreState.State.OPEN,
+        note=f"stage_unlock_correction:{stage.pk}:{reason}",
+    )
+    schedule_judge_context_event(
+        locked_round.pk,
+        revision=score_state.context_version,
+        actor=_realtime_actor(current_operator),
     )
     return score_state
 

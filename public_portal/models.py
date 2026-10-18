@@ -140,6 +140,15 @@ class ResultRelease(models.Model):
     )
     post_version = models.PositiveIntegerField()
     result_version = models.PositiveIntegerField()
+    #: Candidate generation within one raw-facts generation. A later correction can reuse
+    #: the same StageResult row, so this (plus the snapshot below) is what makes a
+    #: historical release describe what was actually published at the time.
+    candidate_revision = models.PositiveBigIntegerField(default=0)
+    result_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Frozen decisions/awards published with this release.",
+    )
     ruleset_version = models.ForeignKey(
         "ruleset.RulesetVersion",
         on_delete=models.PROTECT,

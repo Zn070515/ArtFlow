@@ -28,6 +28,7 @@ from ruleset.resolver import (
 )
 
 from .challenge_models import ChallengeSession
+from .challenge_services import _ensure_session_dependencies_current
 from .models import (
     ContestRound,
     Performance,
@@ -167,6 +168,13 @@ def _facts(version: RulesetVersion, activity) -> PodiumFacts:
     if session is None:
         reasons.append("podium_final_ten_not_confirmed")
     else:
+        # The session froze the first-round authority it was played against. If a later
+        # correction changes that source, recomputing with the new first-round scores and
+        # the old challenge seats/queue would mix two authorities. Refuse instead.
+        try:
+            _ensure_session_dependencies_current(session, lock_dependencies=False)
+        except ValidationError:
+            reasons.append("podium_challenge_source_changed")
         third_round = (
             ContestRound.objects.filter(
                 activity=activity,

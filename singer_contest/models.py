@@ -3376,6 +3376,7 @@ class StageResult(models.Model):
         activity_id: int
         ruleset_version_id: int
         decisions: models.Manager["StageDecision"]
+        award_decisions: models.Manager["StageAwardDecision"]
 
     class Meta:
         base_manager_name = "objects"

@@ -177,6 +177,7 @@ from singer_contest.judge_authority import (
     lock_performance_score,
     prepare_judge_panel,
     release_judge_seat,
+    reopen_performance_score_for_correction,
     resume_judge_panel,
     resume_performance,
     set_judge_seat_display_label,
@@ -248,6 +249,7 @@ from singer_contest.services import (
     set_official_contestant_number,
     set_round_groups,
     set_round_running_order,
+    stage_correction_performances,
     stage_decisions_by_blocks,
     unlock_round,
     unlock_stage_result,
@@ -3123,6 +3125,11 @@ def stage_result_detail(request, pk):
             tie_groups = podium_tie_groups(stage.ruleset_version, stage.activity)
         except ValidationError:
             tie_groups = []
+    correction_performances = (
+        stage_correction_performances(stage)
+        if request.user.is_admin and stage.status == StageResult.Status.READY_TO_CONFIRM
+        else []
+    )
     return render(
         request,
         "staff_panel/stage_result_detail.html",
@@ -3131,6 +3138,7 @@ def stage_result_detail(request, pk):
             "activity": stage.activity,
             "blocks": blocks,
             "podium_tie_groups": tie_groups,
+            "correction_performances": correction_performances,
             # Staff may perform the operational confirmation; only unlocking remains
             # an administrator authority because it reopens an already-final result.
             "can_confirm_stage_result": request.user.is_staff_or_admin,
@@ -3233,6 +3241,34 @@ def stage_result_podium_tie(request, pk):
     else:
         messages.success(request, "已记录人工并列裁决并重新计算结果，请核对后核定。")
     return redirect("staff:stage_result_detail", pk=pk)
+
+
+@admin_required
+@require_POST
+def judge_performance_score_reopen(request, pk):
+    """Admin-only correction seam: reopen one locked performance score gate."""
+
+    _require_admin(request.user)
+    performance_id = str(request.POST.get("performance_id") or "").strip()
+    if not performance_id.isdigit():
+        messages.error(request, "表演参数无效。")
+        return redirect("staff:dashboard")
+    try:
+        reopen_performance_score_for_correction(
+            int(performance_id),
+            operator=request.user,
+            reason=request.POST.get("reason", ""),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"重新开放评分失败：{domain_error_messages(error)}")
+    else:
+        messages.success(
+            request, "已重新开放该表演评分；修正后请重新锁定评分、锁定轮次并重新计算。"
+        )
+    stage_result_id = str(request.POST.get("stage_result_id") or "").strip()
+    if stage_result_id.isdigit():
+        return redirect("staff:stage_result_detail", pk=stage_result_id)
+    return redirect("staff:dashboard")
 
 
 @admin_required

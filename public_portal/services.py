@@ -67,6 +67,47 @@ def _audit_release_transition(
     )
 
 
+def _result_snapshot(stage: StageResult) -> dict:
+    """The exact candidate published by a release, frozen at release time.
+
+    A correction can reuse the StageResult row, deleting and recreating its decisions.
+    Without this snapshot a SUPERSEDED release would point at a row that now describes a
+    different ranking, so the historical record could no longer say what was published.
+    """
+
+    decisions = [
+        {
+            "rank": decision["rank"],
+            "contestant": str(decision["singer_id"]),
+            "outcome_code": decision["outcome_code"],
+            "score": (str(decision["score"]) if decision["score"] is not None else None),
+            "reason": decision["reason"],
+        }
+        for decision in stage.decisions.order_by("rank", "pk").values(
+            "rank", "singer_id", "outcome_code", "score", "reason"
+        )
+    ]
+    awards = [
+        {
+            "award": decision["name"],
+            "contestant": str(decision["singer_id"]),
+            "source_node": decision["source_node"],
+        }
+        for decision in stage.award_decisions.order_by("name", "pk").values(
+            "name", "singer_id", "source_node"
+        )
+    ]
+    return {
+        "stage_key": stage.stage_key,
+        "result_version": stage.result_version,
+        "candidate_revision": stage.candidate_revision,
+        "input_fingerprint": stage.input_fingerprint,
+        "ruleset_version_id": stage.ruleset_version_id,
+        "decisions": decisions,
+        "awards": awards,
+    }
+
+
 def _release_payload(release: ResultRelease) -> str:
     return json.dumps(
         {
@@ -74,6 +115,7 @@ def _release_payload(release: ResultRelease) -> str:
             "stage_result_id": release.stage_result_id,
             "post_version": release.post_version,
             "result_version": release.result_version,
+            "candidate_revision": release.candidate_revision,
             "ruleset_version_id": release.ruleset_version_id,
         },
         ensure_ascii=False,
@@ -213,6 +255,7 @@ def release_result_post(
             if (
                 release.post_version == locked_post.version
                 and release.result_version == locked_stage.result_version
+                and release.candidate_revision == locked_stage.candidate_revision
                 and release.ruleset_version_id == version.pk
                 and release.authority_hash == version.authority_hash
                 and release.input_fingerprint == locked_stage.input_fingerprint
@@ -226,6 +269,8 @@ def release_result_post(
         stage_result=locked_stage,
         post_version=locked_post.version,
         result_version=locked_stage.result_version,
+        candidate_revision=locked_stage.candidate_revision,
+        result_snapshot=_result_snapshot(locked_stage),
         ruleset_version=version,
         authority_hash=version.authority_hash,
         input_fingerprint=locked_stage.input_fingerprint,

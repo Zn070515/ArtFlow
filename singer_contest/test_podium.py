@@ -269,20 +269,39 @@ class PodiumResultServiceTests(TestCase):
         )
         self.assertTrue(podium.confirmable)
 
+    def _third_for_total(self, first_round_score, total):
+        """Find a third-round score that makes this singer's weighted total equal *total*."""
+
+        return next(
+            Decimal(hundredths) / Decimal("100")
+            for hundredths in range(0, 10001)
+            if official_weighted_score(
+                [
+                    (first_round_score, Decimal("0.30")),
+                    (Decimal(hundredths) / Decimal("100"), Decimal("0.70")),
+                ]
+            )
+            == total
+        )
+
     def _make_podium_tie(self):
-        """Make the top two finalists carry identical first- and third-round scores."""
+        """Make two finalists tie on the weighted total using third-round scores only.
+
+        The first round is the confirmed challenge session's frozen source; editing it
+        would (correctly) invalidate the session, so the tie is produced from the third
+        round, which the podium owns.
+        """
 
         tied = self.singers[:2]
-        first_score = ScoreSummary.objects.get(round=self.first_round, singer=tied[0]).average_score
-        third_score = ScoreSummary.objects.get(round=self.final_round, singer=tied[0]).average_score
+        first_a = ScoreSummary.objects.get(round=self.first_round, singer=tied[0]).average_score
+        first_b = ScoreSummary.objects.get(round=self.first_round, singer=tied[1]).average_score
+        third_a = ScoreSummary.objects.get(round=self.final_round, singer=tied[0]).average_score
+        total_a = official_weighted_score([(first_a, Decimal("0.30")), (third_a, Decimal("0.70"))])
+        third_b = self._third_for_total(first_b, total_a)
         with authority_write(SCORE_SUMMARY_RECALCULATE):
-            for singer in tied:
-                ScoreSummary.objects.filter(round=self.first_round, singer=singer).update(
-                    average_score=first_score
-                )
-                ScoreSummary.objects.filter(round=self.final_round, singer=singer).update(
-                    average_score=third_score
-                )
+            ScoreSummary.objects.filter(round=self.final_round, singer=tied[1]).update(
+                average_score=third_b
+            )
         self.activity.phase = Activity.Phase.RESULTS_PENDING
         with authority_write(ACTIVITY_STATE):
             self.activity.save(update_fields=["phase"])
@@ -343,11 +362,20 @@ class PodiumResultServiceTests(TestCase):
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
         # Still tied, but at a different score: the decision's fingerprint is now stale.
+        first_a = ScoreSummary.objects.get(round=self.first_round, singer=tied[0]).average_score
+        first_b = ScoreSummary.objects.get(round=self.first_round, singer=tied[1]).average_score
+        new_third_a = Decimal("85.00")
+        new_total = official_weighted_score(
+            [(first_a, Decimal("0.30")), (new_third_a, Decimal("0.70"))]
+        )
+        new_third_b = self._third_for_total(first_b, new_total)
         with authority_write(SCORE_SUMMARY_RECALCULATE):
-            for singer in tied:
-                ScoreSummary.objects.filter(round=self.final_round, singer=singer).update(
-                    average_score=Decimal("90")
-                )
+            ScoreSummary.objects.filter(round=self.final_round, singer=tied[0]).update(
+                average_score=new_third_a
+            )
+            ScoreSummary.objects.filter(round=self.final_round, singer=tied[1]).update(
+                average_score=new_third_b
+            )
 
         rebuilt = build_podium_result(self.version, self.activity)
         self.assertEqual(rebuilt.status, "review")
@@ -494,6 +522,129 @@ class PodiumResultServiceTests(TestCase):
         self.assertEqual(len(records), 2)
         self.assertIn('"ordering"', records[-1].old_value)
         self.assertIn(str(tied[1].pk), records[-1].new_value)
+
+    def test_the_podium_recovery_chain_keeps_the_challenge_source_locked(self):
+        """Event-day correction: unlock, reopen, correct, re-lock, recompute, confirm.
+
+        The final round is rebuilt through real score cells so its performance gates are
+        genuinely LOCKED — the state that used to make the advertised correction path
+        unreachable.
+        """
+
+        from common.authority import ROUND_PERFORMANCE_STATE
+
+        from .judge_authority import (
+            lock_performance_score,
+            prepare_judge_panel,
+            reopen_performance_score_for_correction,
+        )
+        from .models import PerformanceScoreState, RoundJudge
+        from .podium_services import persist_podium_result
+        from .services import (
+            apply_scores,
+            confirm_stage_result,
+            lock_round,
+            unlock_stage_result,
+        )
+
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+
+        # The fixture seeded summaries and locked gates directly; rebuild the round with
+        # a complete, lockable score matrix instead.
+        with authority_write(CONTEST_ROUND_STATE):
+            self.final_round.status = ContestRound.Status.PREPARED
+            self.final_round.is_locked = False
+            self.final_round.save(update_fields=["status", "is_locked"])
+        with authority_write(ROUND_PERFORMANCE_STATE):
+            PerformanceScoreState.objects.filter(performance__round=self.final_round).update(
+                state=PerformanceScoreState.State.OPEN,
+                locked_by=None,
+                locked_at=None,
+                context_version=1,
+            )
+        prepare_judge_panel(self.final_round.pk, operator=self.staff)
+        judge_ids = list(
+            RoundJudge.objects.filter(round=self.final_round).values_list("judge_id", flat=True)
+        )
+        performances = list(
+            Performance.objects.filter(round=self.final_round).order_by("sequence", "pk")
+        )
+        score_cells = {}
+        for index, performance in enumerate(performances, start=1):
+            value = str(100 - index)
+            for judge_id in judge_ids:
+                score_cells[(performance.singer_id, judge_id)] = value
+        apply_scores(self.final_round, score_cells, self.staff)
+        for performance in performances:
+            state = PerformanceScoreState.objects.get(performance=performance)
+            lock_performance_score(
+                self.final_round.pk,
+                performance.pk,
+                operator=self.staff,
+                expected_context_version=state.context_version,
+            )
+        lock_round(self.final_round, self.staff)
+        self.final_round.refresh_from_db()
+        self.assertEqual(self.final_round.status, ContestRound.Status.LOCKED)
+
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        confirmed = confirm_stage_result(stage, confirmed_by=self.staff)
+        old_fingerprint = confirmed.input_fingerprint
+        old_candidate_revision = confirmed.candidate_revision
+
+        # The guard protects formal challenge history; this fixture is test-mode, so mark
+        # the session formal for the purpose of exercising that guard.
+        from common.authority import LIVE_CHALLENGE_STATE
+
+        from .challenge_models import ChallengeSession
+
+        with authority_write(LIVE_CHALLENGE_STATE):
+            ChallengeSession._base_manager.filter(pk=self.session.pk).update(is_test_data=False)
+
+        unlocked = unlock_stage_result(confirmed, operator=self.staff, note="第三轮某评委录错分数")
+
+        self.first_round.refresh_from_db()
+        self.final_round.refresh_from_db()
+        self.assertEqual(self.first_round.status, ContestRound.Status.LOCKED)
+        self.assertTrue(self.first_round.is_locked)
+        self.assertEqual(self.final_round.status, ContestRound.Status.SCORING)
+        self.assertFalse(self.final_round.is_locked)
+        self.assertEqual(unlocked.candidate_revision, old_candidate_revision + 1)
+
+        target = performances[0]
+        correction = reopen_performance_score_for_correction(
+            target.pk,
+            operator=self.staff,
+            reason="某评委 91.50 误录为 81.50",
+        )
+        self.assertEqual(correction.state, PerformanceScoreState.State.OPEN)
+        apply_scores(
+            self.final_round,
+            {(target.singer_id, judge_ids[0]): "95.00"},
+            self.staff,
+        )
+        correction.refresh_from_db()
+        lock_performance_score(
+            self.final_round.pk,
+            target.pk,
+            operator=self.staff,
+            expected_context_version=correction.context_version,
+        )
+        lock_round(self.final_round, self.staff)
+
+        recomputed = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        self.assertNotEqual(recomputed.pk, confirmed.pk)
+        self.assertNotEqual(recomputed.input_fingerprint, old_fingerprint)
+        self.assertEqual(recomputed.status, StageResult.Status.READY_TO_CONFIRM)
+        re_confirmed = confirm_stage_result(
+            recomputed,
+            confirmed_by=self.staff,
+            expected_candidate_revision=recomputed.candidate_revision,
+        )
+        self.assertEqual(re_confirmed.status, StageResult.Status.CONFIRMED)
 
     def test_a_tie_decision_cannot_move_someone_across_score_groups(self):
         from .podium_services import create_podium_tie_decision, persist_podium_result
