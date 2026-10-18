@@ -488,6 +488,7 @@ def create_podium_tie_decision(
     reason: str,
     operator,
     base_input_fingerprint: str,
+    base_candidate_revision: int | None = None,
 ):
     """Record and audit a manual ordering inside one equal-score podium group.
 
@@ -516,6 +517,14 @@ def create_podium_tie_decision(
         raise ValidationError("该最终结果存在更新版本，请裁定最新结果。")
     if locked.status == StageResult.Status.CONFIRMED:
         raise ValidationError("已核定的最终结果不能再做人工裁决。")
+    if (
+        base_candidate_revision is not None
+        and locked.candidate_revision != base_candidate_revision
+    ):
+        # The raw facts may be unchanged while another staff member already replaced the
+        # candidate (a different tie ordering or a recompute). The page's baseline covers
+        # both dimensions: facts via the fingerprint, candidate via this revision.
+        raise ValidationError("候选结果已被其他工作人员更新，请刷新后重试。")
     facts = _facts(version, locked.activity)
     if facts.reasons:
         raise ValidationError("最终冠亚季军结果尚未满足正式裁决条件。")
@@ -628,7 +637,9 @@ def persist_podium_result(version: RulesetVersion, activity, *, computed_by):
 
 
 @transaction.atomic
-def confirm_podium_result(stage: StageResult, *, confirmed_by):
+def confirm_podium_result(
+    stage: StageResult, *, confirmed_by, expected_candidate_revision: int | None = None
+):
     from accounts.services import require_current_staff
     from common.authority import STAGE_RESULT_CONFIRM, authority_write
 
@@ -641,6 +652,13 @@ def confirm_podium_result(stage: StageResult, *, confirmed_by):
     config = podium_config(version)
     if locked.activity_id != locked_activity.pk or locked.stage_key != config.stage_key:
         raise ValidationError("赛段结果不是当前最终冠亚季军结果。")
+    if (
+        expected_candidate_revision is not None
+        and locked.candidate_revision != expected_candidate_revision
+    ):
+        # The operator must confirm the candidate they actually saw. A newer tie decision
+        # leaves the raw fingerprint unchanged, so only this counter can catch it.
+        raise ValidationError("候选结果已被其他工作人员更新，请刷新后重试。")
     if version.status != RulesetVersion.Status.FROZEN or not version.is_current:
         raise ValidationError("只能核定基于当前冻结赛制版本生成的最终结果。")
     latest = StageResult.objects.filter(

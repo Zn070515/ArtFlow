@@ -236,7 +236,11 @@ class OperatorEndToEndTests(TestCase):
         return resp
 
     def _confirm(self, stage):
-        resp = self.client.post(reverse("staff:stage_result_confirm", args=[stage.pk]))
+        stage.refresh_from_db()
+        resp = self.client.post(
+            reverse("staff:stage_result_confirm", args=[stage.pk]),
+            {"base_candidate_revision": stage.candidate_revision},
+        )
         self.assertEqual(resp.status_code, 302, resp.content[:500])
         stage.refresh_from_db()
         return stage

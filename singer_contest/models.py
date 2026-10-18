@@ -3356,6 +3356,11 @@ class StageResult(models.Model):
     schema_version = models.PositiveIntegerField(default=1)
     plan_version = models.PositiveIntegerField(default=0)
     result_version = models.PositiveIntegerField(default=1)
+    #: Materialization counter *within* one raw-facts generation. ``result_version`` moves
+    #: when the inputs change; this moves whenever the candidate output is rewritten in
+    #: place (for example after a manual tie decision). Confirmation must target the
+    #: candidate the operator actually saw, so it compares this counter.
+    candidate_revision = models.PositiveBigIntegerField(default=1)
     computed_at = models.DateTimeField(auto_now_add=True)
     confirmed_at = models.DateTimeField(
         null=True, blank=True, help_text="When a staff member 核定并锁定 the result."
@@ -3415,6 +3420,7 @@ class StageResult(models.Model):
         "schema_version",
         "plan_version",
         "result_version",
+        "candidate_revision",
         "computed_at",
         "confirmed_by_id",
         "confirmed_at",

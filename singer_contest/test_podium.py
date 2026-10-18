@@ -370,6 +370,7 @@ class PodiumResultServiceTests(TestCase):
             reverse("staff:stage_result_podium_tie", args=[stage.pk]),
             {
                 "base_input_fingerprint": stage.input_fingerprint,
+                "base_candidate_revision": stage.candidate_revision,
                 f"order_{tied[0].pk}": "2",
                 f"order_{tied[1].pk}": "1",
                 "reason": "同分，经评委组复议按第三轮表现排序",
@@ -380,6 +381,122 @@ class PodiumResultServiceTests(TestCase):
         self.assertContains(response, "已记录人工并列裁决")
         stage.refresh_from_db()
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+
+    def test_a_stale_tie_decision_page_cannot_overwrite_a_newer_ordering(self):
+        from .models import PodiumTieDecision
+        from .podium_services import create_podium_tie_decision, persist_podium_result
+
+        tied = self._make_podium_tie()
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        base_revision = stage.candidate_revision
+        create_podium_tie_decision(
+            stage,
+            ordering=[tied[0].pk, tied[1].pk],
+            reason="甲：同分复议",
+            operator=self.staff,
+            base_input_fingerprint=stage.input_fingerprint,
+            base_candidate_revision=base_revision,
+        )
+        stage.refresh_from_db()
+
+        with self.assertRaisesRegex(ValidationError, "候选结果已被其他工作人员更新"):
+            create_podium_tie_decision(
+                stage,
+                ordering=[tied[1].pk, tied[0].pk],
+                reason="乙：旧页面",
+                operator=self.staff,
+                base_input_fingerprint=stage.input_fingerprint,
+                base_candidate_revision=base_revision,
+            )
+
+        decision = PodiumTieDecision.objects.get(
+            activity=self.activity, ruleset_version=self.version, stage_key="final_podium"
+        )
+        self.assertEqual(decision.ordering, [tied[0].pk, tied[1].pk])
+
+    def test_a_stale_confirmation_cannot_finalize_a_candidate_the_operator_did_not_see(self):
+        from .podium_services import create_podium_tie_decision, persist_podium_result
+        from .services import confirm_stage_result
+
+        tied = self._make_podium_tie()
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        create_podium_tie_decision(
+            stage,
+            ordering=[tied[0].pk, tied[1].pk],
+            reason="甲：A 在前",
+            operator=self.staff,
+            base_input_fingerprint=stage.input_fingerprint,
+            base_candidate_revision=stage.candidate_revision,
+        )
+        stage.refresh_from_db()
+        seen_revision = stage.candidate_revision
+
+        # Another staff member replaces the ordering while the first page stays open.
+        create_podium_tie_decision(
+            stage,
+            ordering=[tied[1].pk, tied[0].pk],
+            reason="乙：B 在前",
+            operator=self.staff,
+            base_input_fingerprint=stage.input_fingerprint,
+            base_candidate_revision=seen_revision,
+        )
+        stage.refresh_from_db()
+        self.assertGreater(stage.candidate_revision, seen_revision)
+
+        with self.assertRaisesRegex(ValidationError, "候选结果已被其他工作人员更新"):
+            confirm_stage_result(
+                stage,
+                confirmed_by=self.staff,
+                expected_candidate_revision=seen_revision,
+            )
+        stage.refresh_from_db()
+        self.assertNotEqual(stage.status, StageResult.Status.CONFIRMED)
+
+        confirmed = confirm_stage_result(
+            stage,
+            confirmed_by=self.staff,
+            expected_candidate_revision=stage.candidate_revision,
+        )
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+
+    def test_a_fresh_page_can_correct_a_tie_ordering(self):
+        from common.models import AuditLog
+
+        from .models import PodiumTieDecision
+        from .podium_services import create_podium_tie_decision, persist_podium_result
+
+        tied = self._make_podium_tie()
+        stage = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        create_podium_tie_decision(
+            stage,
+            ordering=[tied[0].pk, tied[1].pk],
+            reason="第一次裁决",
+            operator=self.staff,
+            base_input_fingerprint=stage.input_fingerprint,
+            base_candidate_revision=stage.candidate_revision,
+        )
+        stage.refresh_from_db()
+
+        create_podium_tie_decision(
+            stage,
+            ordering=[tied[1].pk, tied[0].pk],
+            reason="更正裁决",
+            operator=self.staff,
+            base_input_fingerprint=stage.input_fingerprint,
+            base_candidate_revision=stage.candidate_revision,
+        )
+
+        decision = PodiumTieDecision.objects.get(
+            activity=self.activity, ruleset_version=self.version, stage_key="final_podium"
+        )
+        self.assertEqual(decision.ordering, [tied[1].pk, tied[0].pk])
+        audits = AuditLog.objects.filter(
+            action_type=AuditLog.ActionType.MANUAL_DECISION,
+            target=f"StageResult:{stage.pk}",
+        ).order_by("pk")
+        self.assertEqual(audits.count(), 2)
+        self.assertIn('"ordering"', audits.last().old_value)
+        self.assertIn(str(tied[1].pk), audits.last().new_value)
 
     def test_a_tie_decision_cannot_move_someone_across_score_groups(self):
         from .podium_services import create_podium_tie_decision, persist_podium_result

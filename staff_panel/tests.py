@@ -7306,7 +7306,10 @@ class ResultBoardTests(TestCase):
             detail,
             "onsubmit=\"return confirm('确认核定并锁定该赛段结果？确认后将成为正式手卡依据。');\"",
         )
-        response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))  # type: ignore[union-attr]
+        response = self.client.post(
+            reverse("staff:stage_result_confirm", args=[ready.pk]),  # type: ignore[union-attr]
+            {"base_candidate_revision": ready.candidate_revision},  # type: ignore[union-attr]
+        )
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))  # type: ignore[union-attr]
         ready.refresh_from_db()  # type: ignore[union-attr]
         self.assertEqual(ready.status, StageResult.Status.CONFIRMED)
@@ -7338,7 +7341,10 @@ class ResultBoardTests(TestCase):
             reasons=["缺评分"],
         )
         login_admin(self.client, self.admin)
-        response = self.client.post(reverse("staff:stage_result_confirm", args=[hold.pk]))
+        response = self.client.post(
+            reverse("staff:stage_result_confirm", args=[hold.pk]),
+            {"base_candidate_revision": hold.candidate_revision},
+        )
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[hold.pk]))
         hold.refresh_from_db()
         self.assertEqual(hold.status, StageResult.Status.HOLD)

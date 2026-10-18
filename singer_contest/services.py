@@ -3023,7 +3023,12 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         latest.status = status
         latest.reasons = list(result.reasons)
         latest.created_by = computed_by
-        latest.save(update_fields=["status", "reasons", "created_by"])
+        # Same raw facts, new candidate output: the row is rewritten in place, so a
+        # confirmation built from the previous screen must be told the candidate moved.
+        latest.candidate_revision = (latest.candidate_revision or 0) + 1
+        latest.save(
+            update_fields=["status", "reasons", "created_by", "candidate_revision"]
+        )
         with authority_write(STAGE_RESULT_RESOLVE):
             StageDecision.objects.filter(stage_result=latest).delete()
             CompositeResult.objects.filter(stage_result=latest).delete()
@@ -3898,7 +3903,9 @@ def create_manual_award(activity, *, singer, name: str, operator) -> Award:
 
 
 @transaction.atomic
-def confirm_stage_result(stage: StageResult, *, confirmed_by):
+def confirm_stage_result(
+    stage: StageResult, *, confirmed_by, expected_candidate_revision: int | None = None
+):
     """核定并锁定 a resolved stage result into its final handcard state (§36-37).
 
     A resolver ``READY_TO_CONFIRM`` result is machine-computed but still mutable —
@@ -3916,12 +3923,21 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     if _configured_podium_stage_key(stage.ruleset_version) == stage.stage_key:
         from .podium_services import confirm_podium_result
 
-        return confirm_podium_result(stage, confirmed_by=confirmed_by)
+        return confirm_podium_result(
+            stage,
+            confirmed_by=confirmed_by,
+            expected_candidate_revision=expected_candidate_revision,
+        )
     current_actor = require_current_staff(confirmed_by)
     locked_activity = lock_activity_for_action(stage.activity, ActivityAction.PUBLISH_RESULT)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.activity_id != locked_activity.pk:
         raise ValidationError("赛段结果不属于当前活动。")
+    if (
+        expected_candidate_revision is not None
+        and locked.candidate_revision != expected_candidate_revision
+    ):
+        raise ValidationError("候选结果已被其他工作人员更新，请刷新后重试。")
     if locked.status not in {
         StageResult.Status.READY_TO_CONFIRM,
         StageResult.Status.CONFIRMED,
