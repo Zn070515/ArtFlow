@@ -6207,7 +6207,13 @@ def ruleset_live_2026_config(request, pk):
         action = (request.POST.get("action") or "").strip()
         if action == "create_group_stage":
             try:
-                stage = create_live_2026_group_stage(version, operator=request.user)
+                stage = create_live_2026_group_stage(
+                    version,
+                    operator=request.user,
+                    base_group_stage_binding_revision=_binding_revision_from_post(
+                        request.POST.get("base_group_stage_binding_revision")
+                    ),
+                )
             except (PermissionDenied, ValidationError) as exc:
                 messages.error(request, domain_error_messages(exc))
                 return redirect("staff:ruleset_live_2026_config", pk=version.pk)
@@ -6396,6 +6402,7 @@ def ruleset_live_2026_config(request, pk):
             "first_rubric_id": first_round.rubric_id if first_round else None,
             "first_round_editable": first_round_editable,
             "binding_revision": ruleset.binding_revision,
+            "group_stage_binding_revision": ruleset.group_stage_binding_revision,
             "base_first_round_configuration": first_round_configuration_signature(first_round),
             "bound_group_stage": bound_group_stage,
             "resumable_group_stage": resumable_group_stage,

@@ -1750,6 +1750,17 @@ class Live2026FreshWorkbenchTests(TestCase):
     def _config_url(self, version: RulesetVersion) -> str:
         return reverse("staff:ruleset_live_2026_config", args=[version.pk])
 
+    def _create_group_stage(self, version: RulesetVersion):
+        ruleset = ContestRuleset.objects.get(pk=version.ruleset_id)
+        return self.client.post(
+            self._config_url(version),
+            {
+                "action": "create_group_stage",
+                "base_group_stage_binding_revision": ruleset.group_stage_binding_revision,
+            },
+            follow=True,
+        )
+
     def test_a_fresh_built_in_is_prepared_grouped_and_frozen_through_the_ui(self):
         template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
         response = self.client.post(
@@ -1814,7 +1825,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         self.assertTrue(tasks["rubric"]["ready"])
         self.assertFalse(tasks["groups"]["ready"])
 
-        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version)
         stage = GroupStage.objects.get(
             activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
         )
@@ -1905,7 +1916,7 @@ class Live2026FreshWorkbenchTests(TestCase):
             self._form_data(page, group_count=5, include_first_round=True),
             follow=True,
         )
-        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version1)
         stage_a = GroupStage.objects.get(
             activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
         )
@@ -1953,7 +1964,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         version2.ruleset.refresh_from_db()
         self.assertEqual(version2.ruleset.group_stage_keys[first_round_key], stage_a.pk)
 
-        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version2)
         stage_b = (
             GroupStage.objects.filter(
                 activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
@@ -1988,11 +1999,11 @@ class Live2026FreshWorkbenchTests(TestCase):
         )
         version = RulesetVersion.objects.get(ruleset__activity=self.activity)
 
-        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version)
         first = GroupStage.objects.get(
             activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
         )
-        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version)
 
         stages = list(
             GroupStage.objects.filter(
@@ -2027,7 +2038,7 @@ class Live2026FreshWorkbenchTests(TestCase):
             self._form_data(page, group_count=5, include_first_round=True),
             follow=True,
         )
-        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version1)
         stage_a = GroupStage.objects.get(
             activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
         )
@@ -2051,7 +2062,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         first_round_key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
 
         # A starts a re-adjustment preview (B) but has not frozen it yet.
-        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version2)
         preview = (
             GroupStage.objects.filter(
                 activity=self.activity,
@@ -2111,7 +2122,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         )
 
         # An unfinished preview owned by v1.
-        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version1)
         abandoned = (
             GroupStage.objects.filter(
                 activity=self.activity,
@@ -2147,7 +2158,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         )
         assert version2 is not None
 
-        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version2)
         successor_stage = GroupStage.objects.get(
             activity=self.activity,
             managed_by=GroupStage.ManagedBy.LIVE_2026,
@@ -2172,7 +2183,7 @@ class Live2026FreshWorkbenchTests(TestCase):
             self._form_data(page, group_count=5, include_first_round=True),
             follow=True,
         )
-        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version)
         bound = GroupStage.objects.get(
             activity=self.activity,
             managed_by=GroupStage.ManagedBy.LIVE_2026,
@@ -2231,7 +2242,7 @@ class Live2026FreshWorkbenchTests(TestCase):
             self._form_data(page, group_count=5, include_first_round=True),
             follow=True,
         )
-        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version1)
         stage_a = GroupStage.objects.get(
             activity=self.activity,
             managed_by=GroupStage.ManagedBy.LIVE_2026,
@@ -2257,7 +2268,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
 
         # The preview records A and the revision at that moment.
-        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version2)
         preview = (
             GroupStage.objects.filter(
                 activity=self.activity,
@@ -2307,6 +2318,131 @@ class Live2026FreshWorkbenchTests(TestCase):
         self.assertEqual(version2.ruleset.group_stage_keys[key], stage_a.pk)
 
 
+    def _successor_with_bound_first_round(self, name):
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": name},
+            follow=True,
+        )
+        version1 = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        page = self.client.get(self._config_url(version1))
+        self.client.post(
+            self._config_url(version1),
+            self._form_data(page, group_count=5, include_first_round=True),
+            follow=True,
+        )
+        self._create_group_stage(version1)
+        stage_a = GroupStage.objects.get(
+            activity=self.activity,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=version1,
+        )
+        self._finish_group_stage(stage_a, group_count=5)
+        self.client.post(reverse("staff:ruleset_freeze", args=[version1.pk]), follow=True)
+
+        self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": f"{name}（后继）"},
+            follow=True,
+        )
+        version2 = (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+        assert version2 is not None
+        return version2, stage_a
+
+    def _explicitly_bind(self, version, stage):
+        page = self.client.get(self._config_url(version))
+        return self.client.post(
+            self._config_url(version),
+            {
+                "action": "bind_group_stage",
+                "group_stage_id": stage.pk,
+                "base_binding": page.context["binding_signature"],
+                "base_binding_revision": page.context["binding_revision"],
+            },
+            follow=True,
+        )
+
+    def test_a_stale_page_cannot_create_a_replacement_preview(self):
+        version2, _stage_a = self._successor_with_bound_first_round("2026 旧页面创建")
+        key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
+        stale_revision = ContestRuleset.objects.get(
+            pk=version2.ruleset_id
+        ).group_stage_binding_revision
+
+        # Another staff member explicitly chooses C while the page still shows A.
+        stage_c = create_group_stage(
+            self.activity, stage_key="generic_stale_c", name="分组 C", operator=self.admin
+        )
+        self._finish_group_stage(stage_c, group_count=5)
+        self._explicitly_bind(version2, stage_c)
+        current = ContestRuleset.objects.get(pk=version2.ruleset_id)
+        self.assertEqual(current.group_stage_keys[key], stage_c.pk)
+        self.assertEqual(current.group_stage_binding_revision, stale_revision + 1)
+
+        # The stale page's "重新调整" must not record a replacement of C.
+        response = self.client.post(
+            self._config_url(version2),
+            {
+                "action": "create_group_stage",
+                "base_group_stage_binding_revision": stale_revision,
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "第一轮分组已被其他工作人员修改")
+        self.assertFalse(
+            GroupStage.objects.filter(managed_by_version=version2).exists()
+        )
+        current.refresh_from_db()
+        self.assertEqual(current.group_stage_keys[key], stage_c.pk)
+
+    def test_a_stale_page_cannot_resume_a_preview_after_a_newer_choice(self):
+        version2, _stage_a = self._successor_with_bound_first_round("2026 旧页面继续")
+        self._create_group_stage(version2)
+        preview = GroupStage.objects.get(
+            activity=self.activity,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=version2,
+        )
+        stale_revision = ContestRuleset.objects.get(
+            pk=version2.ruleset_id
+        ).group_stage_binding_revision
+
+        stage_c = create_group_stage(
+            self.activity, stage_key="generic_resume_c", name="分组 C", operator=self.admin
+        )
+        self._finish_group_stage(stage_c, group_count=5)
+        self._explicitly_bind(version2, stage_c)
+
+        response = self.client.post(
+            self._config_url(version2),
+            {
+                "action": "create_group_stage",
+                "base_group_stage_binding_revision": stale_revision,
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "第一轮分组已被其他工作人员修改")
+        self.assertEqual(response.redirect_chain[-1][0], self._config_url(version2))
+        preview.refresh_from_db()
+        self.assertEqual(preview.status, GroupStage.Status.DRAFT)
+        self.assertEqual(
+            GroupStage.objects.filter(
+                activity=self.activity,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+                managed_by_version=version2,
+            ).count(),
+            1,
+        )
+
     def _ruleset_version_for(self, activity, name):
         ruleset = ContestRuleset.objects.create(activity=activity, name=name, is_test_data=True)
         with authority_write(RULESET_FREEZE):
@@ -2345,7 +2481,7 @@ class Live2026FreshWorkbenchTests(TestCase):
             self._form_data(page, group_count=5, include_first_round=True),
             follow=True,
         )
-        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version1)
         stage_a = GroupStage.objects.get(
             activity=self.activity,
             managed_by=GroupStage.ManagedBy.LIVE_2026,
@@ -2371,7 +2507,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
 
         # A re-adjustment preview records the grouping intent.
-        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        self._create_group_stage(version2)
         preview = (
             GroupStage.objects.filter(
                 activity=self.activity,
