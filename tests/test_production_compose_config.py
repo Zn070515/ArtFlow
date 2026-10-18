@@ -675,6 +675,10 @@ def test_runtime_entrypoint_seeds_builtin_ruleset_templates_before_static_collec
     seed_position = entrypoint.index("python manage.py seed_ruleset_templates")
     static_position = entrypoint.index("python manage.py collectstatic --noinput")
     assert migrate_position < seed_position < static_position
+    # STATIC_ROOT is a persistent volume. Plain collectstatic skips a destination that is
+    # newer than the source, which is exactly the previous release's collected copy, so a
+    # rebuilt image kept serving stale JS/CSS until someone deleted the volume by hand.
+    assert "python manage.py collectstatic --noinput --clear" in entrypoint
 
 
 @pytest.mark.skipif(DOCKER is None, reason="Docker is required for Compose config validation")
