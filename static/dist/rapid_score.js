@@ -869,6 +869,13 @@
                 moveTo(nextRow.querySelector('input[data-judge-id="' + judgeId + '"]'));
             }
         }
+        else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            const previousRow = row.previousElementSibling;
+            if (previousRow) {
+                moveTo(previousRow.querySelector('input[data-judge-id="' + judgeId + '"]'));
+            }
+        }
         else if (event.key === "ArrowRight") {
             event.preventDefault();
             const cols = row.querySelectorAll("input[data-judge-id]");
