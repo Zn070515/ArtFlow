@@ -55,7 +55,11 @@
     </section>
     {% endif %}
 
-    {% if post.content %}
+    {% if preview and post.post_type == "result_publication" and not active_release %}
+    <div class="mt-6 border border-amber-200 bg-amber-50 text-amber-900 text-sm rounded px-4 py-3">
+        编辑内容预览：这篇文章还没有生效的正式结果发布，下面只是编辑正文，不会出现在正式结果页。
+    </div>
+    {% elif post.content and not active_release %}
     <div class="mt-6 text-gray-800 leading-relaxed whitespace-pre-line">{{ post.content }}</div>
     {% endif %}
     {% if media_items %}
