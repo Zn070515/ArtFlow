@@ -533,11 +533,7 @@ class PodiumResultServiceTests(TestCase):
 
         from common.authority import ROUND_PERFORMANCE_STATE
 
-        from .judge_authority import (
-            lock_performance_score,
-            prepare_judge_panel,
-            reopen_performance_score_for_correction,
-        )
+        from .judge_authority import lock_performance_score, prepare_judge_panel
         from .models import PerformanceScoreState, RoundJudge
         from .podium_services import persist_podium_result
         from .services import (
@@ -615,13 +611,45 @@ class PodiumResultServiceTests(TestCase):
         self.assertEqual(unlocked.candidate_revision, old_candidate_revision + 1)
 
         target = performances[0]
-        correction = reopen_performance_score_for_correction(
-            unlocked.pk,
-            target.pk,
-            operator=self.staff,
-            reason="某评委 91.50 误录为 81.50",
+        from accounts.services import mark_admin_verified
+        from django.urls import reverse
+
+        self.client.force_login(self.staff)
+        session = self.client.session
+        mark_admin_verified(session)
+        session.save()
+
+        # A superseded panel must fail closed instead of colliding on (round, version).
+        with self.assertRaisesRegex(ValidationError, "历史快照"):
+            prepare_judge_panel(self.final_round.pk, operator=self.staff)
+
+        mismatch = self.client.post(
+            reverse("staff:judge_performance_score_reopen", args=[self.first_round.pk]),
+            {
+                "performance_id": target.pk,
+                "stage_result_id": unlocked.pk,
+                "reason": "错误的轮次 URL",
+            },
+            follow=True,
         )
+        self.assertContains(mismatch, "不属于 URL 中指定的轮次")
+
+        response = self.client.post(
+            reverse("staff:judge_performance_score_reopen", args=[self.final_round.pk]),
+            {
+                "performance_id": target.pk,
+                "stage_result_id": unlocked.pk,
+                "reason": "某评委 91.50 误录为 81.50",
+            },
+            follow=True,
+        )
+        self.assertContains(response, "已重新开放该表演评分")
+        correction = PerformanceScoreState.objects.get(performance=target)
         self.assertEqual(correction.state, PerformanceScoreState.State.OPEN)
+        detail = self.client.get(reverse("staff:stage_result_detail", args=[unlocked.pk]))
+        self.assertContains(detail, "去修改评分")
+        self.assertContains(detail, "重新锁定该表演评分")
+
         apply_scores(
             self.final_round,
             {(target.singer_id, judge_ids[0]): "95.00"},
@@ -634,24 +662,35 @@ class PodiumResultServiceTests(TestCase):
         self.assertEqual(self.final_round.status, ContestRound.Status.SCORING)
         correction.refresh_from_db()
         self.assertEqual(correction.state, PerformanceScoreState.State.OPEN)
-        lock_performance_score(
-            self.final_round.pk,
-            target.pk,
-            operator=self.staff,
-            expected_context_version=correction.context_version,
-        )
-        lock_round(self.final_round, self.staff)
 
-        recomputed = persist_podium_result(self.version, self.activity, computed_by=self.staff)
+        response = self.client.post(
+            reverse("staff:stage_result_relock_performance", args=[unlocked.pk]),
+            {"performance_id": target.pk, "context_version": correction.context_version},
+            follow=True,
+        )
+        self.assertContains(response, "该表演评分已重新锁定")
+
+        response = self.client.post(
+            reverse("staff:stage_result_lock_round", args=[unlocked.pk]),
+            {"round_id": self.final_round.pk},
+            follow=True,
+        )
+        self.assertContains(response, "已重新计算")
+        recomputed = StageResult.objects.get(
+            activity=self.activity, stage_key="final_podium", result_version=2
+        )
         self.assertNotEqual(recomputed.pk, confirmed.pk)
         self.assertNotEqual(recomputed.input_fingerprint, old_fingerprint)
         self.assertEqual(recomputed.status, StageResult.Status.READY_TO_CONFIRM)
-        re_confirmed = confirm_stage_result(
-            recomputed,
-            confirmed_by=self.staff,
-            expected_candidate_revision=recomputed.candidate_revision,
+
+        response = self.client.post(
+            reverse("staff:stage_result_confirm", args=[recomputed.pk]),
+            {"base_candidate_revision": recomputed.candidate_revision},
+            follow=True,
         )
-        self.assertEqual(re_confirmed.status, StageResult.Status.CONFIRMED)
+        self.assertContains(response, "已核定并锁定")
+        recomputed.refresh_from_db()
+        self.assertEqual(recomputed.status, StageResult.Status.CONFIRMED)
 
     def test_a_tie_decision_cannot_move_someone_across_score_groups(self):
         from .podium_services import create_podium_tie_decision, persist_podium_result

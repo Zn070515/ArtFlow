@@ -3127,9 +3127,15 @@ def stage_result_detail(request, pk):
             tie_groups = []
     correction_performances = (
         stage_correction_performances(stage)
-        if request.user.is_admin and stage.status == StageResult.Status.READY_TO_CONFIRM
+        if stage.status == StageResult.Status.READY_TO_CONFIRM
         else []
     )
+    correction_rounds: list[ContestRound] = []
+    seen_rounds: set[int] = set()
+    for row in correction_performances:
+        if row["round"].pk not in seen_rounds:
+            seen_rounds.add(row["round"].pk)
+            correction_rounds.append(row["round"])
     return render(
         request,
         "staff_panel/stage_result_detail.html",
@@ -3139,10 +3145,12 @@ def stage_result_detail(request, pk):
             "blocks": blocks,
             "podium_tie_groups": tie_groups,
             "correction_performances": correction_performances,
+            "correction_rounds": correction_rounds,
             # Staff may perform the operational confirmation; only unlocking remains
             # an administrator authority because it reopens an already-final result.
             "can_confirm_stage_result": request.user.is_staff_or_admin,
             "can_decide_podium_tie": request.user.is_staff_or_admin,
+            "can_reopen_performance_score": request.user.is_admin,
             "can_unlock_stage_result": request.user.is_admin,
         },
     )
@@ -3254,6 +3262,10 @@ def judge_performance_score_reopen(request, pk):
     if not performance_id.isdigit() or not stage_result_id.isdigit():
         messages.error(request, "表演或赛段结果参数无效。")
         return redirect("staff:dashboard")
+    performance = Performance.objects.filter(pk=int(performance_id)).first()
+    if performance is None or performance.round_id != pk:
+        messages.error(request, "表演不属于 URL 中指定的轮次。")
+        return redirect("staff:stage_result_detail", pk=stage_result_id)
     try:
         reopen_performance_score_for_correction(
             int(stage_result_id),
@@ -3268,6 +3280,71 @@ def judge_performance_score_reopen(request, pk):
             request, "已重新开放该表演评分；修正后请重新锁定评分、锁定轮次并重新计算。"
         )
     return redirect("staff:stage_result_detail", pk=stage_result_id)
+
+
+@staff_required
+@require_POST
+def stage_result_relock_performance(request, pk):
+    """Close one correction-opened performance gate from the stage result page."""
+
+    stage = get_object_or_404(StageResult, pk=pk)
+    performance_id = str(request.POST.get("performance_id") or "").strip()
+    context_version = str(request.POST.get("context_version") or "").strip()
+    if not performance_id.isdigit() or not context_version.isdigit():
+        messages.error(request, "表演或评分上下文参数无效。")
+        return redirect("staff:stage_result_detail", pk=stage.pk)
+    performance = Performance.objects.filter(
+        pk=int(performance_id), activity_id=stage.activity_id
+    ).first()
+    if performance is None:
+        messages.error(request, "表演不属于当前活动。")
+        return redirect("staff:stage_result_detail", pk=stage.pk)
+    try:
+        ensure_activity_action_allowed(stage.activity, ActivityAction.SCORE)
+        lock_performance_score(
+            performance.round_id,
+            performance.pk,
+            operator=request.user,
+            expected_context_version=int(context_version),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"重新锁定表演评分失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "该表演评分已重新锁定。")
+    return redirect("staff:stage_result_detail", pk=stage.pk)
+
+
+@staff_required
+@require_POST
+def stage_result_lock_round(request, pk):
+    """Lock a correction-reopened round and publish the recomputed stage result."""
+
+    stage = get_object_or_404(StageResult, pk=pk)
+    round_id = str(request.POST.get("round_id") or "").strip()
+    if not round_id.isdigit():
+        messages.error(request, "轮次参数无效。")
+        return redirect("staff:stage_result_detail", pk=stage.pk)
+    contest_round = get_object_or_404(ContestRound, pk=int(round_id), activity=stage.activity)
+    try:
+        ensure_activity_action_allowed(stage.activity, ActivityAction.SCORE)
+        lock_round(contest_round, request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"轮次锁定失败：{domain_error_messages(error)}")
+        return redirect("staff:stage_result_detail", pk=stage.pk)
+    try:
+        maybe_resolve_checkpoints(stage.activity, request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.warning(
+            request, f"轮次已锁定，但赛段未能自动重新计算：{domain_error_messages(error)}"
+        )
+    else:
+        messages.success(request, "轮次已锁定，赛段结果已重新计算；请核对后核定。")
+    latest = (
+        StageResult.objects.filter(activity=stage.activity, stage_key=stage.stage_key)
+        .order_by("-result_version", "-pk")
+        .first()
+    )
+    return redirect("staff:stage_result_detail", pk=(latest or stage).pk)
 
 
 @admin_required
