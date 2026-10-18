@@ -925,17 +925,27 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         self.assertEqual([response.status_code for response in responses], [200, 200])
 
     def test_revoked_and_superseded_releases_are_not_public(self):
-        for status in (ResultRelease.Status.REVOKED, ResultRelease.Status.SUPERSEDED):
-            with self.subTest(status=status):
-                release = self.make_release(status=status)
-                self._save(release)
-                self.client.raise_request_exception = False
-                response = self.client.get(
-                    reverse("public_portal:post_detail", args=[self.post.pk])
-                )
-                self.assertEqual(response.status_code, 404)
-                with authority_write(RESULT_RELEASE_STATE):
-                    release.delete()
+        self.create_public_media()
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            media_path = Path(media_root) / "public/gallery/result.jpg"
+            media_path.parent.mkdir(parents=True)
+            media_path.write_bytes(b"retired-result-media")
+            self.client.raise_request_exception = False
+            for status in (ResultRelease.Status.REVOKED, ResultRelease.Status.SUPERSEDED):
+                with self.subTest(status=status):
+                    release = self.make_release(status=status)
+                    self._save(release)
+                    response = self.client.get(
+                        reverse("public_portal:post_detail", args=[self.post.pk])
+                    )
+                    media_response = self.client.get(
+                        reverse("controlled_media", kwargs={"path": "public/gallery/result.jpg"})
+                    )
+                    _close_file_response_resources(media_response)
+                    self.assertEqual(response.status_code, 404)
+                    self.assertEqual(media_response.status_code, 404)
+                    with authority_write(RESULT_RELEASE_STATE):
+                        release.delete()
 
     def test_release_is_hidden_after_post_version_changes(self):
         self.confirm_stage_result()
