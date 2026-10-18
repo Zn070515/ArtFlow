@@ -3116,9 +3116,8 @@ def stage_result_detail(request, pk):
     for decision in decisions:
         decision.song_label = generic_song_label(decision.singer)
     tie_groups: list[dict] = []
-    if (
-        stage.status == StageResult.Status.REVIEW
-        and "podium_tie_requires_review" in (stage.reasons or [])
+    if stage.status == StageResult.Status.REVIEW and "podium_tie_requires_review" in (
+        stage.reasons or []
     ):
         try:
             tie_groups = podium_tie_groups(stage.ruleset_version, stage.activity)
@@ -3216,8 +3215,7 @@ def stage_result_podium_tie(request, pk):
         messages.error(request, "人工裁决名次必须是互不重复的正整数。")
         return redirect("staff:stage_result_detail", pk=pk)
     ordering = [
-        singer_id
-        for singer_id, _position in sorted(positions.items(), key=lambda item: item[1])
+        singer_id for singer_id, _position in sorted(positions.items(), key=lambda item: item[1])
     ]
     try:
         create_podium_tie_decision(

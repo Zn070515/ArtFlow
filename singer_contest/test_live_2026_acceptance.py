@@ -2317,7 +2317,6 @@ class Live2026FreshWorkbenchTests(TestCase):
         self.assertEqual(preview.status, GroupStage.Status.FROZEN)
         self.assertEqual(version2.ruleset.group_stage_keys[key], stage_a.pk)
 
-
     def _successor_with_bound_first_round(self, name):
         template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
         self.client.post(
@@ -2397,9 +2396,7 @@ class Live2026FreshWorkbenchTests(TestCase):
         )
 
         self.assertContains(response, "第一轮分组已被其他工作人员修改")
-        self.assertFalse(
-            GroupStage.objects.filter(managed_by_version=version2).exists()
-        )
+        self.assertFalse(GroupStage.objects.filter(managed_by_version=version2).exists())
         current.refresh_from_db()
         self.assertEqual(current.group_stage_keys[key], stage_c.pk)
 
@@ -2531,9 +2528,7 @@ class Live2026FreshWorkbenchTests(TestCase):
 
         version2.ruleset.refresh_from_db()
         self.assertGreater(version2.ruleset.binding_revision, binding_revision_at_preview)
-        self.assertEqual(
-            version2.ruleset.group_stage_binding_revision, group_revision_at_preview
-        )
+        self.assertEqual(version2.ruleset.group_stage_binding_revision, group_revision_at_preview)
 
         # The preview's freeze still knows no grouping intent changed, so it auto-binds.
         self._finish_group_stage(preview, group_count=5)
