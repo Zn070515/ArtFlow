@@ -1,3 +1,4 @@
+import threading
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -21,11 +22,12 @@ from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection
 from django.db.models.query import QuerySet
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from entry_access.models import EphemeralSession
 from entry_access.services import redeem_access_grant
+from tests.helpers import postgresql_only
 
 from .judge_authority import (
     JudgeIdempotencyConflict,
@@ -1447,3 +1449,131 @@ class ActualPanelPolicyTests(TestCase):
                 operator=self.operator,
                 attending_judge_ids=[judge.pk for judge in self.judges[:4]],
             )
+
+
+@postgresql_only
+class JudgeScoreConcurrencyTests(TransactionTestCase):
+    """PostgreSQL row-lock evidence for the live judge score path.
+
+    The service design relies on real row locks (Activity -> run state -> panel/seat ->
+    performance score state) and on the command receipt for replay. These tests run the
+    interleavings against PostgreSQL rather than only asserting the service in isolation.
+    """
+
+    reset_sequences = True
+
+    def setUp(self):
+        from .models import Judge, Performance, RoundEntry, RoundJudge
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.operator = User.objects.create_user(
+                username="judge-race-staff", password="pass", role=User.Role.STAFF
+            )
+            singer_user = User.objects.create_user(
+                username="judge-race-singer", password="pass", role=User.Role.PARTICIPANT
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Judge race",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="Race round",
+                judge_count=1,
+                minimum_judge_count=1,
+            )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="Race singer",
+            student_id="judge-race-001",
+            college="Arts",
+            class_name="Class 1",
+            phone="13800000009",
+            song_name="Race song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        judge = Judge.objects.create(activity=self.activity, name="Race judge")
+        RoundEntry.objects.create(round=self.round, singer=self.singer, running_order=1)
+        RoundJudge.objects.create(round=self.round, judge=judge)
+        self.performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.round,
+            singer=self.singer,
+            sequence=1,
+            song_title="Race title",
+            is_test_data=True,
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+        self.token = redeemed.token
+
+    def _race(self, command_ids):
+        barrier = threading.Barrier(len(command_ids))
+        results = []
+        errors = []
+
+        def target(command_id):
+            try:
+                barrier.wait(timeout=10)
+                results.append(
+                    submit_judge_score(
+                        self.token,
+                        command_id=command_id,
+                        expected_context_version=1,
+                        expected_performance_id=self.performance.pk,
+                        score_payload={"score": "90.00", "notes": ""},
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - the test asserts which side wins
+                errors.append(error)
+            finally:
+                connection.close()
+
+        threads = [
+            threading.Thread(target=target, args=(command_id,))
+            for command_id in command_ids
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+        for thread in threads:
+            self.assertFalse(thread.is_alive(), "a judge submission never finished")
+        return results, errors
+
+    def test_the_same_command_retried_concurrently_creates_one_score_fact(self):
+        results, errors = self._race(["judge-race-same", "judge-race-same"])
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 2)
+        self.assertEqual(len({result.score_record_id for result in results}), 1)
+        self.assertEqual(ScoreRecord.objects.count(), 1)
+        self.assertEqual(
+            JudgeScoreReceipt.objects.filter(
+                status=JudgeScoreReceipt.Status.SUCCEEDED
+            ).count(),
+            1,
+        )
+
+    def test_two_commands_at_once_leave_one_formal_score_fact(self):
+        results, errors = self._race(["judge-race-a", "judge-race-b"])
+
+        self.assertGreaterEqual(len(results), 1)
+        self.assertEqual(ScoreRecord.objects.count(), 1)
+        # A conflicting command must surface as a domain error, never a second fact.
+        for error in errors:
+            self.assertIsInstance(error, (ValidationError, JudgeIdempotencyConflict))
