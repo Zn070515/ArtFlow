@@ -634,9 +634,10 @@ class GroupStage(models.Model):
         blank=True,
         related_name="replacement_group_stages",
     )
-    #: The ruleset binding revision when this preview was created. Auto-bind requires the
-    #: revision to be unchanged, which closes the A -> C -> A ABA window.
-    expected_binding_revision = models.PositiveBigIntegerField(default=0)
+    #: The ruleset's ``group_stage_binding_revision`` when this preview was created. Auto-bind
+    #: requires that scoped revision to be unchanged: an unrelated binding save (weights,
+    #: judges) must not invalidate the preview, while A -> C -> A still does.
+    expected_group_stage_binding_revision = models.PositiveBigIntegerField(default=0)
     status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     confirmed_by = models.ForeignKey(

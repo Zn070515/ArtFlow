@@ -5562,6 +5562,9 @@ def ruleset_edit(request, pk):
                     operator=request.user,
                     base_content_hash=request.POST.get("base_content_hash") or None,
                     base_binding=request.POST.get("base_binding") or None,
+                    base_binding_revision=_binding_revision_from_post(
+                        request.POST.get("base_binding_revision")
+                    ),
                     base_round_configuration=request.POST.get("base_round_configuration") or None,
                 )
             except PermissionDenied as exc:
@@ -5819,6 +5822,7 @@ def ruleset_edit(request, pk):
             "live_challenge": live_challenge,
             "live_judges": live_judges,
             "binding_signature": _binding_signature(ruleset),
+            "binding_revision": ruleset.binding_revision,
             "binding_maps": binding_maps,
             "human_summary": human_summary,
             "can_freeze": request.user.is_admin,
@@ -5992,6 +5996,9 @@ def ruleset_bind(request, pk):
                 binding=payload,
                 operator=request.user,
                 base_binding=request.POST.get("base_binding") or None,
+                base_binding_revision=_binding_revision_from_post(
+                    request.POST.get("base_binding_revision")
+                ),
             )
             apply_live_2026_counts(version.ruleset, version, operator=request.user)
     except (ValidationError, PermissionDenied) as exc:

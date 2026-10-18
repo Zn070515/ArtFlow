@@ -176,8 +176,14 @@ class ContestRuleset(models.Model):
         related_name="contest_rulesets",
     )
     #: Monotonic binding revision. Content signatures cannot distinguish A -> C -> A,
-    #: so optimistic concurrency and the workbench's auto-bind CAS use this counter.
+    #: so optimistic concurrency and the workbench's explicit-bind CAS use this counter.
+    #: It increments on every binding write, whether or not the content changed.
     binding_revision = models.PositiveBigIntegerField(default=0)
+    #: Monotonic revision of ``group_stage_keys`` alone. The workbench's auto-bind CAS
+    #: needs "did the grouping intent change?", not "was any field saved?" — an unrelated
+    #: weight/judge save must not invalidate an in-flight re-adjustment preview. Still
+    #: monotonic, so A -> C -> A remains distinguishable.
+    group_stage_binding_revision = models.PositiveBigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -2204,7 +2204,9 @@ class Live2026FreshWorkbenchTests(TestCase):
         version.ruleset.refresh_from_db()
         self.assertEqual(version.ruleset.group_stage_keys[key], stage_c.pk)
 
-    def test_auto_bind_uses_the_binding_revision_so_a_c_a_is_not_mistaken_for_no_change(self):
+    def test_auto_bind_uses_the_group_stage_binding_revision_so_a_c_a_is_not_mistaken_for_no_change(
+        self,
+    ):
         template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
         self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
@@ -2285,12 +2287,164 @@ class Live2026FreshWorkbenchTests(TestCase):
         version2.ruleset.refresh_from_db()
         self.assertEqual(version2.ruleset.group_stage_keys[key], stage_a.pk)
 
-        # A -> C -> A looks unchanged to a value-only CAS; the revision is not the same.
+        # A -> C -> A looks unchanged to a value-only CAS; the scoped revision is not the
+        # same, so the preview's freeze must not take the draft back to A.
         self._finish_group_stage(preview, group_count=5)
         version2.ruleset.refresh_from_db()
         preview.refresh_from_db()
         self.assertEqual(preview.status, GroupStage.Status.FROZEN)
         self.assertEqual(version2.ruleset.group_stage_keys[key], stage_a.pk)
+
+
+    def _ruleset_version_for(self, activity, name):
+        ruleset = ContestRuleset.objects.create(activity=activity, name=name, is_test_data=True)
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
+                status=RulesetVersion.Status.DRAFT,
+                is_current=False,
+            )
+        return version
+
+    def _foreign_activity_and_version(self):
+        with authority_write(ACTIVITY_STATE):
+            other = Activity.objects.create(
+                title="另一个歌手比赛",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.TESTING,
+                is_test_mode=True,
+            )
+        return other, self._ruleset_version_for(other, "其他赛制")
+
+    def test_an_unrelated_binding_save_does_not_invalidate_a_grouping_preview(self):
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 无关保存"},
+            follow=True,
+        )
+        version1 = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        page = self.client.get(self._config_url(version1))
+        self.client.post(
+            self._config_url(version1),
+            self._form_data(page, group_count=5, include_first_round=True),
+            follow=True,
+        )
+        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        stage_a = GroupStage.objects.get(
+            activity=self.activity,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=version1,
+        )
+        self._finish_group_stage(stage_a, group_count=5)
+        self.client.post(reverse("staff:ruleset_freeze", args=[version1.pk]), follow=True)
+        version1.refresh_from_db()
+
+        self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "2026 无关保存（后继）"},
+            follow=True,
+        )
+        version2 = (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+        assert version2 is not None
+        key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
+
+        # A re-adjustment preview records the grouping intent.
+        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        preview = (
+            GroupStage.objects.filter(
+                activity=self.activity,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+                managed_by_version=version2,
+            )
+            .order_by("-pk")
+            .get()
+        )
+        version2.ruleset.refresh_from_db()
+        group_revision_at_preview = version2.ruleset.group_stage_binding_revision
+        binding_revision_at_preview = version2.ruleset.binding_revision
+
+        # Another staff member saves a weight. The binding write is real, but it does not
+        # touch the grouping.
+        page = self.client.get(self._config_url(version2))
+        data = self._form_data(page, group_count=5)
+        data["live_first_weight"] = "35"
+        data["live_challenge_weight"] = "65"
+        self.client.post(self._config_url(version2), data, follow=True)
+
+        version2.ruleset.refresh_from_db()
+        self.assertGreater(version2.ruleset.binding_revision, binding_revision_at_preview)
+        self.assertEqual(
+            version2.ruleset.group_stage_binding_revision, group_revision_at_preview
+        )
+
+        # The preview's freeze still knows no grouping intent changed, so it auto-binds.
+        self._finish_group_stage(preview, group_count=5)
+        version2.ruleset.refresh_from_db()
+        self.assertEqual(version2.ruleset.group_stage_keys[key], preview.pk)
+
+    def test_live_2026_group_stage_requires_an_owner_version(self):
+        with self.assertRaisesRegex(ValidationError, "必须记录所属赛制版本"):
+            create_group_stage(
+                self.activity,
+                stage_key=GroupStage.LIVE_2026_KEY_PREFIX,
+                name="没有归属的分组",
+                operator=self.admin,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+            )
+
+    def test_live_2026_group_stage_refuses_a_version_from_another_activity(self):
+        _other, foreign_version = self._foreign_activity_and_version()
+
+        with self.assertRaisesRegex(ValidationError, "不属于当前活动"):
+            create_group_stage(
+                self.activity,
+                stage_key=GroupStage.LIVE_2026_KEY_PREFIX,
+                name="借来的归属",
+                operator=self.admin,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+                managed_by_version=foreign_version,
+            )
+
+    def test_a_replacement_group_stage_must_belong_to_the_same_activity(self):
+        other, _foreign_version = self._foreign_activity_and_version()
+        owner_version = self._ruleset_version_for(self.activity, "当前活动赛制")
+        foreign_stage = create_group_stage(
+            other, stage_key="foreign_generic", name="外部通用分组", operator=self.admin
+        )
+
+        with self.assertRaisesRegex(ValidationError, "被替换的分组不属于当前活动"):
+            create_group_stage(
+                self.activity,
+                stage_key=GroupStage.LIVE_2026_KEY_PREFIX,
+                name="跨活动替换",
+                operator=self.admin,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+                managed_by_version=owner_version,
+                replaces_group_stage=foreign_stage,
+            )
+
+    def test_a_generic_group_stage_cannot_declare_an_owner_version(self):
+        owner_version = self._ruleset_version_for(self.activity, "当前活动赛制")
+
+        with self.assertRaisesRegex(ValidationError, "通用分组不能声明"):
+            create_group_stage(
+                self.activity,
+                stage_key="generic_owned",
+                name="通用分组",
+                operator=self.admin,
+                managed_by_version=owner_version,
+            )
 
 
 @postgresql_only

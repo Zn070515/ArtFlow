@@ -888,7 +888,9 @@ def create_live_2026_group_stage(version: RulesetVersion, *, operator):
         managed_by=GroupStage.ManagedBy.LIVE_2026,
         managed_by_version=locked_version,
         replaces_group_stage=predecessor,
-        expected_binding_revision=locked_ruleset.binding_revision,
+        # Scoped to the grouping intent: a later weight/judge save on the same draft must
+        # not invalidate this preview, while any actual group_stage_keys edit still does.
+        expected_group_stage_binding_revision=locked_ruleset.group_stage_binding_revision,
     )
 
 
@@ -994,9 +996,13 @@ def auto_bind_live_2026_group_stage(group_stage, operator):
             )
             if version is None or not version_is_editable(version):
                 return None
-            if version.ruleset.binding_revision != group_stage.expected_binding_revision:
-                # The binding changed since this preview was created — even if it changed
+            if (
+                version.ruleset.group_stage_binding_revision
+                != group_stage.expected_group_stage_binding_revision
+            ):
+                # The grouping changed since this preview was created — even if it changed
                 # back to the same stage id (A -> C -> A). A later explicit intent wins.
+                # Unrelated binding saves leave this scoped revision alone.
                 return None
             _key, existing = _binding_state(version)
             actual = int(existing) if existing not in (None, "") else None

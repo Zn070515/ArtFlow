@@ -1599,6 +1599,7 @@ def save_business_ruleset(
     operator,
     base_content_hash: str | None = None,
     base_binding: str | None = None,
+    base_binding_revision: int | None = None,
     base_round_configuration: str | None = None,
 ) -> RulesetVersion:
     """Atomically save the linear business editor and its activity-owned draft rounds."""
@@ -1899,6 +1900,7 @@ def save_business_ruleset(
         binding=binding,
         operator=operator,
         base_binding=base_binding,
+        base_binding_revision=base_binding_revision,
     )
     locked_ruleset.refresh_from_db()
     new_binding = _snapshot_binding(locked_ruleset)
@@ -1948,8 +1950,9 @@ def update_ruleset_binding(
     """Persist a ContestRuleset binding edit under the Activity-first lock.
 
     Re-reads the ruleset after locking, validates/normalizes the binding, and rejects a
-    save whose editor started from a stale binding surface (``base_binding`` signature).
-    Does not touch the version: the snapshot runs at freeze time.
+    save whose editor started from a stale binding surface (``base_binding`` signature or
+    the monotonic ``base_binding_revision``). Does not touch the version: the snapshot runs
+    at freeze time.
     """
     require_current_staff(operator)
     lock_activity_for_action(ruleset.activity)
@@ -1960,6 +1963,9 @@ def update_ruleset_binding(
         # The monotonic counter also catches A -> C -> A, which a content signature cannot.
         raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
     normalized = validate_binding(locked, binding)
+    group_stage_binding_changed = dict(locked.group_stage_keys or {}) != normalized[
+        "group_stage_keys"
+    ]
     locked.stage_key = normalized["stage_key"]
     locked.round_keys = normalized["round_keys"]
     locked.vote_keys = normalized["vote_keys"]
@@ -1970,11 +1976,16 @@ def update_ruleset_binding(
     locked.live_challenge = normalized.get("live_challenge") or {}
     locked.announcement_blocks = normalized["announcement_blocks"]
     locked.announcement_blocks_by_checkpoint = normalized["announcement_blocks_by_checkpoint"]
+    # The global counter guards every binding form; the scoped one answers the narrower
+    # question the grouping preview asks, so an unrelated save cannot make it stale.
     locked.binding_revision = (locked.binding_revision or 0) + 1
+    if group_stage_binding_changed:
+        locked.group_stage_binding_revision = (locked.group_stage_binding_revision or 0) + 1
     locked.save(
         update_fields=[
             "stage_key",
             "binding_revision",
+            "group_stage_binding_revision",
             "round_keys",
             "vote_keys",
             "vote_scoring_rule_keys",
