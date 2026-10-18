@@ -41,7 +41,11 @@ case "$process_role" in
         python manage.py check
         python manage.py migrate --noinput
         python manage.py seed_ruleset_templates
-        python manage.py collectstatic --noinput
+        # --clear: STATIC_ROOT is a persistent volume. Without clearing it, collectstatic
+        # skips a destination that is newer than the source (the previous release's
+        # collected copy), so a rebuilt image kept serving the old rapid-score JS and
+        # every other changed asset until the volume was deleted by hand.
+        python manage.py collectstatic --noinput --clear
         ;;
     realtime)
         # Realtime must never race the web container over migrations, seed data or
