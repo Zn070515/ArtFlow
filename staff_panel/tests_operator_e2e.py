@@ -157,6 +157,7 @@ class OperatorEndToEndTests(TestCase):
             reverse("staff:ruleset_bind", args=[version.pk]),
             {
                 "stage_key": "院十佳",
+                "base_binding_revision": ruleset.binding_revision,
                 "round_keys": json.dumps(
                     {
                         "r1": round_map["r1"],

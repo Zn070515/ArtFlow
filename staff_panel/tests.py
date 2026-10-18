@@ -7614,12 +7614,15 @@ class RulesetTemplateLibraryTests(TestCase):
 
     def test_live_config_page_saves_counts_and_syncs_the_first_round(self):
         from ruleset.models import ContestRuleset
+        from ruleset.services import _binding_signature
         from singer_contest.models import ContestRound
 
         activity, _ruleset, version = self._provisioned_version(title="2026 渡梦改人数")
         response = self.client.post(
             reverse("staff:ruleset_live_2026_config", args=[version.pk]),
             {
+                "base_binding": _binding_signature(_ruleset),
+                "base_binding_revision": _ruleset.binding_revision,
                 "live_participant_count": "12",
                 "live_seat_count": "8",
                 "live_group_count": "4",
@@ -7667,6 +7670,7 @@ class RulesetTemplateLibraryTests(TestCase):
 
         from common.authority import CONTEST_ROUND_STATE, authority_write
         from ruleset.models import ContestRuleset
+        from ruleset.services import _binding_signature
         from singer_contest.models import ContestRound
 
         activity, _ruleset, version = self._provisioned_version(title="2026 已准备第一轮")
@@ -7680,6 +7684,8 @@ class RulesetTemplateLibraryTests(TestCase):
             reverse("staff:ruleset_bind", args=[version.pk]),
             {
                 "live_format_key": "2026_live_challenge",
+                "base_binding": _binding_signature(_ruleset),
+                "base_binding_revision": _ruleset.binding_revision,
                 "live_participant_count": "15",
                 "live_seat_count": "8",
                 "live_group_count": "5",
@@ -8554,6 +8560,7 @@ class RulesetEditorTests(TestCase):
                 "action": "business_save",
                 "base_content_hash": self.version.content_hash,
                 "base_binding": _binding_signature(self.ruleset),
+                "base_binding_revision": self.ruleset.binding_revision,
                 "base_round_configuration": self._business_round_configuration_signature(),
                 "stage_count": "1",
                 "stage_0_key": "stage1",
@@ -8618,6 +8625,7 @@ class RulesetEditorTests(TestCase):
             "action": "business_save",
             "base_content_hash": self.version.content_hash,
             "base_binding": _binding_signature(self.ruleset),
+            "base_binding_revision": self.ruleset.binding_revision,
             "base_round_configuration": self._business_round_configuration_signature(),
             "stage_count": "2",
             "stage_0_key": "stage1",
@@ -8676,6 +8684,7 @@ class RulesetEditorTests(TestCase):
                 "action": "business_save",
                 "base_content_hash": stale_hash,
                 "base_binding": _binding_signature(self.ruleset),
+                "base_binding_revision": self.ruleset.binding_revision,
                 "base_round_configuration": self._business_round_configuration_signature(),
                 "stage_count": "0",
             },
@@ -8692,6 +8701,7 @@ class RulesetEditorTests(TestCase):
                 "action": "business_save",
                 "base_content_hash": self.version.content_hash,
                 "base_binding": _binding_signature(self.ruleset),
+                "base_binding_revision": self.ruleset.binding_revision,
                 "base_round_configuration": self._business_round_configuration_signature(),
                 "stage_count": "1",
                 "stage_0_key": "stage1",
@@ -8854,6 +8864,41 @@ class RulesetEditorTests(TestCase):
         self.ruleset.refresh_from_db()
         self.assertEqual(self.ruleset.binding_revision, 0)
 
+    def test_a_binding_post_without_the_revision_token_is_refused(self):
+        from ruleset.services import _binding_signature
+
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {
+                "live_format_key": "",
+                "base_binding": _binding_signature(self.ruleset),
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "页面版本过旧，请刷新后重试。")
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.binding_revision, 0)
+
+    def test_a_business_save_without_the_revision_token_is_refused(self):
+        from ruleset.services import _binding_signature
+
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {
+                "action": "business_save",
+                "base_content_hash": self.version.content_hash,
+                "base_binding": _binding_signature(self.ruleset),
+                "base_round_configuration": self._business_round_configuration_signature(),
+                "stage_count": "0",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "页面版本过旧，请刷新后重试。")
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.binding_revision, 0)
+
     def test_editor_uses_readable_badges_and_touch_targets(self):
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
 
@@ -8896,6 +8941,7 @@ class RulesetEditorTests(TestCase):
             reverse("staff:ruleset_bind", args=[self.version.pk]),
             {
                 "live_format_key": "",
+                "base_binding_revision": self.ruleset.binding_revision,
                 "live_participant_count": "15",
                 "live_seat_count": "10",
                 "live_challenge_count": "5",
@@ -9000,6 +9046,7 @@ class RulesetEditorTests(TestCase):
             reverse("staff:ruleset_bind", args=[self.version.pk]),
             {
                 "stage_key": "院十佳",
+                "base_binding_revision": self.ruleset.binding_revision,
                 "round_keys": json.dumps({"r1": round_.pk}),
                 "vote_keys": json.dumps({"audience": vote.pk}),
                 "group_keys": json.dumps({"initial_group": round_.pk}),
@@ -9049,6 +9096,7 @@ class RulesetEditorTests(TestCase):
             reverse("staff:ruleset_bind", args=[self.version.pk]),
             {
                 "stage_key": "院十佳",
+                "base_binding_revision": self.ruleset.binding_revision,
                 "round_keys": "{not-json",
                 "vote_keys": "{}",
                 "group_keys": "{}",
@@ -9078,6 +9126,7 @@ class RulesetEditorTests(TestCase):
             reverse("staff:ruleset_bind", args=[self.version.pk]),
             {
                 "stage_key": "院十佳",
+                "base_binding_revision": self.ruleset.binding_revision,
                 "round_keys": json.dumps({"r1": foreign_round.pk}),
                 "vote_keys": "{}",
                 "group_keys": "{}",
