@@ -3163,6 +3163,18 @@ def stage_result_pdf(request, pk):
     return response
 
 
+def _candidate_revision_from_post(value) -> int:
+    """The human form's candidate-output OCC token; missing is refused."""
+
+    text = str(value or "").strip()
+    if not text:
+        raise ValidationError("页面版本过旧，请刷新后重试。")
+    try:
+        return int(text)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("候选结果版本无效，请刷新后重试。") from exc
+
+
 @staff_required
 @require_POST
 def stage_result_confirm(request, pk):
@@ -3170,7 +3182,13 @@ def stage_result_confirm(request, pk):
     stage = get_object_or_404(StageResult, pk=pk)
     try:
         ensure_activity_action_allowed(stage.activity, ActivityAction.PUBLISH_RESULT)
-        confirm_stage_result(stage, confirmed_by=request.user)
+        confirm_stage_result(
+            stage,
+            confirmed_by=request.user,
+            expected_candidate_revision=_candidate_revision_from_post(
+                request.POST.get("base_candidate_revision")
+            ),
+        )
     except (PermissionDenied, ValidationError) as error:
         messages.error(request, f"赛段核定失败：{domain_error_messages(error)}")
     else:
@@ -3208,6 +3226,9 @@ def stage_result_podium_tie(request, pk):
             reason=request.POST.get("reason", ""),
             operator=request.user,
             base_input_fingerprint=request.POST.get("base_input_fingerprint", ""),
+            base_candidate_revision=_candidate_revision_from_post(
+                request.POST.get("base_candidate_revision")
+            ),
         )
     except (PermissionDenied, ValidationError) as error:
         messages.error(request, f"人工裁决失败：{domain_error_messages(error)}")
