@@ -271,7 +271,7 @@ def create_group_stage(
     managed_by: str = GroupStage.ManagedBy.GENERIC,
     managed_by_version=None,
     replaces_group_stage=None,
-    expected_binding_revision: int = 0,
+    expected_group_stage_binding_revision: int = 0,
 ) -> GroupStage:
     current_operator = _operator(operator)
     locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
@@ -310,7 +310,7 @@ def create_group_stage(
             managed_by=managed_by,
             managed_by_version=managed_by_version,
             replaces_group_stage=replaces_group_stage,
-            expected_binding_revision=expected_binding_revision,
+            expected_group_stage_binding_revision=expected_group_stage_binding_revision,
             roster_source=source,
             roster_source_round=roster_source_round,
             is_test_data=locked_activity.is_test_mode,

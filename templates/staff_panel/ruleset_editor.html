@@ -84,6 +84,7 @@
         <input type="hidden" name="action" value="business_save">
         <input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
         <input type="hidden" name="base_binding" value="{{ business_editor.binding_signature }}">
+        <input type="hidden" name="base_binding_revision" value="{{ binding_revision }}">
         <input type="hidden" name="base_round_configuration" value="{{ business_editor.round_configuration_signature }}">
         <input type="hidden" name="stage_count" id="business-stage-count" value="{{ business_editor.stages|length }}">
         <div class="bg-blue-50 border-b border-blue-200 px-4 py-3">
@@ -368,6 +369,7 @@
     <form method="post" action="{% url 'staff:ruleset_bind' version.pk %}" class="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
         {% csrf_token %}
         <input type="hidden" name="base_binding" value="{{ binding_signature }}">
+        <input type="hidden" name="base_binding_revision" value="{{ binding_revision }}">
         <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">关联本场比赛的数据</div>
         <div class="px-4 py-3 grid sm:grid-cols-2 gap-3">
             <div>

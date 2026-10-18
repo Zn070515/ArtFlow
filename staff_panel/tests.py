@@ -8831,6 +8831,29 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(select_by["kind"], "select")
         self.assertEqual(select_by["options"], ["groups"])
 
+    def test_editor_renders_the_binding_revision_for_both_binding_forms(self):
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertContains(response, 'name="base_binding_revision"')
+        self.assertContains(response, f'value="{self.ruleset.binding_revision}"')
+
+    def test_stale_binding_revision_is_refused_by_the_raw_binding_editor(self):
+        from ruleset.services import _binding_signature
+
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {
+                "live_format_key": "",
+                "base_binding": _binding_signature(self.ruleset),
+                "base_binding_revision": self.ruleset.binding_revision + 1,
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "已被其他编辑修改")
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.binding_revision, 0)
+
     def test_editor_uses_readable_badges_and_touch_targets(self):
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
 

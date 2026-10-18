@@ -328,6 +328,31 @@ class BusinessRulesetSaveTests(TestCase):
             )
         self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
 
+    def test_stale_binding_revision_rejects_the_whole_business_save(self):
+        with self.assertRaisesRegex(ValidationError, "已被其他编辑修改"):
+            self._save(
+                self.version,
+                stages=[_business_stage()],
+                operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
+                base_binding_revision=self.ruleset.binding_revision + 1,
+            )
+        self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
+
+    def test_the_group_stage_revision_only_moves_when_the_grouping_changes(self):
+        from ruleset.services import _snapshot_binding, update_ruleset_binding
+
+        original_group_revision = self.ruleset.group_stage_binding_revision
+        original_binding_revision = self.ruleset.binding_revision
+
+        binding = _snapshot_binding(self.ruleset)
+        binding["stage_key"] = "改个名字"
+        update_ruleset_binding(self.ruleset, binding=binding, operator=self.operator)
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.binding_revision, original_binding_revision + 1)
+        self.assertEqual(self.ruleset.group_stage_binding_revision, original_group_revision)
+
     def test_business_save_requires_all_compare_and_swap_baselines(self):
         with self.assertRaises(ValidationError):
             save_business_ruleset(
