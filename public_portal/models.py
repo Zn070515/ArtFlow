@@ -96,6 +96,7 @@ class PublicPost(models.Model):
         def get_status_display(self) -> str: ...
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["-is_pinned", "sort_order", "-created_at"]
         # `cover_image` is the third exact-path lookup the media gateway makes.
         indexes = [models.Index(fields=["cover_image"], name="publicpost_cover_idx")]
@@ -127,6 +128,7 @@ class PublicPost(models.Model):
             status=ResultRelease.Status.ACTIVE,
             post_version=F("post__version"),
             result_version=F("stage_result__result_version"),
+            candidate_revision=F("stage_result__candidate_revision"),
             ruleset_version_id=F("stage_result__ruleset_version_id"),
             authority_hash=F("stage_result__ruleset_hash"),
             input_fingerprint=F("stage_result__input_fingerprint"),
@@ -281,6 +283,7 @@ class ResultRelease(models.Model):
         def get_status_display(self) -> str: ...
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["-released_at", "-pk"]
         constraints = [
             models.UniqueConstraint(
@@ -401,6 +404,7 @@ class PublicMedia(models.Model):
         return super().delete(*args, **kwargs)
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["sort_order", "pk"]
         # Same reason as `SubmissionFile`: the media gateway finds a public image by exact
         # path, on a column that had no index.

@@ -228,6 +228,7 @@ def active_result_release_for_post(post: PublicPost):
             status=ResultRelease.Status.ACTIVE,
             post_version=post.version,
             result_version=F("stage_result__result_version"),
+            candidate_revision=F("stage_result__candidate_revision"),
             ruleset_version_id=F("stage_result__ruleset_version_id"),
             authority_hash=F("stage_result__ruleset_hash"),
             input_fingerprint=F("stage_result__input_fingerprint"),

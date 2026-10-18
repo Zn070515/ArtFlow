@@ -31,6 +31,7 @@ from entry_access.services import (
     issue_access_grant,
     redeem_access_grant,
 )
+from public_portal.models import PublicPost, ResultRelease
 from ruleset.admin import RulesetVersionAdmin
 from ruleset.live_format import provision_live_2026_ruleset
 from ruleset.models import ContestRuleset, RulesetVersion
@@ -95,6 +96,7 @@ from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    RESULT_RELEASE_STATE,
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
@@ -464,6 +466,28 @@ class AuthorityMutationMatrixTests(TestCase):
                 name="Manual matrix award",
                 is_test_data=True,
             )
+        self.result_post = PublicPost.objects.create(
+            title="Matrix result publication",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.activity,
+            version=1,
+        )
+        with authority_write(RESULT_RELEASE_STATE):
+            self.result_release = ResultRelease.objects.create(
+                post=self.result_post,
+                stage_result=self.stage,
+                post_version=1,
+                result_version=self.stage.result_version,
+                candidate_revision=self.stage.candidate_revision,
+                result_snapshot={},
+                ruleset_version=self.version,
+                authority_hash="a" * 64,
+                input_fingerprint="b" * 64,
+                status=ResultRelease.Status.ACTIVE,
+                released_by=self.admin_user,
+                note="matrix release",
+            )
 
     def _lock_round(self):
         with authority_write(CONTEST_ROUND_STATE):
@@ -509,6 +533,7 @@ class AuthorityMutationMatrixTests(TestCase):
                 "RubricCriterion",
                 "CriterionScore",
                 "StageResult",
+                "ResultRelease",
                 "StageDecision",
                 "StageAwardDecision",
                 "CompositeResult",
@@ -1997,6 +2022,25 @@ def _judge(case):
     _identity_row(case, Judge, case.judge, "activity_id", case.other_activity.pk)
 
 
+def _result_release(case):
+    release = case.result_release
+    release.result_snapshot = {"awards": [{"award": "冠军", "contestant_name": "forged"}]}
+    case._assert_rejects(lambda: release.save())
+    case._assert_rejects(lambda: ResultRelease.objects.filter(pk=release.pk).update(note="forged"))
+    case._assert_rejects(
+        lambda: ResultRelease._base_manager.filter(pk=release.pk).update(note="forged")
+    )
+    case._assert_rejects(lambda: ResultRelease.objects.bulk_update([release], ["note"]))
+    case._assert_rejects(lambda: ResultRelease.objects.bulk_create([release]))
+    case._assert_rejects(
+        lambda: ResultRelease.objects.bulk_create(
+            [release], update_conflicts=True, unique_fields=["post"]
+        )
+    )
+    case._assert_rejects(lambda: ResultRelease.objects.filter(pk=release.pk).delete())
+    case._assert_rejects(release.delete)
+
+
 def _ruleset_version(case):
     case._assert_rejects(
         lambda: RulesetVersion.objects.filter(pk=case.version.pk).update(
@@ -2519,6 +2563,16 @@ MODEL_MATRIX = (
         "stage confirmation",
         "stage",
         _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_result),
+    ),
+    _descriptor(
+        "ResultRelease",
+        ResultRelease,
+        "result release service",
+        "result_release",
+        _mutation(
+            "protected instance/queryset/base-manager/bulk/upsert/delete",
+            _result_release,
+        ),
     ),
     _descriptor(
         "StageDecision",

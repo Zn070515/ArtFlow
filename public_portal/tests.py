@@ -685,6 +685,7 @@ class ResultReleaseModelTests(TestCase):
             stage_result=stage_result,
             post_version=(post or self.post).version,
             result_version=stage_result.result_version,
+            candidate_revision=stage_result.candidate_revision,
             ruleset_version=self.ruleset_version,
             authority_hash=self.ruleset_version.authority_hash,
             input_fingerprint=stage_result.input_fingerprint,
@@ -764,6 +765,45 @@ class ResultReleaseModelTests(TestCase):
         release = self.make_release(post=draft)
         with self.assertRaises(ValidationError):
             release.full_clean()
+
+
+class ResultReleaseRehearsalCommandTests(TestCase):
+    def test_prepare_then_cleanup_removes_the_fixture_and_an_active_release(self):
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+        from django.test import override_settings
+        from ruleset.models import RulesetVersion
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture_path = Path(tmp) / "fixture.json"
+            with override_settings(APP_ENV="development", MEDIA_ROOT=Path(tmp) / "media"):
+                call_command("prepare_result_release_rehearsal", output_file=str(fixture_path))
+                fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+                post = PublicPost._base_manager.get(pk=fixture["post_id"])
+                stage = StageResult._base_manager.get(pk=fixture["stage_id"])
+                version = RulesetVersion._base_manager.get(pk=fixture["ruleset_version_id"])
+                operator = User._base_manager.get(pk=fixture["operator_id"])
+                with authority_write(RESULT_RELEASE_STATE):
+                    ResultRelease.objects.create(
+                        post=post,
+                        stage_result=stage,
+                        post_version=post.version,
+                        result_version=stage.result_version,
+                        candidate_revision=stage.candidate_revision,
+                        ruleset_version=version,
+                        authority_hash=stage.ruleset_hash,
+                        input_fingerprint=stage.input_fingerprint,
+                        status=ResultRelease.Status.ACTIVE,
+                        released_by=operator,
+                        note="rehearsal release",
+                    )
+                call_command("cleanup_result_release_rehearsal", fixture=str(fixture_path))
+
+            self.assertFalse(PublicPost._base_manager.filter(pk=post.pk).exists())
+            self.assertFalse(ResultRelease._base_manager.filter(post_id=post.pk).exists())
+            self.assertFalse(StageResult._base_manager.filter(pk=stage.pk).exists())
 
 
 class ResultReleaseVisibilityTests(ResultReleaseModelTests):
@@ -850,13 +890,47 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         self.confirm_stage_result()
         release = self.make_release()
         self._save(release)
-        # Simulate the drift directly: the model guard refuses this through the public
-        # save path, which is exactly the invariant under test.
-        PublicPost._base_manager.filter(pk=self.post.pk).update(version=self.post.version + 1)
+        # Simulate the drift with raw SQL: the model guard refuses every ORM write,
+        # including _base_manager, which is exactly the invariant under test.
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE public_portal_publicpost SET version = %s WHERE id = %s",
+                [self.post.version + 1, self.post.pk],
+            )
 
         self.client.raise_request_exception = False
         response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
         self.assertEqual(response.status_code, 404)
+
+    def test_release_is_hidden_when_the_stage_candidate_revision_moves(self):
+        self.confirm_stage_result()
+        release = self.make_release()
+        release.candidate_revision = self.stage_result.candidate_revision - 1
+        self._save(release)
+
+        self.client.raise_request_exception = False
+        response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_activity_entry_and_live_ssr_use_the_system_result_title(self):
+        self.confirm_stage_result()
+        self.post.title = "李四夺冠"
+        self.post.subtitle = "恭喜李四获得冠军"
+        self.post.save(update_fields=["title", "subtitle"])
+        self._save(self.make_release())
+        system_title = f"{self.activity.title} · 正式赛果"
+        public_code = self.activity.public_code
+
+        entry = self.client.get(reverse("public_portal:activity_entry", args=[public_code]))
+        live = self.client.get(reverse("public_portal:activity_live", args=[public_code]))
+
+        for response in (entry, live):
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, system_title)
+            self.assertNotContains(response, "李四夺冠")
+            self.assertNotContains(response, "恭喜李四")
 
     def test_release_is_hidden_when_a_newer_stage_result_exists(self):
         self.confirm_stage_result()

@@ -17,7 +17,12 @@ from public_portal.models import PublicMedia, PublicPost, ResultRelease
 from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import StageResult
 
-from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    RESULT_RELEASE_STATE,
+    RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
+    authority_write,
+)
 from common.models import AuditLog
 
 
@@ -135,7 +140,8 @@ class Command(BaseCommand):
             if operator is not None:
                 audit_scope |= Q(operator_id=operator_id)
             AuditLog.objects.filter(audit_scope).delete()
-            ResultRelease.objects.filter(post_id=post_id).delete()
+            with authority_write(RESULT_RELEASE_STATE):
+                ResultRelease.objects.filter(post_id=post_id).delete()
             PublicMedia.objects.filter(post_id=post_id).delete()
             PublicPost.objects.filter(pk=post_id).delete()
             with authority_write(STAGE_RESULT_CONFIRM):

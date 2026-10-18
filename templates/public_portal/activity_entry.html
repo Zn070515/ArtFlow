@@ -20,7 +20,7 @@
     {% if result_post %}
     <div class="mt-8 rounded border border-green-200 bg-green-50 p-4">
         <p class="text-sm font-medium text-green-900">结果已公示</p>
-        <a class="mt-1 inline-block text-sm text-green-800 underline" href="{% url 'public_portal:post_detail' result_post.pk %}">{{ result_post.title }}</a>
+        <a class="mt-1 inline-block text-sm text-green-800 underline" href="{% url 'public_portal:post_detail' result_post.pk %}">{{ result_post.public_title }}</a>
     </div>
     {% endif %}
 </main>
