@@ -78,6 +78,7 @@ from .scoring import (
 from .services import (
     _stage_consumed_facts,
     ensure_round_executable_under_current_authority,
+    scoring_panel_snapshot,
     validate_score,
 )
 
@@ -492,6 +493,13 @@ def prepare_judge_panel(
     existing = _current_panel_snapshot(contest_round)
     if existing is not None:
         return existing
+    if RoundPanelSnapshot._base_manager.filter(round=contest_round).exists():
+        # A superseded snapshot means this round was already locked once. Re-creating it
+        # would both collide with judge_panel_snapshot_round_version and rewrite the panel
+        # provenance of a finished round; corrections use the dedicated score seam.
+        raise ValidationError(
+            "本轮已有评委组历史快照，不能重新建立；如为结果纠错，请使用评分纠错入口。"
+        )
 
     competing = (
         RoundPanelSnapshot.objects.select_for_update()
@@ -1017,22 +1025,9 @@ def advance_performance_group(round_id: int, group_id: int, *, operator) -> Perf
 
 
 def _performance_score_completeness(contest_round: ContestRound, performance: Performance):
-    snapshot = _current_panel_snapshot(contest_round)
-    if (
-        snapshot is None
-        and contest_round.status == ContestRound.Status.SCORING
-        and not contest_round.is_locked
-    ):
-        # A stage-result unlock reopens the round after lock_round superseded its panel.
-        # The latest snapshot still names the same panel roster, so a corrected score may
-        # be re-locked against it; judges still cannot submit (that path requires ACTIVE).
-        snapshot = (
-            RoundPanelSnapshot._base_manager.filter(
-                round=contest_round, activity_id=contest_round.activity_id
-            )
-            .order_by("-version", "-pk")
-            .first()
-        )
+    # Same roster authority as rapid entry and recalculation: during the correction
+    # window that is the latest (now superseded) panel, not the mutable RoundJudge list.
+    snapshot = scoring_panel_snapshot(contest_round)
     if snapshot is None:
         raise PermissionDenied("评委组尚未准备，不能锁定表演评分。")
     judge_ids = list(snapshot.members.filter(is_active=True).values_list("judge_id", flat=True))

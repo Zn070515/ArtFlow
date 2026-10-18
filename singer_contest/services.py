@@ -195,6 +195,36 @@ def _active_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     return Judge.objects.filter(round_assignments__round=contest_round).order_by("pk")
 
 
+def scoring_panel_snapshot(contest_round: ContestRound):
+    """The panel roster that owns this round's scoring facts.
+
+    Normally that is the current ACTIVE/HOLD snapshot. After a stage-result unlock the
+    round is SCORING again but its panel was superseded at lock time; the latest snapshot
+    still names the judges who actually scored the round, so correction reads the same
+    roster everywhere instead of falling back to the mutable ``RoundJudge`` list.
+    """
+
+    snapshot = (
+        RoundPanelSnapshot.objects.filter(round=contest_round)
+        .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
+        .order_by("-version")
+        .first()
+    )
+    if (
+        snapshot is None
+        and contest_round.status == ContestRound.Status.SCORING
+        and not contest_round.is_locked
+    ):
+        snapshot = (
+            RoundPanelSnapshot._base_manager.filter(
+                round=contest_round, activity_id=contest_round.activity_id
+            )
+            .order_by("-version", "-pk")
+            .first()
+        )
+    return snapshot
+
+
 def authoritative_panel_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     """Return the one judge set allowed to participate in this round's scoring matrix.
 
@@ -202,12 +232,7 @@ def authoritative_panel_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     profile is later deactivated. Legacy rounds without a panel snapshot retain the
     prepared ``RoundJudge`` fallback for compatibility.
     """
-    snapshot = (
-        RoundPanelSnapshot.objects.filter(round=contest_round)
-        .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
-        .order_by("-version")
-        .first()
-    )
+    snapshot = scoring_panel_snapshot(contest_round)
     if snapshot is None:
         return _active_judges(contest_round)
     return (
@@ -4104,11 +4129,12 @@ def _release_stage_consumed_facts(stage: StageResult, *, operator) -> None:
 
 
 def stage_correction_performances(stage: StageResult) -> list[dict]:
-    """Locked performances whose scores an unlocked stage may reopen for correction.
+    """Performances of the rounds an unlocked stage released for correction.
 
     Only rounds the unlock actually released (SCORING and unlocked) appear here; a round
-    kept locked as challenge history is intentionally absent. The caller still has to go
-    through the admin-only reopen service for each performance.
+    kept locked as challenge history is intentionally absent. Rows keep their current gate
+    state so the page can show "reopen", "go correct", and "relock" as the operator moves
+    through the chain instead of making the row disappear after it is reopened.
     """
 
     from .models import PerformanceScoreState
@@ -4124,10 +4150,7 @@ def stage_correction_performances(stage: StageResult) -> list[dict]:
         if contest_round.status != ContestRound.Status.SCORING or contest_round.is_locked:
             continue
         states = (
-            PerformanceScoreState.objects.filter(
-                performance__round=contest_round,
-                state=PerformanceScoreState.State.LOCKED,
-            )
+            PerformanceScoreState.objects.filter(performance__round=contest_round)
             .select_related("performance__singer")
             .order_by("performance__sequence", "performance__pk")
         )
@@ -4138,6 +4161,7 @@ def stage_correction_performances(stage: StageResult) -> list[dict]:
                     "performance": score_state.performance,
                     "singer": score_state.performance.singer,
                     "score_state": score_state,
+                    "state": score_state.state,
                 }
             )
     return rows

@@ -285,6 +285,16 @@ urlpatterns = [
         name="stage_result_podium_tie",
     ),
     path(
+        "stage-results/<int:pk>/correction/relock/",
+        views.stage_result_relock_performance,
+        name="stage_result_relock_performance",
+    ),
+    path(
+        "stage-results/<int:pk>/correction/lock-round/",
+        views.stage_result_lock_round,
+        name="stage_result_lock_round",
+    ),
+    path(
         "stage-results/<int:pk>/unlock/",
         views.stage_result_unlock,
         name="stage_result_unlock",
