@@ -173,6 +173,11 @@ urlpatterns = [
         name="judge_performance_score_lock",
     ),
     path(
+        "judges/round/<int:pk>/performances/score-reopen/",
+        views.judge_performance_score_reopen,
+        name="judge_performance_score_reopen",
+    ),
+    path(
         "judges/round/<int:pk>/performances/hold/",
         views.judge_performance_hold,
         name="judge_performance_hold",

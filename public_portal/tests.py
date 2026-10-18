@@ -1016,6 +1016,57 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
         )
         self.assertEqual(closure.call_count, 2)
 
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_release_freezes_the_candidate_it_published(self, closure):
+        """A later correction may reuse the StageResult row; the release must not drift."""
+
+        self.confirm_stage_result()
+        published_revision = self.stage_result.candidate_revision
+
+        from .services import release_result_post
+
+        release = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="首次发布",
+        )
+
+        self.assertEqual(release.candidate_revision, published_revision)
+        self.assertEqual(release.result_snapshot["candidate_revision"], published_revision)
+        self.assertEqual(release.result_snapshot["stage_key"], self.stage_result.stage_key)
+        self.assertEqual(
+            release.result_snapshot["result_version"], self.stage_result.result_version
+        )
+        payload = json.loads(
+            AuditLog.objects.get(
+                action_type=AuditLog.ActionType.RELEASE_RESULT,
+                target=f"PublicPost:{self.post.pk}",
+            ).new_value
+        )
+        self.assertEqual(payload["candidate_revision"], published_revision)
+
+        # Simulate the post-release correction that re-materializes the same row.
+        with authority_write(STAGE_RESULT_CONFIRM):
+            self.stage_result.candidate_revision = published_revision + 1
+            self.stage_result.status = StageResult.Status.READY_TO_CONFIRM
+            self.stage_result.confirmed_by = None
+            self.stage_result.confirmed_at = None
+            self.stage_result.save(
+                update_fields=[
+                    "candidate_revision",
+                    "status",
+                    "confirmed_by",
+                    "confirmed_at",
+                ]
+            )
+
+        release.refresh_from_db()
+        self.assertEqual(release.result_snapshot["candidate_revision"], published_revision)
+
     def test_release_rejects_missing_note_and_non_admin(self):
         from .services import release_result_post
 
