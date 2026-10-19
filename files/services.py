@@ -1255,16 +1255,22 @@ def _reconcile_owner_checks(owner, requirements):
     """
     owner_filter = _owner_filter(owner)
     file_queryset = SubmissionFile.objects.filter(**owner_filter)
-    current = {c.item_name: c for c in MaterialCheck.objects.filter(**owner_filter)}
+    # ``question_key`` belongs to the questionnaire's own checks. The legacy requirement
+    # writer owns only the unkeyed rows; treating a questionnaire check as its own would
+    # delete it on the next requirement save.
+    current = {
+        c.item_name: c
+        for c in MaterialCheck.objects.filter(**owner_filter, question_key="")
+    }
     present_names = set()
     checks = []
     for index, (item_name, file_purpose) in enumerate(requirements or []):
         present_names.add(item_name)
         existing = current.get(item_name)
         purpose = file_purpose or ""
-        has_file = (
-            bool(purpose) and file_queryset.filter(file_purpose=purpose, is_current=True).exists()
-        )
+        has_file = bool(purpose) and file_queryset.filter(
+            file_purpose=purpose, is_current=True, question_key=""
+        ).exists()
         defaults: dict = {"sort_order": index, "file_purpose": purpose}
         if existing is not None and existing.file_purpose != purpose:
             # The requirement's material type changed. A staff approval of the old type
@@ -1289,6 +1295,7 @@ def _reconcile_owner_checks(owner, requirements):
             defaults["status"] = existing.status if existing else MaterialCheck.Status.UPLOADED
         check, _ = MaterialCheck.objects.update_or_create(
             item_name=item_name,
+            question_key="",
             defaults=defaults,
             **owner_filter,
         )

@@ -555,6 +555,40 @@ class GroupEitherBranchFileQuestionTests(_GroupMaterialBase):
         self.assertFalse(SubmissionFile.objects.filter(group=group).exists())
 
 
+class GroupMaterialCheckIdentityTests(_GroupMaterialBase):
+    def test_legacy_reconcile_does_not_delete_questionnaire_checks(self):
+        version = self.frozen_group_version()
+        _stage, group, singers = self.confirmed_group(version)
+        self.login_member(singers[0])
+        self.client.get(reverse("questionnaire:group_form", args=[group.pk]))
+        self.assertEqual(group.material_checks.exclude(question_key="").count(), 2)
+
+        from files.services import reconcile_group_material_checks
+
+        reconcile_group_material_checks(group)
+
+        self.assertEqual(group.material_checks.exclude(question_key="").count(), 2)
+        self.assertTrue(group.material_checks.filter(question_key="").exists())
+
+    def test_a_legacy_and_a_question_check_may_share_an_item_name(self):
+        version = self.frozen_group_version()
+        _stage, group, _singers = self.confirmed_group(version)
+
+        from files.models import MaterialCheck
+
+        MaterialCheck.objects.create(
+            group=group, item_name="合唱伴奏", question_key="", required=True
+        )
+        MaterialCheck.objects.create(
+            group=group,
+            item_name="合唱伴奏",
+            question_key="group.same_name",
+            required=True,
+        )
+
+        self.assertEqual(group.material_checks.filter(item_name="合唱伴奏").count(), 2)
+
+
 class ParticipantGroupLinkTests(_GroupMaterialBase):
     def test_first_open_creates_the_group_material_checks(self):
         version = self.frozen_group_version()

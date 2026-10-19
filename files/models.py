@@ -332,8 +332,13 @@ class MaterialCheck(models.Model):
             ),
             models.UniqueConstraint(
                 fields=["group", "item_name"],
-                condition=Q(group__isnull=False),
+                condition=Q(group__isnull=False, question_key=""),
                 name="materialcheck_unique_group_item",
+            ),
+            models.UniqueConstraint(
+                fields=["group", "question_key"],
+                condition=Q(group__isnull=False) & ~Q(question_key=""),
+                name="materialcheck_unique_group_question",
             ),
         ]
 
