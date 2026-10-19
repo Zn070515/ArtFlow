@@ -16,8 +16,10 @@ import copy
 import json
 
 from accounts.models import User
+from common.models import AuditLog
 from core.models import Activity
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from ruleset.live_format import LIVE_CHALLENGE_FORMAT_KEY
 from ruleset.models import ContestRuleset, RulesetVersion
@@ -152,12 +154,32 @@ class Command(BaseCommand):
         sections: dict[str, object] = {"questionnaire": updated_participant}
         if add_group:
             sections["group_questionnaire"] = live_2026_group_questionnaire()
-        update_ruleset_definition_sections(
-            version,
-            sections=sections,
-            operator=operator,
-            base_content_hash=version.content_hash,
-        )
+        old_hash = version.content_hash
+        with transaction.atomic():
+            updated = update_ruleset_definition_sections(
+                version,
+                sections=sections,
+                operator=operator,
+                base_content_hash=old_hash,
+            )
+            AuditLog.objects.create(
+                operator=operator,
+                action_type=AuditLog.ActionType.OTHER,
+                target=f"RulesetVersion:{updated.pk}",
+                old_value=json.dumps(
+                    {"content_hash": old_hash, "group_questionnaire": not add_group},
+                    ensure_ascii=False,
+                ),
+                new_value=json.dumps(
+                    {
+                        "content_hash": updated.content_hash,
+                        "changed_questions": changed_questions,
+                        "group_questionnaire": True,
+                    },
+                    ensure_ascii=False,
+                ),
+                note="upgrade_live_2026_questionnaires",
+            )
         self.stdout.write(
             self.style.SUCCESS(
                 f"upgraded activity {activity.pk} v{version.version} "

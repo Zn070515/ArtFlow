@@ -5,6 +5,7 @@ from io import StringIO
 
 from accounts.models import User
 from common.authority import RULESET_FREEZE, authority_write
+from common.models import AuditLog
 from common.test_characterization import _CharacterizationBase
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -110,6 +111,12 @@ class UpgradeLive2026QuestionnairesTests(_CharacterizationBase):
         self.assertEqual(
             [q["key"] for q in root["group_questionnaire"]["pages"][0]["sections"][0]["questions"]],
             ["group.song", "group.media"],
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                target=f"RulesetVersion:{self.version.pk}",
+                note="upgrade_live_2026_questionnaires",
+            ).exists()
         )
 
     def test_second_run_is_idempotent(self):
