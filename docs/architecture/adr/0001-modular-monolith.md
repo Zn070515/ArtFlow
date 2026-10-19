@@ -10,14 +10,19 @@ v1 是一个 Django 单体，领域边界靠 app 目录和 service 约定维持�
 
 ## 决策
 
-v2 采用**模块化单体**：
+v2 采用**模块化单体**，模块边界由 **Capability** 定义（GOAL §6/§7/§23）：
 
-- 一个可部署的 API 进程，内部由显式模块（activity、definition、registration、
-  evaluation、voting、ticketing、results、archive、media、platform）组成；
-- 模块之间只通过公开 contract（命令、查询、领域事件）交互，不共享表；
+- 一个可部署的 API 进程，内部由 Engine（Activity、Definition、Authority、
+  Execution Session、Projection 等共享机制）和 Capability 组成；初始
+  capabilities 包括 Registration、Questionnaire、Materials、Competition、
+  Evaluation、Scheduling、Voting、Ticketing、Publishing、Results、Archive 等；
+- 四个产品面（Studio/Ops/Live/Portal）共享同一 Activity 与 Capability 模型，
+  不各自拥有事实；
+- capability 之间只通过公开 contract（命令、查询、不可变事件、稳定 ID、
+  显式 binding）交互，禁止直接读写其他 capability 的表；
 - 部署时仍可拆出 web/media/realtime worker 池（同一代码、不同进程角色），
   但不是独立服务；
-- 只有在出现**独立的伸缩或故障隔离需求**时，才把某个模块拆成服务。
+- 只有在出现**独立的伸缩或故障隔离需求**时，才把某个 capability 拆成服务。
 
 ## 后果
 

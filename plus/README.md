@@ -5,26 +5,33 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## First vertical slice
 
-`packages/domain` implements:
+`packages/domain` implements the GOAL's kernel shape:
 
 ```text
-Activity → Definition Draft → Compiler → Definition Release → Execution Run
+Activity (thin: draft → active → closed → archived)
+  → ActivityDefinitionPackage draft
+      manifest + per-capability definitions + bindings
+  → each capability compiler + the Activity compiler
+  → immutable Definition Release
+  → ExecutionSession (scope + mode; several scopes may run at once)
 ```
 
 It is deliberately small and pure:
 
 - commands are functions with explicit inputs;
-- every artifact is deep-frozen where it represents authority;
+- every authority artifact is deep-frozen;
 - OCC is a monotonic revision carried by the command, and a stale revision is
   refused with `STALE_REVISION`;
 - a draft is the only editable definition surface;
-- release requires a compiled plan whose content hash matches the draft;
-- an execution run binds a released definition, never a draft;
-- one activity has at most one running execution.
+- release requires a compiled package whose content hash matches the draft and
+  whose capabilities are enabled on the activity;
+- an execution session binds a released definition, never a draft;
+- multiple scopes may run at once; the scope conflict policy is supplied by the
+  capability composition, and FORMAL cannot overlap TEST/REHEARSAL in a
+  conflicting scope.
 
-The rules come from `docs/invariants/` (LIFE-01/02, CONC-01, AUTH-01) and the
-first golden fixture (`tests/golden/result-release-lifecycle.json`) will reuse
-the same vocabulary when the result slice arrives.
+The rules come from the root `GOAL.md`, `docs/invariants/` (LIFE-01/02,
+CONC-01, AUTH-01) and the golden fixtures in `tests/golden/`.
 
 ## Run
 

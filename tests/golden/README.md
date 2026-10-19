@@ -12,6 +12,10 @@ fixture 不绑定 Django、TypeScript 或数据库；v1 的回归测试和 Plus 
 test 都消费同一份输入/期望。这样“旧实现”和“新实现”验证的是同一条规则，而
 不是两套各自为政的测试。
 
+这些 fixture 来自 v1 的行为证据，不是 v2 的架构规范。v1 的 Activity 阶段/
+单一流程在 v2 中可能被表达为多个 capability 生命周期与 execution scopes；
+Plus 适配器负责把同一业务事实映射到新的命令词汇，而不能改变期望结果。
+
 ## 第一批 fixture
 
 | 文件 | 覆盖不变量 | 场景 |

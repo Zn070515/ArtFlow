@@ -1,5 +1,8 @@
 # ArtFlow-Plus（v2）开发主线
 
+产品与架构身份的权威是根目录 [`GOAL.md`](../../GOAL.md)；本目录与
+`docs/architecture/`、`docs/domains/` 都是它的执行材料。
+
 本分支从 `v1.0.0` 的发布提交 `80bdc95843678be99fe24c877b0b6164f6147d83` 切出。
 `v1.0.0` 的应用基线是 `a98dcc80525ab5de0c539b73d93382ebc5b2bfa4`；发布提交只多了
 `.github/workflows/publish.yml`。
@@ -21,7 +24,8 @@
 
 | 内容 | 位置 |
 | --- | --- |
-| 产品目标与范围 | [goal.md](goal.md) |
+| 产品与架构 GOAL（权威） | [GOAL.md](../../GOAL.md) |
+| 目标执行摘要 | [goal.md](goal.md) |
 | 里程碑与出口条件 | [roadmap.md](roadmap.md) |
 | 目标架构与模块边界 | [architecture/target](../architecture/target/README.md) |
 | 架构决策 | [architecture/adr](../architecture/adr/README.md) |
@@ -64,10 +68,15 @@ tests/golden/      # 从 v1 提炼的可重复业务样例
 第一条新实现从一个很小的 vertical slice 开始：
 
 ```text
-Activity → Definition Draft → Compiler → Definition Release → Execution Run
+Activity（thin）
+  → Definition Package Draft（manifest + capability definitions + bindings）
+  → 每个 capability 的 compiler + Activity 协调
+  → 不可变 Definition Release
+  → scoped Execution Sessions（scope + mode，可并行/声明冲突）
 ```
 
-完整跑通之后再逐步迁移 Registration、Evaluation、Voting、Result。
+完整跑通之后再逐步迁移 Registration、Competition/Evaluation、Voting/Ticketing、
+Publishing/Results/Archive，并用三个结构不同的活动验证抽象。
 
 ## 分支纪律
 

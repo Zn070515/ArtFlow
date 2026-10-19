@@ -1,4 +1,4 @@
-# Results / Release / Correction 领域
+# Results / Publishing / Correction（capability）
 
 ## 目的
 
@@ -14,6 +14,17 @@
   snapshot（身份、标题、decisions、awards）。
 - `PublicPost`：编辑性容器；正式结果发布后不再提供正文/封面/媒体作为事实。
 - `CorrectionSeam`：解锁 → 修改 → 重新锁定 → 重算 → 重新核定的窄路径。
+
+## 生命周期
+
+Publishing capability：
+
+```text
+PRIVATE → READY → RELEASED → REVOKED
+```
+
+Result 候选/核定是 Evaluation 的事实；Publishing 只负责把已核定的 release
+snapshot 公开。两者不能互相替代：内部 CONFIRMED 不等于公众可见。
 
 ## 流程
 

@@ -1,4 +1,4 @@
-# Registration / Questionnaire / Materials 领域
+# Registration / Questionnaire / Materials（capability）
 
 ## 目的
 
@@ -18,6 +18,14 @@
 
 ## 生命周期
 
+Capability 级：
+
+```text
+DRAFT → OPEN → REVIEW → FINAL
+```
+
+Registration 内部状态：
+
 ```text
 draft ─submit─▶ submitted ─review─▶ approved | need_supplement | rejected
                                      │
@@ -25,8 +33,10 @@ draft ─submit─▶ submitted ─review─▶ approved | need_supplement | rej
 ```
 
 - 报名审核是**人员准入**；材料审核是**交付物准入**，两者不能互相替代。
-- 名单只有在“报名截止/审核完成/彩排或更后”才是 FINAL；在此之前是 UNKNOWN，
-  不是 0（LIFE-07）。
+- 名单只有在 capability 到达 FINAL（或活动进入执行阶段且名单已确定）时才是
+  FINAL；在此之前是 UNKNOWN，不是 0（LIFE-07）。
+- 这些状态不强迫其他 capability 与报名同阶段；Scheduling/Competition 可以有
+  自己的生命周期。
 
 ## 不变量
 

@@ -1,4 +1,4 @@
-# Evaluation / Scoring / Podium 领域
+# Competition / Evaluation / Scoring / Podium（capability）
 
 ## 目的
 
@@ -15,6 +15,19 @@
 - `Rubric`/`Criterion`：分项评分标准；发布后不可静默改。
 - `Ranking`/`Advancement`：由 resolver 从事实计算；tie 必须有显式决策。
 - `Podium`：最终名次/奖项候选；来源必须是 CONFIRMED 的 StageResult。
+
+## 生命周期
+
+Capability 级（Competition）：
+
+```text
+PREPARING → READY → RUNNING → CLOSED
+```
+
+- Evaluation 可以在一个 Competition 内有多个 execution sessions/rounds；每个
+  session 绑定自己的 scope 与 mode。
+- Activity 的粗生命周期不替代这里的 RUNNING/CLOSED；比赛可以在 Activity
+  ACTIVE 期间多次准备、运行、关闭。
 
 ## 流程
 

@@ -1,4 +1,4 @@
-# Tickets / Capabilities / Access 领域
+# Ticketing / Capabilities / Access（capability）
 
 ## 目的
 
@@ -12,6 +12,23 @@
 - `JudgeEntryCapability`：活动级的评委入口凭证；带版本与 HMAC。
 - `JudgeSeatGrant` / `AccessGrant`：一次性领取席位/资源的授权。
 - `EphemeralSession`：短时、可撤销的现场会话。
+
+## 生命周期
+
+Capability 级（入口/票据发放）：
+
+```text
+DRAFT → OPEN → CLOSED
+```
+
+单张票据/凭证：
+
+```text
+ISSUED → REDEEMED → EXPIRED / REVOKED
+```
+
+- 关闭入口只拒绝新 claim，不驱逐已领取的会话（TIC-02）。
+- 重新签发立即让旧凭证失效，但不影响已建立会话的继续使用。
 
 ## 流程
 

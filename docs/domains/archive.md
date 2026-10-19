@@ -1,4 +1,4 @@
-# Archive / Retention / Export 领域
+# Archive / Retention / Export（capability）
 
 ## 目的
 
@@ -11,6 +11,17 @@
 - `ArchiveArtifact`：包内文件（workbook、PDF、CSV、媒体清单）。
 - `RetentionPolicy`：保留期限与清理动作（PII、上传、审计、票据）。
 - `ExportTask` / `GeneratedDocument`：临时导出与生成文档；有各自权限。
+
+## 生命周期
+
+Capability 级：
+
+```text
+DRAFT → PACKAGING → SEALED
+```
+
+- PACKAGING 可以重试/继续；SEALED 后包不可变。
+- Activity 的 ARCHIVED 是粗生命周期，不替代归档包的打包状态。
 
 ## 规则
 

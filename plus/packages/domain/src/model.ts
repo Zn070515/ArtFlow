@@ -1,15 +1,20 @@
-/** The first ArtFlow-Plus vertical slice: activity → definition → execution. */
+/** The first ArtFlow-Plus vertical slice: thin activity, definition package, execution session. */
 
-export type ActivityStatus = "draft" | "active" | "archived";
+export type ActivityStatus = "draft" | "active" | "closed" | "archived";
 
+/**
+ * Activity is deliberately thin: identity, lifecycle, enabled capabilities and
+ * the active definition release. Capability state lives in its own capability.
+ */
 export interface Activity {
   readonly id: string;
   readonly title: string;
   readonly status: ActivityStatus;
   /** Monotonic revision for activity-level commands (CONC-01). */
   readonly revision: number;
-  /** Number of definitions released for this activity. */
-  readonly definitionVersion: number;
+  readonly enabledCapabilities: readonly string[];
+  /** Number of activity definition releases. */
+  readonly activeDefinitionVersion: number;
 }
 
 export type NodeType = "roster" | "round" | "aggregate" | "output";
@@ -25,10 +30,31 @@ export interface DefinitionEdge {
   readonly to: string;
 }
 
-export interface DefinitionDocument {
+/** A capability owns its own definition language/compiler. */
+export interface CapabilityDefinition {
   readonly schemaVersion: 1;
   readonly nodes: readonly DefinitionNode[];
   readonly edges: readonly DefinitionEdge[];
+}
+
+export interface CapabilityBinding {
+  readonly from: string;
+  readonly to: string;
+  readonly kind: string;
+}
+
+/**
+ * The Activity Definition Package coordinates capability definitions and the
+ * bindings between them. It is not one universal workflow graph.
+ */
+export interface ActivityDefinitionPackage {
+  readonly schemaVersion: 1;
+  readonly manifest: {
+    readonly key: string;
+    readonly title: string;
+  };
+  readonly capabilities: Readonly<Record<string, CapabilityDefinition>>;
+  readonly bindings?: readonly CapabilityBinding[];
 }
 
 /** A draft is the only editable definition surface. */
@@ -36,13 +62,12 @@ export interface DefinitionDraft {
   readonly activityId: string;
   readonly revision: number;
   readonly status: "draft";
-  readonly document: DefinitionDocument;
+  readonly package: ActivityDefinitionPackage;
 }
 
-export type DefinitionVersion = DefinitionDraft | ReleasedDefinition;
-
-export interface CompiledPlan {
+export interface CompiledCapabilityPlan {
   readonly ok: true;
+  readonly capabilityKey: string;
   readonly order: readonly string[];
   readonly contentHash: string;
   readonly nodes: readonly DefinitionNode[];
@@ -60,28 +85,46 @@ export interface CompileFailure {
   readonly issues: readonly CompileIssue[];
 }
 
-export type CompileResult = CompiledPlan | CompileFailure;
+export type CapabilityCompileResult = CompiledCapabilityPlan | CompileFailure;
 
-/** A released definition is immutable; corrections release a new version. */
-export interface ReleasedDefinition {
+export interface CompiledActivityDefinition {
+  readonly ok: true;
+  readonly contentHash: string;
+  readonly capabilities: Readonly<Record<string, CompiledCapabilityPlan>>;
+}
+
+export type PackageCompileResult = CompiledActivityDefinition | CompileFailure;
+
+/** A released definition package is immutable; corrections release a new version. */
+export interface ReleasedActivityDefinition {
   readonly activityId: string;
   readonly version: number;
   readonly status: "released";
   readonly contentHash: string;
-  readonly plan: CompiledPlan;
+  readonly capabilities: Readonly<Record<string, CompiledCapabilityPlan>>;
   readonly releasedAt: string;
 }
 
-export type ExecutionRunStatus = "running" | "closed";
+export type DefinitionVersion = DefinitionDraft | ReleasedActivityDefinition;
 
-export interface ExecutionRun {
+export type ExecutionMode = "test" | "rehearsal" | "formal";
+
+export interface ExecutionSession {
   readonly id: string;
   readonly activityId: string;
   readonly definitionVersion: number;
   readonly contentHash: string;
-  readonly status: ExecutionRunStatus;
+  readonly scope: string;
+  readonly mode: ExecutionMode;
+  readonly status: "running" | "closed";
   readonly revision: number;
 }
+
+/**
+ * Which execution scopes cannot run at the same time. The plan is supplied by
+ * the capability composition; the kernel does not hard-code scope names.
+ */
+export type ScopeConflictPolicy = Readonly<Record<string, readonly string[]>>;
 
 export function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {

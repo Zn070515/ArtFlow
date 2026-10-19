@@ -1,33 +1,53 @@
-import { definitionHash } from "./compiler.js";
+import { activityDefinitionPackageHash } from "./compiler.js";
 import { fail } from "./errors.js";
 import type {
   Activity,
-  CompiledPlan,
-  DefinitionDocument,
+  ActivityDefinitionPackage,
+  CompiledActivityDefinition,
   DefinitionDraft,
   DefinitionVersion,
-  ExecutionRun,
-  ReleasedDefinition,
+  ExecutionMode,
+  ExecutionSession,
+  ReleasedActivityDefinition,
+  ScopeConflictPolicy,
 } from "./model.js";
 import { deepFreeze } from "./model.js";
 
-function cloneDocument(document: DefinitionDocument): DefinitionDocument {
+function clonePackage(pkg: ActivityDefinitionPackage): ActivityDefinitionPackage {
+  const capabilities: Record<string, ActivityDefinitionPackage["capabilities"][string]> = {};
+  for (const [key, definition] of Object.entries(pkg.capabilities)) {
+    capabilities[key] = {
+      schemaVersion: definition.schemaVersion,
+      nodes: definition.nodes.map((node) => ({ ...node })),
+      edges: definition.edges.map((edge) => ({ ...edge })),
+    };
+  }
   return {
-    schemaVersion: document.schemaVersion,
-    nodes: document.nodes.map((node) => ({ ...node })),
-    edges: document.edges.map((edge) => ({ ...edge })),
+    schemaVersion: pkg.schemaVersion,
+    manifest: { ...pkg.manifest },
+    capabilities,
+    bindings: (pkg.bindings ?? []).map((binding) => ({ ...binding })),
   };
 }
 
-export function createActivity(input: { id: string; title: string }): Activity {
+export function createActivity(input: {
+  id: string;
+  title: string;
+  capabilities?: readonly string[];
+}): Activity {
   if (!input.id.trim()) fail("INVALID_INPUT", "Activity id cannot be empty.");
   if (!input.title.trim()) fail("INVALID_INPUT", "Activity title cannot be empty.");
+  const capabilities = [...new Set(input.capabilities ?? [])];
+  if (capabilities.some((key) => !key.trim())) {
+    fail("INVALID_INPUT", "Capability keys cannot be empty.");
+  }
   return deepFreeze({
     id: input.id,
     title: input.title,
     status: "draft" as const,
     revision: 0,
-    definitionVersion: 0,
+    enabledCapabilities: capabilities,
+    activeDefinitionVersion: 0,
   });
 }
 
@@ -41,22 +61,56 @@ export function activateActivity(activity: Activity, expectedRevision: number): 
   return deepFreeze({ ...activity, status: "active" as const, revision: activity.revision + 1 });
 }
 
-export function createDefinitionDraft(activity: Activity): DefinitionDraft {
+export function closeActivity(
+  activity: Activity,
+  expectedRevision: number,
+  sessions: readonly ExecutionSession[],
+): Activity {
+  if (activity.revision !== expectedRevision) {
+    fail("STALE_REVISION", "The activity changed since it was read.");
+  }
   if (activity.status !== "active") {
-    fail("ACTIVITY_NOT_ACTIVE", "A definition can only be drafted for an active activity.");
+    fail("INVALID_TRANSITION", "Only an active activity can be closed.");
+  }
+  if (sessions.some((session) => session.status === "running")) {
+    fail(
+      "ACTIVITY_HAS_RUNNING_SESSIONS",
+      "Close every running execution session before closing the activity.",
+    );
+  }
+  return deepFreeze({ ...activity, status: "closed" as const, revision: activity.revision + 1 });
+}
+
+export function archiveActivity(activity: Activity, expectedRevision: number): Activity {
+  if (activity.revision !== expectedRevision) {
+    fail("STALE_REVISION", "The activity changed since it was read.");
+  }
+  if (activity.status !== "closed") {
+    fail("INVALID_TRANSITION", "Only a closed activity can be archived.");
+  }
+  return deepFreeze({ ...activity, status: "archived" as const, revision: activity.revision + 1 });
+}
+
+export function createDefinitionDraft(activity: Activity): DefinitionDraft {
+  if (activity.status !== "draft" && activity.status !== "active") {
+    fail("ACTIVITY_NOT_ACTIVE", "A definition can only be drafted while the activity is editable.");
   }
   return deepFreeze({
     activityId: activity.id,
     revision: 0,
     status: "draft" as const,
-    document: { schemaVersion: 1 as const, nodes: [], edges: [] },
+    package: {
+      schemaVersion: 1 as const,
+      manifest: { key: activity.id, title: activity.title },
+      capabilities: {},
+    },
   });
 }
 
 export function updateDefinitionDraft(
   draft: DefinitionDraft,
   expectedRevision: number,
-  document: DefinitionDocument,
+  pkg: ActivityDefinitionPackage,
 ): DefinitionDraft {
   if (draft.revision !== expectedRevision) {
     fail("STALE_REVISION", "The definition draft changed since it was read.");
@@ -64,7 +118,7 @@ export function updateDefinitionDraft(
   return deepFreeze({
     ...draft,
     revision: draft.revision + 1,
-    document: cloneDocument(document),
+    package: clonePackage(pkg),
   });
 }
 
@@ -72,21 +126,22 @@ export interface ReleaseDefinitionInput {
   readonly activity: Activity;
   readonly draft: DefinitionDraft;
   readonly expectedDraftRevision: number;
-  readonly plan: CompiledPlan;
+  readonly compiled: CompiledActivityDefinition;
   readonly releasedAt: string;
 }
 
 export interface ReleaseDefinitionResult {
   readonly activity: Activity;
-  readonly version: ReleasedDefinition;
+  readonly version: ReleasedActivityDefinition;
 }
 
 /**
- * Release is the authority transition: the compiled plan must be the plan for
- * this draft, the activity must be active, and the released version is frozen.
+ * Release is the authority transition: the compiled package must describe this
+ * draft, every capability must be enabled on the activity, and the released
+ * package is frozen. Corrigenda release a new version.
  */
 export function releaseDefinition(input: ReleaseDefinitionInput): ReleaseDefinitionResult {
-  const { activity, draft, expectedDraftRevision, plan, releasedAt } = input;
+  const { activity, draft, expectedDraftRevision, compiled, releasedAt } = input;
   if (activity.status !== "active") {
     fail("ACTIVITY_NOT_ACTIVE", "Only an active activity can release a definition.");
   }
@@ -96,69 +151,117 @@ export function releaseDefinition(input: ReleaseDefinitionInput): ReleaseDefinit
   if (draft.revision !== expectedDraftRevision) {
     fail("STALE_REVISION", "The definition draft changed since it was read.");
   }
-  if (!plan.ok) {
-    fail("DEFINITION_HASH_MISMATCH", "An invalid plan cannot be released.");
+  if (!compiled.ok) {
+    fail("DEFINITION_HASH_MISMATCH", "An invalid package cannot be released.");
   }
-  if (plan.contentHash !== definitionHash(draft.document)) {
+  if (compiled.contentHash !== activityDefinitionPackageHash(draft.package)) {
     fail(
       "DEFINITION_HASH_MISMATCH",
-      "The compiled plan does not describe the current draft document.",
+      "The compiled package does not describe the current draft.",
     );
   }
-  const versionNumber = activity.definitionVersion + 1;
-  const version: ReleasedDefinition = deepFreeze({
+  const disabled = Object.keys(compiled.capabilities).filter(
+    (key) => !activity.enabledCapabilities.includes(key),
+  );
+  if (disabled.length > 0) {
+    fail(
+      "CAPABILITY_NOT_ENABLED",
+      `The package includes capabilities that are not enabled: ${disabled.join(", ")}.`,
+    );
+  }
+
+  const versionNumber = activity.activeDefinitionVersion + 1;
+  const version: ReleasedActivityDefinition = deepFreeze({
     activityId: activity.id,
     version: versionNumber,
     status: "released" as const,
-    contentHash: plan.contentHash,
-    plan,
+    contentHash: compiled.contentHash,
+    capabilities: compiled.capabilities,
     releasedAt,
   });
   const nextActivity = deepFreeze({
     ...activity,
     revision: activity.revision + 1,
-    definitionVersion: versionNumber,
+    activeDefinitionVersion: versionNumber,
   });
   return { activity: nextActivity, version };
 }
 
-export interface StartExecutionRunInput {
+export interface StartExecutionSessionInput {
   readonly activity: Activity;
   readonly version: DefinitionVersion;
-  readonly existingRun: ExecutionRun | undefined;
-  readonly runId: string;
+  readonly scope: string;
+  readonly mode: ExecutionMode;
+  readonly existingSessions: readonly ExecutionSession[];
+  readonly conflicts: ScopeConflictPolicy;
+  readonly sessionId: string;
 }
 
-export function startExecutionRun(input: StartExecutionRunInput): ExecutionRun {
-  const { activity, version, existingRun, runId } = input;
+/**
+ * An activity may run several execution scopes at once (rehearsal, judging,
+ * check-in, voting...). The policy, not the kernel, declares which scopes
+ * conflict. TEST/REHEARSAL can never share a conflicting scope with FORMAL.
+ */
+export function startExecutionSession(input: StartExecutionSessionInput): ExecutionSession {
+  const { activity, version, scope, mode, existingSessions, conflicts, sessionId } = input;
   if (activity.status !== "active") {
-    fail("ACTIVITY_NOT_ACTIVE", "Only an active activity can start a run.");
+    fail("ACTIVITY_NOT_ACTIVE", "Only an active activity can start an execution session.");
   }
   if (version.status !== "released") {
-    fail("VERSION_NOT_RELEASED", "An execution run must reference a released definition.");
+    fail("VERSION_NOT_RELEASED", "An execution session must reference a released definition.");
   }
   if (version.activityId !== activity.id) {
     fail("CROSS_ACTIVITY", "The definition version belongs to a different activity.");
   }
-  if (existingRun?.status === "running") {
-    fail("RUN_ALREADY_ACTIVE", "This activity already has a running execution.");
+  if (!scope.trim()) {
+    fail("INVALID_INPUT", "An execution scope cannot be empty.");
   }
+  if (!sessionId.trim()) {
+    fail("INVALID_INPUT", "An execution session id cannot be empty.");
+  }
+  if (!["test", "rehearsal", "formal"].includes(mode)) {
+    fail("INVALID_INPUT", "Execution mode must be test, rehearsal or formal.");
+  }
+
+  const running = existingSessions.filter((session) => session.status === "running");
+  if (running.some((session) => session.scope === scope)) {
+    fail("SCOPE_ALREADY_RUNNING", `Scope ${scope} already has a running execution.`);
+  }
+  for (const other of running) {
+    const declared =
+      (conflicts[scope] ?? []).includes(other.scope) ||
+      (conflicts[other.scope] ?? []).includes(scope);
+    if (!declared) continue;
+    if ((mode === "formal") !== (other.mode === "formal")) {
+      fail(
+        "TEST_FORMAL_CONFLICT",
+        `Formal and non-formal execution cannot overlap in ${scope} / ${other.scope}.`,
+      );
+    }
+    fail("SCOPE_CONFLICT", `Scopes ${scope} and ${other.scope} cannot run at the same time.`);
+  }
+
   return deepFreeze({
-    id: runId,
+    id: sessionId,
     activityId: activity.id,
     definitionVersion: version.version,
     contentHash: version.contentHash,
+    scope,
+    mode,
     status: "running" as const,
     revision: 0,
   });
 }
 
-export function closeExecutionRun(run: ExecutionRun, expectedRevision: number): ExecutionRun {
-  if (run.revision !== expectedRevision) {
-    fail("STALE_REVISION", "The execution run changed since it was read.");
+export function closeExecutionSession(
+  session: ExecutionSession,
+  expectedRevision: number,
+): ExecutionSession {
+  if (session.revision !== expectedRevision) {
+    fail("STALE_REVISION", "The execution session changed since it was read.");
   }
-  if (run.status !== "running") {
-    fail("INVALID_TRANSITION", "Only a running execution can be closed.");
+  if (session.status !== "running") {
+    fail("INVALID_TRANSITION", "Only a running execution session can be closed.");
   }
-  return deepFreeze({ ...run, status: "closed" as const, revision: run.revision + 1 });
+  return deepFreeze({ ...session, status: "closed" as const, revision: session.revision + 1 });
 }

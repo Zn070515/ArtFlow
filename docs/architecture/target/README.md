@@ -1,115 +1,168 @@
 # ArtFlow-Plus 目标架构
 
-状态：规划基线（2026-10-19）。决策依据见 `docs/architecture/adr/`。
+状态：规划基线（2026-10-19）。产品与架构身份的权威是根目录 `GOAL.md`；本文
+只把它的结构落成模块、所有权与运行流程。技术选型见 `docs/architecture/adr/`。
 
-## 形态
-
-一个模块化单体（ADR-0001），一个 PostgreSQL 事实源，一个公开来源，三个进程
-角色（web/media/realtime），按 vertical slice 从 v1 迁移（ADR-0006）。
+## 产品面与内核
 
 ```text
-Browser ──HTTPS──▶ Caddy ──/──▶ web (Fastify + domain)
-                         ├─/media/*──▶ media worker
-                         └─/ws/*─────▶ realtime worker
-                                        │
-                              PostgreSQL ◀── outbox ──▶ pg-boss worker
-                                        │
-                                     Redis (optional pub/sub)
+Studio  ── design
+Ops     ── prepare / operate
+Live    ── execute on site
+Portal  ── participate / access
+              │
+        ArtFlow Engine
+   Activity · Capability · Definition · Compile · Release
+   Command · Authority · Execution Session · Fact · Decision
+   Snapshot · Audit · Projection · Recovery
+              │
+        Platform
+   identity · capability credentials · storage · worker
+   realtime transport · observability · backup · diagnostics
 ```
 
-## 模块
+四个产品面共享同一个 Activity 与 Capability 模型；任何面都不得自行解释权威
+业务事实。Engine 不是用户界面；Platform 只提供机制，不决定比赛结果。
 
-| 模块 | 负责 | 不负责 |
+## 核心概念
+
+| 概念 | 归属 | 说明 |
 | --- | --- | --- |
-| `platform` | 身份、会话、capability、审计、时钟、ID | 业务规则 |
-| `activity` | 活动、阶段、公开入口 | 报名/评分/结果细节 |
-| `definition` | 赛制 DSL、编译、冻结、发布版本 | 执行/评分 |
-| `registration` | 报名、问卷、材料、审核、名单 | 评分、结果 |
-| `evaluation` | 轮次、评委组、表演、分数事实、排名 | 公示、归档 |
-| `voting` | 投票场次、选票、成绩组成 | 评分事实 |
-| `ticketing` | 票据、凭证、领取、访问会话 | 选手报名 |
-| `results` | 候选、核定、release snapshot、撤销/纠错 | 内部录分 |
-| `archive` | 归档包、保留、导出、恢复清单 | 在线结果选择 |
-| `media` | 受控文件访问、存储适配器 | 业务可见性 |
-| `realtime` | 广播、在线状态 | 事实写入 |
+| Activity | Engine（thin） | 身份、标题、owner、粗生命周期、启用的 capabilities、当前 definition release、公共身份 |
+| Capability | 领域单元 | 一组内聚业务能力（Registration、Evaluation、Voting…），拥有自己的事实、命令、查询、事件与定义语言 |
+| Activity Pack | 组合 | 一组 opinionated 的 capability + 默认值 + 引导；不是 Activity 子类 |
+| Definition Package | Engine/各 capability | manifest + 启用的 capabilities + 各 capability 定义 + policies + bindings + 兼容信息 |
+| Definition Draft | Studio | 唯一可编辑配置面；允许不完整与 UNKNOWN |
+| Compile | 各 capability + Activity 协调 | 每个 capability 有自己的编译器；Activity 编译器协调并验证跨 capability 绑定 |
+| Definition Release | Engine | 不可变的执行权威；正式执行只能绑定 release，不能绑定 draft |
+| Execution Session | Engine | 绑定 activity + release + scope + mode；一个 activity 可以有多个并行 scope |
+| Fact / Decision / Snapshot / Projection | Engine | 发生的事实 / 由规则得出的结论 / 权威边界上的不可变表示 / 可重建的读模型 |
+
+## Activity 生命周期
+
+```text
+DRAFT → ACTIVE → CLOSED → ARCHIVED
+```
+
+Activity 只拥有粗生命周期。各 capability 拥有更丰富的生命周期，例如：
+
+```text
+Registration: DRAFT → OPEN → REVIEW → FINAL
+Competition:  PREPARING → READY → RUNNING → CLOSED
+Voting:       DRAFT → OPEN → CLOSED
+Publishing:   PRIVATE → READY → RELEASED → REVOKED
+```
+
+不得把本质并行的运营过程压进一个全局线性阶段。capability 自己声明哪些 scope
+冲突、哪些可以同时运行。
+
+## Capability 列表（初始）
+
+Registration、Questionnaire、Materials、Participant Directory、Program
+Management、Competition、Evaluation、Scheduling、Tasks、Resources、Rehearsal、
+Ticketing、Check-in、Voting、Publishing、Results、Archive、Incident Management。
+
+每个 capability 必须声明：
+
+- identity/version、依赖、冲突；
+- definition contract、compile 诊断；
+- commands、queries、events；
+- permissions；
+- 四个产品面上的贡献；
+- migration requirements。
+
+Capability 不是页面、菜单、表或服务；它是内聚的业务能力。
 
 ## 依赖规则
 
-1. 模块之间只能通过公开 contract（命令/查询/事件）调用；**禁止跨模块查表**。
-2. `platform` 不依赖业务模块；业务模块可以依赖 `platform`。
-3. 事件是过去式、不可变；消费者不能反向同步调用生产者的写模型。
-4. 每个模块有自己的 schema（Postgres schema 或表前缀）与迁移目录。
-5. 结构门禁会检查：include 清单、受 guard 的 manager、清单漂移；后续增加
-   “模块不得导入其他模块的 persistence”。
+1. 每个权威事实只有一个 owning capability。
+2. capability 之间只能通过公开 contract（命令/查询/不可变事件/稳定 ID/
+   显式 binding）交互；**禁止直接读写其他 capability 的表**。
+3. `Platform` 不依赖业务 capability；capability 可以依赖 Platform。
+4. Engine 不硬编码具体 capability 的 scope 名称；冲突策略由组合提供。
+5. 依赖图与 module import 规则在 v2 代码落地后用结构门禁检查。
 
-## 请求流程（写）
+## 定义与编译
 
 ```text
-HTTP → 认证/限流 → 解析命令 → 授权 → 打开事务
-  → 锁聚合 → 重新读取 + 校验状态/OCC
-  → 写业务表 + outbox 事件 + 审计
-  → 提交
-  → 返回 201/200 + 结果（或 4xx + 领域错误码）
+Definition Draft（可编辑、可不完整）
+  → 每个 capability 自己的 compiler
+  → Activity compiler 协调：schema/reference/dependency/compatibility/business/
+    conflict/cross-capability binding
+  → 诊断：ERROR / DEFERRED / WARNING / REVIEW / INFORMATION
+  → 不可变 Definition Release
 ```
 
-- 输入校验在边界（Zod/TypeBox），领域命令再做业务校验。
-- 错误码由领域层决定，HTTP 只映射（404/403/409/422），不拼接异常文本。
-- 所有敏感命令带 `Idempotency-Key`（command_id）。
+- UNKNOWN 不得被静默转为 0/false/空；DEFERRED 不是 PASS。
+- 正式执行绑定 release；修正产生新版本，不重写历史。
+- Draft 协作（多人编辑、最终一致）与权威命令（revision/CAS/事务）是两种模式，
+  不能混用。
 
-## 请求流程（读）
+## 执行
 
-- 公开/列表/导出消费 **read model**（由 outbox 投影）。
-- 权威转换的历史读只读 snapshot（release/archive）。
-- 同一个事实只能有一个 selector；selector 是模块公开的查询，不在页面里拼条件。
-- 读模型允许最终一致；发布/撤销后的“立即读到自己”通过版本号或直接读 snapshot
-  解决。
+Execution Session 至少包含：activity、definition release、scope、mode、运行时
+事实。mode 至少区分 TEST/REHEARSAL 与 FORMAL；测试执行不得污染正式事实。
 
-## 数据所有权
+一个 Activity 可以同时运行多个 scope（排练、评分、签到、投票…）。哪些 scope
+冲突由 capability 组合声明，而不是由 Activity 的单一阶段决定。
 
-| 数据 | 所有者 | 其他模块 |
+## 事实、决定、快照、投影
+
+- **Facts**：已发生/已权威提交（报名提交、材料审核、分数提交、选票接受、签到）。
+- **Decisions**：由事实与显式规则得出的结论（审核通过、排名、晋级、结果核定）；
+  候选与正式决定必须可区分。
+- **Snapshots**：权威边界上的不可变表示（冻结定义、名单、panel、核定结果、
+  release、归档包）；后续修改不得改写历史快照。
+- **Projections**：UI/列表/实时/搜索/报表读模型；可重建，永远不是权威。
+
+## 写路径
+
+```text
+HTTP → 认证/限流 → command envelope（actor, activity, capability,
+        expected revision, scope, idempotency key, payload）
+  → 授权/所有权 → 锁聚合 → 重读并校验状态/OCC
+  → 写事实 + outbox + 审计 → commit
+  → 返回结果或带 code 的领域错误
+```
+
+- 正式事实不能因为客户端陈旧被静默覆盖；冲突可见、可恢复。
+- command 必须显式携带上下文；幂等键防止重试产生第二条事实。
+
+## 读路径
+
+- 公开/列表/实时/报表消费 projection；projection 由 outbox 构建。
+- 权威转换的历史读只读 snapshot。
+- 每个公开事实只有一个 selector；selector 是 capability 的公开查询。
+- 读模型可以最终一致；“发布后立即读到自己”用版本/snapshot 解决。
+
+## 产品面职责
+
+| 面 | 职责 | 不做什么 |
 | --- | --- | --- |
-| Activity / Phase | activity | 只读 contract |
-| Definition / Release | definition | 通过 released version 引用 |
-| Registration / Questionnaire / Files | registration | 通过 roster/material contract |
-| Score facts / Panels / Rankings | evaluation | 通过 result candidate contract |
-| Ballots / Vote sessions | voting | 通过 vote result contract |
-| Tickets / Capabilities | ticketing | 通过 access contract |
-| StageResult / ResultRelease | results | 公开 read model |
-| ArchivePackage | archive | 只读 snapshot |
+| Studio | 设计活动、capability 组合、定义、策略、绑定、发布准备 | 现场执行 |
+| Ops | 报名/材料/名单/节目/评委/任务/资源/彩排/准备度 | 重新定义规则 |
+| Live | 当前表演/评分/投票/签到/节奏/异常/HOLD/恢复 | 成为事实源 |
+| Portal | 参与者/评委/观众/志愿者/公众的角色化入口 | 泄漏越权信息 |
 
-## 安全边界
+## 部署与可靠性
 
-- 公开码只定位；写权限必须 capability 或登录身份（ADR-0007）。
-- 私有媒体只经 media 模块；对象存储适配器保持私有，签名 URL 短时有效。
-- 审计是命令的一部分；日志脱敏 token/联系方式。
-- 测试数据与正式数据分离；正式结果/归档拒绝 TEST 活动。
-
-## 部署与可运维性
-
-- 镜像不可变；tag/digest 部署；启动校验 baked SHA。
-- 静态产物版本化并替换；所有渲染进程共享 manifest。
-- 单来源代理；web/media/realtime 不各自发布端口。
-- liveness/readiness 分离；Redis 故障只降级实时能力。
-- 备份/恢复按数据库引用的文件清单验证。
-
-## 可观测性
-
-- 每个命令记录：command id、activity、actor、结果码、耗时。
-- outbox 积压、投影延迟、死信数量是核心指标。
-- 现场模式：健康页与“当前表演/评分门/评委组”状态可一眼看到。
-- 审计日志是业务事实，不是调试日志；不写 token、密码、完整联系方式。
+- 模块化单体优先；一个应用镜像，web/media/realtime 三个进程角色。
+- 单公开来源；媒体经受控网关；静态产物与镜像同版。
+- PostgreSQL 事实源；outbox + pg-boss；Redis 仅增强实时。
+- 实时失败只降低可见性，不破坏正确性。
+- 备份/恢复验证数据库引用的每个文件；版本 tag/digest 部署。
 
 ## 测试与门禁
 
-- 领域单元 + 属性测试（fast-check）。
-- Golden fixtures：v1 与 v2 共用。
-- Contract tests：模块 contract、OpenAPI 错误码。
+- 领域单元 + 反例 + 属性测试（fast-check）。
+- 实现无关 Golden fixtures（v1 与 v2 共用）。
+- Contract tests（capability 之间、HTTP 错误码）。
 - 真实 PostgreSQL 双线程并发测试。
-- 关键 E2E：扫码、录分、发布、纠错、归档。
-- 结构门禁：`tests/gates/`；架构门禁在 v2 代码落地后补“模块导入/表访问”检查。
+- 关键现场旅程 E2E。
+- 结构门禁：清单覆盖、权限闭包、部署不变量；后续增加 capability import 规则。
 
-## 迁移策略
+## 迁移
 
-- v1 保持可部署；v2 按 slice 切换入口（ADR-0006）。
-- 历史数据通过可重放导入命令进入 v2；导入前后用 golden 校验。
-- 每次 cutover 有回滚开关与验证报告；删除 v1 代码前先证明没有入口指向它。
+- v1 是 reference implementation，不是必须保留的架构。
+- 按 vertical slice 切换；同一业务事实在任一时刻只有一个实现是权威。
+- v1 的实现 bug 只修 v1；业务不变量提炼进 Golden/不变量，用 v2 重新实现。

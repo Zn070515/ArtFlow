@@ -1,4 +1,4 @@
-# Voting 领域
+# Voting（capability）
 
 ## 目的
 
@@ -13,6 +13,15 @@
 - `VoteRecord`：选票中的一项。
 - `ScoringRule`：票数→分数的规则（例如 ballot share percent）；冻结时快照。
 - `LiveState`：给观众页用的投影；不是权威。
+
+## 生命周期
+
+```text
+DRAFT → OPEN → CLOSED
+```
+
+一个 Activity 可以有多个投票场次；每个场次是一个 execution scope，是否与其他
+scope 冲突由 capability 组合声明。
 
 ## 流程
 

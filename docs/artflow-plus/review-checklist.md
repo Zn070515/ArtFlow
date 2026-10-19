@@ -6,8 +6,15 @@
 ## 领域规则
 
 - [ ] 改动对应的不变量编号（`docs/invariants/`）已列出；没有新增隐式规则。
+- [ ] 改动属于一个明确的 capability；没有把 capability 状态塞回 Activity。
+- [ ] 写路径只有一个 command；没有跨 capability 直接读写表。
+- [ ] Activity 仍保持薄容器（身份/粗生命周期/enabled capabilities/active release）。
+- [ ] Definition 改动走 Package + 对应 capability compiler + cross-capability
+      binding 校验；没有把 package 当成一个通用 workflow 图。
+- [ ] Execution Session 带 scope 与 mode；并行/冲突策略由组合声明；TEST/REHEARSAL
+      与 FORMAL 不在冲突 scope 上重叠。
+- [ ] Studio/Ops/Live/Portal 消费同一 authority；没有哪个面自行解释事实。
 - [ ] 新增/修改的状态迁移在显式状态机表中；没有 `save(status=...)`。
-- [ ] 写路径只有一个 command；没有跨模块直接写表。
 - [ ] OCC token 是必填；缺 token/旧 token 被拒绝。
 - [ ] 错误是带 code 的领域错误，消息可执行；没有裸异常/堆栈。
 

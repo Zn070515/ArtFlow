@@ -4,9 +4,13 @@ export type DomainErrorCode =
   | "INVALID_TRANSITION"
   | "ACTIVITY_NOT_ACTIVE"
   | "CROSS_ACTIVITY"
+  | "CAPABILITY_NOT_ENABLED"
   | "DEFINITION_HASH_MISMATCH"
   | "VERSION_NOT_RELEASED"
-  | "RUN_ALREADY_ACTIVE";
+  | "SCOPE_ALREADY_RUNNING"
+  | "SCOPE_CONFLICT"
+  | "TEST_FORMAL_CONFLICT"
+  | "ACTIVITY_HAS_RUNNING_SESSIONS";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel
