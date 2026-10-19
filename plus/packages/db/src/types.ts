@@ -177,6 +177,147 @@ export interface MaterialRow {
   updated_at: ColumnType<Date, Date | undefined, Date>;
 }
 
+export interface CompetitionRoundRow {
+  id: string;
+  activity_id: string;
+  round_key: string;
+  release_version: number;
+  state: string;
+  revision: number;
+  score_version: number;
+  minimum_judges: number;
+  judge_count: number;
+  completion_mode: string;
+  advance_count: number;
+  current_panel_id: string | null;
+  locked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface PanelSnapshotRow {
+  id: string;
+  activity_id: string;
+  round_id: string;
+  version: number;
+  state: string;
+  expected_judges: number;
+  minimum_judges: number;
+  roster_digest: string;
+  context_version: number;
+  current: boolean;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface PanelMemberRow {
+  panel_id: string;
+  judge_id: string;
+  seat_key: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface JudgeSeatRow {
+  id: string;
+  panel_id: string;
+  judge_id: string;
+  state: string;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface PerformanceRow {
+  id: string;
+  activity_id: string;
+  round_id: string;
+  contestant_id: string;
+  sequence: number;
+  state: string;
+  context_version: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface PerformanceScoreStateRow {
+  performance_id: string;
+  state: string;
+  context_version: number;
+  revision: number;
+  opened_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  locked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface ScoreFactRow {
+  id: string;
+  activity_id: string;
+  round_id: string;
+  performance_id: string;
+  contestant_id: string;
+  judge_id: string;
+  panel_snapshot_id: string;
+  seat_id: string;
+  source: string;
+  total: number;
+  criteria: ColumnType<unknown, string, string>;
+  notes: string;
+  version: number;
+  context_version: number;
+  current: boolean;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface ScoreRevisionRow {
+  id: string;
+  score_fact_id: string;
+  version: number;
+  source: string;
+  total: number;
+  criteria: ColumnType<unknown, string, string>;
+  reason: string;
+  command_id: string;
+  actor_id: string;
+  created_at: ColumnType<Date, Date | string, Date | string>;
+}
+
+export interface ScoreCorrectionRow {
+  id: string;
+  score_fact_id: string;
+  state: string;
+  base_version: number;
+  reason: string;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface RankingSnapshotRow {
+  id: string;
+  activity_id: string;
+  round_id: string;
+  source_score_version: number;
+  input_fingerprint: string;
+  status: string;
+  rows: ColumnType<unknown, string, string>;
+  tie_groups: ColumnType<unknown, string, string>;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface AdvancementDecisionRow {
+  id: string;
+  activity_id: string;
+  round_id: string;
+  input_fingerprint: string;
+  status: string;
+  decisions: ColumnType<unknown, string, string>;
+  decided_by: string | null;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -192,4 +333,15 @@ export interface Database {
   registration: RegistrationRow;
   roster: RosterRow;
   material: MaterialRow;
+  competition_round: CompetitionRoundRow;
+  panel_snapshot: PanelSnapshotRow;
+  panel_member: PanelMemberRow;
+  judge_seat: JudgeSeatRow;
+  performance: PerformanceRow;
+  performance_score_state: PerformanceScoreStateRow;
+  score_fact: ScoreFactRow;
+  score_revision: ScoreRevisionRow;
+  score_correction: ScoreCorrectionRow;
+  ranking_snapshot: RankingSnapshotRow;
+  advancement_decision: AdvancementDecisionRow;
 }

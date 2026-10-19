@@ -1,5 +1,6 @@
 export * from "./activity-repository.js";
 export * from "./auth-repository.js";
+export * from "./competition-repository.js";
 export * from "./material-repository.js";
 export * from "./registration-repository.js";
 export * from "./command-receipt.js";
@@ -10,4 +11,5 @@ export * from "./outbox.js";
 export * from "./projection-repository.js";
 export * from "./readiness.js";
 export * from "./session-repository.js";
+export * from "./score-repository.js";
 export * from "./types.js";
