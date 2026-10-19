@@ -137,6 +137,19 @@ POST  /api/activities/:id/roster/finalize
 POST  /api/activities/:id/registrations/:registrationId/materials
 GET   /api/activities/:id/materials/:materialId
 POST  /api/activities/:id/competition/rounds/:roundKey/prepare
+POST  /api/activities/:id/competition/rounds/:roundKey/panel
+POST  /api/activities/:id/competition/rounds/:roundKey/performances/:performanceId/open
+POST  /api/activities/:id/competition/rounds/:roundKey/performances/:performanceId/lock
+POST  /api/activities/:id/competition/rounds/:roundKey/lock
+POST  /api/activities/:id/competition/rounds/:roundKey/scores
+PATCH /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId
+POST  /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections
+POST  /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections/:correctionId/close
+POST  /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections/:correctionId/recalculate
+POST  /api/activities/:id/competition/rounds/:roundKey/resolve
+POST  /api/activities/:id/competition/rounds/:roundKey/advancement/finalize
+POST  /api/activities/:id/competition/rounds/:roundKey/ties/:tieId/decide
+POST  /api/activities/:id/competition/podium/recompute
 ```
 
 Questionnaire and material slots are read from the active released definition.
@@ -156,13 +169,22 @@ prepare round → activate panel → open performance → score fact(s)
 
 Round, panel, seat, performance, score fact, revision, correction, ranking,
 advancement, tie-decision, and podium-candidate tables are covered by migrations
-`0006_competition_evaluation` through `0008_resolution_candidates`. All scoring
-sources share the `(round, contestant, judge)` current-fact uniqueness constraint.
+`0006_competition_evaluation` through `0009_m5_context_and_podium_metadata`. All
+scoring sources share the `(round, contestant, judge)` current-fact uniqueness
+constraint. Advancing a performance context retires only the old current score
+facts; their immutable history remains, and a gate/resolver can consume only
+facts bound to the current panel and exact performance context. Opening a
+performance also requires its participant to be in the final approved roster.
 `duplicate-score-fact.json` is consumed by
 `packages/runtime/test/golden-duplicate-score-fact.test.ts`; the adapter uses real
 commands and asserts no-side-effect rejection, immutable edit history, and stale
-context refusal. Resolver output is a candidate/read model only; M5 does not confirm
-Awards or stage results.
+context refusal. Correction is an audited `open → revise → close → recalculate`
+saga; the next round lock and resolver run explicitly consume the new score
+version. Unresolved ties remain HOLD, and podium required rounds come from the
+frozen competition release rather than the caller's subset. `StageResultCandidateProduced`
+records the source round IDs, source score versions, and input fingerprint.
+Resolver output is a candidate/read model only; M5 does not confirm Awards or
+stage results.
 
 A blocked projection is recovered through the worker's operator CLI (there is no
 unauthenticated HTTP route):

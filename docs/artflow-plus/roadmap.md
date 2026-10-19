@@ -122,9 +122,11 @@ Evaluation/Voting 等 capability 仍由 M5-M7 实现。
   projection 管理；round/panel/performance 使用 PostgreSQL 锁顺序与 CAS。
 - direct judge、staff rapid、staff proxy、paper recovery 共用一个 score fact 唯一键；
   代录/纸面要求来源编号与原因，编辑保留 immutable revision，纠错以 fingerprint
-  绑定的 open → revise → close → recalculate saga 完成。
+  绑定的 open → revise → close → recalculate saga 完成；performance context
+  递增时只退役旧 current facts，不改写历史，随后必须重新锁轮与 resolve。
 - Ranking 从 frozen score snapshot 确定性计算；同分保持 HOLD，晋级跨 cutoff 必须
-  显式 tie decision；podium 仅产出 candidate，不物化 Award 或 confirmed result。
+  显式 tie decision；podium 从 frozen release 推导完整必需轮次并记录每轮
+  source score version，仅产出 candidate，不物化 Award 或 confirmed result。
 
 **出口**：`duplicate-score-fact` golden adapter；score fact 与 panel activation 的
 真实 PostgreSQL 双连接并发；纠错链 E2E；resolution fingerprint / tie HOLD / podium

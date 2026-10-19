@@ -56,7 +56,8 @@ prepare round（名单+评委+分组快照）
 
 `RoundPrepared`、`PanelSnapshotActivated`、`PerformanceAdvanced`、
 `ScoreFactRecorded`、`ScoreFactRevised`、`PerformanceLocked`、
-`RoundLocked`、`RankingComputed`、`AdvancementFinalized`、
+`RoundLocked`、`ScoreCorrectionOpened`、`ScoreCorrectionClosed`、
+`ScoresRecalculated`、`RankingComputed`、`AdvancementFinalized`、
 `StageResultCandidateProduced`。
 
 ## v1 参考
@@ -72,6 +73,10 @@ prepare round（名单+评委+分组快照）
 - Resolver 是纯函数/纯服务，输入是显式快照；不得读“当前值”。
 - 纠错是显式 saga（开门 → 改 → 锁 → 重算 → 重核），每步幂等。
 - 评分读路径只能有一个 panel roster selector。
+- final roster 的 approved participant set 是 performance 的边界；context version
+  前进时只退役旧 current score facts，历史事实与 revision 不改写。
+- ranking 必须逐个绑定 locked performance 的 current panel 与 exact context；podium
+  必须消费 frozen release 声明的完整 round 集合，并记录每轮 source score version。
 
 ## 待决问题
 

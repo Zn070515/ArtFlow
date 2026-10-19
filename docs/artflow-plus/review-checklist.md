@@ -41,10 +41,18 @@
   proxy、paper 共用同一事实，重复返回 `DUPLICATE_SCORE_FACT`。
 - [x] panel/seat/performance/context version 在锁内复核；HOLD、superseded、closed
   performance 和 stale context 都在写入前拒绝。
+- [x] performance context 递增只退役旧 current score facts；resolver 要求每个
+  locked performance 都有 current panel + exact context 的事实，不能用旧事实过门。
 - [x] 编辑追加 immutable `score_revision`；纠错持久化 base version 与 input
-  fingerprint，不能把 locked fact 变成无理由的普通更新。
+  fingerprint，按 `open → revise → close → recalculate` 状态机写审计事件，不能把
+  locked fact 变成无理由的普通更新。
 - [x] ranking 使用 frozen score snapshot；同分默认 HOLD，晋级 cutoff 的 tie 需要
-  显式 decision；podium 只保存 candidate，不提前确认 Award。
+  显式 decision；podium 从 frozen release 的完整 required rounds 读取并保存 source
+  score versions，只保存 candidate，不提前确认 Award。
+- [x] performance 只能绑定 final approved roster；`competition.round.prepare` 只负责
+  prepare，其余比赛生命周期命令需要 `competition.manage`。
+- [x] HTTP mutation 将 path resource ID 传入 command，在事务内先校验 performance、
+  score fact 与 tie identity，不用 mutation 后检查补救。
 - [x] duplicate-score golden、panel/score 双连接 PostgreSQL 并发、runtime/API focused
   tests 已通过；root Django 全量 test 按 Plus 重构约束未运行。
 
