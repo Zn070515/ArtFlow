@@ -87,6 +87,46 @@ from .services import (
 )
 
 
+def _live_group_questionnaire():
+    return {
+        "schema_version": 1,
+        "key": "group_submission",
+        "subject": "group",
+        "pages": [
+            {
+                "key": "group_materials",
+                "title": "分组合唱材料",
+                "sections": [
+                    {
+                        "key": "songs",
+                        "title": "歌曲",
+                        "questions": [
+                            {
+                                "key": "group.song",
+                                "type": "text",
+                                "label": "合唱曲目",
+                                "required": True,
+                            },
+                            {
+                                "key": "group.media",
+                                "type": "file",
+                                "label": "合唱音视频",
+                                "required": True,
+                                "file": {
+                                    "purpose": "accompaniment",
+                                    "accepts": ["performance_video"],
+                                    "extensions": [".mp3", ".mp4"],
+                                    "max_mb": 100,
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+
 def _live_questionnaire():
     questions = []
     for round_key, label in (("r2", "踢馆曲目"), ("r3", "第三轮曲目")):
@@ -274,6 +314,7 @@ class _Live2026AcceptanceFixtureMixin(_FixtureBase):
                 },
             ],
             "questionnaire": _live_questionnaire(),
+            "group_questionnaire": _live_group_questionnaire(),
         }
         with authority_write(RULESET_FREEZE):
             self.version = RulesetVersion.objects.create(

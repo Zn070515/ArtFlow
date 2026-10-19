@@ -626,3 +626,33 @@ class GroupBuilderViewTests(_BuilderBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "分组合唱材料")
         self.assertContains(response, "合唱音视频")
+
+    def test_saving_a_legacy_group_document_moves_it_to_the_group_slot(self):
+        version = self.make_version(with_questionnaire=False)
+        root = json.loads(version.definition)
+        root["questionnaire"] = GROUP_QUESTIONNAIRE
+        version.definition = json.dumps(root, ensure_ascii=False)
+        version.save(update_fields=["definition"])
+        version.refresh_from_db()
+
+        response = self.client.post(
+            self.group_designer_url(version),
+            {
+                "action": "edit",
+                "key": "group.song",
+                "label": "合唱歌名",
+                "base_content_hash": version.content_hash,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        version.refresh_from_db()
+        stored = json.loads(version.definition)
+        self.assertNotIn("questionnaire", stored)
+        self.assertIn("group_questionnaire", stored)
+        self.assertEqual(
+            stored["group_questionnaire"]["pages"][0]["sections"][0]["questions"][0][
+                "label"
+            ],
+            "合唱歌名",
+        )

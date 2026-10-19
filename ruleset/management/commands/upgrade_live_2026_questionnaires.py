@@ -71,6 +71,8 @@ class Command(BaseCommand):
         operator = User.objects.filter(username=options["operator_username"]).first()
         if operator is None:
             raise CommandError(f"user {options['operator_username']!r} does not exist")
+        if not getattr(operator, "is_staff_or_admin", False):
+            raise CommandError("operator must be a staff or admin account")
         ruleset = ContestRuleset.objects.filter(activity=activity).first()
         if ruleset is None:
             raise CommandError("activity has no ContestRuleset")

@@ -220,15 +220,34 @@ def _participant_can_edit(registration):
     return registration.activity.phase == Activity.Phase.REGISTRATION_OPEN
 
 
+def _activity_has_group_questionnaire(activity) -> bool:
+    """Whether the frozen ruleset can actually serve the group material page."""
+    from questionnaire.registration import questionnaire_plan
+    from ruleset.services import current_frozen_version
+
+    version = current_frozen_version(activity)
+    if version is None:
+        return False
+    try:
+        questionnaire_plan(version, subject="group")
+    except (ValidationError, TypeError, ValueError):
+        return False
+    return True
+
+
 @login_required
 def my_registrations_view(request):
     registrations = prime_questionnaire_answers(
         SingerRegistration.objects.filter(user=request.user).select_related("activity")
     )
+    group_capable_activity_ids: set[int] = set()
     for registration in registrations:
         registration.song_label = generic_song_label(registration)
+        if _activity_has_group_questionnaire(registration.activity):
+            group_capable_activity_ids.add(registration.activity_id)
     memberships = GroupMembership.objects.filter(
         singer__in=registrations,
+        singer__activity_id__in=group_capable_activity_ids,
         is_current=True,
         group__is_active=True,
         group__stage__status__in=[

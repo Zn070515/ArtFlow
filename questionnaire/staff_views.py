@@ -28,9 +28,10 @@ from ruleset.models import RulesetVersion
 from ruleset.services import (
     LIVE_CHALLENGE_FORMAT_KEY,
     newer_ruleset_version,
-    update_ruleset_definition_section,
+    update_ruleset_definition_sections,
     version_is_editable,
 )
+from ruleset.templates import live_2026_group_questionnaire
 
 from .builder import (
     add_question,
@@ -84,55 +85,9 @@ EMPTY_QUESTIONNAIRE = {
     ],
 }
 
-EMPTY_GROUP_QUESTIONNAIRE = {
-    "schema_version": 1,
-    "key": "group_submission",
-    "subject": "group",
-    "pages": [
-        {
-            "key": "group_materials",
-            "title": "分组合唱材料",
-            "sections": [
-                {
-                    "key": "songs",
-                    "title": "歌曲",
-                    "questions": [
-                        {
-                            "key": "group.song",
-                            "type": "text",
-                            "label": "合唱曲目",
-                            "required": True,
-                        },
-                        {
-                            "key": "group.media",
-                            "type": "file",
-                            "label": "合唱音视频",
-                            "required": True,
-                            "file": {
-                                "purpose": "accompaniment",
-                                "accepts": ["performance_video"],
-                                "extensions": [
-                                    ".mp3",
-                                    ".wav",
-                                    ".m4a",
-                                    ".flac",
-                                    ".aac",
-                                    ".ogg",
-                                    ".mp4",
-                                    ".mov",
-                                    ".webm",
-                                    ".mkv",
-                                ],
-                                "max_mb": 100,
-                                "max_files": 1,
-                            },
-                        },
-                    ],
-                }
-            ],
-        }
-    ],
-}
+# The designer's starter is the same document the built-in template ships, so the two
+# cannot drift. ``_current_questionnaire`` returns a copy before any edit.
+EMPTY_GROUP_QUESTIONNAIRE = live_2026_group_questionnaire()
 
 
 def _definition_root(version: RulesetVersion) -> dict:
@@ -148,7 +103,16 @@ def _definition_root(version: RulesetVersion) -> dict:
 def _current_questionnaire(version: RulesetVersion, *, subject: str = "participant") -> dict:
     if subject not in QUESTIONNAIRE_ROOT_KEYS:
         raise ValidationError("未知的问卷主体。")
-    raw = _definition_root(version).get(QUESTIONNAIRE_ROOT_KEYS[subject])
+    root = _definition_root(version)
+    raw = root.get(QUESTIONNAIRE_ROOT_KEYS[subject])
+    if raw is None and subject == "group":
+        legacy = root.get("questionnaire")
+        if legacy is not None:
+            try:
+                if compile_questionnaire(legacy).subject == "group":
+                    return legacy
+            except ValidationError:
+                pass
     if raw is not None:
         return raw
     starter = EMPTY_GROUP_QUESTIONNAIRE if subject == "group" else EMPTY_QUESTIONNAIRE
@@ -464,10 +428,22 @@ def builder_view(request: HttpRequest, pk: int, subject: str = "participant"):
                     request, f"这道题不能再向{direction}移动：条件依赖必须保持在前面。"
                 )
                 return redirect(builder_route, pk=version.pk)
-            update_ruleset_definition_section(
+            sections = {QUESTIONNAIRE_ROOT_KEYS[subject]: questionnaire}
+            if subject == "group":
+                # A pre-split version stored its group document in the participant slot.
+                # Saving the group designer is the migration seam: move it out, so the
+                # participant slot is no longer a group document.
+                legacy = _definition_root(version).get("questionnaire")
+                if legacy is not None:
+                    try:
+                        legacy_is_group = compile_questionnaire(legacy).subject == "group"
+                    except ValidationError:
+                        legacy_is_group = False
+                    if legacy_is_group:
+                        sections["questionnaire"] = None
+            update_ruleset_definition_sections(
                 version,
-                section=QUESTIONNAIRE_ROOT_KEYS[subject],
-                value=questionnaire,
+                sections=sections,
                 operator=request.user,
                 base_content_hash=base_content_hash,
             )

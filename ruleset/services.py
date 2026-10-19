@@ -1491,8 +1491,9 @@ def update_ruleset_definition_sections(
         root.pop("checkpoints", None)
         sections_to_apply.pop("checkpoints")
     for name, value in sections_to_apply.items():
-        if name == "group_questionnaire" and value is None:
-            # The optional group document is removed by sending null, not by storing null.
+        if name in {"questionnaire", "group_questionnaire"} and value is None:
+            # The optional questionnaire documents are removed by sending null, not by
+            # storing null. This is also the legacy group-document move seam.
             root.pop(name, None)
         else:
             root[name] = value
@@ -2386,7 +2387,10 @@ def _questionnaire_plan_of(
             legacy_plan = compile_questionnaire(legacy)
             if legacy_plan.subject == "group":
                 return legacy_plan
-    return compile_questionnaire(raw) if raw is not None else None
+    if raw is None:
+        return None
+    plan = compile_questionnaire(raw)
+    return plan if plan.subject == subject else None
 
 
 def _validate_successor_questionnaire(
@@ -2429,13 +2433,19 @@ def _carry_questionnaire_answers(
     from questionnaire.successor import carry_answers
 
     carried = 0
+    plans = {
+        subject: (
+            _questionnaire_plan_of(previous, subject=subject),
+            _questionnaire_plan_of(version, subject=subject),
+        )
+        for subject in QUESTIONNAIRE_ROOT_KEYS
+    }
     rows = QuestionnaireResponse.objects.filter(ruleset_version=previous).select_related(
         "group", "singer_registration"
     )
     for old in rows:
         subject = "group" if old.group_id else "participant"
-        before = _questionnaire_plan_of(previous, subject=subject)
-        after = _questionnaire_plan_of(version, subject=subject)
+        before, after = plans[subject]
         if before is None or after is None:
             continue
         answers = carry_answers(before, after, old.answers)

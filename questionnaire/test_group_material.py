@@ -12,7 +12,12 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from accounts.models import User
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    RULESET_FREEZE,
+    authority_write,
+)
 from common.test_characterization import _CharacterizationBase
 from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -59,6 +64,25 @@ GROUP_QUESTIONNAIRE = {
 }
 
 
+PARTICIPANT_QUESTIONNAIRE = {
+    "schema_version": 1,
+    "key": "singer_submission",
+    "pages": [
+        {
+            "key": "basic",
+            "title": "基本信息",
+            "sections": [
+                {
+                    "key": "identity",
+                    "title": "身份",
+                    "questions": [{"key": "name", "type": "text", "label": "姓名"}],
+                }
+            ],
+        }
+    ],
+}
+
+
 def _definition() -> str:
     return json.dumps(
         {
@@ -80,7 +104,7 @@ class _GroupMaterialBase(_CharacterizationBase):
         with authority_write(ACCOUNT_AUTHORITY):
             self.operator.save()
 
-    def frozen_group_version(self, questionnaire=None):
+    def frozen_group_version(self, questionnaire=None, *, slot="group_questionnaire"):
         # FORMAL: a non-staff member may only reach a formal activity's group page (§14.2).
         activity = self.make_activity(
             is_test_mode=False,
@@ -89,11 +113,32 @@ class _GroupMaterialBase(_CharacterizationBase):
         )
         ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=False)
         root = json.loads(_definition())
-        root["group_questionnaire"] = questionnaire or GROUP_QUESTIONNAIRE
+        root[slot] = questionnaire or GROUP_QUESTIONNAIRE
         version = RulesetVersion.objects.create(
             ruleset=ruleset, definition=json.dumps(root, ensure_ascii=False)
         )
         freeze_ruleset_version(version, self.operator)
+        version.refresh_from_db()
+        return version
+
+    def legacy_frozen_group_version(self):
+        """A pre-split version: the group document lives in ``questionnaire``."""
+        activity = self.make_activity(
+            is_test_mode=False,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            title=f"旧分组问卷-{uuid4().hex[:6]}",
+        )
+        ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=False)
+        root = json.loads(_definition())
+        root["questionnaire"] = GROUP_QUESTIONNAIRE
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                definition=json.dumps(root, ensure_ascii=False),
+            )
         version.refresh_from_db()
         return version
 
@@ -613,4 +658,35 @@ class ParticipantGroupLinkTests(_GroupMaterialBase):
         self.assertContains(response, group.name)
         self.assertContains(
             response, reverse("questionnaire:group_form", args=[group.pk])
+        )
+
+    def test_legacy_group_document_does_not_500_the_participant_entry(self):
+        version = self.legacy_frozen_group_version()
+        _stage, group, singers = self.confirmed_group(version)
+        self.login_member(singers[0])
+
+        response = self.client.get(
+            reverse("questionnaire:form", args=[version.ruleset.activity_id])
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.client.get(reverse("questionnaire:group_form", args=[group.pk])).status_code,
+            200,
+        )
+
+    def test_group_link_is_hidden_without_a_group_questionnaire(self):
+        version = self.frozen_group_version(
+            PARTICIPANT_QUESTIONNAIRE, slot="questionnaire"
+        )
+        _stage, group, singers = self.confirmed_group(version)
+        self.login_member(singers[0])
+
+        response = self.client.get(reverse("singer_contest:my_registrations"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "分组合唱材料")
+        self.assertEqual(
+            self.client.get(reverse("questionnaire:group_form", args=[group.pk])).status_code,
+            403,
         )
