@@ -1,11 +1,21 @@
 import {
+  ActivateCompetitionPanelBodySchema,
   CloseExecutionBodySchema,
+  CompetitionRoundParamsSchema,
+  CompetitionScoreBodySchema,
+  CompetitionScopeBodySchema,
   errorResponse,
   ExecutionModeSchema,
+  EditCompetitionScoreBodySchema,
+  OpenCompetitionPerformanceBodySchema,
+  OpenScoreCorrectionBodySchema,
   PackInstantiateBodySchema,
+  PrepareCompetitionRoundBodySchema,
+  ResolveCompetitionBodySchema,
   StartExecutionBodySchema,
+  TieDecisionBodySchema,
 } from "@artflow-plus/contracts";
-import { checkReady, type Database } from "@artflow-plus/db";
+import { checkReady, getCurrentRankingSnapshot, getRoundByKey, type Database } from "@artflow-plus/db";
 import {
   defaultCapabilityRegistry,
   DomainError,
@@ -32,7 +42,18 @@ import {
   listEvents,
   listExecutions,
   finalizeRoster,
+  activateCompetitionPanel,
+  editScoreFact,
+  lockPerformance,
+  openPerformance,
+  openScoreCorrection,
   prepareCompetitionRound,
+  recordTieDecision,
+  resolveRound,
+  submitJudgeScore,
+  submitPaperScore,
+  submitProxyScore,
+  submitRapidScore,
   readMaterialForActor,
   reviewMaterial,
   reviewRegistration,
@@ -91,6 +112,31 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   DEFINITION_HASH_MISMATCH: 422,
   DEFINITION_INVALID: 422,
   RELEASE_SNAPSHOT_INCOMPLETE: 422,
+  ROUND_UNKNOWN: 422,
+  ROUND_ALREADY_PREPARED: 409,
+  ROUND_NOT_PREPARED: 409,
+  ROUND_LOCKED: 409,
+  PANEL_ALREADY_ACTIVE: 409,
+  PANEL_NOT_ACTIVE: 409,
+  PERFORMANCE_ALREADY_OPEN: 409,
+  PERFORMANCE_NOT_OPEN: 409,
+  PERFORMANCE_LOCKED: 409,
+  PERFORMANCE_SCORE_OPEN: 409,
+  SCORE_GATE_OPEN: 409,
+  NO_PERFORMANCES: 409,
+  JUDGE_ROSTER_INVALID: 422,
+  DUPLICATE_SCORE_FACT: 409,
+  STALE_CONTEXT: 409,
+  PERFORMANCE_NOT_SCORABLE: 409,
+  SOURCE_REFERENCE_REQUIRED: 422,
+  CORRECTION_REQUIRED: 422,
+  SCORE_FACT_LOCKED: 409,
+  SCORE_FACT_NOT_FOUND: 404,
+  CORRECTION_NOT_FOUND: 404,
+  CORRECTION_ALREADY_OPEN: 409,
+  STALE_RESOLUTION_INPUT: 409,
+  TIE_DECISION_REQUIRED: 422,
+  TIE_DECISION_INVALID: 422,
 };
 
 const CreateActivityBody = Type.Object(
@@ -325,6 +371,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   async function requestDeps(request: FastifyRequest): Promise<RuntimeDeps> {
     return { ...deps, actor: await requestActor(request) };
+  }
+
+  async function routeRound(activityId: string, roundKey: string) {
+    const round = await getRoundByKey(db, activityId, roundKey);
+    if (round === null) throw new DomainError("NOT_FOUND", "The competition round was not found.");
+    return round;
   }
 
   await app.register(swagger, {
@@ -703,6 +755,254 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         scope: body.scope,
       });
       return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds",
+    { schema: { params: ActivityParams, body: PrepareCompetitionRoundBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { roundKey: string; scope: string };
+      const outcome = await prepareCompetitionRound(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundKey: body.roundKey,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/panel",
+    { schema: { params: CompetitionRoundParamsSchema, body: ActivateCompetitionPanelBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string; judges: { judgeId: string; seatKey: string }[] };
+      const round = await routeRound(id, roundKey);
+      const outcome = await activateCompetitionPanel(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        scope: body.scope,
+        judges: body.judges,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  const CompetitionPerformanceParams = Type.Object({
+    id: Type.String({ minLength: 1 }),
+    roundKey: Type.String({ minLength: 1, maxLength: 100 }),
+    performanceId: Type.String({ minLength: 1, maxLength: 100 }),
+  }, { additionalProperties: false });
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/performances/:performanceId/open",
+    { schema: { params: CompetitionPerformanceParams, body: OpenCompetitionPerformanceBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string; contestantId: string; sequence: number };
+      const round = await routeRound(id, roundKey);
+      const outcome = await openPerformance(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        scope: body.scope,
+        contestantId: body.contestantId,
+        sequence: body.sequence,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/performances/:performanceId/lock",
+    { schema: { params: CompetitionPerformanceParams, body: CompetitionScopeBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey, performanceId } = request.params as { id: string; roundKey: string; performanceId: string };
+      const body = request.body as { scope: string };
+      const round = await routeRound(id, roundKey);
+      const outcome = await lockPerformance(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        performanceId,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/scores",
+    { schema: { params: CompetitionRoundParamsSchema, body: CompetitionScoreBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as {
+        scope: string;
+        source: "direct_judge" | "staff_rapid" | "staff_proxy" | "paper_dr";
+        performanceId: string;
+        panelSnapshotId: string;
+        seatId: string;
+        contextVersion: number;
+        criteria: Record<string, number>;
+        notes?: string;
+        sourceReference?: string;
+        reason?: string;
+      };
+      const round = await routeRound(id, roundKey);
+      const base = {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        performanceId: body.performanceId,
+        panelSnapshotId: body.panelSnapshotId,
+        seatId: body.seatId,
+        contextVersion: body.contextVersion,
+        criteria: body.criteria,
+        ...(body.notes === undefined ? {} : { notes: body.notes }),
+        scope: body.scope,
+      };
+      const outcome = body.source === "direct_judge"
+        ? await submitJudgeScore(db, await requestDeps(request), base)
+        : body.source === "staff_rapid"
+          ? await submitRapidScore(db, await requestDeps(request), base)
+          : body.source === "staff_proxy"
+            ? await submitProxyScore(db, await requestDeps(request), { ...base, sourceReference: body.sourceReference ?? "", reason: body.reason ?? "" })
+            : await submitPaperScore(db, await requestDeps(request), { ...base, sourceReference: body.sourceReference ?? "", reason: body.reason ?? "" });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  const ScoreFactParams = Type.Object({
+    id: Type.String({ minLength: 1 }),
+    roundKey: Type.String({ minLength: 1, maxLength: 100 }),
+    scoreFactId: Type.String({ minLength: 1, maxLength: 100 }),
+  }, { additionalProperties: false });
+
+  app.patch(
+    "/api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId",
+    { schema: { params: ScoreFactParams, body: EditCompetitionScoreBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey, scoreFactId } = request.params as { id: string; roundKey: string; scoreFactId: string };
+      const body = request.body as {
+        scope: string;
+        performanceId: string;
+        panelSnapshotId: string;
+        seatId: string;
+        contextVersion: number;
+        expectedVersion: number;
+        criteria: Record<string, number>;
+        reason: string;
+        correctionId?: string;
+      };
+      const round = await routeRound(id, roundKey);
+      const outcome = await editScoreFact(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        performanceId: body.performanceId,
+        panelSnapshotId: body.panelSnapshotId,
+        seatId: body.seatId,
+        contextVersion: body.contextVersion,
+        expectedVersion: body.expectedVersion,
+        criteria: body.criteria,
+        reason: body.reason,
+        correctionId: body.correctionId,
+        scope: body.scope,
+      });
+      if (outcome.body.id !== scoreFactId) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections",
+    { schema: { params: ScoreFactParams, body: OpenScoreCorrectionBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey, scoreFactId } = request.params as { id: string; roundKey: string; scoreFactId: string };
+      const body = request.body as { scope: string; performanceId: string; panelSnapshotId: string; reason: string };
+      const round = await routeRound(id, roundKey);
+      const outcome = await openScoreCorrection(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        performanceId: body.performanceId,
+        scoreFactId,
+        panelSnapshotId: body.panelSnapshotId,
+        scope: body.scope,
+        reason: body.reason,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/resolve",
+    { schema: { params: RoundParams, body: ResolveCompetitionBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string };
+      const round = await routeRound(id, roundKey);
+      const outcome = await resolveRound(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  const TieParams = Type.Object({
+    id: Type.String({ minLength: 1 }),
+    roundKey: Type.String({ minLength: 1, maxLength: 100 }),
+    tieId: Type.String({ minLength: 1, maxLength: 100 }),
+  }, { additionalProperties: false });
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/ties/:tieId/decide",
+    { schema: { params: TieParams, body: TieDecisionBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey, tieId } = request.params as { id: string; roundKey: string; tieId: string };
+      const body = request.body as { scope: string; rankingSnapshotId: string; inputFingerprint: string; contestants: string[]; order: string[]; reason: string };
+      const round = await routeRound(id, roundKey);
+      const outcome = await recordTieDecision(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        rankingSnapshotId: body.rankingSnapshotId || tieId,
+        inputFingerprint: body.inputFingerprint,
+        contestants: body.contestants,
+        order: body.order,
+        reason: body.reason,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/competition/rounds/:roundKey/ranking",
+    { schema: { params: RoundParams, querystring: CompetitionScopeBodySchema } },
+    async (request) => {
+      await requestActor(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const round = await routeRound(id, roundKey);
+      const ranking = await getCurrentRankingSnapshot(db, round.id);
+      if (ranking === null) throw new DomainError("NOT_FOUND", "The ranking was not found.");
+      return ranking;
     },
   );
 

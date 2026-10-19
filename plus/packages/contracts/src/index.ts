@@ -1,4 +1,5 @@
 export * from "./capability-manifest.js";
+export * from "./competition.js";
 export * from "./command-envelope.js";
 export * from "./common.js";
 export * from "./errors.js";

@@ -186,6 +186,17 @@ export async function getRoundByKeyForUpdate(
   return row === undefined ? null : round(row);
 }
 
+export async function getRoundByKey(
+  db: Kysely<Database>,
+  activityId: string,
+  roundKey: string,
+): Promise<StoredRound | null> {
+  const row = await db.selectFrom("competition_round").selectAll()
+    .where("activity_id", "=", activityId).where("round_key", "=", roundKey)
+    .executeTakeFirst();
+  return row === undefined ? null : round(row);
+}
+
 export async function updateRound(
   trx: Kysely<Database>,
   value: StoredRound,
