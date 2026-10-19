@@ -4,7 +4,7 @@ import { sql, type Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { closeDb, createDb, migrate } from "../src/index.js";
+import { closeDb, createDb, migrate, migrateTo } from "../src/index.js";
 import type { Database } from "../src/index.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
@@ -168,5 +168,34 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
     await expect(
       db.insertInto("execution_session").values(session("session-b")).execute(),
     ).rejects.toThrow();
+  });
+
+  it("restores the legacy vote identity constraint when rolling back 0011", async () => {
+    const activityId = `migration-identity-${randomUUID()}`;
+    await db.insertInto("activity").values({
+      id: activityId,
+      title: "Migration identity test",
+      status: "active",
+      revision: 1,
+      enabled_capabilities: JSON.stringify([]),
+      active_definition_version: 1,
+    }).execute();
+    await migrateTo(db, "0010_m6_voting_ticketing");
+    const invalidInsert = (id: string) => sql`
+      insert into vote_session (
+        id, activity_id, definition_version, purpose, selection_type,
+        max_selections, requires_ticket, allow_browser_identity,
+        scoring_rule, status, revision, opened_at, closed_at
+      ) values (
+        ${id}, ${activityId}, 1, 'popularity', 'single',
+        1, true, true, '{"kind":"ballot_share_percent","scale":100,"decimals":2}'::jsonb,
+        'open', 0, now(), null
+      )
+    `.execute(db);
+
+    await expect(invalidInsert("invalid-before-0011")).rejects.toThrow();
+    await migrateTo(db, "0011_voting_identity_policy");
+    await migrateTo(db, "0010_m6_voting_ticketing");
+    await expect(invalidInsert("invalid-after-0011-rollback")).rejects.toThrow();
   });
 });

@@ -1016,6 +1016,11 @@ const migrations: Record<string, Migration> = {
       `.execute(db);
       await sql`
         alter table vote_session
+          add constraint vote_session_identity_check
+            check (not (requires_ticket and allow_browser_identity))
+      `.execute(db);
+      await sql`
+        alter table vote_session
           drop constraint if exists vote_session_identity_policy_check,
           drop column identity_policy
       `.execute(db);
@@ -1029,17 +1034,30 @@ class StaticMigrationProvider implements MigrationProvider {
   }
 }
 
-export async function migrate(db: Kysely<Database>): Promise<MigrationResultSet> {
+async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   // Kysely otherwise discovers migration tables in *any* schema; with pooled
   // search_path-based test schemas that can pick up another schema's lock
   // table. Pin the migrator to the connection's current schema.
   const current = await sql<{ schema: string }>`select current_schema() as schema`.execute(db);
   const schema = current.rows[0]?.schema;
-  const migrator = new Migrator({
+  return new Migrator({
     db,
     provider: new StaticMigrationProvider(),
     ...(schema === undefined ? {} : { migrationTableSchema: schema }),
   });
+}
+
+export async function migrateTo(db: Kysely<Database>, migrationName: string): Promise<MigrationResultSet> {
+  const migrator = await createMigrator(db);
+  const result = await migrator.migrateTo(migrationName);
+  if (result.error !== undefined) {
+    throw result.error;
+  }
+  return result;
+}
+
+export async function migrate(db: Kysely<Database>): Promise<MigrationResultSet> {
+  const migrator = await createMigrator(db);
   const result = await migrator.migrateToLatest();
   if (result.error !== undefined) {
     throw result.error;
