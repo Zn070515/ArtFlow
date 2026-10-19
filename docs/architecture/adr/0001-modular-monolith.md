@@ -1,0 +1,37 @@
+# ADR-0001: v2 是模块化单体
+
+状态：accepted（2026-10-19）
+
+## 背景
+
+v1 是一个 Django 单体，领域边界靠 app 目录和 service 约定维持；重构的目标是
+更清晰的领域边界、可测试的规则和可长期演进的结构，而不是把部署拆成许多服务。
+团队规模小，现场部署在一台学校服务器上，运维复杂度必须可控。
+
+## 决策
+
+v2 采用**模块化单体**，模块边界由 **Capability** 定义（GOAL §6/§7/§23）：
+
+- 一个可部署的 API 进程，内部由 Engine（Activity、Definition、Authority、
+  Execution Session、Projection 等共享机制）和 Capability 组成；初始
+  capabilities 包括 Registration、Questionnaire、Materials、Competition、
+  Evaluation、Scheduling、Voting、Ticketing、Publishing、Results、Archive 等；
+- 四个产品面（Studio/Ops/Live/Portal）共享同一 Activity 与 Capability 模型，
+  不各自拥有事实；
+- capability 之间只通过公开 contract（命令、查询、不可变事件、稳定 ID、
+  显式 binding）交互，禁止直接读写其他 capability 的表；
+- 部署时仍可拆出 web/media/realtime worker 池（同一代码、不同进程角色），
+  但不是独立服务；
+- 只有在出现**独立的伸缩或故障隔离需求**时，才把某个 capability 拆成服务。
+
+## 后果
+
+- 事务边界简单，现场部署只需要一个数据库 + 一个应用镜像；
+- 模块边界靠代码审查、依赖规则和 contract test 维持，不能靠网络隔离；
+- 需要一条“模块不得直接访问其他模块表”的结构门禁；
+- worker 池的拆分保留 v1 的现场经验（慢媒体下载不能拖垮录分）。
+
+## 替代方案
+
+- **微服务**：部署、可观测性、数据一致性成本远超当前团队和场景，否决。
+- **Django 继续单体**：领域模型与前端/实时能力受限，且 v1 已冻结，否决。

@@ -1,0 +1,27 @@
+{
+  "name": "@artflow-plus/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx src/main.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@artflow-plus/contracts": "workspace:*",
+    "@artflow-plus/db": "workspace:*",
+    "@artflow-plus/domain": "workspace:*",
+    "@artflow-plus/runtime": "workspace:*",
+    "@fastify/swagger": "9.9.2",
+    "@sinclair/typebox": "0.34.52",
+    "fastify": "5.12.7",
+    "kysely": "0.29.7"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1",
+    "tsx": "4.23.15"
+  }
+}

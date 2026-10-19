@@ -1,0 +1,131 @@
+{
+  "schema": "artflow.golden.fixture.v1",
+  "id": "capability-reissue-close",
+  "invariants": ["TICK-01", "TICK-02", "TICK-03", "TICK-06"],
+  "description": "评委入口的 public code 不是凭证；重签立即失效旧 capability；关闭入口只拒绝新 claim，不驱逐已领取的席位。",
+  "facts": {
+    "activity": {
+      "key": "act-2026",
+      "public_code": "ABC123",
+      "judge_entry_open": true,
+      "judge_entry_version": 1
+    },
+    "panel": {"key": "panel-1", "state": "active", "seats": ["seat-1", "seat-2"]},
+    "sessions": []
+  },
+  "steps": [
+    {
+      "step": 1,
+      "command": "claim_judge_seat",
+      "actor": "judge:teacher-a",
+      "input": {
+        "public_code": "ABC123",
+        "capability": "v1-valid-signature"
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["JudgeSeatClaimed"],
+        "read_model": {
+          "claimed_seat": "seat-1",
+          "session_count": 1
+        }
+      }
+    },
+    {
+      "step": 2,
+      "command": "claim_judge_seat",
+      "actor": "judge:unsigned",
+      "input": {
+        "public_code": "ABC123",
+        "capability": null
+      },
+      "expect": {
+        "outcome": "rejected",
+        "reason": "INVALID_JUDGE_ENTRY",
+        "side_effects": "none"
+      }
+    },
+    {
+      "step": 3,
+      "command": "reissue_judge_capability",
+      "actor": "staff:fixture-staff",
+      "input": {"activity": "act-2026", "reason": "二维码外泄"},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["JudgeCapabilityReissued"],
+        "read_model": {"judge_entry_version": 2}
+      }
+    },
+    {
+      "step": 4,
+      "command": "claim_judge_seat",
+      "actor": "judge:teacher-b",
+      "input": {
+        "public_code": "ABC123",
+        "capability": "v1-valid-signature"
+      },
+      "expect": {
+        "outcome": "rejected",
+        "reason": "INVALID_JUDGE_ENTRY",
+        "side_effects": "none"
+      }
+    },
+    {
+      "step": 5,
+      "command": "claim_judge_seat",
+      "actor": "judge:teacher-b",
+      "input": {
+        "public_code": "ABC123",
+        "capability": "v2-valid-signature"
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["JudgeSeatClaimed"],
+        "read_model": {"claimed_seat": "seat-2", "session_count": 2}
+      }
+    },
+    {
+      "step": 6,
+      "command": "close_judge_entry",
+      "actor": "staff:fixture-staff",
+      "input": {"activity": "act-2026", "reason": "评委已到齐"},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["JudgeEntryClosed"],
+        "read_model": {"judge_entry_open": false, "session_count": 2}
+      }
+    },
+    {
+      "step": 7,
+      "command": "claim_judge_seat",
+      "actor": "judge:teacher-c",
+      "input": {
+        "public_code": "ABC123",
+        "capability": "v2-valid-signature"
+      },
+      "expect": {
+        "outcome": "rejected",
+        "reason": "JUDGE_ENTRY_CLOSED",
+        "side_effects": "none"
+      }
+    },
+    {
+      "step": 8,
+      "command": "submit_judge_score",
+      "actor": "judge:teacher-a",
+      "input": {
+        "session": "session-1",
+        "round": "round-1",
+        "performance": "perf-1",
+        "context_version": 1,
+        "command_id": "cmd-after-close",
+        "score": 88
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["ScoreFactRecorded"],
+        "read_model": {"session_count": 2}
+      }
+    }
+  ]
+}

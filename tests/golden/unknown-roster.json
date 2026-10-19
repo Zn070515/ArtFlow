@@ -1,0 +1,92 @@
+{
+  "schema": "artflow.golden.fixture.v1",
+  "id": "unknown-roster",
+  "invariants": ["LIFE-07", "CONC-01"],
+  "description": "报名名单未定时是 UNKNOWN 而不是 0：赛制可以冻结（DEFERRED 可见），但开始执行必须 fail closed；名单确定后同一命令通过。",
+  "facts": {
+    "activity": {
+      "key": "act-2026",
+      "phase": "registration_open",
+      "lifecycle": "formal",
+      "approved_registrations": 0,
+      "entry_roster_final": false
+    },
+    "ruleset": {
+      "version": "v1",
+      "status": "draft",
+      "quota": 10,
+      "binding_revision": 1
+    },
+    "round": {"key": "round-1", "status": "draft", "judge_count": 5, "minimum_judges": 3},
+    "judges": ["judge-j1", "judge-j2", "judge-j3", "judge-j4", "judge-j5"]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "command": "compile_ruleset",
+      "actor": "staff:fixture-staff",
+      "input": {"ruleset": "v1", "roster_final": false},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["RulesetCompiled"],
+        "read_model": {
+          "error_count": 0,
+          "deferred_codes": ["QUOTA_UNVERIFIABLE", "VOTE_ROSTER_DEFERRED"]
+        }
+      }
+    },
+    {
+      "step": 2,
+      "command": "freeze_ruleset",
+      "actor": "admin:fixture-admin",
+      "input": {"ruleset": "v1", "expected_binding_revision": 1},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["RulesetFrozen"],
+        "read_model": {"ruleset_status": "frozen", "is_current": true}
+      }
+    },
+    {
+      "step": 3,
+      "command": "prepare_round",
+      "actor": "staff:fixture-staff",
+      "input": {"round": "round-1", "ruleset": "v1"},
+      "expect": {
+        "outcome": "rejected",
+        "reason": "ROSTER_UNKNOWN",
+        "side_effects": "none"
+      }
+    },
+    {
+      "step": 4,
+      "command": "set_roster_final",
+      "actor": "system:registration-closed",
+      "input": {
+        "activity": "act-2026",
+        "approved_registrations": 15,
+        "phase": "rehearsal",
+        "entry_roster_final": true
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["RosterFinalized"],
+        "read_model": {"entry_roster_final": true, "approved_registrations": 15}
+      }
+    },
+    {
+      "step": 5,
+      "command": "prepare_round",
+      "actor": "staff:fixture-staff",
+      "input": {"round": "round-1", "ruleset": "v1"},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["RoundPrepared"],
+        "read_model": {
+          "round_status": "prepared",
+          "round_entries": 15,
+          "assigned_judges": 5
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "schema": "artflow.golden.fixture.v1",
+  "id": "static-artifact-identity",
+  "invariants": ["DEPL-02", "DEPL-04"],
+  "description": "新镜像启动后客户端产物必须与镜像一致；持久卷里的旧 bundle 不能覆盖新 bundle；渲染错误页的 worker 必须能读到 manifest。",
+  "facts": {
+    "image": {
+      "revision": "sha-2",
+      "static_bundle_hash": "bundle-new",
+      "static_manifest_present": true
+    },
+    "static_volume": {
+      "static_bundle_hash": "bundle-old",
+      "static_manifest_present": true
+    },
+    "workers": {
+      "web": {"mounts_static_volume": true},
+      "media": {"mounts_static_volume": false},
+      "realtime": {"mounts_static_volume": false}
+    }
+  },
+  "steps": [
+    {
+      "step": 1,
+      "command": "start_web_process",
+      "actor": "system:entrypoint",
+      "input": {"collect_static_clear": false},
+      "expect": {
+        "outcome": "rejected",
+        "reason": "STALE_STATIC_ARTIFACT",
+        "side_effects": "none"
+      }
+    },
+    {
+      "step": 2,
+      "command": "start_web_process",
+      "actor": "system:entrypoint",
+      "input": {"collect_static_clear": true},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["StaticAssetsCollected"],
+        "read_model": {
+          "served_bundle_hash": "bundle-new",
+          "served_manifest_present": true
+        }
+      }
+    },
+    {
+      "step": 3,
+      "command": "start_media_worker",
+      "actor": "system:entrypoint",
+      "input": {"static_manifest_present": false},
+      "expect": {
+        "outcome": "rejected",
+        "reason": "STATIC_MANIFEST_MISSING",
+        "side_effects": "none"
+      }
+    },
+    {
+      "step": 4,
+      "command": "start_media_worker",
+      "actor": "system:entrypoint",
+      "input": {"static_manifest_present": true},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["MediaWorkerReady"],
+        "read_model": {"error_page_status": 404, "render_uses_manifest": true}
+      }
+    },
+    {
+      "step": 5,
+      "command": "render_public_error",
+      "actor": "public:anonymous",
+      "input": {"status": 404, "worker": "media"},
+      "expect": {
+        "outcome": "accepted",
+        "events": ["ErrorPageRendered"],
+        "read_model": {"http_status": 404, "body_source": "image-static"}
+      }
+    }
+  ]
+}
