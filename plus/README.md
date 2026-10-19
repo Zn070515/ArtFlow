@@ -43,26 +43,51 @@ pnpm -C plus run check   # tsc --noEmit
 pnpm -C plus run test    # Vitest + fast-check
 ```
 
+The PostgreSQL-backed `packages/db` tests run when a database is reachable and
+are skipped otherwise. Against the local Docker database:
+
+```powershell
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+pnpm -C plus run test
+```
+
 The root `check:plus` / `test:plus` scripts delegate to the same pnpm commands.
-The Gates workflow runs both on every `artflow-plus` push/PR.
+The Gates workflow runs both on every `artflow-plus` push/PR and supplies the
+same variable from its PostgreSQL service.
 
-## Target layout
+## Capability composition (M2)
 
-Only `packages/domain` exists today. The planned shape is:
+`packages/domain/src/registry.ts` is the capability registry:
+identity/version/dependencies/conflicts/definition contract/commands/queries/
+events/permissions/surfaces. `packs.ts` turns an opinionated composition plus
+Guided Mode answers into one compilable Definition Package.
+
+```text
+CapabilityRegistry.validateComposition({ enable, disable })
+  → dependency closure, conflict diagnostics, merged scope-conflict policy
+
+instantiateActivityPack(SINGER_COMPETITION_PACK, registry, { answers })
+  → enabled capabilities + compilable empty definition
+```
+
+The default registry exposes only capabilities implemented today
+(`competition`). A Pack that references a capability scheduled for M4-M7 fails
+with `CAPABILITY_UNKNOWN` diagnostics rather than producing placeholders.
+
+## Current layout
 
 ```text
 plus/
 ├── apps/
-│   ├── api/          # Fastify composition root, HTTP contracts
-│   ├── worker/       # outbox/projections/exports (pg-boss)
-│   └── web/          # React + Vite workbench and audience pages
+│   └── api/          # Fastify composition root, HTTP contracts
 ├── packages/
-│   ├── domain/       # pure commands, state machines, capability compilers
-│   ├── contracts/    # TypeBox/JSON Schema, command/query/event contracts
-│   ├── db/           # Kysely schema access and module-owned migrations
-│   └── ui/           # shared React components and design tokens
+│   ├── domain/       # engine kernel, capability registry, packs, compilers
+│   ├── contracts/    # TypeBox/JSON Schema, command/event/pack contracts
+│   └── db/           # Kysely schema access and module-owned migrations
 └── README.md
 ```
+
+Planned but not created yet: `apps/worker`, `apps/web`, `packages/ui`.
 
 Tooling baseline (ADR-0002): Node 24 LTS (`.node-version` 24.22.0), TypeScript 7
 strict, pnpm 12.14.0 workspaces, Fastify 5 + TypeBox, Kysely, pg-boss,
@@ -85,9 +110,9 @@ read each other's tables.
 
 ## Next slices
 
-1. Competition capability compiler nodes (ROSTER/ROUND/AGGREGATE/SELECT/OUTPUT)
-   and their own property tests; these are not Engine node types.
-2. `packages/contracts` with TypeBox/JSON Schema command, error and event envelopes.
-3. `apps/api` with the command envelope, error mapping and OpenAPI.
-4. `packages/db` with the first aggregate schema and outbox.
-5. The registration/roster slice, reusing `unknown-roster` golden.
+1. M3 execution runtime: session projections, outbox worker, recovery, realtime
+   degradation.
+2. M4 Registration / Questionnaire / Materials, reusing `unknown-roster` and the
+   pack questions introduced in M2.
+3. Register each implemented capability in the default registry and let the
+   Singer Pack instantiate completely; no engine change should be required.

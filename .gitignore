@@ -42,6 +42,9 @@ Thumbs.db
 # Node / Tailwind
 node_modules/
 dist/
+# The root npm workspace is the v1 line; pnpm only manages plus/, and pnpm 12
+# writes a package-manager lockfile at the root when invoked there.
+/pnpm-lock.yaml
 # ArtFlow-Plus build output
 plus/packages/domain/dist/
 !static/dist/

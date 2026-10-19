@@ -7,6 +7,7 @@ import type {
   CompiledCapabilityPlan,
 } from "../model.js";
 import { deepFreeze } from "../model.js";
+import type { CapabilityRegistration } from "../registry.js";
 
 /**
  * Competition owns this language. The Activity compiler only sees the opaque
@@ -191,3 +192,35 @@ export const competitionCompiler: CapabilityCompiler = {
   capabilityKey: "competition",
   compile: compileCompetitionDefinition,
 };
+
+/**
+ * The unconfigured shape a Pack may compile before anybody has designed the
+ * rounds: one roster and one result, with nothing in between. It is a valid
+ * definition, not a placeholder the competition compiler would refuse.
+ */
+export function createEmptyCompetitionDefinition(): CapabilityDefinition {
+  return createCompetitionDefinition(
+    [
+      { key: "roster", type: "roster" },
+      { key: "result", type: "output" },
+    ],
+    [{ from: "roster", to: "result" }],
+  );
+}
+
+export const competitionCapability: CapabilityRegistration = deepFreeze({
+  manifest: {
+    identity: "competition",
+    version: "1",
+    dependencies: [],
+    conflicts: [],
+    definitionSchemaVersion: 1,
+    commands: ["competition.configure"],
+    queries: ["competition.describe"],
+    events: ["CompetitionConfigured"],
+    permissions: ["competition.manage"],
+    surfaces: ["studio", "ops", "live"],
+  },
+  compiler: competitionCompiler,
+  emptyDefinition: createEmptyCompetitionDefinition,
+});

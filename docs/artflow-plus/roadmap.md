@@ -14,7 +14,7 @@
 
 **出口**：Gates 在 `artflow-plus` 常绿；golden 结构校验通过。
 
-## M1 — Engine Kernel（进行中）
+## M1 — Engine Kernel（已完成）
 
 - 薄 Activity：DRAFT → ACTIVE → CLOSED → ARCHIVED；enabled capabilities；
   active definition version。
@@ -32,20 +32,28 @@
 fast-check 已迁移，属性测试覆盖 hash 稳定性、陈旧 revision、closed/archived
 活动、同 scope 双 session、scope 冲突隔离。
 
-## M2 — Capability Composition 与 Activity Packs
+## M2 — Capability Composition 与 Activity Packs（已完成，2026-10-19）
 
-- 工具链：pnpm workspace + Vitest/fast-check 已在 M1 落地；M2 加入 `packages/contracts`
-  （TypeBox/JSON Schema）、`apps/api`（Fastify 5 + OpenAPI）、`packages/db`
-  （Kysely + module-owned migrations）。
-- Capability 注册表：identity/version/dependencies/conflicts/definition contract/
-  commands/queries/events/permissions/surfaces。
-- Activity Pack：Registration+Questionnaire+Materials+Competition+Evaluation+
-  Voting+Publishing+Archive（Singer Competition Pack）等组合与默认值。
-- Pack 的引导（Guided Mode）与兼容性校验；禁用 capability 时的依赖处理。
-- 结构门禁：capability 不得导入其他 capability 的 persistence。
+- 工具链：`packages/contracts`（TypeBox/JSON Schema）、`apps/api`（Fastify 5 +
+  OpenAPI）、`packages/db`（Kysely + module-owned migrations）。
+- Capability 注册表（`plus/packages/domain/src/registry.ts`）：identity/version/
+  dependencies/conflicts/definition contract/commands/queries/events/permissions/
+  surfaces；组装期拒绝重复 identity、compiler 错配、未知依赖与自引用。
+- Activity Pack（`packs.ts`）：Singer Competition Pack 等组合与默认值；Guided
+  Mode 问题映射到 capability；Pack 只产出 Definition Package，不是 Activity
+  子类。
+- 组合校验：依赖传递展开；禁用仍被依赖的 capability、互斥 capability、未知
+  capability 都产生带 code/path 的诊断；scope 冲突策略由参与组合的 capability
+  合并。
+- 结构门禁 GATE-PLUS-BOUNDARY-01：capability 不得导入其他 capability 的内部
+  文件或 persistence；engine assembly 不得硬编码具体 capability。
+- API：`GET /api/capabilities`、`GET /api/packs`、
+  `POST /api/packs/:id/instantiate`；未实现的 capability 以诊断返回，不生成
+  半启用的占位 Pack。
 
-**出口**：能用一个 Pack 生成可编译的空定义；依赖/冲突诊断正确；Gate 检查
-capability 边界。
+**出口**：Singer Pack 在完整注册表上生成可编译的空定义；依赖/冲突诊断正确；
+Gate 检查 capability 边界。真实 Registration/Evaluation 等 capability 仍由
+M4-M7 实现，默认注册表只暴露已实现的 `competition`。
 
 ## M3 — Execution Runtime
 

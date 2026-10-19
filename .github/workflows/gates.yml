@@ -19,7 +19,23 @@ jobs:
   gates:
     name: Structural and golden gates
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: artflow
+          POSTGRES_PASSWORD: artflow_dev
+          POSTGRES_DB: artflow_plus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U artflow -d artflow_plus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      ARTFLOW_PLUS_DATABASE_URL: postgresql://artflow:artflow_dev@127.0.0.1:5432/artflow_plus
     steps:
       - name: Check out source
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
