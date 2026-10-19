@@ -17,6 +17,23 @@
 - `release/1.x` 暂不单独创建：在 `main` 仍是 1.x 生产线期间它与 `main` 重复；
   等 Plus 准备接管 `main` 时再从当时的 1.x 末端切出长期维护分支。
 
+## 规划基线（2026-10-19）
+
+| 内容 | 位置 |
+| --- | --- |
+| 产品目标与范围 | [goal.md](goal.md) |
+| 里程碑与出口条件 | [roadmap.md](roadmap.md) |
+| 目标架构与模块边界 | [architecture/target](../architecture/target/README.md) |
+| 架构决策 | [architecture/adr](../architecture/adr/README.md) |
+| 领域模型 | [domains](../domains/) |
+| 业务不变量（54 条） | [invariants](../invariants/README.md) |
+| 真实事故库 | [incidents](../incidents/) |
+| 结构门禁 | [gates](../gates/README.md) |
+| Golden fixtures | [tests/golden](../../tests/golden/README.md) |
+| 497 条 fix 的经验 | [analysis/fix-lessons.md](analysis/fix-lessons.md) |
+| 重构前待决问题 | [open-questions.md](open-questions.md) |
+| PR 审查清单 | [review-checklist.md](review-checklist.md) |
+
 ## 修复如何向前传播
 
 不要机械 merge `main` → `artflow-plus`。按事故性质分三类：
@@ -29,7 +46,7 @@
 3. **部署事故**（例如持久化 `STATIC_ROOT` 让旧 JS 覆盖新镜像）：把事故提炼成部署
    不变量（“部署的新版本必须能证明客户端产物与服务器版本一致”），不要求搬运旧实现。
 
-## M0：Legacy Extraction（先提炼，再实现）
+## M0：Legacy Extraction（已完成）
 
 M0 不写 React，也不删旧代码。目标是把 v1 的真实业务知识变成新架构可以依赖的资产：
 

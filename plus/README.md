@@ -36,3 +36,42 @@ npm run test:plus    # compile and run the node:test suite
 ```
 
 The Gates workflow runs both on every `artflow-plus` push/PR.
+
+## Target layout
+
+Only `packages/domain` exists today. The planned shape is:
+
+```text
+plus/
+├── apps/
+│   ├── api/          # Fastify composition root, HTTP contracts
+│   ├── worker/       # outbox/projections/exports (pg-boss)
+│   └── web/          # React + Vite workbench and audience pages
+├── packages/
+│   ├── domain/       # pure commands, state machines, compiler
+│   ├── contracts/    # command/query/event schemas, error codes
+│   ├── db/           # Drizzle schema and migrations
+│   └── ui/           # shared React components and design tokens
+└── README.md
+```
+
+Modules stay separate inside `packages/domain` (activity, definition,
+registration, evaluation, voting, ticketing, results, archive) and may not
+read each other's tables.
+
+## Planning baseline
+
+- Product goal: `docs/artflow-plus/goal.md`
+- Roadmap: `docs/artflow-plus/roadmap.md`
+- Target architecture: `docs/architecture/target/README.md`
+- ADRs: `docs/architecture/adr/`
+- Invariants: `docs/invariants/`
+- Golden fixtures: `tests/golden/`
+- Gates: `docs/gates/`
+
+## Next slices
+
+1. Compiler nodes (ROSTER/ROUND/AGGREGATE/SELECT/OUTPUT) + property tests.
+2. `apps/api` with the command envelope, error mapping and OpenAPI.
+3. `packages/db` with the first aggregate schema and outbox.
+4. The registration/roster slice, reusing `unknown-roster` golden.
