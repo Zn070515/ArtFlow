@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import fc from "fast-check";
+import { expect, it } from "vitest";
 
 import {
   activateActivity,
@@ -62,6 +62,7 @@ const COMPILERS: readonly CapabilityCompiler[] = [
   competitionCompiler,
   passthroughCompiler("registration"),
   passthroughCompiler("voting"),
+  passthroughCompiler("archive"),
 ];
 
 function definitionPackage(
@@ -92,15 +93,12 @@ function activeActivity(
 function compiledPackage(pkg: ActivityDefinitionPackage): CompiledActivityDefinition {
   const result = compileActivityDefinitionPackage(pkg, COMPILERS);
   if (!result.ok) {
-    assert.fail(`expected a valid package, got ${JSON.stringify(result.issues)}`);
+    throw new Error(`expected a valid package, got ${JSON.stringify(result.issues)}`);
   }
   return result;
 }
 
-function draftWith(
-  activity: Activity,
-  pkg: ActivityDefinitionPackage,
-): DefinitionDraft {
+function draftWith(activity: Activity, pkg: ActivityDefinitionPackage): DefinitionDraft {
   const draft = createDefinitionDraft(activity);
   return updateDefinitionDraft(draft, draft.revision, pkg);
 }
@@ -147,25 +145,24 @@ function expectCode(action: () => unknown, code: DomainErrorCode): void {
   } catch (error) {
     caught = error;
   }
-  if (!(caught instanceof DomainError)) {
-    assert.fail(`expected DomainError ${code}`);
-  }
-  assert.equal(caught.code, code);
+  expect(caught).toBeInstanceOf(DomainError);
+  if (!(caught instanceof DomainError)) return;
+  expect(caught.code).toBe(code);
 }
 
-test("activity lifecycle: draft → active → closed → archived", () => {
+it("activity lifecycle: draft → active → closed → archived", () => {
   const draft = createActivity({ id: "act-1", title: "2026", capabilities: ["registration"] });
   const active = activateActivity(draft, draft.revision);
   const closed = closeActivity(active, active.revision, []);
   const archived = archiveActivity(closed, closed.revision);
 
-  assert.equal(active.status, "active");
-  assert.equal(closed.status, "closed");
-  assert.equal(archived.status, "archived");
+  expect(active.status).toBe("active");
+  expect(closed.status).toBe("closed");
+  expect(archived.status).toBe("archived");
   expectCode(() => archiveActivity(active, active.revision), "INVALID_TRANSITION");
 });
 
-test("activity → package draft → compile → release → execution session", () => {
+it("activity → package draft → compile → release → execution session", () => {
   const activity = activeActivity();
   const pkg = definitionPackage();
   const draft = draftWith(activity, pkg);
@@ -178,29 +175,31 @@ test("activity → package draft → compile → release → execution session",
     compiled,
     releasedAt: "2026-10-19T10:00:00Z",
   });
-  assert.equal(release.version.version, 1);
-  assert.equal(release.version.contentHash, compiled.contentHash);
-  assert.equal(Object.keys(release.version.capabilities).sort().join(","), "competition,registration");
-  assert.equal(release.activity.activeDefinitionVersion, 1);
-  assert.ok(Object.isFrozen(release.version));
+  expect(release.version.version).toBe(1);
+  expect(release.version.contentHash).toBe(compiled.contentHash);
+  expect(Object.keys(release.version.capabilities).sort().join(",")).toBe(
+    "competition,registration",
+  );
+  expect(release.activity.activeDefinitionVersion).toBe(1);
+  expect(Object.isFrozen(release.version)).toBe(true);
 
   const run = session(release.activity, release.version, "stage", "formal", [], {});
-  assert.equal(run.status, "running");
-  assert.equal(run.scope, "stage");
-  assert.equal(run.mode, "formal");
-  assert.equal(closeExecutionSession(run, 0).status, "closed");
+  expect(run.status).toBe("running");
+  expect(run.scope).toBe("stage");
+  expect(run.mode).toBe("formal");
+  expect(closeExecutionSession(run, 0).status).toBe("closed");
 });
 
-test("several execution scopes may run at the same time", () => {
+it("several execution scopes may run at the same time", () => {
   const activity = activeActivity();
   const release = released(activity);
   const judging = session(release.activity, release.version, "judging", "formal", [], {});
   const checkin = session(release.activity, release.version, "checkin", "formal", [judging], {});
-  assert.equal(judging.status, "running");
-  assert.equal(checkin.status, "running");
+  expect(judging.status).toBe("running");
+  expect(checkin.status).toBe("running");
 });
 
-test("declared conflicting scopes cannot overlap", () => {
+it("declared conflicting scopes cannot overlap", () => {
   const activity = activeActivity();
   const release = released(activity);
   const judging = session(release.activity, release.version, "judging", "formal", [], {
@@ -215,7 +214,7 @@ test("declared conflicting scopes cannot overlap", () => {
   );
 });
 
-test("formal and non-formal execution cannot share a conflicting scope", () => {
+it("formal and non-formal execution cannot share a conflicting scope", () => {
   const activity = activeActivity();
   const release = released(activity);
   const formal = session(release.activity, release.version, "stage", "formal", [], {
@@ -230,7 +229,7 @@ test("formal and non-formal execution cannot share a conflicting scope", () => {
   );
 });
 
-test("a scope may only have one running session", () => {
+it("a scope may only have one running session", () => {
   const activity = activeActivity();
   const release = released(activity);
   const first = session(release.activity, release.version, "stage", "formal", [], {});
@@ -240,7 +239,7 @@ test("a scope may only have one running session", () => {
   );
 });
 
-test("closing an activity requires every execution session to be closed", () => {
+it("closing an activity requires every execution session to be closed", () => {
   const activity = activeActivity();
   const release = released(activity);
   const running = session(release.activity, release.version, "stage", "formal", [], {});
@@ -250,10 +249,10 @@ test("closing an activity requires every execution session to be closed", () => 
   );
   const closedRun = closeExecutionSession(running, 0);
   const closedActivity = closeActivity(release.activity, release.activity.revision, [closedRun]);
-  assert.equal(closedActivity.status, "closed");
+  expect(closedActivity.status).toBe("closed");
 });
 
-test("the package compiler refuses a capability with a cycle", () => {
+it("the package compiler refuses a capability with a cycle", () => {
   const broken = createCompetitionDefinition(
     [
       { key: "roster", type: "roster" },
@@ -275,46 +274,50 @@ test("the package compiler refuses a capability with a cycle", () => {
     },
     COMPILERS,
   );
-  assert.equal(result.ok, false);
+  expect(result.ok).toBe(false);
   if (result.ok) return;
-  assert.ok(result.issues.some((item) => item.code === "CAPABILITY_CYCLE"));
-  assert.ok(result.issues.some((item) => item.path.startsWith("capabilities.competition.")));
+  expect(result.issues.some((item) => item.code === "CAPABILITY_CYCLE")).toBe(true);
+  expect(
+    result.issues.some((item) => item.path.startsWith("capabilities.competition.")),
+  ).toBe(true);
 });
 
-test("a capability without a registered compiler is refused", () => {
+it("a capability without a registered compiler is refused", () => {
   const result = compileActivityDefinitionPackage(
     definitionPackage(["competition", "scheduling"], []),
     COMPILERS,
   );
-  assert.equal(result.ok, false);
+  expect(result.ok).toBe(false);
   if (result.ok) return;
-  assert.ok(
+  expect(
     result.issues.some(
       (item) =>
-        item.code === "CAPABILITY_COMPILER_MISSING" &&
-        item.path === "capabilities.scheduling",
+        item.code === "CAPABILITY_COMPILER_MISSING" && item.path === "capabilities.scheduling",
     ),
-  );
+  ).toBe(true);
 });
 
-test("the package compiler requires at least one capability", () => {
+it("the package compiler requires at least one capability", () => {
   const result = compileActivityDefinitionPackage(definitionPackage([]), COMPILERS);
-  assert.equal(result.ok, false);
+  expect(result.ok).toBe(false);
   if (result.ok) return;
-  assert.ok(result.issues.some((item) => item.code === "NO_CAPABILITIES"));
+  expect(result.issues.some((item) => item.code === "NO_CAPABILITIES")).toBe(true);
 });
 
-test("a binding must name an existing capability", () => {
+it("a binding must name an existing capability", () => {
   const result = compileActivityDefinitionPackage(
-    definitionPackage(["competition"], [{ from: "registration", to: "competition", kind: "roster" }]),
+    definitionPackage(
+      ["competition"],
+      [{ from: "registration", to: "competition", kind: "roster" }],
+    ),
     COMPILERS,
   );
-  assert.equal(result.ok, false);
+  expect(result.ok).toBe(false);
   if (result.ok) return;
-  assert.ok(result.issues.some((item) => item.code === "BINDING_UNKNOWN_CAPABILITY"));
+  expect(result.issues.some((item) => item.code === "BINDING_UNKNOWN_CAPABILITY")).toBe(true);
 });
 
-test("the package hash ignores capability and binding input order", () => {
+it("the package hash ignores capability and binding input order", () => {
   const forward = definitionPackage(["registration", "competition"], [
     { from: "registration", to: "competition", kind: "roster" },
     { from: "competition", to: "registration", kind: "result" },
@@ -324,25 +327,25 @@ test("the package hash ignores capability and binding input order", () => {
     capabilities: { competition: capabilityDefinition(), registration: capabilityDefinition() },
     bindings: [...(forward.bindings ?? [])].reverse(),
   };
-  assert.equal(activityDefinitionPackageHash(forward), activityDefinitionPackageHash(reverse));
+  expect(activityDefinitionPackageHash(forward)).toBe(activityDefinitionPackageHash(reverse));
 });
 
-test("the competition compiler owns its language", () => {
+it("the competition compiler owns its language", () => {
   const result = competitionCompiler.compile(capabilityDefinition());
-  assert.equal(result.ok, true);
+  expect(result.ok).toBe(true);
   if (!result.ok) return;
-  assert.equal(result.capabilityKey, "competition");
+  expect(result.capabilityKey).toBe("competition");
   const artifact = result.artifact as { order: readonly string[] };
-  assert.deepEqual(artifact.order, ["roster", "round1", "result"]);
+  expect(artifact.order).toEqual(["roster", "round1", "result"]);
 });
 
-test("a stale draft revision is refused", () => {
+it("a stale draft revision is refused", () => {
   const activity = activeActivity();
   const draft = createDefinitionDraft(activity);
   expectCode(() => updateDefinitionDraft(draft, 99, definitionPackage()), "STALE_REVISION");
 });
 
-test("a compiled package from another draft cannot be released", () => {
+it("a compiled package from another draft cannot be released", () => {
   const activity = activeActivity();
   const firstPackage = definitionPackage();
   const draft = draftWith(activity, firstPackage);
@@ -363,7 +366,7 @@ test("a compiled package from another draft cannot be released", () => {
   );
 });
 
-test("release requires an active activity", () => {
+it("release requires an active activity", () => {
   const draftActivity = createActivity({
     id: "act-1",
     title: "2026",
@@ -384,7 +387,7 @@ test("release requires an active activity", () => {
   );
 });
 
-test("a package cannot include a capability the activity did not enable", () => {
+it("a package cannot include a capability the activity did not enable", () => {
   const activity = activeActivity(["competition"]);
   const pkg = definitionPackage(["registration", "competition"], []);
   const draft = draftWith(activity, pkg);
@@ -401,7 +404,7 @@ test("a package cannot include a capability the activity did not enable", () => 
   );
 });
 
-test("an execution session cannot bind a draft", () => {
+it("an execution session cannot bind a draft", () => {
   const activity = activeActivity();
   const draft = createDefinitionDraft(activity);
   expectCode(
@@ -419,16 +422,124 @@ test("an execution session cannot bind a draft", () => {
   );
 });
 
-test("a released package from another activity is refused", () => {
+it("a released package from another activity is refused", () => {
   const activity = activeActivity();
   const other = activateActivity(
-    createActivity({ id: "act-2", title: "Other", capabilities: ["registration", "competition"] }),
+    createActivity({
+      id: "act-2",
+      title: "Other",
+      capabilities: ["registration", "competition"],
+    }),
     0,
   );
   const release = released(activity);
-  expectCode(
-    () =>
-      session(other, release.version, "stage", "formal", [], {}, "session-1"),
-    "CROSS_ACTIVITY",
+  expectCode(() => session(other, release.version, "stage", "formal", [], {}, "session-1"), "CROSS_ACTIVITY");
+});
+
+// --- property tests (fast-check) ---
+
+it("property: package hash is independent of capability and binding order", () => {
+  fc.assert(
+    fc.property(
+      fc.uniqueArray(fc.constantFrom("registration", "competition", "voting", "archive"), {
+        minLength: 1,
+        maxLength: 4,
+      }),
+      (keys) => {
+        const capabilities = Object.fromEntries(
+          keys.map((key) => [key, capabilityDefinition()]),
+        ) as Record<string, CapabilityDefinition>;
+        const bindings = keys.slice(1).map((key, index) => ({
+          from: keys[index] ?? key,
+          to: key,
+          kind: "link",
+        }));
+        const forward: ActivityDefinitionPackage = {
+          schemaVersion: 1,
+          manifest: { key: "pkg", title: "property" },
+          capabilities,
+          bindings,
+        };
+        const reverse: ActivityDefinitionPackage = {
+          ...forward,
+          capabilities: Object.fromEntries(
+            [...keys].reverse().map((key) => [key, capabilityDefinition()]),
+          ) as Record<string, CapabilityDefinition>,
+          bindings: [...bindings].reverse(),
+        };
+        expect(activityDefinitionPackageHash(forward)).toBe(
+          activityDefinitionPackageHash(reverse),
+        );
+      },
+    ),
+  );
+});
+
+it("property: any mismatched revision is refused", () => {
+  const activity = activeActivity();
+  const draft = createDefinitionDraft(activity);
+  fc.assert(
+    fc.property(fc.integer({ min: 0, max: 10_000 }), (revision) => {
+      fc.pre(revision !== draft.revision);
+      expectCode(
+        () => updateDefinitionDraft(draft, revision, definitionPackage()),
+        "STALE_REVISION",
+      );
+    }),
+  );
+});
+
+it("property: closed or archived activities never start an execution", () => {
+  fc.assert(
+    fc.property(fc.constantFrom("closed", "archived"), (state) => {
+      const activity = activeActivity();
+      const release = released(activity);
+      const closed = closeActivity(release.activity, release.activity.revision, []);
+      const final =
+        state === "closed" ? closed : archiveActivity(closed, closed.revision);
+      expectCode(
+        () => session(final, release.version, "stage", "formal", [], {}),
+        "ACTIVITY_NOT_ACTIVE",
+      );
+    }),
+  );
+});
+
+it("property: two running sessions never share a scope", () => {
+  fc.assert(
+    fc.property(fc.constantFrom<ExecutionMode>("test", "rehearsal", "formal"), (mode) => {
+      const activity = activeActivity();
+      const release = released(activity);
+      const first = session(release.activity, release.version, "stage", mode, [], {});
+      expectCode(
+        () =>
+          session(release.activity, release.version, "stage", mode, [first], {}, "second"),
+        "SCOPE_ALREADY_RUNNING",
+      );
+    }),
+  );
+});
+
+it("property: declared conflicts reject or isolate the second scope", () => {
+  fc.assert(
+    fc.property(
+      fc.constantFrom<ExecutionMode>("test", "rehearsal", "formal"),
+      fc.constantFrom<ExecutionMode>("test", "rehearsal", "formal"),
+      (firstMode, secondMode) => {
+        const activity = activeActivity();
+        const release = released(activity);
+        const conflicts = { a: ["b"] };
+        const first = session(release.activity, release.version, "a", firstMode, [], conflicts);
+        const expected =
+          (firstMode === "formal") !== (secondMode === "formal")
+            ? "TEST_FORMAL_CONFLICT"
+            : "SCOPE_CONFLICT";
+        expectCode(
+          () =>
+            session(release.activity, release.version, "b", secondMode, [first], conflicts, "second"),
+          expected,
+        );
+      },
+    ),
   );
 });

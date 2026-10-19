@@ -28,14 +28,15 @@
   不能重叠。
 - 领域错误码、OCC、冻结、单 scope 运行、Activity 关闭前必须关闭 sessions。
 
-**出口**：领域测试覆盖上述规则；`npm run check:plus`/`test:plus` 常绿；至少
-一条属性测试（hash 稳定性/状态机边）。
+**出口**：领域测试覆盖上述规则；`pnpm -C plus run check/test` 常绿；Vitest +
+fast-check 已迁移，属性测试覆盖 hash 稳定性、陈旧 revision、closed/archived
+活动、同 scope 双 session、scope 冲突隔离。
 
 ## M2 — Capability Composition 与 Activity Packs
 
-- 工具链收敛：pnpm workspaces、Vitest + fast-check、`apps/api`（Fastify 5 +
-  TypeBox/OpenAPI）、`packages/db`（Kysely + module-owned migrations）；M1 的
-  `node:test`/npm bootstrap 退出。
+- 工具链：pnpm workspace + Vitest/fast-check 已在 M1 落地；M2 加入 `packages/contracts`
+  （TypeBox/JSON Schema）、`apps/api`（Fastify 5 + OpenAPI）、`packages/db`
+  （Kysely + module-owned migrations）。
 - Capability 注册表：identity/version/dependencies/conflicts/definition contract/
   commands/queries/events/permissions/surfaces。
 - Activity Pack：Registration+Questionnaire+Materials+Competition+Evaluation+

@@ -35,13 +35,15 @@ CONC-01, AUTH-01) and the golden fixtures in `tests/golden/`.
 
 ## Run
 
-From the repository root:
+From the repository root (Node 24.22.0 is pinned in `.node-version`):
 
 ```powershell
-npm run check:plus   # tsc --noEmit
-npm run test:plus    # compile and run the node:test suite
+pnpm -C plus install --frozen-lockfile
+pnpm -C plus run check   # tsc --noEmit
+pnpm -C plus run test    # Vitest + fast-check
 ```
 
+The root `check:plus` / `test:plus` scripts delegate to the same pnpm commands.
 The Gates workflow runs both on every `artflow-plus` push/PR.
 
 ## Target layout
@@ -62,10 +64,10 @@ plus/
 └── README.md
 ```
 
-Tooling baseline (ADR-0002): Node 24 LTS, TypeScript 7 strict, pnpm workspaces,
-Fastify 5 + TypeBox, Kysely, pg-boss, React 19 + Vite 8, Vitest + fast-check,
-Playwright. M1 still runs through the root npm scripts and `node:test`; the
-pnpm/Vitest move lands with `apps/` in M2.
+Tooling baseline (ADR-0002): Node 24 LTS (`.node-version` 24.22.0), TypeScript 7
+strict, pnpm 12.14.0 workspaces, Fastify 5 + TypeBox, Kysely, pg-boss,
+React 19 + Vite 8, Vitest 5 + fast-check 4, Playwright. `pnpm-lock.yaml` is
+committed; `node:test` has been retired.
 
 Modules stay separate inside `packages/domain` (activity, definition,
 registration, evaluation, voting, ticketing, results, archive) and may not
@@ -83,7 +85,9 @@ read each other's tables.
 
 ## Next slices
 
-1. Compiler nodes (ROSTER/ROUND/AGGREGATE/SELECT/OUTPUT) + property tests.
-2. `apps/api` with the command envelope, error mapping and OpenAPI.
-3. `packages/db` with the first aggregate schema and outbox.
-4. The registration/roster slice, reusing `unknown-roster` golden.
+1. Competition capability compiler nodes (ROSTER/ROUND/AGGREGATE/SELECT/OUTPUT)
+   and their own property tests; these are not Engine node types.
+2. `packages/contracts` with TypeBox/JSON Schema command, error and event envelopes.
+3. `apps/api` with the command envelope, error mapping and OpenAPI.
+4. `packages/db` with the first aggregate schema and outbox.
+5. The registration/roster slice, reusing `unknown-roster` golden.

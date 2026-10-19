@@ -11,6 +11,9 @@ v2 需要异步任务（投影、导出、归档、通知、清理），同时�
 ## 决策
 
 - **PostgreSQL 是唯一事实源**；所有命令在单事务内写业务表与 outbox 事件。
+- 本地开发使用 **PostgreSQL 18.6**（Docker，`localhost:5433`，独立卷
+  `artflow-plus-postgres`），与 v1 的 PostgreSQL 16 / 5432 隔离；不在 Windows
+  裸装数据库。
 - 异步 worker 使用 **pg-boss**（Postgres-backed job queue）消费 outbox/任务；
   Redis 仅用于实时广播等可降级能力。pg-boss 要求 Node 22.12+/PostgreSQL 13+；
   baseline（Node 24 LTS + PostgreSQL）完全覆盖。

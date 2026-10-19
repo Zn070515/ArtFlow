@@ -35,7 +35,7 @@
 ## 测试与门禁
 
 - [ ] 领域单元 + 至少一个反例；适用的 golden fixture 已更新并通过。
-- [ ] `npm run check:plus` / `test:plus` 通过。
+- [ ] `pnpm -C plus run check` / `test` 通过（Node 24.22.0；Vitest + fast-check）。
 - [ ] `uv run pytest tests/gates -q` 通过；没有新增 allowlist 例外。
 - [ ] 结构/类型检查清单没有新增遗漏（pyright/ruff/mypy/tsconfig/Tailwind）。
 

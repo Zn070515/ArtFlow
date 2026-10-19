@@ -12,9 +12,9 @@ v2 需要类型化领域内核、可共享的契约、现代前端、透明的�
 
 | 层 | 选型 |
 | --- | --- |
-| Runtime | **Node.js 24 LTS** |
+| Runtime | **Node.js 24.22.0 LTS**（`.node-version`） |
 | Language | **TypeScript 7.x，strict** |
-| Workspace | **pnpm workspaces**（M2 引入；M1 bootstrap 仍用根 npm 脚本） |
+| Workspace | **pnpm 12.14.0 workspaces**（`plus/`，已引入） |
 | 架构 | **Modular Monolith**（ADR-0001） |
 | HTTP | **Fastify 5**，薄 adapter + composition root |
 | API Schema | **TypeBox / JSON Schema**（运行时校验、TS 推断、序列化、OpenAPI） |
@@ -27,7 +27,7 @@ v2 需要类型化领域内核、可共享的契约、现代前端、透明的�
 | Server state | **TanStack Query** |
 | Router | **TanStack Router** |
 | E2E | **Playwright** |
-| Unit / contract | **Vitest + fast-check**（M1 用 `node:test` 完成 bootstrap，M2 收敛） |
+| Unit / contract | **Vitest 5 + fast-check 4**（已迁移，24 个测试） |
 | Realtime | HTTP authority + realtime projection；SSE/WS 细节后定（ADR-0008） |
 
 ## 理由
@@ -51,8 +51,9 @@ v2 需要类型化领域内核、可共享的契约、现代前端、透明的�
 
 ## 后果
 
-- M1 的 `plus/packages/domain` 继续用根 `npm` + `tsc` + `node:test`；M2 引入
-  `pnpm-workspace.yaml`、`apps/api`、`packages/db`、Vitest/fast-check。
+- `plus/` 已是 pnpm workspace（`plus/pnpm-workspace.yaml`、`pnpm-lock.yaml`），
+  Node 由 `.node-version` 固定为 24.22.0；根 `package.json` 的 `check:plus`/
+  `test:plus` 委托给 pnpm。M2 继续在此加入 `apps/api` 与 `packages/db`。
 - Domain 类型与 API Schema 分离；HTTP 层通过 TypeBox 校验后映射到领域命令。
 - Kysely 的 migration 由模块自己拥有；禁止跨模块表访问。
 - 任何基础选型变更必须新增 ADR，并说明对 ADR-0001/0003/0005 的影响。

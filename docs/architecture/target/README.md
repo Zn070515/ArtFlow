@@ -146,10 +146,10 @@ HTTP → 认证/限流 → command envelope（actor, activity, capability,
 
 ## 技术 Baseline
 
-Node 24 LTS、TypeScript 7 strict、pnpm workspaces、Fastify 5 + TypeBox/OpenAPI、
-PostgreSQL + Kysely + pg-boss（outbox）、React 19 + Vite 8 + TanStack Router/
-Query、Vitest + fast-check、Playwright。决策与理由见 ADR-0002/0003；换库走新
-ADR，不重开基础方向。
+Node 24.22.0 LTS、TypeScript 7 strict、pnpm 12.14.0 workspaces、Fastify 5 +
+TypeBox/OpenAPI、PostgreSQL 18.6（本地 Docker，5433）+ Kysely + pg-boss（outbox）、
+React 19 + Vite 8 + TanStack Router/Query、Vitest 5 + fast-check 4、Playwright。
+决策与理由见 ADR-0002/0003；换库走新 ADR，不重开基础方向。
 
 ## 部署与可靠性
 
