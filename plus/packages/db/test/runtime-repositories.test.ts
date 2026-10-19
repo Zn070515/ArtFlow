@@ -324,6 +324,49 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
     expect(projection?.blockedSequence).toBeUndefined();
   });
 
+  it("lists healthy partitions before blocked ones", async () => {
+    const blocked = await seedActivity();
+    const healthy = await seedActivity();
+    const append = (activityId: string, sessionId: string) =>
+      db.transaction().execute((trx) =>
+        appendEvent(trx, {
+          eventId: `evt-${randomUUID()}`,
+          type: "ExecutionSessionStarted",
+          occurredAt: "2026-10-19T10:00:00Z",
+          activityId,
+          aggregateType: "execution_session",
+          aggregateId: sessionId,
+          capability: "engine",
+          revision: 0,
+          mode: "formal",
+          scope: "stage",
+          payload: {
+            sessionId,
+            definitionVersion: 1,
+            contentHash: "hash",
+            scope: "stage",
+            mode: "formal",
+            openedAt: "2026-10-19T10:00:00Z",
+          },
+        }),
+      );
+    // The blocked partition has the older event, so id order alone would pick it.
+    const blockedSequence = await append(blocked, "session-blocked");
+    await append(healthy, "session-healthy");
+    await db.transaction().execute((trx) =>
+      blockExecutionProjection(trx, blocked, "formal", blockedSequence, "boom"),
+    );
+
+    // Other tests may leave pending partitions in this schema; only relative
+    // order matters here.
+    const partitions = await listPendingPartitions(db, 50);
+    const healthyIndex = partitions.findIndex((item) => item.activityId === healthy);
+    const blockedIndex = partitions.findIndex((item) => item.activityId === blocked);
+    expect(healthyIndex).toBeGreaterThanOrEqual(0);
+    expect(blockedIndex).toBeGreaterThanOrEqual(0);
+    expect(healthyIndex).toBeLessThan(blockedIndex);
+  });
+
   it("never lets an older projection overwrite a newer one", async () => {
     const activityId = await seedActivity();
     const state = {

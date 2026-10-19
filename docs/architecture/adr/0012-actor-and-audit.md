@@ -28,8 +28,8 @@ Evaluation / Voting 命令，最后再做一次全量横向返工；而且 Defin
   - API 默认使用显式 `SYSTEM_ACTOR`；
   - 测试可以注入固定 actor；
   - M4 起由本地会话派生，M8 再替换为 SSO provider。
-- `CommandMeta` 携带 actor；payload hash 包含 `actorId`，避免不同 actor 复用同一 command
-  结果。
+- `CommandMeta` 携带 actor；replay 时校验 receipt 上记录的 actor 一致，避免不同 actor
+  复用同一 command 结果。payload hash 的格式保持不变，升级前写入的 receipt 仍可重放。
 - 每个被接受的 command 在同一事务内写一条 `audit_entry`：
   `command_id / activity_id / capability / command_type / actor_id / actor_type / detail /
   created_at`。

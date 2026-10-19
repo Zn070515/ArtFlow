@@ -106,6 +106,14 @@ M1/M2 交付了纯领域内核、Capability Registry、Activity Pack 和 HTTP/DB
   retry、两个 relay 并发；DB 测试覆盖迁移、CAS、分区锁、死信阻塞/恢复。
 - **readiness**：`/readyz` 执行 `select 1` 并检查 0002/0003 迁移；`/healthz` 仍是进程存活。
 - **SSE**：轮询加 running flag，慢查询不会产生重复 frame。
+- **旧 release 兼容**：0003 为迁移前的 release 回填空快照；`startExecution` 检测到
+  全空快照时按迁移前的行为从 registry 推导 conflicts，不把“空”当成“没有冲突”。
+- **运维恢复入口**：`apps/worker` 提供 operator CLI
+  `ops retry --activity <id> --mode <mode>` 与 `ops rebuild ...`；不新增未认证的 HTTP 路由。
+  权限策略仍由 M4 的本地会话与 M8 的 SSO 提供。
+- **升级注意**：0003 不会把迁移前已存在的 dead letter 回填成 blocked 分区（Plus 尚未
+  部署）；若要在已有部署上升级，先显式 drain/repair 旧死信，再运行迁移。
+- **连接超时**：`createDb` 默认 5s 连接超时，避免 readiness 在数据库黑洞时挂起。
 
 ## 后果
 

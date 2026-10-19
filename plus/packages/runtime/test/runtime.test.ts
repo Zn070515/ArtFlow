@@ -371,6 +371,52 @@ describe.skipIf(!connectionString)("execution runtime on PostgreSQL", () => {
     });
   });
 
+  it("derives conflicts for a release backfilled by migration 0003", async () => {
+    const activityId = await createReleasedActivity();
+    // Simulate the empty snapshot migration 0003 backfills for older releases.
+    await db
+      .updateTable("definition_release")
+      .set({
+        execution_policy: JSON.stringify({
+          declaredScopes: [],
+          conflicts: {},
+          runtimeContractVersion: 1,
+        }),
+        capability_versions: JSON.stringify({}),
+      })
+      .where("activity_id", "=", activityId)
+      .execute();
+    await start(activityId, "stage", "formal");
+    await expect(start(activityId, "rehearsal", "formal")).rejects.toMatchObject({
+      code: "SCOPE_CONFLICT",
+    });
+  });
+
+  it("refuses to replay a command id claimed by another actor", async () => {
+    const commandId = `create-${randomUUID()}`;
+    await createActivity(db, registry, deps, {
+      commandId,
+      title: "Actor bound",
+      capabilities: ["competition"],
+    });
+    const otherActor: RuntimeDeps = {
+      ...deps,
+      actor: {
+        actorId: "mallory",
+        actorType: "user",
+        roles: [],
+        permissions: [],
+      },
+    };
+    await expect(
+      createActivity(db, registry, otherActor, {
+        commandId,
+        title: "Actor bound",
+        capabilities: ["competition"],
+      }),
+    ).rejects.toMatchObject({ code: "COMMAND_ID_CONFLICT" });
+  });
+
   it("replays an accepted create even when the registry would now reject it", async () => {
     const commandId = `create-${randomUUID()}`;
     const first = await createActivity(db, registry, deps, {

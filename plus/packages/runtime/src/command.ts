@@ -43,12 +43,14 @@ export async function executeCommand<T>(
   meta: CommandMeta,
   handler: (trx: Transaction<Database>) => Promise<CommandHandlerResult<T>>,
 ): Promise<CommandOutcome<T>> {
+  // The actor is checked against the stored receipt in claimCommand, not
+  // hashed here: keeping the hash format stable lets receipts written before
+  // actors existed still replay after an upgrade.
   const payloadHash = stableHash({
     commandType: meta.commandType,
     activityId: meta.activityId,
     capability: meta.capability,
     scope: meta.scope ?? null,
-    actorId: meta.actor.actorId,
     payload: meta.payload,
   });
 

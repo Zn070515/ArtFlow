@@ -15,14 +15,21 @@ export interface CreateDbOptions {
 }
 
 export function createDb(options: CreateDbOptions): Kysely<Database> {
-  const { connectionString, schema, max = 5, connectionTimeoutMillis } = options;
+  // A bounded connect timeout keeps readiness probes from hanging behind an
+  // unreachable database; callers may override it explicitly.
+  const {
+    connectionString,
+    schema,
+    max = 5,
+    connectionTimeoutMillis = 5_000,
+  } = options;
   if (schema !== undefined && !SAFE_SCHEMA.test(schema)) {
     throw new Error(`Unsafe schema name: ${schema}`);
   }
   const pool = new pg.Pool({
     connectionString,
     max,
-    ...(connectionTimeoutMillis === undefined ? {} : { connectionTimeoutMillis }),
+    connectionTimeoutMillis,
     options: schema === undefined ? undefined : `-c search_path=${schema}`,
   });
   return new Kysely<Database>({

@@ -124,6 +124,14 @@ the API uses an explicit system actor and tests inject one; actors are never rea
 from a request body. `/readyz` checks PostgreSQL and the required migrations;
 `/healthz` only reports process liveness.
 
+A blocked projection is recovered through the worker's operator CLI (there is no
+unauthenticated HTTP route):
+
+```powershell
+pnpm -C plus --filter @artflow-plus/worker ops retry   --activity <id> --mode formal
+pnpm -C plus --filter @artflow-plus/worker ops rebuild --activity <id> --mode formal
+```
+
 ## Current layout
 
 ```text

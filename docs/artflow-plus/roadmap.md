@@ -99,6 +99,8 @@ Registration/Evaluation/Voting 等 capability 仍由 M4-M7 实现。
 
 ## M4 — Registration / Questionnaire / Materials
 
+- **前置**：第一个真实 capability command 落地前，必须把本地会话派生的 ActorContext 与
+  命令级权限检查接上（M3.5 只固定了 actor/audit 数据模型，ADR-0012）。
 - 报名 DRAFT→OPEN→REVIEW→FINAL；问卷版本与文件槽位；受控媒体。
 - 名单 FINAL/UNKNOWN；执行边界 fail closed。
 - 从 v1 导入历史报名（可重放）。

@@ -9,6 +9,9 @@ import { deepFreeze } from "./model.js";
 export type CapabilitySurface = "studio" | "ops" | "live" | "portal";
 
 const SURFACES: ReadonlySet<string> = new Set(["studio", "ops", "live", "portal"]);
+/** Same contract as CapabilityManifestSchema.scopes and StartExecutionBody. */
+const SCOPE_PATTERN = /^[a-z][a-z0-9_-]*$/;
+const SCOPE_MAX_LENGTH = 100;
 
 /**
  * What a capability declares about itself (roadmap M2, ADR-0009). The manifest
@@ -170,6 +173,31 @@ export function createCapabilityRegistry(
             "CAPABILITY_SURFACE",
             `Capability ${manifest.identity} declares unknown surface ${surface}.`,
             `${path}.surfaces`,
+          ),
+        );
+      }
+    }
+    const scopes = manifest.scopes ?? [];
+    if (new Set(scopes).size !== scopes.length) {
+      issues.push(
+        issue(
+          "CAPABILITY_SCOPE",
+          `Capability ${manifest.identity} declares duplicate scopes.`,
+          `${path}.scopes`,
+        ),
+      );
+    }
+    for (const scope of scopes) {
+      if (
+        scope.length === 0 ||
+        scope.length > SCOPE_MAX_LENGTH ||
+        !SCOPE_PATTERN.test(scope)
+      ) {
+        issues.push(
+          issue(
+            "CAPABILITY_SCOPE",
+            `Capability ${manifest.identity} declares invalid scope ${scope}.`,
+            `${path}.scopes`,
           ),
         );
       }

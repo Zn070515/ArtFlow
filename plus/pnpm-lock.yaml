@@ -221,6 +221,9 @@ importers:
       '@artflow-plus/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@artflow-plus/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@artflow-plus/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

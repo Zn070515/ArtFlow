@@ -36,6 +36,7 @@ function stubCapability(
     dependencies?: readonly string[];
     conflicts?: readonly string[];
     surfaces?: readonly CapabilitySurface[];
+    scopes?: readonly string[];
   } = {},
 ): CapabilityRegistration {
   const manifest: CapabilityManifest = {
@@ -49,6 +50,7 @@ function stubCapability(
     events: [`${identity[0]?.toUpperCase() ?? "X"}${identity.slice(1)}Configured`],
     permissions: [`${identity}.manage`],
     surfaces: options.surfaces ?? ["studio"],
+    ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
   };
   return {
     manifest,
@@ -106,6 +108,24 @@ it("a registry refuses a duplicate capability identity", () => {
   expect(result.ok).toBe(false);
   if (result.ok) return;
   expect(codes(result.issues)).toContain("CAPABILITY_DUPLICATE");
+});
+
+it("a registry refuses manifest scopes the execution API can never send", () => {
+  const result = createCapabilityRegistry([
+    stubCapability("competition", { scopes: ["Stage"] }),
+  ]);
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(codes(result.issues)).toContain("CAPABILITY_SCOPE");
+});
+
+it("a registry refuses duplicate manifest scopes", () => {
+  const result = createCapabilityRegistry([
+    stubCapability("competition", { scopes: ["stage", "stage"] }),
+  ]);
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(codes(result.issues)).toContain("CAPABILITY_SCOPE");
 });
 
 it("a registry refuses a compiler that belongs to another capability", () => {

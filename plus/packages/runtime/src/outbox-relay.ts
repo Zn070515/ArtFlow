@@ -194,6 +194,15 @@ export async function rebuildExecutionProjection(
   mode: ExecutionMode,
 ): Promise<RebuildResult> {
   return db.transaction().execute(async (trx) => {
+    // The relay holds this same transaction-scoped lock while applying a
+    // partition. Rebuilding without it could force-write a snapshot that a
+    // concurrent relay pass has already superseded, dropping an event that is
+    // already marked published and will never be applied again.
+    if (!(await tryLockPartition(trx, partitionKey(activityId, mode)))) {
+      throw new Error(
+        `Projection ${activityId}/${mode} is being updated by the relay; retry the rebuild.`,
+      );
+    }
     await deleteExecutionProjection(trx, activityId, mode);
     const events = await readExecutionHistory(trx, activityId, mode);
     let state = emptyExecutionProjection(activityId, mode);

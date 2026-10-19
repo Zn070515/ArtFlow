@@ -139,13 +139,14 @@ export async function headSequence(
 export interface PendingPartition {
   readonly activityId: string | null;
   readonly mode: string | null;
-  readonly firstSequence: number;
 }
 
 /**
  * A projection partition is (activity, mode). The relay locks a partition
  * before claiming its events, so two relays can never apply event N+1 before
- * event N. Different partitions may still run concurrently.
+ * event N. Different partitions may still run concurrently. Healthy
+ * partitions come first: the relay skips blocked ones, and letting those fill
+ * the limit would starve every other partition once enough are blocked.
  */
 export async function listPendingPartitions(
   db: Kysely<Database>,
@@ -154,20 +155,21 @@ export async function listPendingPartitions(
   const result = await sql<{
     activity_id: string | null;
     mode: string | null;
-    first_sequence: string;
   }>`
-    select activity_id, mode, min(id) as first_sequence
-      from outbox
-     where published_at is null
-       and dead_lettered_at is null
-     group by activity_id, mode
-     order by min(id)
+    select o.activity_id, o.mode
+      from outbox o
+      left join execution_projection p
+        on p.activity_id = o.activity_id
+       and p.mode = o.mode
+     where o.published_at is null
+       and o.dead_lettered_at is null
+     group by o.activity_id, o.mode, p.status
+     order by coalesce(p.status = 'blocked', false), min(o.id)
      limit ${limit}
   `.execute(db);
   return result.rows.map((row) => ({
     activityId: row.activity_id,
     mode: row.mode,
-    firstSequence: Number(row.first_sequence),
   }));
 }
 

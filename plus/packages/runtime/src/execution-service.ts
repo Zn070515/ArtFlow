@@ -25,6 +25,7 @@ import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
+import { CompositionError } from "./errors.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand } from "./hash.js";
 
@@ -122,6 +123,24 @@ export async function startExecution(
           `Scope ${input.scope} is not declared by release ${release.version}.`,
         );
       }
+      // Migration 0003 backfills the snapshot of releases that predate it with
+      // empty values. An empty snapshot has no conflicts, so trusting it would
+      // silently drop the conflict policy those releases ran under; derive it
+      // from the registry exactly as the pre-snapshot runtime did.
+      const legacySnapshot =
+        Object.keys(release.capabilityVersions).length === 0 &&
+        release.executionPolicy.declaredScopes.length === 0 &&
+        Object.keys(release.executionPolicy.conflicts).length === 0;
+      let conflicts = release.executionPolicy.conflicts;
+      if (legacySnapshot) {
+        const composition = registry.validateComposition({
+          enable: activity.enabledCapabilities,
+        });
+        if (!composition.ok) {
+          throw new CompositionError(composition.issues);
+        }
+        conflicts = composition.plan.scopeConflicts;
+      }
       const existingSessions = await listRunningSessions(trx, input.activityId);
       const openedAt = deps.now();
       const session = startExecutionSession({
@@ -130,7 +149,7 @@ export async function startExecution(
         scope: input.scope,
         mode: input.mode,
         existingSessions,
-        conflicts: release.executionPolicy.conflicts,
+        conflicts,
         sessionId: idFromCommand("sess", input.commandId),
       });
       const saved = await insertSession(trx, session, openedAt);

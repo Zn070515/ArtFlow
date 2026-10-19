@@ -77,6 +77,11 @@ export async function claimCommand(
   if (existing.payload_hash !== input.payloadHash) {
     throw new CommandIdConflictError(input.commandId);
   }
+  // A command id belongs to the actor that first claimed it. Receipts written
+  // before actors existed (actor_id null) stay replayable.
+  if (existing.actor_id !== null && existing.actor_id !== input.actor.actorId) {
+    throw new CommandIdConflictError(input.commandId);
+  }
   if (existing.result === null) {
     throw new CommandInProgressError(input.commandId);
   }
