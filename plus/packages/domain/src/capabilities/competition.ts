@@ -26,16 +26,45 @@ export interface CompetitionEdge {
   readonly to: string;
 }
 
+export type CompetitionCompletionMode = "full_matrix" | "minimum_valid";
+export type CompetitionTiePolicy = "review";
+
+export interface CompetitionRoundDefinition {
+  readonly key: string;
+  readonly judgeCount: number;
+  readonly minimumJudges: number;
+  readonly completion: CompetitionCompletionMode;
+  readonly advanceCount?: number;
+  readonly scoringMethod?: "average" | "drop_high_low";
+}
+
+export interface CompetitionRubricCriterion {
+  readonly key: string;
+  readonly weight: number;
+  readonly maximum: number;
+  readonly minimum?: number;
+}
+
+export interface CompetitionRubricDefinition {
+  readonly criteria: readonly CompetitionRubricCriterion[];
+}
+
 export interface CompetitionDefinition {
   readonly schemaVersion: 1;
   readonly nodes: readonly CompetitionNode[];
   readonly edges: readonly CompetitionEdge[];
+  readonly rounds?: readonly CompetitionRoundDefinition[];
+  readonly rubric?: CompetitionRubricDefinition;
+  readonly tiePolicy?: CompetitionTiePolicy;
 }
 
 export interface CompiledCompetitionArtifact {
   readonly order: readonly string[];
   readonly nodes: readonly CompetitionNode[];
   readonly edges: readonly CompetitionEdge[];
+  readonly rounds: readonly CompetitionRoundDefinition[];
+  readonly rubric: CompetitionRubricDefinition;
+  readonly tiePolicy: CompetitionTiePolicy;
 }
 
 const NODE_TYPES: ReadonlySet<CompetitionNodeType> = new Set([
@@ -74,8 +103,9 @@ function asCompetitionDefinition(payload: unknown): CompetitionDefinition | null
 export function createCompetitionDefinition(
   nodes: readonly CompetitionNode[],
   edges: readonly CompetitionEdge[],
+  options: Pick<CompetitionDefinition, "rounds" | "rubric" | "tiePolicy"> = {},
 ): CapabilityDefinition {
-  const payload: CompetitionDefinition = { schemaVersion: 1, nodes, edges };
+  const payload: CompetitionDefinition = { schemaVersion: 1, nodes, edges, ...options };
   return { schemaVersion: 1, payload };
 }
 
@@ -151,6 +181,68 @@ export function compileCompetitionDefinition(
     issues.push(issue("NO_OUTPUT", "A definition needs at least one output node.", "nodes"));
   }
 
+  const roundNodes = new Set(
+    payload.nodes.filter((node) => node.type === "round").map((node) => node.key),
+  );
+  const configuredRounds = payload.rounds ?? [];
+  const roundKeys = new Set<string>();
+  for (const round of configuredRounds) {
+    if (!round.key.trim()) {
+      issues.push(issue("EMPTY_ROUND_KEY", "A round key cannot be empty.", "rounds"));
+      continue;
+    }
+    if (roundKeys.has(round.key)) {
+      issues.push(issue("DUPLICATE_ROUND", `Duplicate round key: ${round.key}.`, round.key));
+      continue;
+    }
+    roundKeys.add(round.key);
+    if (!roundNodes.has(round.key)) {
+      issues.push(issue("ROUND_NODE_REQUIRED", `Round ${round.key} is not declared as a round node.`, round.key));
+    }
+    if (!Number.isInteger(round.judgeCount) || round.judgeCount < 1) {
+      issues.push(issue("JUDGE_COUNT_INVALID", `Round ${round.key} needs a positive judge count.`, round.key));
+    }
+    if (!Number.isInteger(round.minimumJudges) || round.minimumJudges < 1 || round.minimumJudges > round.judgeCount) {
+      issues.push(issue("MINIMUM_JUDGES_INVALID", `Round ${round.key} has an invalid minimum judge count.`, round.key));
+    }
+    if (round.completion !== "full_matrix" && round.completion !== "minimum_valid") {
+      issues.push(issue("COMPLETION_MODE_INVALID", `Round ${round.key} has an invalid completion mode.`, round.key));
+    }
+    if (round.advanceCount !== undefined && (!Number.isInteger(round.advanceCount) || round.advanceCount < 0)) {
+      issues.push(issue("ADVANCE_COUNT_INVALID", `Round ${round.key} has an invalid advancement count.`, round.key));
+    }
+  }
+
+  const rubric = payload.rubric ?? { criteria: [] };
+  if (!Array.isArray(rubric.criteria)) {
+    issues.push(issue("RUBRIC_INVALID", "A rubric needs a criteria array.", "rubric.criteria"));
+  }
+  const criterionKeys = new Set<string>();
+  for (const criterion of rubric.criteria ?? []) {
+    if (!criterion.key.trim()) {
+      issues.push(issue("EMPTY_CRITERION_KEY", "A criterion key cannot be empty.", "rubric.criteria"));
+      continue;
+    }
+    if (criterionKeys.has(criterion.key)) {
+      issues.push(issue("DUPLICATE_CRITERION", `Duplicate criterion key: ${criterion.key}.`, criterion.key));
+      continue;
+    }
+    criterionKeys.add(criterion.key);
+    if (!Number.isFinite(criterion.weight) || criterion.weight <= 0) {
+      issues.push(issue("CRITERION_WEIGHT_INVALID", `Criterion ${criterion.key} needs a positive weight.`, criterion.key));
+    }
+    if (!Number.isFinite(criterion.maximum) || criterion.maximum <= 0) {
+      issues.push(issue("CRITERION_MAXIMUM_INVALID", `Criterion ${criterion.key} needs a positive maximum.`, criterion.key));
+    }
+    if (criterion.minimum !== undefined && (!Number.isFinite(criterion.minimum) || criterion.minimum < 0 || criterion.minimum > criterion.maximum)) {
+      issues.push(issue("CRITERION_MINIMUM_INVALID", `Criterion ${criterion.key} has an invalid minimum.`, criterion.key));
+    }
+  }
+  const tiePolicy = payload.tiePolicy ?? "review";
+  if (tiePolicy !== "review") {
+    issues.push(issue("TIE_POLICY_INVALID", "Only explicit review tie handling is supported.", "tiePolicy"));
+  }
+
   const queue = [...keys].filter((key) => (incoming.get(key) ?? 0) === 0).sort();
   const order: string[] = [];
   while (queue.length > 0) {
@@ -178,6 +270,11 @@ export function compileCompetitionDefinition(
     order,
     nodes: [...payload.nodes].sort(byKey).map((node) => ({ ...node })),
     edges: [...payload.edges].sort(byEdge).map((edge) => ({ ...edge })),
+    rounds: [...configuredRounds].sort((left, right) => left.key.localeCompare(right.key)).map((round) => ({ ...round, advanceCount: round.advanceCount ?? 0, scoringMethod: round.scoringMethod ?? "average" })),
+    rubric: {
+      criteria: [...(rubric.criteria ?? [])].sort((left, right) => left.key.localeCompare(right.key)).map((criterion) => ({ ...criterion, minimum: criterion.minimum ?? 0 })),
+    },
+    tiePolicy,
   };
   const plan: CompiledCapabilityPlan = {
     ok: true,

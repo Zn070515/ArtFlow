@@ -12,3 +12,4 @@ export * from "./model.js";
 export * from "./packs.js";
 export * from "./registry.js";
 export * from "./runtime.js";
+export * from "./scoring.js";
