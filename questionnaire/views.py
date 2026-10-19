@@ -137,11 +137,11 @@ def _invalid_questionnaire_response() -> JsonResponse:
     return JsonResponse({"error": "问卷内容未通过校验，请检查后重试。"}, status=409)
 
 
-def _frozen_plan(activity: Activity):
+def _frozen_plan(activity: Activity, *, subject: str = "participant"):
     version = current_frozen_version(activity)
     if version is None:
         raise PermissionDenied("当前活动没有已确认的赛制。")
-    return version, questionnaire_plan(version)
+    return version, questionnaire_plan(version, subject=subject)
 
 
 # Phases in which a participant may open their own questionnaire. Reading it stays open
@@ -316,6 +316,8 @@ def form_view(request: HttpRequest, activity_pk: int):
         # legacy entry, not expose an internal "no questionnaire" error page.
         return redirect(f"{reverse('singer_contest:apply')}?activity={activity.pk}")
     version, plan = _frozen_plan(activity)
+    if plan.subject != "participant":
+        raise PermissionDenied("当前赛制没有启用选手问卷。")
     staff = _is_staff(request.user)
     if staff:
         # A preview: an unsaved registration, so opening the page never creates a draft
@@ -388,7 +390,7 @@ def group_form_view(request: HttpRequest, group_pk: int):
     activity = group.stage.activity
     if not _is_staff(request.user):
         _require_group_page(activity)
-    version, plan = _frozen_plan(activity)
+    version, plan = _frozen_plan(activity, subject="group")
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     staff = _is_staff(request.user)
@@ -633,7 +635,7 @@ def group_autosave_view(request: HttpRequest, group_pk: int):
     if _is_staff(request.user):
         raise PermissionDenied("工作人员不能通过选手入口修改分组合唱资料。")
     _require_group_page(group.stage.activity)
-    version, plan = _frozen_plan(group.stage.activity)
+    version, plan = _frozen_plan(group.stage.activity, subject="group")
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     payload = _json_body(request)
@@ -690,7 +692,7 @@ def group_submit_view(request: HttpRequest, group_pk: int):
     if _is_staff(request.user):
         raise PermissionDenied("工作人员不能通过选手入口提交分组合唱资料。")
     _require_group_page(group.stage.activity)
-    version, plan = _frozen_plan(group.stage.activity)
+    version, plan = _frozen_plan(group.stage.activity, subject="group")
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     payload = _json_body(request)
@@ -756,7 +758,7 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
     uploaded = request.FILES.get("file")
     if not uploaded:
         return JsonResponse({"error": "请选择要上传的文件。"}, status=400)
-    version, plan = _frozen_plan(group.stage.activity)
+    version, plan = _frozen_plan(group.stage.activity, subject="group")
     stale = _stale_or_missing_schema_hash({"schema_hash": request.POST.get("schema_hash")}, plan)
     if stale is not None:
         return stale

@@ -576,7 +576,7 @@ def store_questionnaire_group_file(
     version = current_frozen_version(_owner_activity(group))
     if version is None:
         raise ValidationError("当前活动没有已确认的赛制，无法上传材料。")
-    plan = questionnaire_plan(version)
+    plan = questionnaire_plan(version, subject="group")
     if plan.subject != "group":
         raise ValidationError("当前赛制没有分组合唱组问卷。")
     if expected_schema_hash and expected_schema_hash != plan.schema_hash:

@@ -89,7 +89,7 @@ class _GroupMaterialBase(_CharacterizationBase):
         )
         ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=False)
         root = json.loads(_definition())
-        root["questionnaire"] = questionnaire or GROUP_QUESTIONNAIRE
+        root["group_questionnaire"] = questionnaire or GROUP_QUESTIONNAIRE
         version = RulesetVersion.objects.create(
             ruleset=ruleset, definition=json.dumps(root, ensure_ascii=False)
         )
@@ -132,7 +132,7 @@ class _GroupMaterialBase(_CharacterizationBase):
     def schema_hash(self, version):
         from .registration import questionnaire_plan
 
-        return questionnaire_plan(version).schema_hash
+        return questionnaire_plan(version, subject="group").schema_hash
 
 
 class GroupMaterialWindowHttpTests(_GroupMaterialBase):
@@ -491,7 +491,7 @@ class GroupEitherBranchFileQuestionTests(_GroupMaterialBase):
         from questionnaire.registration import questionnaire_plan
 
         reconcile_group_questionnaire_material_checks(
-            group=group, version=version, plan=questionnaire_plan(version)
+            group=group, version=version, plan=questionnaire_plan(version, subject="group")
         )
         from files.models import MaterialCheck
 

@@ -83,6 +83,13 @@ VALIDATION_FORMATS = frozenset({"phone_cn", "email"})
 # surface until a separate viewer-audience contract exists for rendering and writes.
 AUDIENCES = frozenset({"participant"})
 SUBMISSION_SUBJECTS = frozenset({"participant", "group"})
+# A version may carry one participant questionnaire and one group questionnaire. The root
+# keys stay separate so a 2026 ruleset can collect both personal and shared group material;
+# the runtime selects by subject instead of assuming a single document.
+QUESTIONNAIRE_ROOT_KEYS: dict[str, str] = {
+    "participant": "questionnaire",
+    "group": "group_questionnaire",
+}
 # When an answer becomes due. ``upfront`` is the registration pass; ``before_round`` gates
 # it on a round existing/starting (round keys are resolved at freeze, §P2).
 DUE_MODES = frozenset({"upfront", "before_round"})
