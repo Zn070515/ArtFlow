@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-19
+
+### The 2026 ruleset can carry participant and group questionnaires
+
+The built-in 2026 format now ships two questionnaires in one definition: `questionnaire`
+(participant R2/R3 songs and one media answer) and `group_questionnaire` (group song and
+one media answer). A media answer accepts either common audio or common video, in both
+documents. The group page reads the group document by subject, any current group member can
+submit, staff review through the existing material checks, and the existing group material
+window (open / supplement-only / closed) is unchanged.
+
+- A version's definition may carry `group_questionnaire` beside `questionnaire`; each root
+  slot enforces its subject at save and freeze.
+- The group questionnaire is selected by subject, so the participant entry and the group
+  form no longer read the same single document.
+- The 2026 freeze requires both documents; an existing DRAFT is upgraded with
+  `upgrade_live_2026_questionnaires` (dry-run first). FROZEN versions are never rewritten.
+- Common formats: audio `.mp3/.wav/.m4a/.flac/.aac/.ogg`, video `.mp4/.mov/.webm/.mkv`,
+  100MB per file.
+
 ## 2026-10-09 (last)
 
 ### The judge entry is judged against the locked row, not against the pre-lock read

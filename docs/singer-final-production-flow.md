@@ -36,6 +36,19 @@ ArtFlow 中的一次「院十佳」活动表示**院十佳决赛的完整运行�
 
 当年赛制一律在克隆之后按当年规则调整。
 
+## 个人问卷与分组问卷
+
+2026 内置赛制在一个 `RulesetVersion` 里同时携带两份问卷：
+
+- **选手问卷**（`questionnaire`，`subject=participant`）：每名选手的第二轮、第三轮曲目，以及一个音视频文件（伴奏音频或演唱视频，二选一）。
+- **分组合唱问卷**（`group_questionnaire`，`subject=group`）：每组的合唱曲目，以及一个音视频文件（同上）。
+
+两份问卷都进入冻结快照。分组问卷的提交入口是 `/questionnaire/group/<group_pk>/`：组内任一当前成员可提交，工作人员在分组合唱赛段页审核；材料窗口仍由 `GroupStage.material_status` 控制（开放 / 仅补交 / 关闭），默认是「关闭」，工作人员需要先在分组页设为「开放」。
+
+冻结时，2026 赛制必须同时存在两份问卷；旧版草稿用 `uv run python manage.py upgrade_live_2026_questionnaires --activity <id> --operator-username <staff> --dry-run` 检查后去掉 `--dry-run` 补齐。FROZEN 版本不会被改写。
+
+音视频格式：音频 `.mp3/.wav/.m4a/.flac/.aac/.ogg`，视频 `.mp4/.mov/.webm/.mkv`；单文件上限 100MB。
+
 ## 正式运行流程
 
 1. **创建活动**：Admin 创建当年院十佳决赛活动，生命周期为 TEST。
