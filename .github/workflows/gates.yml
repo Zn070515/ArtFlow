@@ -44,5 +44,8 @@ jobs:
       - name: Validate golden fixtures
         run: uv run python tests/golden/validate_fixtures.py
 
+      - name: Run the golden fixtures with a v1 adapter
+        run: uv run python manage.py test tests.golden --noinput
+
       - name: Lint the gate code
         run: uv run ruff check tests/gates tests/golden
