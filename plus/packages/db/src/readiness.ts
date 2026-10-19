@@ -6,6 +6,7 @@ const REQUIRED_MIGRATIONS = [
   "0002_execution_runtime",
   "0003_runtime_hardening",
   "0004_local_sessions",
+  "0005_registration_materials",
 ];
 
 /**

@@ -133,6 +133,50 @@ export interface LocalSessionRow {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface RegistrationRow {
+  id: string;
+  activity_id: string;
+  participant_id: string;
+  questionnaire_version: string;
+  questionnaire_hash: string;
+  status: string;
+  answers: ColumnType<unknown, string, string>;
+  revision: number;
+  review_note: string | null;
+  reviewed_by: string | null;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface RosterRow {
+  activity_id: string;
+  status: string;
+  approved_count: number | null;
+  revision: number;
+  finalized_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface MaterialRow {
+  id: string;
+  activity_id: string;
+  registration_id: string;
+  question_key: string;
+  storage_key: string;
+  original_name: string;
+  content_type: string;
+  byte_length: number;
+  owner_actor_id: string;
+  status: string;
+  review_note: string;
+  reviewed_by: string | null;
+  reviewed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  revision: number;
+  current: boolean;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -145,4 +189,7 @@ export interface Database {
   audit_entry: AuditEntryRow;
   local_account: LocalAccountRow;
   local_session: LocalSessionRow;
+  registration: RegistrationRow;
+  roster: RosterRow;
+  material: MaterialRow;
 }

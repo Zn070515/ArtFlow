@@ -40,7 +40,7 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
          and table_name in (
            'definition_draft', 'definition_compiled', 'definition_release',
            'execution_session', 'execution_projection', 'audit_entry',
-           'local_account', 'local_session'
+           'local_account', 'local_session', 'registration', 'roster', 'material'
          )
        order by table_name
     `.execute(db);
@@ -53,6 +53,9 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
       "execution_session",
       "local_account",
       "local_session",
+      "material",
+      "registration",
+      "roster",
     ]);
   });
 
