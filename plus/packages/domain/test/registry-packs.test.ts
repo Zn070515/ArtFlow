@@ -279,6 +279,8 @@ it("the default registry exposes only implemented capabilities", () => {
     "materials",
     "questionnaire",
     "registration",
+    "ticketing",
+    "voting",
   ]);
   const result = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry, {
     answers: { judges: false, "publish-results": false, archive: false },

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import {
   CapabilityManifestSchema,
+  JudgeEntryBodySchema,
   PackInstantiateBodySchema,
+  SubmitBallotBodySchema,
 } from "@artflow-plus/contracts";
 import { closeDb, createDb, insertLocalAccount, migrate } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
@@ -381,13 +383,15 @@ dbIt("lists the registered capabilities using the shared manifest contract", asy
   const response = await app.inject({ method: "GET", url: "/api/capabilities" });
   expect(response.statusCode).toBe(200);
   const body = response.json() as { capabilities: unknown[] };
-  expect(body.capabilities).toHaveLength(4);
+  expect(body.capabilities).toHaveLength(6);
   expect(Value.Check(CapabilityManifestSchema, body.capabilities[0])).toBe(true);
   expect((body.capabilities as { identity: string }[]).map((item) => item.identity)).toEqual([
     "competition",
     "materials",
     "questionnaire",
     "registration",
+    "ticketing",
+    "voting",
   ]);
 });
 
@@ -457,6 +461,17 @@ dbIt("keeps the pack instantiation body contract in sync with the API", () => {
       disable: ["materials"],
     }),
   ).toBe(true);
+  expect(Value.Check(JudgeEntryBodySchema, { publicCode: "ABC123", capability: null })).toBe(true);
+  expect(Value.Check(SubmitBallotBodySchema, {
+    scope: "voting",
+    optionIds: ["option-1"],
+    identity: { type: "browser" },
+  })).toBe(true);
+  expect(Value.Check(SubmitBallotBodySchema, {
+    scope: "voting",
+    optionIds: ["option-1"],
+    identity: { type: "browser", fingerprint: "raw-client-id" },
+  })).toBe(false);
 });
 
 dbIt("starts parallel scopes, lists them and closes with OCC", async () => {
