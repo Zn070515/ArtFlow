@@ -656,9 +656,7 @@ class ParticipantGroupLinkTests(_GroupMaterialBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "分组合唱材料")
         self.assertContains(response, group.name)
-        self.assertContains(
-            response, reverse("questionnaire:group_form", args=[group.pk])
-        )
+        self.assertContains(response, reverse("questionnaire:group_form", args=[group.pk]))
 
     def test_legacy_group_document_does_not_500_the_participant_entry(self):
         version = self.legacy_frozen_group_version()
@@ -676,9 +674,7 @@ class ParticipantGroupLinkTests(_GroupMaterialBase):
         )
 
     def test_group_link_is_hidden_without_a_group_questionnaire(self):
-        version = self.frozen_group_version(
-            PARTICIPANT_QUESTIONNAIRE, slot="questionnaire"
-        )
+        version = self.frozen_group_version(PARTICIPANT_QUESTIONNAIRE, slot="questionnaire")
         _stage, group, singers = self.confirmed_group(version)
         self.login_member(singers[0])
 

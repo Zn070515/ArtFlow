@@ -8,10 +8,11 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   attestations: write
   id-token: write
+  actions: read
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -28,6 +29,24 @@ jobs:
 
       - name: Resolve the lowercase image name
         run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      # A tag is the release authority, but it must not be stronger than CI. The same
+      # commit's main-branch runs are the evidence: a tag pushed before those gates finish
+      # (or from a commit that never passed them) must not produce a formal package.
+      - name: Require green quality gates for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ github.sha }}"
+          for workflow in ci.yml security.yml workflow-lint.yml integration.yml; do
+            count="$(gh api \
+              "repos/${{ github.repository }}/actions/workflows/${workflow}/runs?head_sha=${sha}&branch=main&per_page=20" \
+              --jq '[.workflow_runs[] | select(.event == "push" and .conclusion == "success")] | length')"
+            if [ "$count" -lt 1 ]; then
+              echo "::error::No successful ${workflow} run on main for ${sha}; refusing to publish."
+              exit 1
+            fi
+          done
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -86,3 +105,15 @@ jobs:
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            echo "Release ${{ github.ref_name }} already exists; leaving it unchanged."
+          else
+            gh release create "${{ github.ref_name }}" \
+              --title "ArtFlow ${{ github.ref_name }}" \
+              --notes-from-tag
+          fi

@@ -225,9 +225,7 @@ class _BuilderBase(_CharacterizationBase):
         return reverse("staff:ruleset_group_questionnaire", args=[version.pk])
 
     def group_preview_url(self, version, context="participant"):
-        return reverse(
-            "staff:ruleset_group_questionnaire_preview", args=[version.pk, context]
-        )
+        return reverse("staff:ruleset_group_questionnaire_preview", args=[version.pk, context])
 
 
 class BuilderViewTests(_BuilderBase):
@@ -590,9 +588,7 @@ class GroupBuilderViewTests(_BuilderBase):
         self.assertEqual(response.status_code, 302)
         participant, group = self._stored()
         self.assertEqual(participant, before_participant)
-        self.assertEqual(
-            group["pages"][0]["sections"][0]["questions"][0]["label"], "合唱歌名"
-        )
+        self.assertEqual(group["pages"][0]["sections"][0]["questions"][0]["label"], "合唱歌名")
 
     def test_editing_group_file_question_keeps_accepts(self):
         self._post(
@@ -612,9 +608,7 @@ class GroupBuilderViewTests(_BuilderBase):
     def test_json_mode_cannot_put_the_participant_document_in_the_group_slot(self):
         _, before_group = self._stored()
 
-        response = self._post(
-            action="save_json", questionnaire_json=json.dumps(QUESTIONNAIRE)
-        )
+        response = self._post(action="save_json", questionnaire_json=json.dumps(QUESTIONNAIRE))
 
         self.assertEqual(response.status_code, 302)
         _, after_group = self._stored()
@@ -651,8 +645,6 @@ class GroupBuilderViewTests(_BuilderBase):
         self.assertNotIn("questionnaire", stored)
         self.assertIn("group_questionnaire", stored)
         self.assertEqual(
-            stored["group_questionnaire"]["pages"][0]["sections"][0]["questions"][0][
-                "label"
-            ],
+            stored["group_questionnaire"]["pages"][0]["sections"][0]["questions"][0]["label"],
             "合唱歌名",
         )

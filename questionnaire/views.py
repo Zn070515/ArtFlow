@@ -336,7 +336,7 @@ def form_view(request: HttpRequest, activity_pk: int):
             version=version, user=cast(AccountUser, request.user)
         )
     participant_groups = []
-    if not staff:
+    if not staff and isinstance(request.user, AccountUser):
         try:
             questionnaire_plan(version, subject="group")
         except ValidationError:
@@ -426,9 +426,7 @@ def group_form_view(request: HttpRequest, group_pk: int):
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     staff = _is_staff(request.user)
     response = (
-        get_or_create_group_draft(group=group, version=version, plan=plan)
-        if not staff
-        else None
+        get_or_create_group_draft(group=group, version=version, plan=plan) if not staff else None
     )
     writable = None if staff else writable_group_question_keys(group=group, plan=plan)
     answers = (response.answers if response else {}) or {}

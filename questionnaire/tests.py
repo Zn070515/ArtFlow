@@ -474,18 +474,12 @@ class QuestionnairePlanSubjectTests(SimpleTestCase):
         )
 
         self.assertRaises(ValidationError, questionnaire_plan, version)
-        self.assertRaises(
-            ValidationError, questionnaire_plan, version, subject="group"
-        )
+        self.assertRaises(ValidationError, questionnaire_plan, version, subject="group")
 
     def test_unknown_subject_is_rejected(self):
-        version = self._version(
-            questionnaire=_questionnaire([_question("r2.song", round="r2")])
-        )
+        version = self._version(questionnaire=_questionnaire([_question("r2.song", round="r2")]))
 
-        self.assertRaises(
-            ValidationError, questionnaire_plan, version, subject="audience"
-        )
+        self.assertRaises(ValidationError, questionnaire_plan, version, subject="audience")
 
     def test_group_selector_accepts_the_legacy_single_document(self):
         version = self._version(questionnaire=self._group_questionnaire())

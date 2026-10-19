@@ -17,6 +17,7 @@ The boundary the other two cases protect is the one the whole phase exists for:
 
 import json
 from types import SimpleNamespace
+from typing import cast
 
 from common.authority import authority_write
 from django.core.exceptions import ValidationError
@@ -186,16 +187,19 @@ class QuestionnaireFreezeGateTests(_QuestionnaireFreezeBase):
             )
 
     def test_plan_selection_does_not_treat_a_legacy_group_document_as_participant(self):
-        version = SimpleNamespace(
-            definition=json.dumps(
-                {"questionnaire": live_2026_group_questionnaire()},
-                ensure_ascii=False,
-            )
+        version = cast(
+            RulesetVersion,
+            SimpleNamespace(
+                definition=json.dumps(
+                    {"questionnaire": live_2026_group_questionnaire()},
+                    ensure_ascii=False,
+                )
+            ),
         )
 
         self.assertIsNone(_questionnaire_plan_of(version))
         group_plan = _questionnaire_plan_of(version, subject="group")
-        self.assertIsNotNone(group_plan)
+        assert group_plan is not None
         self.assertEqual(group_plan.subject, "group")
 
     def test_live_2026_freeze_requires_the_group_questionnaire(self):
