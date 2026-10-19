@@ -1,4 +1,7 @@
 import { competitionCapability } from "./capabilities/competition.js";
+import { materialsCapability } from "./capabilities/materials.js";
+import { questionnaireCapability } from "./capabilities/questionnaire.js";
+import { registrationCapability } from "./capabilities/registration.js";
 import { createCapabilityRegistry } from "./registry.js";
 import type { CapabilityRegistry } from "./registry.js";
 
@@ -8,7 +11,12 @@ import type { CapabilityRegistry } from "./registry.js";
  * never to half-enabled placeholders.
  */
 export function createDefaultCapabilityRegistry(): CapabilityRegistry {
-  const result = createCapabilityRegistry([competitionCapability]);
+  const result = createCapabilityRegistry([
+    competitionCapability,
+    materialsCapability,
+    questionnaireCapability,
+    registrationCapability,
+  ]);
   if (!result.ok) {
     throw new Error(
       `The default capability registry is invalid: ${result.issues

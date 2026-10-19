@@ -276,9 +276,12 @@ it("a pack diagnoses a disabled dependency instead of silently re-enabling it", 
 it("the default registry exposes only implemented capabilities", () => {
   expect(defaultCapabilityRegistry.list().map((item) => item.manifest.identity)).toEqual([
     "competition",
+    "materials",
+    "questionnaire",
+    "registration",
   ]);
-  const result = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry);
-  expect(result.ok).toBe(false);
-  if (result.ok) return;
-  expect(codes(result.issues)).toContain("CAPABILITY_UNKNOWN");
+  const result = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry, {
+    answers: { judges: false, "publish-results": false, archive: false },
+  });
+  expect(result.ok).toBe(true);
 });
