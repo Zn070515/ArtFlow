@@ -22,6 +22,17 @@
 - [ ] OCC token 是必填；缺 token/旧 token 被拒绝。
 - [ ] 错误是带 code 的领域错误，消息可执行；没有裸异常/堆栈。
 
+### M4 Registration / Questionnaire / Materials
+
+- [ ] M4 HTTP 写入只接受由 `local_session` bearer 解析出的 actor；body 不能指定
+      actor id、角色或权限。
+- [ ] 报名与材料命令只读取 active Definition Release 的问卷/文件槽位；未知题目和
+      不允许的材料在 receipt 事务内拒绝且不产生事件。
+- [ ] 私有材料读取按报名参与者或 `materials.read`/`materials.review`/`materials.manage`
+      授权；响应不得生成 public/static media URL。
+- [ ] roster 的 `unknown` 与 `final(0)` 区分；所有 round/执行准备命令在名单未知时
+      返回 `ROSTER_UNKNOWN`，并保持事件、receipt 与轮次状态不变。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

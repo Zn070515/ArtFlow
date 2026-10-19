@@ -48,6 +48,16 @@ fixture 在 `V1_COVERAGE` 里记录对应的 v1 套件，保证“还没适配�
 uv run python manage.py test tests.golden
 ```
 
+Plus runtime 的 M4 adapter 也消费同一份 `unknown-roster.json`：
+
+```powershell
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+pnpm -C plus --filter @artflow-plus/runtime exec vitest run test/golden-unknown-roster.test.ts
+```
+
+它通过真实 Registration/roster/round command 验证名单未知时返回
+`ROSTER_UNKNOWN`、事件游标不变，名单最终化后才允许准备轮次。
+
 ## 规则
 
 1. 每个真实事故在 v1 修复后，追加一个 fixture；失败输入和期望拒绝原因都要

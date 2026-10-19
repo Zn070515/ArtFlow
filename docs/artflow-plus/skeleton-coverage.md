@@ -31,17 +31,29 @@ capability（命令、事件、投影、定义语言），由 Registry/Pack 组�
 - 重启后从持久化 release/session 读取一致状态；投影可从事件日志重建。
 - 断线后客户端用 `after` 游标恢复，SSE 只是增强。
 
+## M4 已经证明的部分
+
+- 默认 Registry 已注册 `registration`、`questionnaire`、`materials`；问卷和文件槽位
+  从 active Definition Release 读取，报名行冻结版本与 schema hash。
+- 报名提交、审核、名单最终化、材料上传/审核都经过 receipt → Activity lock →
+  projection → event/outbox → audit 的统一 command 事务。
+- local session 通过 bearer token 派生 `ActorContext`；参与者只能操作自己的报名和材料，
+  Staff 权限才可审核/读取他人材料。
+- `unknown-roster` golden 已接入 Plus runtime：UNKNOWN 不等于零，`prepare_round` 在
+  名单最终化前返回 `ROSTER_UNKNOWN`，且 rejected command 不产生事件。
+
 ## 仍由后续里程碑证明的部分
 
-- M4-M7 的真实 capability 命令、投影与 golden fixtures。
+- M5-M7 的真实 capability 命令、投影与 golden fixtures。
 - 现场旅程（报名→评审→投票→发布→归档）的端到端验证。
 - 第三个结构不同的活动在不改内核的情况下运行。
-- 认证 provider（本地会话/SSO）与具体授权策略：Actor/Audit 数据模型已在 M3.5 固定，
-  M4 由本地会话派生 actor，SSO 仍在 M8；不伪造身份。
+- SSO provider 与现场旅程（报名→评审→投票→发布→归档）的端到端验证；M4 当前使用
+  本地会话，SSO 仍在 M8；不伪造身份。
 
 ## 约束
 
 1. 任何 capability 不得读写其他 capability 的表；只能通过命令/查询/事件/稳定 ID/binding。
 2. 产品面（Studio/Ops/Live/Portal）只组合公开 contract，不自行解释权威事实。
-3. 新增 capability 只需注册 manifest + compiler + handlers，不修改 Engine。
+3. 新增 capability 只需注册 manifest + compiler + handlers，不修改 Engine；M4 的
+   registration/material 当前状态表仍由 capability-owned repository 管理。
 4. 结构门禁 GATE-PLUS-BOUNDARY-01 检查上述边界；`REQUIRE_DB=1` 保证数据库测试不会静默跳过。

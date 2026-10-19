@@ -84,9 +84,10 @@ instantiateActivityPack(SINGER_COMPETITION_PACK, registry, { answers })
   → enabled capabilities + compilable empty definition
 ```
 
-The default registry exposes only capabilities implemented today
-(`competition`). A Pack that references a capability scheduled for M4-M7 fails
-with `CAPABILITY_UNKNOWN` diagnostics rather than producing placeholders.
+The default registry exposes the capabilities implemented today
+(`competition`, `materials`, `questionnaire`, and `registration`). A Pack that
+references a capability scheduled for M5-M7 still fails with
+`CAPABILITY_UNKNOWN` diagnostics rather than producing placeholders.
 
 ## Execution runtime (M3)
 
@@ -119,10 +120,30 @@ from the log. pg-boss only schedules the relay as a backstop; the outbox remains
 the source of truth. Formal, rehearsal and test events and projections never mix.
 
 Every accepted command writes an `audit_entry` with the injected `ActorContext`
-in the same transaction as the receipt and the outbox event. M3 has no login, so
-the API uses an explicit system actor and tests inject one; actors are never read
-from a request body. `/readyz` checks PostgreSQL and the required migrations;
+in the same transaction as the receipt and the outbox event. M3 engine routes
+retain the explicit system-actor compatibility path; M4 capability writes use
+local bearer sessions (`POST /api/auth/login`) and never read actor identity from
+the request body. `/readyz` checks PostgreSQL and the required migrations;
 `/healthz` only reports process liveness.
+
+M4 registration/material routes are authoritative HTTP commands:
+
+```text
+POST  /api/activities/:id/registrations
+PATCH /api/activities/:id/registrations/:registrationId
+POST  /api/activities/:id/registrations/:registrationId/submit
+POST  /api/activities/:id/registrations/:registrationId/review
+POST  /api/activities/:id/roster/finalize
+POST  /api/activities/:id/registrations/:registrationId/materials
+GET   /api/activities/:id/materials/:materialId
+POST  /api/activities/:id/competition/rounds/:roundKey/prepare
+```
+
+Questionnaire and material slots are read from the active released definition.
+Material reads return controlled metadata only and are owner/staff-permission
+checked; no public or static media URL is produced. The `registration`, `roster`,
+and `material` tables are current-state projections while the outbox remains the
+immutable event log.
 
 A blocked projection is recovered through the worker's operator CLI (there is no
 unauthenticated HTTP route):
@@ -169,11 +190,17 @@ new architecture.
 - Golden fixtures: `tests/golden/`
 - Gates: `docs/gates/`
 
+## M4 exit evidence
+
+- PostgreSQL runtime tests cover the released questionnaire snapshot, rejected
+  unknown questions, registration review, server-derived roster counts, private
+  material ownership, and the fail-closed execution boundary.
+- `packages/runtime/test/golden-unknown-roster.test.ts` consumes the shared
+  `tests/golden/unknown-roster.json` fixture and proves UNKNOWN is not zero.
+- The local-session migration is `0004_local_sessions`; registration/material
+  projections are in `0005_registration_materials`.
+
 ## Next slices
 
-1. M4 Registration / Questionnaire / Materials: real capability commands,
-   projections and the `unknown-roster` golden, reusing the pack questions.
-2. Register each implemented capability in the default registry and let the
-   Singer Pack instantiate completely; no engine change should be required.
-3. M5 Competition / Evaluation: score facts, judge panels, rapid entry and
+1. M5 Competition / Evaluation: score facts, judge panels, rapid entry and
    correction. The runtime already provides mode isolation, receipts and replay.

@@ -52,8 +52,9 @@ fast-check 已迁移，属性测试覆盖 hash 稳定性、陈旧 revision、clo
   半启用的占位 Pack。
 
 **出口**：Singer Pack 在完整注册表上生成可编译的空定义；依赖/冲突诊断正确；
-Gate 检查 capability 边界。真实 Registration/Evaluation 等 capability 仍由
-M4-M7 实现，默认注册表只暴露已实现的 `competition`。
+Gate 检查 capability 边界。真实 Registration/Evaluation 等 capability 仍按
+M4-M7 分片实现；M2 当时的默认注册表只暴露 `competition`，已在 M4 更新为暴露当前
+四个已实现 capability。
 
 ## M3 — Execution Runtime（已完成，2026-10-19）
 
@@ -85,7 +86,7 @@ M4-M7 实现，默认注册表只暴露已实现的 `competition`。
 - `/readyz` 检查 PostgreSQL 与迁移；SSE 轮询不重叠。
 
 **出口**：多个 scope 并行；冲突策略生效；恢复后状态一致；事件可重放。真实
-Registration/Evaluation/Voting 等 capability 仍由 M4-M7 实现。
+Evaluation/Voting 等 capability 仍由 M5-M7 实现。
 
 ## M3.5 — Actor / Audit Foundation（已完成，2026-10-19）
 
@@ -97,7 +98,7 @@ Registration/Evaluation/Voting 等 capability 仍由 M4-M7 实现。
 
 **出口**：ADR-0012；M4 的 Registration 命令不需要再横向补 actor/audit。
 
-## M4 — Registration / Questionnaire / Materials
+## M4 — Registration / Questionnaire / Materials（已完成，2026-10-19）
 
 - **前置**：第一个真实 capability command 落地前，必须把本地会话派生的 ActorContext 与
   命令级权限检查接上（M3.5 只固定了 actor/audit 数据模型，ADR-0012）。
@@ -105,7 +106,15 @@ Registration/Evaluation/Voting 等 capability 仍由 M4-M7 实现。
 - 名单 FINAL/UNKNOWN；执行边界 fail closed。
 - 从 v1 导入历史报名（可重放）。
 
-**出口**：`unknown-roster` golden；文件所有权/审核回归；名单未定时执行拒绝。
+- 本地 session 登录与 bearer actor 派生已接入 M4 HTTP 写路径；权限在 command
+  handler 内检查，actor 不从 body/header 自定义字段读取。
+- `registration`、`roster`、`material` 由 `0005_registration_materials` 持久化；
+  当前状态与 durable receipt/audit/outbox 在同一 command 事务内提交。
+- `tests/golden/unknown-roster.json` 已由 Plus runtime adapter 消费；名单未知时
+  `prepareCompetitionRound` 返回 `ROSTER_UNKNOWN` 且事件/receipt 无副作用，最终化
+  后按服务端 approved registration 数量准备轮次。
+
+**出口**：已满足：`unknown-roster` golden；文件所有权/审核回归；名单未定时执行拒绝。
 
 ## M5 — Competition / Evaluation / Podium
 
