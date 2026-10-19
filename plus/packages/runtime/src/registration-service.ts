@@ -6,7 +6,6 @@ import {
   getRelease,
   findReleaseByQuestionnaireHash,
   getRosterForUpdate,
-  findRunningSessionByScope,
   insertRegistration,
   listApprovedRegistrationCount,
   listMaterials,
@@ -25,7 +24,6 @@ import {
   createRegistration,
   DomainError,
   finalizeRoster as finalizeRosterDomain,
-  requireFinalRoster,
   requirePermission,
   reviewRegistration as reviewRegistrationDomain,
   saveRegistrationAnswer as saveRegistrationAnswerDomain,
@@ -168,7 +166,6 @@ export async function startRegistration(
     },
   );
 }
-
 export interface SaveRegistrationAnswerInput {
   readonly commandId: string;
   readonly activityId: string;
@@ -405,72 +402,3 @@ export async function finalizeRoster(
   );
 }
 
-export interface PrepareCompetitionRoundInput {
-  readonly commandId: string;
-  readonly activityId: string;
-  readonly roundKey: string;
-  readonly scope: string;
-}
-
-export interface PreparedCompetitionRound {
-  readonly activityId: string;
-  readonly roundKey: string;
-  readonly scope: string;
-  readonly mode: "test" | "rehearsal" | "formal";
-  readonly participantCount: number;
-  readonly rosterRevision: number;
-}
-
-export async function prepareCompetitionRound(
-  db: Kysely<Database>,
-  deps: RuntimeDeps,
-  input: PrepareCompetitionRoundInput,
-): Promise<CommandOutcome<PreparedCompetitionRound>> {
-  const actor = runtimeActor(deps);
-  return executeCommand(
-    db,
-    {
-      commandId: input.commandId,
-      activityId: input.activityId,
-      capability: "competition",
-      commandType: "competition.round.prepare",
-      scope: input.scope,
-      actor,
-      payload: { roundKey: input.roundKey, scope: input.scope },
-    },
-    async (trx) => {
-      requirePermission(actor, "competition.round.prepare");
-      const activity = await getActivityForUpdate(trx, input.activityId);
-      if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
-      requireActive(activity);
-      const release = await getRelease(trx, input.activityId, activity.activeDefinitionVersion);
-      if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The activity has no active released definition.");
-      if (release.executionPolicy.declaredScopes.length > 0 && !release.executionPolicy.declaredScopes.includes(input.scope)) {
-        throw new DomainError("SCOPE_UNDECLARED", `Scope ${input.scope} is not declared by the release.`);
-      }
-      const roster = requireFinalRoster(await getRosterForUpdate(trx, input.activityId));
-      const session = await findRunningSessionByScope(trx, input.activityId, input.scope);
-      if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
-      const body: PreparedCompetitionRound = {
-        activityId: input.activityId,
-        roundKey: input.roundKey,
-        scope: input.scope,
-        mode: session.mode,
-        participantCount: roster.approvedCount,
-        rosterRevision: roster.revision,
-      };
-      await appendEngineEvent(trx, deps, {
-        type: "CompetitionRoundPrepared",
-        activityId: input.activityId,
-        aggregateType: "competition_round",
-        aggregateId: `${input.activityId}:${input.roundKey}`,
-        revision: roster.revision,
-        capability: "competition",
-        mode: session.mode,
-        scope: session.scope,
-        payload: body,
-      });
-      return { body, status: 201 };
-    },
-  );
-}

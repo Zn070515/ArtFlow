@@ -79,11 +79,6 @@ export interface StoredPerformanceScoreState {
   readonly lockedAt: string | null;
 }
 
-function jsonObject(value: unknown): Readonly<Record<string, unknown>> {
-  if (typeof value === "string") return JSON.parse(value) as Readonly<Record<string, unknown>>;
-  return (value ?? {}) as Readonly<Record<string, unknown>>;
-}
-
 function iso(value: Date | string | null): string | null {
   if (value === null) return null;
   return value instanceof Date ? value.toISOString() : value;
@@ -205,6 +200,18 @@ export async function updateRound(
   return round(row);
 }
 
+export async function getNextPanelVersion(
+  db: Kysely<Database>,
+  roundId: string,
+): Promise<number> {
+  const result = await sql<{ version: number | string | null }>`
+    select coalesce(max(version), 0)::int as version
+      from panel_snapshot
+     where round_id = ${roundId}
+  `.execute(db);
+  return Number(result.rows[0]?.version ?? 0) + 1;
+}
+
 export async function insertPanelSnapshot(db: Kysely<Database>, value: StoredPanelSnapshot): Promise<void> {
   await db.insertInto("panel_snapshot").values({
     id: value.id,
@@ -226,6 +233,22 @@ export async function getCurrentPanelForUpdate(trx: Kysely<Database>, roundId: s
   const row = await trx.selectFrom("panel_snapshot").selectAll()
     .where("round_id", "=", roundId).where("current", "=", true).forUpdate().executeTakeFirst();
   return row === undefined ? null : panel(row);
+}
+
+export async function updatePanelSnapshot(
+  trx: Kysely<Database>,
+  value: StoredPanelSnapshot,
+  expectedVersion: number,
+): Promise<StoredPanelSnapshot> {
+  const row = await trx.updateTable("panel_snapshot").set({
+    state: value.state,
+    context_version: value.contextVersion,
+    current: value.current,
+    updated_at: new Date(),
+  }).where("id", "=", value.id).where("version", "=", expectedVersion)
+    .returningAll().executeTakeFirst();
+  if (row === undefined) throw new StaleRevisionError(value.id);
+  return panel(row);
 }
 
 export async function insertPanelMember(db: Kysely<Database>, value: StoredPanelMember): Promise<void> {
@@ -273,13 +296,28 @@ export async function insertPerformance(db: Kysely<Database>, value: StoredPerfo
   }).execute();
   await db.insertInto("performance_score_state").values({
     performance_id: value.id,
-    state: value.state === "open" ? "open" : "not_opened",
+    state: value.state,
     context_version: value.contextVersion,
     revision: 0,
     opened_at: value.state === "open" ? new Date() : null,
-    locked_at: null,
+    locked_at: value.state === "locked" ? new Date() : null,
     updated_at: new Date(),
   }).execute();
+}
+
+export async function updatePerformance(
+  trx: Kysely<Database>,
+  value: StoredPerformance,
+  expectedContextVersion: number,
+): Promise<StoredPerformance> {
+  const row = await trx.updateTable("performance").set({
+    state: value.state,
+    context_version: value.contextVersion,
+    updated_at: new Date(),
+  }).where("id", "=", value.id).where("context_version", "=", expectedContextVersion)
+    .returningAll().executeTakeFirst();
+  if (row === undefined) throw new StaleRevisionError(value.id);
+  return performance(row);
 }
 
 export async function getPerformanceForUpdate(trx: Kysely<Database>, id: string): Promise<StoredPerformance | null> {

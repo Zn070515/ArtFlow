@@ -1,5 +1,6 @@
 export * from "./activity-service.js";
 export * from "./auth-service.js";
+export * from "./competition-service.js";
 export * from "./command.js";
 export * from "./definition-service.js";
 export * from "./deps.js";

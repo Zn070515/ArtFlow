@@ -1,5 +1,5 @@
 import type { ScoreSource } from "@artflow-plus/domain";
-import type { Kysely, Selectable } from "kysely";
+import { sql, type Kysely, type Selectable } from "kysely";
 
 import { StaleRevisionError } from "./activity-repository.js";
 import type {
@@ -175,6 +175,19 @@ export async function getScoreFactForUpdate(
     .where("round_id", "=", roundId).where("contestant_id", "=", contestantId)
     .where("judge_id", "=", judgeId).where("current", "=", true).forUpdate().executeTakeFirst();
   return row === undefined ? null : scoreFact(row);
+}
+
+export async function countCurrentScoreFacts(
+  db: Kysely<Database>,
+  performanceId: string,
+): Promise<number> {
+  const result = await sql<{ count: number }>`
+    select count(*)::int as count
+      from score_fact
+     where performance_id = ${performanceId}
+       and current = true
+  `.execute(db);
+  return result.rows[0]?.count ?? 0;
 }
 
 export async function insertScoreFact(db: Kysely<Database>, value: StoredScoreFact): Promise<void> {
