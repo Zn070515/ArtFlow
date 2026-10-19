@@ -1,4 +1,5 @@
 export * from "./activity-repository.js";
+export * from "./auth-repository.js";
 export * from "./command-receipt.js";
 export * from "./db.js";
 export * from "./definition-repository.js";

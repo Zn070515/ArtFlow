@@ -109,6 +109,30 @@ export interface AuditEntryRow {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface LocalAccountRow {
+  username: string;
+  password_digest: string;
+  actor_id: string;
+  actor_type: string;
+  roles: ColumnType<string[] | string, string, string>;
+  permissions: ColumnType<string[] | string, string, string>;
+  auth_context: string | null;
+  active: boolean;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface LocalSessionRow {
+  token: string;
+  actor_id: string;
+  actor_type: string;
+  roles: ColumnType<string[] | string, string, string>;
+  permissions: ColumnType<string[] | string, string, string>;
+  auth_context: string | null;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  revoked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -119,4 +143,6 @@ export interface Database {
   execution_session: ExecutionSessionRow;
   execution_projection: ExecutionProjectionRow;
   audit_entry: AuditEntryRow;
+  local_account: LocalAccountRow;
+  local_session: LocalSessionRow;
 }

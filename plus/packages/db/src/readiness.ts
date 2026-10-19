@@ -2,7 +2,11 @@ import { sql, type Kysely } from "kysely";
 
 import type { Database } from "./types.js";
 
-const REQUIRED_MIGRATIONS = ["0002_execution_runtime", "0003_runtime_hardening"];
+const REQUIRED_MIGRATIONS = [
+  "0002_execution_runtime",
+  "0003_runtime_hardening",
+  "0004_local_sessions",
+];
 
 /**
  * Readiness is stronger than liveness: the process is only ready when the

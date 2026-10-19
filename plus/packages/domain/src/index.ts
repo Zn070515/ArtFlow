@@ -1,4 +1,5 @@
 export * from "./actor.js";
+export * from "./auth.js";
 export * from "./capabilities/competition.js";
 export * from "./commands.js";
 export * from "./compiler.js";

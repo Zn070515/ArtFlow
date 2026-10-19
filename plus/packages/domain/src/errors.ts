@@ -1,6 +1,8 @@
 export type DomainErrorCode =
   | "INVALID_INPUT"
   | "NOT_FOUND"
+  | "UNAUTHENTICATED"
+  | "FORBIDDEN"
   | "STALE_REVISION"
   | "INVALID_TRANSITION"
   | "COMMAND_ID_CONFLICT"

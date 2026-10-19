@@ -39,7 +39,8 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
        where table_schema = current_schema()
          and table_name in (
            'definition_draft', 'definition_compiled', 'definition_release',
-           'execution_session', 'execution_projection', 'audit_entry'
+           'execution_session', 'execution_projection', 'audit_entry',
+           'local_account', 'local_session'
          )
        order by table_name
     `.execute(db);
@@ -50,6 +51,8 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
       "definition_release",
       "execution_projection",
       "execution_session",
+      "local_account",
+      "local_session",
     ]);
   });
 
@@ -79,6 +82,32 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
       "execution_projection.status",
       "outbox.actor_id",
       "outbox.actor_type",
+    ]);
+  });
+
+  it("creates local account and session authority columns", async () => {
+    const result = await sql<{ table_name: string; column_name: string }>`
+      select table_name, column_name
+        from information_schema.columns
+       where table_schema = current_schema()
+         and (
+           (table_name = 'local_account'
+            and column_name in ('username', 'password_digest', 'actor_id', 'permissions', 'active'))
+           or (table_name = 'local_session'
+               and column_name in ('token', 'actor_id', 'expires_at', 'revoked_at'))
+         )
+       order by table_name, column_name
+    `.execute(db);
+    expect(result.rows.map((row) => `${row.table_name}.${row.column_name}`)).toEqual([
+      "local_account.active",
+      "local_account.actor_id",
+      "local_account.password_digest",
+      "local_account.permissions",
+      "local_account.username",
+      "local_session.actor_id",
+      "local_session.expires_at",
+      "local_session.revoked_at",
+      "local_session.token",
     ]);
   });
 
