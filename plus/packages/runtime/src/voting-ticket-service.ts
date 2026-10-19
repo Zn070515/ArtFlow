@@ -9,7 +9,6 @@ import type {
 } from "@artflow-plus/db";
 import {
   countBallots,
-  countVotesByOption,
   findActivityByPublicCodeAndVersion,
   findJudgeSession,
   findTicketAccessSession,
@@ -37,6 +36,7 @@ import {
   updateJudgeEntry,
   updateTicket,
   revokeTicketAccessSession as revokeTicketAccessSessionRow,
+  readValidVoteTally,
   updateVoteSessionStatus,
 } from "@artflow-plus/db";
 import {
@@ -414,14 +414,11 @@ export async function getClosedVoteScores(
   const session = await getVoteSession(db, sessionId);
   if (session === null) throw new DomainError("NOT_FOUND", "The voting session was not found.");
   if (session.status !== "closed") throw new DomainError("VOTE_SESSION_NOT_OPEN", "Only a closed voting session has authoritative scores.");
-  const totalBallots = await countBallots(db, sessionId);
-  const counted = await countVotesByOption(db, sessionId);
-  const options = await listVoteOptions(db, sessionId);
-  const rawCounts = Object.fromEntries(options.map((option) => [option.id, counted[option.id] ?? 0]));
-  const computed = computeVoteScores({ counts: rawCounts, totalBallots, rule: session.scoringRule });
+  const tally = await readValidVoteTally(db, sessionId);
+  const computed = computeVoteScores({ counts: tally.countsByOption, totalBallots: tally.totalBallots, rule: session.scoringRule });
   return computed.status === "ready"
-    ? { sessionId, totalBallots, rawCounts, scoreStatus: "ready", scoreInputs: computed.scores }
-    : { sessionId, totalBallots, rawCounts, scoreStatus: "hold", holdReason: computed.reason };
+    ? { sessionId, totalBallots: tally.totalBallots, rawCounts: tally.countsByOption, scoreStatus: "ready", scoreInputs: computed.scores }
+    : { sessionId, totalBallots: tally.totalBallots, rawCounts: tally.countsByOption, scoreStatus: "hold", holdReason: computed.reason };
 }
 
 export interface IssueTicketInput {

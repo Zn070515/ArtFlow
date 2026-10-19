@@ -1,4 +1,5 @@
 import type { CompiledVotingArtifact } from "@artflow-plus/domain";
+import { sql } from "kysely";
 import type { Kysely, Selectable } from "kysely";
 
 import type {
@@ -278,6 +279,55 @@ function validBallots(
       expression("ballot.identity_type", "!=", "ticket"),
       expression("ticket.state", "=", "redeemed"),
     ]));
+}
+
+export interface ValidVoteTally {
+  readonly totalBallots: number;
+  readonly countsByOption: Readonly<Record<string, number>>;
+}
+
+/** Reads the valid ballot set, vote records, and frozen options in one snapshot. */
+export async function readValidVoteTally(
+  db: Kysely<Database>,
+  sessionId: string,
+): Promise<ValidVoteTally> {
+  const result = await sql<{
+    readonly total_ballots: number | string;
+    readonly counts_by_option: Record<string, number | string>;
+  }>`
+    with valid_ballots as (
+      select ballot.id
+        from ballot
+        left join ticket on ticket.id = ballot.ticket_id
+       where ballot.session_id = ${sessionId}
+         and (ballot.identity_type <> 'ticket' or ticket.state = 'redeemed')
+    ), option_counts as (
+      select vote_option.id as option_id,
+             count(valid_ballots.id) as count
+        from vote_option
+        left join vote_record
+          on vote_record.option_id = vote_option.id
+         and vote_record.session_id = ${sessionId}
+        left join valid_ballots on valid_ballots.id = vote_record.ballot_id
+       where vote_option.session_id = ${sessionId}
+       group by vote_option.id
+    )
+    select (select count(*) from valid_ballots) as total_ballots,
+           coalesce(
+             (select jsonb_object_agg(option_id, count) from option_counts),
+             '{}'::jsonb
+           ) as counts_by_option
+  `.execute(db);
+  const row = result.rows[0];
+  if (row === undefined) throw new Error("The vote tally query returned no row.");
+
+  const counts = row.counts_by_option;
+  return {
+    totalBallots: Number(row.total_ballots),
+    countsByOption: Object.fromEntries(
+      Object.entries(counts).map(([optionId, count]) => [optionId, Number(count)]),
+    ),
+  };
 }
 
 export async function countBallots(

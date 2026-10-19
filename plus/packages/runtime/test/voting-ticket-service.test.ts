@@ -10,6 +10,7 @@ import {
   insertSession,
   getLiveState,
   migrate,
+  readValidVoteTally,
   readEventsSince,
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
@@ -297,6 +298,10 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       expectedRevision: 0,
     });
     expect(closed.body.status).toBe("closed");
+    await expect(readValidVoteTally(db, "vote-1")).resolves.toEqual({
+      totalBallots: 1,
+      countsByOption: { [option?.id ?? ""]: 1, [opened.body.options[1]?.id ?? ""]: 0 },
+    });
     await expect(submitBallot(db, deps(judgeA), {
       commandId: "m6-ballot-3",
       activityId,
@@ -317,6 +322,10 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       ticketId: ticket.body.ticket.id,
       reason: "撤销后不应继续计入正式结果",
     })).resolves.toMatchObject({ body: { state: "revoked" } });
+    await expect(readValidVoteTally(db, "vote-1")).resolves.toEqual({
+      totalBallots: 0,
+      countsByOption: { [option?.id ?? ""]: 0, [opened.body.options[1]?.id ?? ""]: 0 },
+    });
     await expect(getClosedVoteScores(db, "vote-1")).resolves.toMatchObject({
       totalBallots: 0,
       scoreStatus: "hold",
