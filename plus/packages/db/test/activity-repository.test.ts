@@ -15,6 +15,9 @@ import {
 import type { Database } from "../src/index.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
+if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
+  throw new Error("REQUIRE_DB=1 but ARTFLOW_PLUS_DATABASE_URL is unset.");
+}
 const schema = `artflow_test_${Date.now()}_${process.pid}`;
 
 let db: Kysely<Database>;

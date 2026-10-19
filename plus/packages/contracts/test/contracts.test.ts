@@ -4,11 +4,16 @@ import { expect, it } from "vitest";
 import {
   ActivityPackSchema,
   CapabilityManifestSchema,
+  CloseExecutionBodySchema,
   CommandEnvelopeSchema,
   DomainEventEnvelopeSchema,
   ErrorResponseSchema,
   errorResponse,
+  EventFeedSchema,
+  ExecutionProjectionSchema,
+  ExecutionSessionSchema,
   PackInstantiateBodySchema,
+  StartExecutionBodySchema,
 } from "../src/index.js";
 
 it("accepts a well-formed command envelope", () => {
@@ -118,6 +123,79 @@ it("validates a pack instantiation body without accepting unknown fields", () =>
     Value.Check(PackInstantiateBodySchema, { answers: { "audience-voting": "yes" } }),
   ).toBe(false);
   expect(Value.Check(PackInstantiateBodySchema, { actor: "forged" })).toBe(false);
+});
+
+it("carries execution mode and scope on events", () => {
+  const event = {
+    eventId: "evt-1",
+    type: "ExecutionSessionStarted",
+    occurredAt: "2026-10-19T10:00:00Z",
+    activityId: "act-1",
+    capability: "engine",
+    aggregateId: "session-1",
+    revision: 0,
+    mode: "formal",
+    scope: "stage",
+    payload: {},
+  };
+  expect(Value.Check(DomainEventEnvelopeSchema, event)).toBe(true);
+  expect(Value.Check(DomainEventEnvelopeSchema, { ...event, mode: "live" })).toBe(false);
+});
+
+it("validates execution start and close bodies", () => {
+  expect(
+    Value.Check(StartExecutionBodySchema, {
+      scope: "stage",
+      mode: "rehearsal",
+      expectedRevision: 3,
+    }),
+  ).toBe(true);
+  expect(
+    Value.Check(StartExecutionBodySchema, { scope: "stage", mode: "production" }),
+  ).toBe(false);
+  expect(Value.Check(StartExecutionBodySchema, { scope: "", mode: "formal" })).toBe(false);
+  expect(Value.Check(CloseExecutionBodySchema, { expectedRevision: 0 })).toBe(true);
+  expect(Value.Check(CloseExecutionBodySchema, {})).toBe(false);
+});
+
+it("validates an execution session and projection snapshot", () => {
+  const session = {
+    id: "session-1",
+    activityId: "act-1",
+    definitionVersion: 1,
+    contentHash: "hash-1",
+    scope: "stage",
+    mode: "formal",
+    status: "running",
+    revision: 0,
+    openedAt: "2026-10-19T10:00:00Z",
+  };
+  expect(Value.Check(ExecutionSessionSchema, session)).toBe(true);
+  expect(Value.Check(ExecutionSessionSchema, { ...session, status: "paused" })).toBe(false);
+  expect(
+    Value.Check(ExecutionProjectionSchema, {
+      activityId: "act-1",
+      mode: "formal",
+      sessions: { "session-1": session },
+      runningScopes: ["stage"],
+      lastSequence: 4,
+      headSequence: 4,
+      stale: false,
+    }),
+  ).toBe(true);
+});
+
+it("validates an event feed cursor response", () => {
+  expect(
+    Value.Check(EventFeedSchema, {
+      events: [],
+      nextCursor: 0,
+      headCursor: 0,
+    }),
+  ).toBe(true);
+  expect(Value.Check(EventFeedSchema, { events: [], nextCursor: -1, headCursor: 0 })).toBe(
+    false,
+  );
 });
 
 it("validates a capability manifest and its surfaces", () => {

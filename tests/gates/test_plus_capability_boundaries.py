@@ -2,9 +2,10 @@
 
 A capability is a module boundary (ADR-0009/0010). This gate fails when a
 capability imports another capability's file, when the domain package imports
-persistence, or when the engine assembly modules hard-code a concrete
-capability. The synthetic test proves the gate can actually fail; the real-tree
-test keeps the current boundary clean.
+persistence, when the engine assembly modules hard-code a concrete capability,
+or when the application layer reaches into a capability implementation instead
+of using the registry. The synthetic test proves the gate can actually fail;
+the real-tree test keeps the current boundary clean.
 """
 
 from __future__ import annotations
@@ -85,6 +86,30 @@ def engine_assembly_violations(domain_src: Path) -> list[str]:
     return violations
 
 
+def app_layer_violations(plus_root: Path) -> list[str]:
+    """Runtime/API/worker use the registry, never a concrete capability file."""
+    violations: list[str] = []
+    bases = (
+        plus_root / "packages" / "runtime" / "src",
+        plus_root / "apps" / "api" / "src",
+        plus_root / "apps" / "worker" / "src",
+    )
+    for base in bases:
+        if not base.exists():
+            violations.append(f"{base.relative_to(plus_root).as_posix()}: missing")
+            continue
+        for path in sorted(base.rglob("*.ts")):
+            for specifier in _imports(path):
+                if "capabilities/" in specifier or specifier.endswith(
+                    "/capabilities.js"
+                ):
+                    violations.append(
+                        f"{path.relative_to(plus_root).as_posix()}: "
+                        f"application imports concrete capability {specifier}"
+                    )
+    return violations
+
+
 def test_capabilities_do_not_import_each_other() -> None:
     violations = capability_violations(
         ROOT / "plus" / "packages" / "domain" / "src"
@@ -108,6 +133,13 @@ def test_engine_assembly_does_not_hard_code_capabilities() -> None:
         ROOT / "plus" / "packages" / "domain" / "src"
     )
     assert not violations, "the engine must not hard-code capabilities:\n" + "\n".join(
+        violations
+    )
+
+
+def test_application_layers_use_the_registry() -> None:
+    violations = app_layer_violations(ROOT / "plus")
+    assert not violations, "the application layer must not name capabilities:\n" + "\n".join(
         violations
     )
 
@@ -136,4 +168,22 @@ def test_gate_detects_synthetic_violations(tmp_path: Path) -> None:
     assert any(
         "registry.ts" in item and "capabilities/alpha.js" in item
         for item in assembly_failures
+    )
+
+    plus_root = tmp_path / "plus"
+    api_src = plus_root / "apps" / "api" / "src"
+    runtime_src = plus_root / "packages" / "runtime" / "src"
+    worker_src = plus_root / "apps" / "worker" / "src"
+    for path in (api_src, runtime_src, worker_src):
+        path.mkdir(parents=True, exist_ok=True)
+    (api_src / "app.ts").write_text(
+        'import { alpha } from "../../../packages/domain/src/capabilities/alpha.js";\n',
+        encoding="utf-8",
+    )
+    (runtime_src / "service.ts").write_text("export {};\n", encoding="utf-8")
+    (worker_src / "main.ts").write_text("export {};\n", encoding="utf-8")
+    app_failures = app_layer_violations(plus_root)
+    assert any(
+        "apps/api/src/app.ts" in item and "capabilities/alpha.js" in item
+        for item in app_failures
     )

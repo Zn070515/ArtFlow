@@ -58,6 +58,210 @@ const migrations: Record<string, Migration> = {
       await db.schema.dropTable("activity").ifExists().execute();
     },
   },
+  "0002_execution_runtime": {
+    async up(db: Kysely<Database>): Promise<void> {
+      // --- command receipts become replayable command claims -----------------
+      await sql`alter table command_receipt add column capability varchar(100)`.execute(db);
+      await sql`alter table command_receipt add column command_type varchar(100)`.execute(db);
+      await sql`alter table command_receipt add column payload_hash varchar(64)`.execute(db);
+      await sql`alter table command_receipt add column scope varchar(100)`.execute(db);
+      await sql`alter table command_receipt add column http_status integer`.execute(db);
+      await sql`alter table command_receipt alter column result drop not null`.execute(db);
+      await sql`
+        update command_receipt
+           set capability = coalesce(capability, 'engine'),
+               command_type = coalesce(command_type, 'legacy'),
+               payload_hash = coalesce(payload_hash, 'legacy'),
+               http_status = coalesce(http_status, 200)
+         where capability is null
+            or command_type is null
+            or payload_hash is null
+            or http_status is null
+      `.execute(db);
+      await sql`alter table command_receipt alter column capability set not null`.execute(db);
+      await sql`alter table command_receipt alter column command_type set not null`.execute(db);
+      await sql`alter table command_receipt alter column payload_hash set not null`.execute(db);
+
+      // --- outbox becomes the immutable, replayable event log ----------------
+      await sql`alter table outbox add column event_id varchar(100)`.execute(db);
+      await sql`alter table outbox add column activity_id varchar(100)`.execute(db);
+      await sql`alter table outbox add column aggregate_type varchar(100)`.execute(db);
+      await sql`alter table outbox add column aggregate_id varchar(100)`.execute(db);
+      await sql`alter table outbox add column capability varchar(100)`.execute(db);
+      await sql`alter table outbox add column revision integer`.execute(db);
+      await sql`alter table outbox add column mode varchar(20)`.execute(db);
+      await sql`alter table outbox add column scope varchar(100)`.execute(db);
+      await sql`alter table outbox add column occurred_at timestamptz`.execute(db);
+      await sql`alter table outbox add column attempts integer not null default 0`.execute(db);
+      await sql`alter table outbox add column last_error text`.execute(db);
+      await sql`alter table outbox add column dead_lettered_at timestamptz`.execute(db);
+      await sql`
+        update outbox
+           set event_id = 'legacy-' || id,
+               activity_id = coalesce(activity_id, payload->>'activityId'),
+               aggregate_type = coalesce(aggregate_type, 'activity'),
+               capability = coalesce(capability, 'engine'),
+               revision = coalesce(revision, 0),
+               occurred_at = coalesce(occurred_at, created_at)
+         where event_id is null
+      `.execute(db);
+      await sql`alter table outbox alter column event_id set not null`.execute(db);
+      await sql`alter table outbox alter column occurred_at set not null`.execute(db);
+      await sql`
+        alter table outbox
+          add constraint outbox_mode_check
+          check (mode is null or mode in ('test', 'rehearsal', 'formal'))
+      `.execute(db);
+      await sql`create unique index outbox_event_id_key on outbox(event_id)`.execute(db);
+      await sql`create index outbox_activity_id_idx on outbox(activity_id, id)`.execute(db);
+      await sql`
+        create index outbox_pending_idx on outbox(id)
+         where published_at is null and dead_lettered_at is null
+      `.execute(db);
+
+      // --- definition drafts, compiled plans and releases -------------------
+      await db.schema
+        .createTable("definition_draft")
+        .addColumn("activity_id", "varchar(100)", (column) =>
+          column.primaryKey().references("activity.id").onDelete("cascade"),
+        )
+        .addColumn("revision", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("package", "jsonb", (column) => column.notNull())
+        .addColumn("updated_at", "timestamptz", (column) =>
+          column.notNull().defaultTo(sql`now()`),
+        )
+        .execute();
+
+      await db.schema
+        .createTable("definition_compiled")
+        .addColumn("activity_id", "varchar(100)", (column) =>
+          column.notNull().references("activity.id").onDelete("cascade"),
+        )
+        .addColumn("draft_revision", "integer", (column) => column.notNull())
+        .addColumn("content_hash", "varchar(64)", (column) => column.notNull())
+        .addColumn("capabilities", "jsonb", (column) => column.notNull())
+        .addColumn("compiled_at", "timestamptz", (column) =>
+          column.notNull().defaultTo(sql`now()`),
+        )
+        .addPrimaryKeyConstraint("definition_compiled_pkey", [
+          "activity_id",
+          "draft_revision",
+        ])
+        .execute();
+
+      await db.schema
+        .createTable("definition_release")
+        .addColumn("activity_id", "varchar(100)", (column) =>
+          column.notNull().references("activity.id").onDelete("cascade"),
+        )
+        .addColumn("version", "integer", (column) => column.notNull())
+        .addColumn("content_hash", "varchar(64)", (column) => column.notNull())
+        .addColumn("capabilities", "jsonb", (column) => column.notNull())
+        .addColumn("released_at", "timestamptz", (column) => column.notNull())
+        .addColumn("source_draft_revision", "integer", (column) => column.notNull())
+        .addPrimaryKeyConstraint("definition_release_pkey", ["activity_id", "version"])
+        .execute();
+
+      // --- execution sessions ------------------------------------------------
+      await db.schema
+        .createTable("execution_session")
+        .addColumn("id", "varchar(100)", (column) => column.primaryKey())
+        .addColumn("activity_id", "varchar(100)", (column) =>
+          column.notNull().references("activity.id").onDelete("cascade"),
+        )
+        .addColumn("definition_version", "integer", (column) => column.notNull())
+        .addColumn("content_hash", "varchar(64)", (column) => column.notNull())
+        .addColumn("scope", "varchar(100)", (column) => column.notNull())
+        .addColumn("mode", "varchar(20)", (column) => column.notNull())
+        .addColumn("status", "varchar(20)", (column) => column.notNull())
+        .addColumn("revision", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("opened_at", "timestamptz", (column) => column.notNull())
+        .addColumn("closed_at", "timestamptz")
+        .addForeignKeyConstraint(
+          "execution_session_release_fk",
+          ["activity_id", "definition_version"],
+          "definition_release",
+          ["activity_id", "version"],
+        )
+        .addCheckConstraint(
+          "execution_session_mode_check",
+          sql`mode in ('test', 'rehearsal', 'formal')`,
+        )
+        .addCheckConstraint(
+          "execution_session_status_check",
+          sql`status in ('running', 'closed')`,
+        )
+        .execute();
+      await sql`
+        create unique index execution_session_one_running_scope
+          on execution_session(activity_id, scope)
+         where status = 'running'
+      `.execute(db);
+      await sql`
+        create index execution_session_activity_idx
+          on execution_session(activity_id, opened_at)
+      `.execute(db);
+
+      // --- execution projection ---------------------------------------------
+      await db.schema
+        .createTable("execution_projection")
+        .addColumn("activity_id", "varchar(100)", (column) =>
+          column.notNull().references("activity.id").onDelete("cascade"),
+        )
+        .addColumn("mode", "varchar(20)", (column) => column.notNull())
+        .addColumn("last_sequence", "bigint", (column) => column.notNull().defaultTo(0))
+        .addColumn("state", "jsonb", (column) => column.notNull())
+        .addColumn("updated_at", "timestamptz", (column) =>
+          column.notNull().defaultTo(sql`now()`),
+        )
+        .addPrimaryKeyConstraint("execution_projection_pkey", ["activity_id", "mode"])
+        .addCheckConstraint(
+          "execution_projection_mode_check",
+          sql`mode in ('test', 'rehearsal', 'formal')`,
+        )
+        .execute();
+    },
+    async down(db: Kysely<Database>): Promise<void> {
+      await db.schema.dropTable("execution_projection").ifExists().execute();
+      await db.schema.dropTable("execution_session").ifExists().execute();
+      await db.schema.dropTable("definition_release").ifExists().execute();
+      await db.schema.dropTable("definition_compiled").ifExists().execute();
+      await db.schema.dropTable("definition_draft").ifExists().execute();
+
+      await sql`drop index if exists outbox_pending_idx`.execute(db);
+      await sql`drop index if exists outbox_activity_id_idx`.execute(db);
+      await sql`drop index if exists outbox_event_id_key`.execute(db);
+      await sql`alter table outbox drop constraint if exists outbox_mode_check`.execute(db);
+      await sql`
+        alter table outbox
+          drop column if exists event_id,
+          drop column if exists activity_id,
+          drop column if exists aggregate_type,
+          drop column if exists aggregate_id,
+          drop column if exists capability,
+          drop column if exists revision,
+          drop column if exists mode,
+          drop column if exists scope,
+          drop column if exists occurred_at,
+          drop column if exists attempts,
+          drop column if exists last_error,
+          drop column if exists dead_lettered_at
+      `.execute(db);
+
+      await sql`update command_receipt set result = '{}'::jsonb where result is null`.execute(
+        db,
+      );
+      await sql`alter table command_receipt alter column result set not null`.execute(db);
+      await sql`
+        alter table command_receipt
+          drop column if exists capability,
+          drop column if exists command_type,
+          drop column if exists payload_hash,
+          drop column if exists scope,
+          drop column if exists http_status
+      `.execute(db);
+    },
+  },
 };
 
 class StaticMigrationProvider implements MigrationProvider {
@@ -67,9 +271,15 @@ class StaticMigrationProvider implements MigrationProvider {
 }
 
 export async function migrate(db: Kysely<Database>): Promise<MigrationResultSet> {
+  // Kysely otherwise discovers migration tables in *any* schema; with pooled
+  // search_path-based test schemas that can pick up another schema's lock
+  // table. Pin the migrator to the connection's current schema.
+  const current = await sql<{ schema: string }>`select current_schema() as schema`.execute(db);
+  const schema = current.rows[0]?.schema;
   const migrator = new Migrator({
     db,
     provider: new StaticMigrationProvider(),
+    ...(schema === undefined ? {} : { migrationTableSchema: schema }),
   });
   const result = await migrator.migrateToLatest();
   if (result.error !== undefined) {

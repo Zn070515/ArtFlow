@@ -36,6 +36,8 @@ jobs:
           --health-retries 12
     env:
       ARTFLOW_PLUS_DATABASE_URL: postgresql://artflow:artflow_dev@127.0.0.1:5432/artflow_plus
+      # A skipped database test must fail CI, not silently pass.
+      REQUIRE_DB: "1"
     steps:
       - name: Check out source
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0

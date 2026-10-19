@@ -1,45 +1,50 @@
 import {
+  CloseExecutionBodySchema,
   errorResponse,
+  ExecutionModeSchema,
   PackInstantiateBodySchema,
+  StartExecutionBodySchema,
 } from "@artflow-plus/contracts";
+import type { Database } from "@artflow-plus/db";
 import {
-  activateActivity,
-  compileActivityDefinitionPackage,
-  createActivity,
-  createDefinitionDraft,
   defaultCapabilityRegistry,
   DomainError,
   instantiateActivityPack,
-  releaseDefinition,
   SINGER_COMPETITION_PACK,
-  updateDefinitionDraft,
 } from "@artflow-plus/domain";
 import type {
-  Activity,
   ActivityDefinitionPackage,
   ActivityPack,
-  CapabilityCompiler,
   CapabilityRegistry,
-  CompiledActivityDefinition,
-  DefinitionDraft,
-  ReleasedActivityDefinition,
+  ExecutionMode,
 } from "@artflow-plus/domain";
+import {
+  activateActivity,
+  appendRuntimeFact,
+  closeExecution,
+  compileDefinition,
+  createActivity,
+  defaultRuntimeDeps,
+  getActivity,
+  getExecutionState,
+  listEvents,
+  listExecutions,
+  releaseDefinitionCommand,
+  startExecution,
+} from "@artflow-plus/runtime";
+import type { RuntimeDeps } from "@artflow-plus/runtime";
 import swagger from "@fastify/swagger";
 import { Type } from "@sinclair/typebox";
+import type { Kysely } from "kysely";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
-interface Entry {
-  activity: Activity;
-  draft?: DefinitionDraft;
-  compiled?: CompiledActivityDefinition;
-  version?: ReleasedActivityDefinition;
-}
-
 export interface AppOptions {
-  registry?: CapabilityRegistry;
-  packs?: readonly ActivityPack[];
-  compilers?: readonly CapabilityCompiler[];
-  now?: () => string;
+  readonly db: Kysely<Database>;
+  readonly registry?: CapabilityRegistry;
+  readonly packs?: readonly ActivityPack[];
+  readonly deps?: RuntimeDeps;
+  /** Exposes the generic capability fact seam for the M3 skeleton proof. */
+  readonly enableRuntimeFacts?: boolean;
 }
 
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
@@ -49,9 +54,13 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   CROSS_ACTIVITY: 404,
   STALE_REVISION: 409,
   INVALID_TRANSITION: 409,
+  COMMAND_ID_CONFLICT: 409,
+  COMMAND_IN_PROGRESS: 409,
+  COMPOSITION_INVALID: 422,
   ACTIVITY_NOT_ACTIVE: 409,
   CAPABILITY_NOT_ENABLED: 409,
   VERSION_NOT_RELEASED: 409,
+  SESSION_NOT_RUNNING: 409,
   DEFINITION_NOT_COMPILED: 409,
   SCOPE_ALREADY_RUNNING: 409,
   SCOPE_CONFLICT: 409,
@@ -67,17 +76,32 @@ const CreateActivityBody = Type.Object(
     capabilities: Type.Optional(
       Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { uniqueItems: true }),
     ),
+    packId: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    answers: Type.Optional(Type.Record(Type.String(), Type.Boolean())),
+    enable: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { uniqueItems: true }),
+    ),
+    disable: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { uniqueItems: true }),
+    ),
   },
   { additionalProperties: false },
 );
 
-const ActivityParams = Type.Object({ id: Type.String({ minLength: 1 }) }, {
-  additionalProperties: false,
-});
+const ActivityParams = Type.Object(
+  { id: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
 
-const PackParams = Type.Object({ id: Type.String({ minLength: 1 }) }, {
-  additionalProperties: false,
-});
+const PackParams = Type.Object(
+  { id: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const SessionParams = Type.Object(
+  { id: Type.String({ minLength: 1 }), sessionId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
 
 const ActivateBody = Type.Object(
   { expectedRevision: Type.Integer({ minimum: 0 }) },
@@ -85,12 +109,39 @@ const ActivateBody = Type.Object(
 );
 
 const CompileBody = Type.Object(
-  { package: Type.Unknown() },
+  {
+    package: Type.Unknown(),
+    expectedDraftRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
   { additionalProperties: false },
 );
 
 const ReleaseBody = Type.Object(
   { expectedDraftRevision: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+
+const EventsQuery = Type.Object(
+  {
+    after: Type.Optional(Type.Integer({ minimum: 0 })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+    mode: Type.Optional(ExecutionModeSchema),
+  },
+  { additionalProperties: false },
+);
+
+const StateQuery = Type.Object(
+  { mode: Type.Optional(ExecutionModeSchema) },
+  { additionalProperties: false },
+);
+
+const RuntimeFactBody = Type.Object(
+  {
+    capability: Type.String({ pattern: "^[a-z][a-z0-9_-]*$", maxLength: 80 }),
+    scope: Type.String({ pattern: "^[a-z][a-z0-9_-]*$", maxLength: 100 }),
+    type: Type.String({ pattern: "^[A-Z][A-Za-z0-9]+$", maxLength: 100 }),
+    payload: Type.Unknown(),
+  },
   { additionalProperties: false },
 );
 
@@ -122,14 +173,25 @@ function asPackage(value: unknown): ActivityDefinitionPackage {
   return candidate as ActivityDefinitionPackage;
 }
 
-export async function buildApp(options: AppOptions = {}): Promise<FastifyInstance> {
+function errorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) return null;
+  const code = (error as { code: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+function errorDetails(error: unknown): unknown {
+  if (typeof error === "object" && error !== null && "issues" in error) {
+    return (error as { issues: unknown }).issues;
+  }
+  return undefined;
+}
+
+export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  const { db } = options;
   const registry = options.registry ?? defaultCapabilityRegistry;
-  const compilers = options.compilers ?? registry.compilers;
   const packs = options.packs ?? [SINGER_COMPETITION_PACK];
-  const now = options.now ?? (() => new Date().toISOString());
-  const entries = new Map<string, Entry>();
-  let nextId = 0;
+  const deps = options.deps ?? defaultRuntimeDeps();
 
   await app.register(swagger, {
     openapi: {
@@ -182,41 +244,74 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     "/api/activities",
     { schema: { body: CreateActivityBody } },
     async (request, reply) => {
-      requireIdempotency(request);
-      const body = request.body as { title: string; capabilities?: string[] };
-      const id = `act-${++nextId}`;
-      const activity = createActivity({
-        id,
+      const commandId = requireIdempotency(request);
+      const body = request.body as {
+        title: string;
+        capabilities?: string[];
+        packId?: string;
+        answers?: Record<string, boolean>;
+        enable?: string[];
+        disable?: string[];
+      };
+      let capabilities = body.capabilities;
+      let initialDefinition: ActivityDefinitionPackage | undefined;
+      if (body.packId !== undefined) {
+        const pack = packs.find((candidate) => candidate.identity === body.packId);
+        if (pack === undefined) {
+          throw new DomainError("NOT_FOUND", `Pack ${body.packId} was not found.`);
+        }
+        const instantiated = instantiateActivityPack(pack, registry, {
+          title: body.title,
+          ...(body.answers === undefined ? {} : { answers: body.answers }),
+          ...(body.enable === undefined ? {} : { enable: body.enable }),
+          ...(body.disable === undefined ? {} : { disable: body.disable }),
+        });
+        if (!instantiated.ok) {
+          return reply
+            .status(422)
+            .send(
+              errorResponse(
+                "PACK_COMPOSITION_INVALID",
+                `Pack ${body.packId} cannot be instantiated.`,
+                instantiated.issues,
+              ),
+            );
+        }
+        capabilities = [...instantiated.instantiation.enabledCapabilities];
+        initialDefinition = instantiated.instantiation.definition;
+      }
+      const outcome = await createActivity(db, registry, deps, {
+        commandId,
         title: body.title,
-        capabilities: body.capabilities,
+        ...(capabilities === undefined ? {} : { capabilities }),
+        ...(initialDefinition === undefined ? {} : { initialDefinition }),
       });
-      entries.set(id, { activity });
-      return reply.status(201).send({
-        id: activity.id,
-        status: activity.status,
-        revision: activity.revision,
-        enabledCapabilities: activity.enabledCapabilities,
-      });
+      return reply.status(outcome.status).send(outcome.body);
     },
   );
+
+  app.get("/api/activities/:id", { schema: { params: ActivityParams } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const activity = await getActivity(db, id);
+    if (activity === null) {
+      throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
+    }
+    return activity;
+  });
 
   app.post(
     "/api/activities/:id/activate",
     { schema: { params: ActivityParams, body: ActivateBody } },
     async (request, reply) => {
-      requireIdempotency(request);
+      const commandId = requireIdempotency(request);
       const { id } = request.params as { id: string };
-      const entry = entries.get(id);
-      if (entry === undefined) {
-        throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
-      }
       const body = request.body as { expectedRevision: number };
-      entry.activity = activateActivity(entry.activity, body.expectedRevision);
-      return reply.send({
-        id: entry.activity.id,
-        status: entry.activity.status,
-        revision: entry.activity.revision,
+      const outcome = await activateActivity(db, deps, {
+        commandId,
+        activityId: id,
+        expectedRevision: body.expectedRevision,
       });
+      return reply.status(outcome.status).send(outcome.body);
     },
   );
 
@@ -224,28 +319,21 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     "/api/activities/:id/definitions/compile",
     { schema: { params: ActivityParams, body: CompileBody } },
     async (request, reply) => {
-      requireIdempotency(request);
+      const commandId = requireIdempotency(request);
       const { id } = request.params as { id: string };
-      const entry = entries.get(id);
-      if (entry === undefined) {
-        throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
-      }
-      const body = request.body as { package: unknown };
-      const definitionPackage = asPackage(body.package);
-      const compiled = compileActivityDefinitionPackage(definitionPackage, compilers);
-      if (!compiled.ok) {
-        return reply
-          .status(422)
-          .send(errorResponse("DEFINITION_INVALID", "The definition package is invalid.", compiled.issues));
-      }
-      const base = entry.draft ?? createDefinitionDraft(entry.activity);
-      entry.draft = updateDefinitionDraft(base, base.revision, definitionPackage);
-      entry.compiled = compiled;
-      return reply.send({
-        contentHash: compiled.contentHash,
-        capabilities: Object.keys(compiled.capabilities).sort(),
-        diagnostics: [],
+      const body = request.body as {
+        package: unknown;
+        expectedDraftRevision?: number;
+      };
+      const outcome = await compileDefinition(db, registry, deps, {
+        commandId,
+        activityId: id,
+        package: asPackage(body.package),
+        ...(body.expectedDraftRevision === undefined
+          ? {}
+          : { expectedDraftRevision: body.expectedDraftRevision }),
       });
+      return reply.status(outcome.status).send(outcome.body);
     },
   );
 
@@ -253,40 +341,218 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     "/api/activities/:id/definitions/release",
     { schema: { params: ActivityParams, body: ReleaseBody } },
     async (request, reply) => {
-      requireIdempotency(request);
+      const commandId = requireIdempotency(request);
       const { id } = request.params as { id: string };
-      const entry = entries.get(id);
-      if (entry === undefined) {
+      const body = request.body as { expectedDraftRevision: number };
+      const outcome = await releaseDefinitionCommand(db, deps, {
+        commandId,
+        activityId: id,
+        expectedDraftRevision: body.expectedDraftRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/executions",
+    { schema: { params: ActivityParams, body: StartExecutionBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        scope: string;
+        mode: ExecutionMode;
+        expectedRevision?: number;
+      };
+      const outcome = await startExecution(db, registry, deps, {
+        commandId,
+        activityId: id,
+        scope: body.scope,
+        mode: body.mode,
+        ...(body.expectedRevision === undefined
+          ? {}
+          : { expectedRevision: body.expectedRevision }),
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/executions/:sessionId/close",
+    { schema: { params: SessionParams, body: CloseExecutionBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, sessionId } = request.params as { id: string; sessionId: string };
+      const body = request.body as { expectedRevision: number };
+      const outcome = await closeExecution(db, deps, {
+        commandId,
+        activityId: id,
+        sessionId,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/executions",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const activity = await getActivity(db, id);
+      if (activity === null) {
         throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
       }
-      if (entry.draft === undefined || entry.compiled === undefined) {
-        throw new DomainError(
-          "DEFINITION_NOT_COMPILED",
-          "Compile the current definition package before releasing it.",
-        );
+      return { sessions: await listExecutions(db, id) };
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/execution-state",
+    { schema: { params: ActivityParams, querystring: StateQuery } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as { mode?: ExecutionMode };
+      const activity = await getActivity(db, id);
+      if (activity === null) {
+        throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
       }
-      const body = request.body as { expectedDraftRevision: number };
-      const result = releaseDefinition({
-        activity: entry.activity,
-        draft: entry.draft,
-        expectedDraftRevision: body.expectedDraftRevision,
-        compiled: entry.compiled,
-        releasedAt: now(),
-      });
-      entry.activity = result.activity;
-      entry.version = result.version;
-      return reply.status(201).send({
-        activityId: result.version.activityId,
-        version: result.version.version,
-        contentHash: result.version.contentHash,
+      return getExecutionState(db, id, query.mode ?? "formal");
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/events",
+    { schema: { params: ActivityParams, querystring: EventsQuery } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as {
+        after?: number;
+        limit?: number;
+        mode?: ExecutionMode;
+      };
+      const activity = await getActivity(db, id);
+      if (activity === null) {
+        throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
+      }
+      return listEvents(db, {
+        activityId: id,
+        after: query.after ?? 0,
+        limit: query.limit ?? 100,
+        ...(query.mode === undefined ? {} : { mode: query.mode }),
       });
     },
   );
 
+  app.get(
+    "/api/activities/:id/stream",
+    { schema: { params: ActivityParams, querystring: EventsQuery } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as {
+        after?: number;
+        mode?: ExecutionMode;
+      };
+      const activity = await getActivity(db, id);
+      if (activity === null) {
+        throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
+      }
+      const headerCursor = request.headers["last-event-id"];
+      const fromHeader = Array.isArray(headerCursor) ? headerCursor[0] : headerCursor;
+      const parsedHeader =
+        typeof fromHeader === "string" && /^\d+$/.test(fromHeader)
+          ? Number(fromHeader)
+          : 0;
+
+      reply.hijack();
+      const raw = reply.raw;
+      raw.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      });
+      raw.flushHeaders();
+      let cursor = query.after ?? parsedHeader;
+      let closed = false;
+      const close = (): void => {
+        if (closed) return;
+        closed = true;
+        clearInterval(poll);
+        clearInterval(heartbeat);
+        raw.end();
+      };
+      const poll = setInterval(() => {
+        if (closed) return;
+        void listEvents(db, {
+          activityId: id,
+          after: cursor,
+          limit: 100,
+          ...(query.mode === undefined ? {} : { mode: query.mode }),
+        })
+          .then((feed) => {
+            if (closed) return;
+            for (const event of feed.events) {
+              raw.write(`id: ${event.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
+              cursor = event.sequence;
+            }
+          })
+          .catch(() => {
+            // Realtime is an enhancement; close and let the client poll.
+            close();
+          });
+      }, 500);
+      const heartbeat = setInterval(() => {
+        if (!closed) raw.write(": heartbeat\n\n");
+      }, 15_000);
+      request.raw.on("close", close);
+      raw.on("error", close);
+      await new Promise<void>((resolve) => {
+        request.raw.on("close", resolve);
+      });
+    },
+  );
+
+  if (options.enableRuntimeFacts === true) {
+    app.post(
+      "/api/activities/:id/runtime-facts",
+      { schema: { params: ActivityParams, body: RuntimeFactBody } },
+      async (request, reply) => {
+        const commandId = requireIdempotency(request);
+        const { id } = request.params as { id: string };
+        const body = request.body as {
+          capability: string;
+          scope: string;
+          type: string;
+          payload: unknown;
+        };
+        const outcome = await appendRuntimeFact(db, registry, deps, {
+          commandId,
+          activityId: id,
+          capability: body.capability,
+          scope: body.scope,
+          type: body.type,
+          payload: body.payload,
+        });
+        return reply.status(outcome.status).send(outcome.body);
+      },
+    );
+  }
+
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof DomainError) {
-      const status = STATUS_BY_CODE[error.code] ?? 400;
-      return reply.status(status).send(errorResponse(error.code, error.message));
+    const code = errorCode(error);
+    if (code !== null) {
+      const status = STATUS_BY_CODE[code] ?? 400;
+      const details = errorDetails(error);
+      return reply
+        .status(status)
+        .send(
+          errorResponse(
+            code,
+            error instanceof Error ? error.message : "The command was refused.",
+            details,
+          ),
+        );
     }
     const failure = error as {
       validation?: unknown;

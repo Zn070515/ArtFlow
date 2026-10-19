@@ -1,5 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 
+import { ExecutionModeSchema } from "./common.js";
+
 /** The transport shape of a domain event; events are immutable facts. */
 export const DomainEventEnvelopeSchema = Type.Object(
   {
@@ -10,6 +12,8 @@ export const DomainEventEnvelopeSchema = Type.Object(
     capability: Type.String({ minLength: 1, maxLength: 100 }),
     aggregateId: Type.String({ minLength: 1, maxLength: 100 }),
     revision: Type.Integer({ minimum: 0 }),
+    mode: Type.Optional(ExecutionModeSchema),
+    scope: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
     payload: Type.Unknown(),
   },
   { additionalProperties: false },

@@ -55,13 +55,26 @@ fast-check 已迁移，属性测试覆盖 hash 稳定性、陈旧 revision、clo
 Gate 检查 capability 边界。真实 Registration/Evaluation 等 capability 仍由
 M4-M7 实现，默认注册表只暴露已实现的 `competition`。
 
-## M3 — Execution Runtime
+## M3 — Execution Runtime（已完成，2026-10-19）
 
-- Execution Session 生命周期与投影（当前表演/评分门/投票状态/签到）。
-- Outbox + worker；断线可恢复；实时失败降级到 HTTP。
-- 正式/测试 scope 隔离的端到端验证。
+- **Durable command**：receipt claim（payload hash / replay / conflict）、OCC、确定性 id，
+  事实 + outbox + receipt 同一事务；定义 draft/compiled/release 与 execution session 全部
+  持久化。
+- **Outbox + worker**：outbox 升级为事件日志（envelope 字段、attempts、dead letter）；
+  `FOR UPDATE SKIP LOCKED` relay；pg-boss 12 作为分钟级兜底 + 250ms 低延迟循环；
+  `apps/worker` 独立进程。
+- **投影与恢复**：`execution_projection(activity_id, mode)`；失败停批保持顺序；
+  `rebuildExecutionProjection` 从事件日志重放；权威 session 列表与最终一致投影分离。
+- **实时降级**：SSE `GET /stream`（Last-Event-ID、heartbeat）尾随事件日志；
+  `GET /events?after=` 是权威恢复路径；SSE 失败不阻塞写。
+- **正式/测试隔离**：mode 来自服务端 session；事件、投影、读路径均按 mode 分区。
+- **骨架证明 E2E**：Pack → Activity → Compile/Release → 并行 scope → capability facts →
+  投影隔离 → 重放 → 重启后一致（`apps/api/test/skeleton.test.ts`）。
+- **门禁**：GATE-PLUS-BOUNDARY-01 扩展到 runtime/API/worker 不得直接 import 具体
+  capability；CI `REQUIRE_DB=1` 使数据库测试不能静默跳过。
 
-**出口**：多个 scope 并行；冲突策略生效；恢复后状态一致；事件可重放。
+**出口**：多个 scope 并行；冲突策略生效；恢复后状态一致；事件可重放。真实
+Registration/Evaluation/Voting 等 capability 仍由 M4-M7 实现。
 
 ## M4 — Registration / Questionnaire / Materials
 
