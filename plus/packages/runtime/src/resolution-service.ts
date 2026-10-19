@@ -31,6 +31,8 @@ import type {
 } from "@artflow-plus/domain";
 import {
   applyTieDecision,
+  averageScore,
+  compareScores,
   computeRanking,
   DomainError,
 } from "@artflow-plus/domain";
@@ -92,12 +94,11 @@ async function rankingInput(
   }
   const rows: ScoreRow[] = [];
   for (const [contestantId, values] of byContestant) {
-    const sorted = [...values].sort((left, right) => left - right);
+    const sorted = [...values].sort(compareScores);
     const effective = round.scoringMethod === "drop_high_low" && sorted.length >= 3
       ? sorted.slice(1, -1)
       : sorted;
-    const total = effective.reduce((sum, value) => sum + value, 0) / effective.length;
-    rows.push({ contestantId, total: Math.round(total * 100) / 100, judgeCount: values.length });
+    rows.push({ contestantId, total: averageScore(effective), judgeCount: values.length });
   }
   const inputFingerprint = stableHash({
     activityId: activity.id,

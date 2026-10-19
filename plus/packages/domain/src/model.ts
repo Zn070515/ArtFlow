@@ -30,6 +30,11 @@ export interface CapabilityDefinition {
 export interface CapabilityCompiler {
   readonly capabilityKey: string;
   compile(definition: CapabilityDefinition): CapabilityCompileResult;
+  /** Optional capability-owned validation against the complete composition. */
+  validateComposition?(input: {
+    readonly enabledCapabilities: readonly string[];
+    readonly artifact: unknown;
+  }): readonly CompileIssue[];
 }
 
 export interface CapabilityBinding {

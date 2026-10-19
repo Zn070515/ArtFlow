@@ -229,7 +229,6 @@ it("a pack generates a compilable empty definition from its defaults", () => {
   expect(result.instantiation.enabledCapabilities).toEqual([
     "archive",
     "competition",
-    "evaluation",
     "materials",
     "publishing",
     "questionnaire",
@@ -286,4 +285,54 @@ it("the default registry exposes only implemented capabilities", () => {
     answers: { judges: false, "publish-results": false, archive: false },
   });
   expect(result.ok).toBe(true);
+});
+
+it("allows browser voting without ticketing and rejects ticket voting without it", () => {
+  const browser = compileActivityDefinitionPackage(
+    {
+      schemaVersion: 1,
+      manifest: { key: "browser-vote", title: "Browser vote" },
+      capabilities: {
+        voting: {
+          schemaVersion: 1,
+          payload: {
+            schemaVersion: 1,
+            purpose: "popularity",
+            selectionType: "single",
+            maxSelections: 1,
+            identityPolicy: "browser",
+            scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+          },
+        },
+      },
+      bindings: [],
+    },
+    [defaultCapabilityRegistry.get("voting")?.compiler ?? passthroughCompiler("voting")],
+  );
+  expect(browser.ok).toBe(true);
+
+  const ticket = compileActivityDefinitionPackage(
+    {
+      schemaVersion: 1,
+      manifest: { key: "ticket-vote", title: "Ticket vote" },
+      capabilities: {
+        voting: {
+          schemaVersion: 1,
+          payload: {
+            schemaVersion: 1,
+            purpose: "score_component",
+            selectionType: "single",
+            maxSelections: 1,
+            identityPolicy: "ticket",
+            scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+          },
+        },
+      },
+      bindings: [],
+    },
+    [defaultCapabilityRegistry.get("voting")?.compiler ?? passthroughCompiler("voting")],
+  );
+  expect(ticket.ok).toBe(false);
+  if (ticket.ok) return;
+  expect(ticket.issues.map((issue) => issue.code)).toContain("CAPABILITY_TICKETING_REQUIRED");
 });

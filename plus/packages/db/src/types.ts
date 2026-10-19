@@ -355,8 +355,7 @@ export interface VoteSessionRow {
   purpose: string;
   selection_type: string;
   max_selections: number;
-  requires_ticket: boolean;
-  allow_browser_identity: boolean;
+    identity_policy: string;
   scoring_rule: ColumnType<unknown, string, string>;
   status: string;
   revision: number;

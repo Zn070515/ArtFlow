@@ -423,7 +423,6 @@ dbIt("instantiates a pack once every capability is registered", async () => {
     "registration",
     "questionnaire",
     "materials",
-    "evaluation",
     "voting",
     "publishing",
     "archive",
@@ -484,7 +483,7 @@ dbIt("keeps the pack instantiation body contract in sync with the API", () => {
   })).toBe(false);
 });
 
-dbIt("uses an IP-global judge-entry rate-limit bucket", async () => {
+dbIt("uses a process-local judge-entry rate-limit bucket keyed by IP", async () => {
   const keys: string[] = [];
   const limited = await buildApp({
     db,

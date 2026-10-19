@@ -29,8 +29,7 @@ export interface StoredVoteSession {
   readonly purpose: "popularity" | "score_component";
   readonly selectionType: "single" | "multi";
   readonly maxSelections: number;
-  readonly requiresTicket: boolean;
-  readonly allowBrowserIdentity: boolean;
+  readonly identityPolicy: "ticket" | "browser" | "anonymous";
   readonly scoringRule: CompiledVotingArtifact["scoringRule"];
   readonly status: "draft" | "open" | "closed";
   readonly revision: number;
@@ -48,8 +47,7 @@ function voteSession(row: Selectable<VoteSessionRow>): StoredVoteSession {
     purpose: row.purpose as StoredVoteSession["purpose"],
     selectionType: row.selection_type as StoredVoteSession["selectionType"],
     maxSelections: row.max_selections,
-    requiresTicket: row.requires_ticket,
-    allowBrowserIdentity: row.allow_browser_identity,
+    identityPolicy: row.identity_policy as StoredVoteSession["identityPolicy"],
     scoringRule: json(row.scoring_rule) as CompiledVotingArtifact["scoringRule"],
     status: row.status as StoredVoteSession["status"],
     revision: row.revision,
@@ -207,8 +205,7 @@ export async function insertVoteSession(
     purpose: input.purpose,
     selection_type: input.selectionType,
     max_selections: input.maxSelections,
-    requires_ticket: input.requiresTicket,
-    allow_browser_identity: input.allowBrowserIdentity,
+    identity_policy: input.identityPolicy,
     scoring_rule: JSON.stringify(input.scoringRule),
     status: input.status,
     revision: input.revision,
@@ -269,11 +266,28 @@ export async function insertVoteRecords(
   await trx.insertInto("vote_record").values(records.map((record) => ({ ...record }))).execute();
 }
 
+/** The single authoritative ballot selector used by closed-session tallies. */
+function validBallots(
+  db: Kysely<Database>,
+  sessionId: string,
+) {
+  return db.selectFrom("ballot")
+    .leftJoin("ticket", "ticket.id", "ballot.ticket_id")
+    .where("ballot.session_id", "=", sessionId)
+    .where((expression) => expression.or([
+      expression("ballot.identity_type", "!=", "ticket"),
+      expression("ticket.state", "=", "redeemed"),
+    ]));
+}
+
 export async function countBallots(
   db: Kysely<Database>,
   sessionId: string,
 ): Promise<number> {
-  const row = await db.selectFrom("ballot").select(({ fn }) => fn.countAll<number>().as("count")).where("session_id", "=", sessionId).executeTakeFirstOrThrow();
+  const row = await validBallots(db, sessionId)
+    .clearSelect()
+    .select(({ fn }) => fn.countAll<number>().as("count"))
+    .executeTakeFirstOrThrow();
   return Number(row.count);
 }
 
@@ -281,7 +295,12 @@ export async function countVotesByOption(
   db: Kysely<Database>,
   sessionId: string,
 ): Promise<Readonly<Record<string, number>>> {
-  const rows = await db.selectFrom("vote_record").select(["option_id", ({ fn }) => fn.countAll<number>().as("count")]).where("session_id", "=", sessionId).groupBy("option_id").execute();
+  const rows = await db.selectFrom("vote_record")
+    .select(["vote_record.option_id", ({ fn }) => fn.countAll<number>().as("count")])
+    .where("vote_record.session_id", "=", sessionId)
+    .where("vote_record.ballot_id", "in", validBallots(db, sessionId).select("ballot.id"))
+    .groupBy("vote_record.option_id")
+    .execute();
   return Object.fromEntries(rows.map((row) => [row.option_id, Number(row.count)]));
 }
 

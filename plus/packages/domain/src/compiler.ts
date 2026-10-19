@@ -183,6 +183,18 @@ export function compileActivityDefinitionPackage(
     bindingKeys.add(bindingKey);
   }
 
+  for (const key of capabilityKeys) {
+    const compiler = registry.get(key);
+    const plan = compiled[key];
+    if (compiler?.validateComposition === undefined || plan === undefined) continue;
+    for (const item of compiler.validateComposition({
+      enabledCapabilities: capabilityKeys,
+      artifact: plan.artifact,
+    })) {
+      issues.push(issue(`CAPABILITY_${item.code}`, `${key}: ${item.message}`, `capabilities.${key}.${item.path}`));
+    }
+  }
+
   if (issues.length > 0) {
     return deepFreeze({ ok: false, issues });
   }

@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import type { ScoreSource } from "@artflow-plus/domain";
 import { sql, type Kysely, type Selectable } from "kysely";
 
@@ -129,7 +130,7 @@ function scoreFact(row: Selectable<ScoreFactRow>): StoredScoreFact {
     panelSnapshotId: row.panel_snapshot_id,
     seatId: row.seat_id,
     source: row.source as ScoreSource,
-    total: Number(row.total),
+    total: new Decimal(String(row.total)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
     criteria: objectValue(row.criteria) as Readonly<Record<string, number>>,
     notes: row.notes,
     version: row.version,
@@ -144,7 +145,7 @@ function scoreRevision(row: Selectable<ScoreRevisionRow>): StoredScoreRevision {
     scoreFactId: row.score_fact_id,
     version: row.version,
     source: row.source as ScoreSource,
-    total: Number(row.total),
+    total: new Decimal(String(row.total)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
     criteria: objectValue(row.criteria) as Readonly<Record<string, number>>,
     reason: row.reason,
     commandId: row.command_id,

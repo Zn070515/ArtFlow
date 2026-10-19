@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 
 import {
+  averageScore,
   applyTieDecision,
   computeRanking,
   normalizeScoreSubmission,
@@ -13,6 +14,25 @@ const rubric = {
     { key: "emotion", weight: 1, maximum: 100 },
   ],
 };
+
+it("rounds decimal authority with decimal half-up semantics", () => {
+  const result = normalizeScoreSubmission(
+    { criteria: { technique: 1.005, stage: 0, emotion: 0 }, notes: "" },
+    {
+      criteria: [
+        { key: "technique", weight: 1, maximum: 10 },
+        { key: "stage", weight: 1, maximum: 10 },
+        { key: "emotion", weight: 1, maximum: 10 },
+      ],
+    },
+  );
+
+  expect(result.total).toBe(1.01);
+});
+
+it("averages repeating decimal judge totals without binary drift", () => {
+  expect(averageScore([1.005, 1.015])).toBe(1.01);
+});
 
 function row(contestantId: string, total: number) {
   return { contestantId, total, judgeCount: 3 };

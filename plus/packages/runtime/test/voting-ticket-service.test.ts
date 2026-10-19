@@ -87,7 +87,11 @@ function deps(actor: ActorContext): RuntimeDeps {
   };
 }
 
-async function seedActivity(activityId = `activity-${randomUUID()}`, includeJudging = false): Promise<string> {
+async function seedActivity(
+  activityId = `activity-${randomUUID()}`,
+  includeJudging = false,
+  identityPolicy: "ticket" | "browser" | "anonymous" = "ticket",
+): Promise<string> {
   const competition = {
     ok: true as const,
     capabilityKey: "competition",
@@ -129,8 +133,7 @@ async function seedActivity(activityId = `activity-${randomUUID()}`, includeJudg
           purpose: "score_component",
           selectionType: "single",
           maxSelections: 1,
-          requiresTicket: true,
-          allowBrowserIdentity: false,
+          identityPolicy,
           scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
         },
       },
@@ -304,8 +307,21 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     })).rejects.toMatchObject({ code: "VOTE_SESSION_CLOSED" });
     await expect(getClosedVoteScores(db, "vote-1")).resolves.toMatchObject({
       totalBallots: 1,
+      scoreStatus: "ready",
       rawCounts: { [option?.id ?? ""]: 1, [opened.body.options[1]?.id ?? ""]: 0 },
       scoreInputs: { [option?.id ?? ""]: 100, [opened.body.options[1]?.id ?? ""]: 0 },
+    });
+    await expect(revokeTicket(db, deps(staff), {
+      commandId: "m6-ballot-revoke-after-close",
+      activityId,
+      ticketId: ticket.body.ticket.id,
+      reason: "撤销后不应继续计入正式结果",
+    })).resolves.toMatchObject({ body: { state: "revoked" } });
+    await expect(getClosedVoteScores(db, "vote-1")).resolves.toMatchObject({
+      totalBallots: 0,
+      scoreStatus: "hold",
+      holdReason: "NO_VALID_BALLOTS",
+      rawCounts: { [option?.id ?? ""]: 0, [opened.body.options[1]?.id ?? ""]: 0 },
     });
     await relayOutboxOnce(db);
     await expect(getLiveState(db, activityId, "vote_session", "vote-1")).resolves.toMatchObject({
@@ -314,6 +330,50 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     });
     const rebuilt = await rebuildVotingLiveProjection(db, activityId, "vote-1", "formal");
     expect(rebuilt.state).toMatchObject({ status: "closed", counts: { [option?.id ?? ""]: 1 }, authoritative: false });
+  });
+
+  it("enforces the frozen identity policy and rejects client downgrade to anonymous", async () => {
+    const browserActivity = await seedActivity("act-browser-policy", false, "browser");
+    const opened = await openVoteSession(db, deps(staff), {
+      commandId: "m6-browser-policy-open",
+      activityId: browserActivity,
+      sessionId: "m6-browser-policy-session",
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+    const optionId = opened.body.options[0]?.id ?? "";
+    await expect(submitBallot(db, deps(judgeA), {
+      commandId: "m6-browser-policy-anonymous",
+      activityId: browserActivity,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [optionId],
+      identity: { type: "anonymous" },
+    })).rejects.toMatchObject({ code: "BALLOT_IDENTITY_INVALID" });
+    await expect(submitBallot(db, deps(judgeA), {
+      commandId: "m6-browser-policy-ticket",
+      activityId: browserActivity,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [optionId],
+      identity: { type: "ticket", sessionToken: "not-a-browser-credential" },
+    })).rejects.toMatchObject({ code: "BALLOT_IDENTITY_INVALID" });
+    await submitBallot(db, deps(judgeA), {
+      commandId: "m6-browser-policy-submit",
+      activityId: browserActivity,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [optionId],
+      identity: { type: "browser", fingerprint: "browser-a" },
+    });
+    await expect(submitBallot(db, deps(judgeA), {
+      commandId: "m6-browser-policy-duplicate",
+      activityId: browserActivity,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [optionId],
+      identity: { type: "browser", fingerprint: "browser-a" },
+    })).rejects.toMatchObject({ code: "DUPLICATE_BALLOT" });
   });
 
   it("rejects a ticket from another activity without accepting a cross-activity ballot", async () => {
@@ -440,8 +500,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
             purpose: "popularity",
             selectionType: "multi",
             maxSelections: 2,
-            requiresTicket: false,
-            allowBrowserIdentity: true,
+            identityPolicy: "browser",
             scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
           },
         },
@@ -461,7 +520,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       candidateIds: ["singer-a"],
     });
     expect(opened.body.session.definitionVersion).toBe(1);
-    expect(opened.body.session.requiresTicket).toBe(true);
+    expect(opened.body.session.identityPolicy).toBe("ticket");
   });
 
   it("rejects vote commands when the running execution release no longer matches", async () => {
@@ -490,8 +549,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
             purpose: "score_component",
             selectionType: "single",
             maxSelections: 1,
-            requiresTicket: true,
-            allowBrowserIdentity: false,
+            identityPolicy: "ticket",
             scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
           },
         },

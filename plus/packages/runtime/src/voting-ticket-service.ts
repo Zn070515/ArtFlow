@@ -191,8 +191,7 @@ export async function openVoteSession(
       purpose: artifact.purpose,
       selectionType: artifact.selectionType,
       maxSelections: artifact.maxSelections,
-      requiresTicket: artifact.requiresTicket,
-      allowBrowserIdentity: artifact.allowBrowserIdentity,
+      identityPolicy: artifact.identityPolicy,
       scoringRule: artifact.scoringRule,
       status: "open",
       revision: 0,
@@ -277,10 +276,7 @@ export async function submitBallot(
     if (execution.definitionVersion !== voteSession.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
     let ticketId: string | undefined;
     if (input.identity.type === "ticket") {
-      if (!voteSession.requiresTicket) {
-        // Ticket-backed identity remains valid for a public session; the session
-        // policy only requires a ticket when it says so.
-      }
+      if (voteSession.identityPolicy !== "ticket") throw new DomainError("BALLOT_IDENTITY_INVALID", "Ticket identity is not allowed for this voting session.");
       const accessSession = ticketSessionDigest === null ? null : await getTicketAccessSessionForUpdate(trx, ticketSessionDigest);
       const accessExpiresAt = accessSession === null ? Number.NaN : Date.parse(String(accessSession.expires_at));
       if (accessSession === null || accessSession.activity_id !== input.activityId || accessSession.revoked_at !== null || accessExpiresAt <= Date.parse(deps.now())) {
@@ -291,10 +287,12 @@ export async function submitBallot(
         throw new DomainError("INVALID_TICKET", "The ticket access session is invalid.");
       }
       ticketId = lockedTicket.id;
-    } else if (voteSession.requiresTicket) {
-      throw new DomainError("TICKET_REQUIRED", "This voting session requires a ticket.");
-    } else if (input.identity.type === "browser" && (!voteSession.allowBrowserIdentity || !input.identity.fingerprint.trim())) {
-      throw new DomainError("BALLOT_IDENTITY_INVALID", "Browser identity is not allowed for this voting session.");
+    } else if (input.identity.type === "browser") {
+      if (voteSession.identityPolicy !== "browser" || !input.identity.fingerprint.trim()) {
+        throw new DomainError("BALLOT_IDENTITY_INVALID", "Browser identity is not allowed for this voting session.");
+      }
+    } else if (voteSession.identityPolicy !== "anonymous") {
+      throw new DomainError("BALLOT_IDENTITY_INVALID", "Anonymous identity is not allowed for this voting session.");
     }
     const options = await listVoteOptions(trx, input.sessionId);
     const optionById = new Map(options.map((option) => [option.id, option]));
@@ -399,7 +397,9 @@ export interface VoteScoreReadModel {
   readonly sessionId: string;
   readonly totalBallots: number;
   readonly rawCounts: Readonly<Record<string, number>>;
-  readonly scoreInputs: Readonly<Record<string, number>>;
+  readonly scoreStatus: "ready" | "hold";
+  readonly holdReason?: "NO_VALID_BALLOTS";
+  readonly scoreInputs?: Readonly<Record<string, number>>;
 }
 
 export async function getClosedVoteScores(
@@ -413,8 +413,10 @@ export async function getClosedVoteScores(
   const counted = await countVotesByOption(db, sessionId);
   const options = await listVoteOptions(db, sessionId);
   const rawCounts = Object.fromEntries(options.map((option) => [option.id, counted[option.id] ?? 0]));
-  const scoreInputs = computeVoteScores({ counts: rawCounts, totalBallots, rule: session.scoringRule });
-  return { sessionId, totalBallots, rawCounts, scoreInputs };
+  const computed = computeVoteScores({ counts: rawCounts, totalBallots, rule: session.scoringRule });
+  return computed.status === "ready"
+    ? { sessionId, totalBallots, rawCounts, scoreStatus: "ready", scoreInputs: computed.scores }
+    : { sessionId, totalBallots, rawCounts, scoreStatus: "hold", holdReason: computed.reason };
 }
 
 export interface IssueTicketInput {

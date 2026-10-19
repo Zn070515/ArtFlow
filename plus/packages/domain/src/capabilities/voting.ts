@@ -1,5 +1,6 @@
 import { capabilityDefinitionHash } from "../compiler.js";
 import { fail } from "../errors.js";
+import { Decimal } from "decimal.js";
 import type {
   CapabilityCompileResult,
   CapabilityCompiler,
@@ -12,6 +13,7 @@ import type { CapabilityRegistration } from "../registry.js";
 
 export type VotingPurpose = "popularity" | "score_component";
 export type VotingSelectionType = "single" | "multi";
+export type VotingIdentityPolicy = "ticket" | "browser" | "anonymous";
 
 export interface VotingScoringRule {
   readonly kind: "ballot_share_percent";
@@ -24,8 +26,7 @@ export interface VotingDefinition {
   readonly purpose: VotingPurpose;
   readonly selectionType: VotingSelectionType;
   readonly maxSelections: number;
-  readonly requiresTicket: boolean;
-  readonly allowBrowserIdentity: boolean;
+  readonly identityPolicy: VotingIdentityPolicy;
   readonly scoringRule: VotingScoringRule;
 }
 
@@ -76,14 +77,11 @@ export function compileVotingDefinition(
   if (payload.selectionType === "multi" && payload.maxSelections < 2) {
     issues.push(issue("MAX_SELECTIONS_INVALID", "Multi-select voting must allow at least two options.", "maxSelections"));
   }
-  if (typeof payload.requiresTicket !== "boolean") {
-    issues.push(issue("TICKET_POLICY_INVALID", "requiresTicket must be boolean.", "requiresTicket"));
+  if (payload.identityPolicy !== "ticket" && payload.identityPolicy !== "browser" && payload.identityPolicy !== "anonymous") {
+    issues.push(issue("IDENTITY_POLICY_INVALID", "identityPolicy must be ticket, browser, or anonymous.", "identityPolicy"));
   }
-  if (typeof payload.allowBrowserIdentity !== "boolean") {
-    issues.push(issue("BROWSER_IDENTITY_INVALID", "allowBrowserIdentity must be boolean.", "allowBrowserIdentity"));
-  }
-  if (payload.requiresTicket && payload.allowBrowserIdentity) {
-    issues.push(issue("IDENTITY_POLICY_INVALID", "Ticket-backed voting cannot allow browser identity.", "allowBrowserIdentity"));
+  if (payload.purpose === "score_component" && payload.identityPolicy !== "ticket") {
+    issues.push(issue("SCORE_COMPONENT_IDENTITY_INVALID", "score_component voting must use ticket identity.", "identityPolicy"));
   }
   const rule = payload.scoringRule;
   if (rule === null || typeof rule !== "object" || rule.kind !== "ballot_share_percent") {
@@ -104,8 +102,7 @@ export function compileVotingDefinition(
     purpose: payload.purpose,
     selectionType: payload.selectionType,
     maxSelections: payload.maxSelections,
-    requiresTicket: payload.requiresTicket,
-    allowBrowserIdentity: payload.allowBrowserIdentity,
+    identityPolicy: payload.identityPolicy,
     scoringRule: { ...payload.scoringRule },
   };
   const plan: CompiledCapabilityPlan = {
@@ -120,6 +117,13 @@ export function compileVotingDefinition(
 export const votingCompiler: CapabilityCompiler = {
   capabilityKey: "voting",
   compile: compileVotingDefinition,
+  validateComposition: ({ enabledCapabilities, artifact }) => {
+    const voting = artifact as Partial<CompiledVotingArtifact>;
+    if (voting.identityPolicy === "ticket" && !enabledCapabilities.includes("ticketing")) {
+      return [issue("TICKETING_REQUIRED", "Ticket identity policy requires the ticketing capability.", "identityPolicy")];
+    }
+    return [];
+  },
 };
 
 export function createEmptyVotingDefinition(): CapabilityDefinition {
@@ -127,8 +131,7 @@ export function createEmptyVotingDefinition(): CapabilityDefinition {
     purpose: "popularity",
     selectionType: "single",
     maxSelections: 1,
-    requiresTicket: false,
-    allowBrowserIdentity: true,
+    identityPolicy: "browser",
     scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
   });
 }
@@ -137,7 +140,7 @@ export const votingCapability: CapabilityRegistration = deepFreeze({
   manifest: {
     identity: "voting",
     version: "1",
-    dependencies: ["ticketing"],
+    dependencies: [],
     conflicts: [],
     definitionSchemaVersion: 1,
     commands: [
@@ -168,8 +171,12 @@ export interface VoteScoreInput {
   readonly rule: VotingScoringRule;
 }
 
+export type VoteScoreResult =
+  | { readonly status: "ready"; readonly scores: Readonly<Record<string, number>> }
+  | { readonly status: "hold"; readonly reason: "NO_VALID_BALLOTS" };
+
 /** Converts raw ballot counts to score-component inputs; it never creates judge facts. */
-export function computeVoteScores(input: VoteScoreInput): Readonly<Record<string, number>> {
+export function computeVoteScores(input: VoteScoreInput): VoteScoreResult {
   if (!Number.isInteger(input.totalBallots) || input.totalBallots < 0) {
     fail("INVALID_INPUT", "totalBallots must be a non-negative integer.");
   }
@@ -179,15 +186,18 @@ export function computeVoteScores(input: VoteScoreInput): Readonly<Record<string
   if (!Number.isInteger(input.rule.decimals) || input.rule.decimals < 0 || input.rule.decimals > 6) {
     fail("INVALID_INPUT", "The voting score decimals are invalid.");
   }
-  const factor = 10 ** input.rule.decimals;
+  if (input.totalBallots === 0) return deepFreeze({ status: "hold", reason: "NO_VALID_BALLOTS" });
   const result: Record<string, number> = {};
   for (const optionId of Object.keys(input.counts).sort()) {
     const count = input.counts[optionId];
     if (count === undefined || !Number.isInteger(count) || count < 0) {
       fail("INVALID_INPUT", `Vote count for ${optionId} is invalid.`);
     }
-    const value = input.totalBallots === 0 ? 0 : (count / input.totalBallots) * input.rule.scale;
-    result[optionId] = Math.round(value * factor) / factor;
+    const value = new Decimal(count)
+      .dividedBy(input.totalBallots)
+      .times(input.rule.scale)
+      .toDecimalPlaces(input.rule.decimals, Decimal.ROUND_HALF_UP);
+    result[optionId] = value.toNumber();
   }
-  return deepFreeze(result);
+  return deepFreeze({ status: "ready", scores: result });
 }

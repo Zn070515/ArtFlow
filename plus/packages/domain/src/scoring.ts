@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Decimal } from "decimal.js";
 
 import { fail } from "./errors.js";
 import { deepFreeze } from "./model.js";
@@ -53,6 +54,20 @@ export interface TieDecision {
   readonly reason: string;
 }
 
+export function roundScore(value: number, decimals = 2): number {
+  return new Decimal(value).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toNumber();
+}
+
+export function compareScores(left: number, right: number): number {
+  return new Decimal(left).comparedTo(new Decimal(right));
+}
+
+export function averageScore(values: readonly number[], decimals = 2): number {
+  if (values.length === 0) throw new Error("Cannot average an empty score set.");
+  const total = values.reduce((sum, value) => sum.plus(new Decimal(value)), new Decimal(0));
+  return total.dividedBy(values.length).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toNumber();
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
   if (typeof value === "number") return JSON.stringify(value);
@@ -88,7 +103,7 @@ export function normalizeScoreSubmission(
     fail("INVALID_INPUT", "Score criteria must exactly match the released rubric.");
   }
   const normalized: Record<string, number> = {};
-  let total = 0;
+  let total = new Decimal(0);
   for (const key of providedKeys) {
     const criterion = expected.get(key);
     const value = criteria[key];
@@ -98,9 +113,9 @@ export function normalizeScoreSubmission(
     const minimum = criterion.minimum ?? 0;
     if (value < minimum || value > criterion.maximum) fail("INVALID_INPUT", `Criterion ${key} is outside its allowed range.`);
     normalized[key] = value;
-    total += value * criterion.weight;
+    total = total.plus(new Decimal(value).times(criterion.weight));
   }
-  const roundedTotal = Math.round(total * 100) / 100;
+  const roundedTotal = total.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
   const canonicalPayload = { criteria: normalized, notes: input.notes.trim() };
   return deepFreeze({ criteria: normalized, total: roundedTotal, notes: canonicalPayload.notes, canonicalPayload });
 }
@@ -109,12 +124,12 @@ export function computeRanking(input: {
   readonly rows: readonly ScoreRow[];
   readonly tiePolicy: "review";
 }): RankingResult {
-  const rows = [...input.rows].sort((left, right) => right.total - left.total);
+  const rows = [...input.rows].sort((left, right) => compareScores(right.total, left.total));
   const tieGroups: TieGroup[] = [];
   for (let index = 0; index < rows.length;) {
     const current = rows[index];
     if (current === undefined) break;
-    const group = rows.slice(index).filter((row) => row.total === current.total);
+    const group = rows.slice(index).filter((row) => compareScores(row.total, current.total) === 0);
     if (group.length > 1) tieGroups.push({ total: current.total, contestants: group.map((row) => row.contestantId) });
     index += group.length;
   }
@@ -140,7 +155,7 @@ export function applyTieDecision(ranking: RankingResult, decision: TieDecision):
   }
   const order = new Map(decision.order.map((contestant, index) => [contestant, index]));
   const rows = [...ranking.rows].sort((left, right) => {
-    if (left.total !== right.total) return right.total - left.total;
+    if (compareScores(left.total, right.total) !== 0) return compareScores(right.total, left.total);
     return (order.get(left.contestantId) ?? 0) - (order.get(right.contestantId) ?? 0);
   });
   const remainingTieGroups = ranking.tieGroups.filter((group) => group !== target);
