@@ -42,9 +42,24 @@ capability（命令、事件、投影、定义语言），由 Registry/Pack 组�
 - `unknown-roster` golden 已接入 Plus runtime：UNKNOWN 不等于零，`prepare_round` 在
   名单最终化前返回 `ROSTER_UNKNOWN`，且 rejected command 不产生事件。
 
+## M5 已经证明的部分
+
+- Competition release 编译并冻结 round、rubric、judge count、completion mode、
+  advancement quota 与 tie policy；round/panel/performance/score fact projection
+  通过 module-owned migrations 持久化。
+- direct judge、staff rapid、staff proxy、paper recovery 共享 `(round, contestant,
+  judge)` 唯一 score fact；编辑写入 immutable revision，locked performance 的纠错
+  要求 correction base version 与 input fingerprint。
+- `duplicate-score-fact.json` 已由 `golden-duplicate-score-fact.test.ts` 通过真实
+  runtime commands 消费；重复代录无事件副作用，编辑不新增 current row，陈旧 context
+  被拒绝。
+- PostgreSQL 双连接测试证明 panel activation 与 score fact submission 各自只产生一个
+  winner；ranking 的 tie HOLD、explicit tie decision、advancement 和 podium candidate
+  都以 frozen input fingerprint 驱动。
+
 ## 仍由后续里程碑证明的部分
 
-- M5-M7 的真实 capability 命令、投影与 golden fixtures。
+- M6-M7 的真实 capability 命令、投影与 golden fixtures。
 - 现场旅程（报名→评审→投票→发布→归档）的端到端验证。
 - 第三个结构不同的活动在不改内核的情况下运行。
 - SSO provider 与现场旅程（报名→评审→投票→发布→归档）的端到端验证；M4 当前使用

@@ -58,6 +58,16 @@ pnpm -C plus --filter @artflow-plus/runtime exec vitest run test/golden-unknown-
 它通过真实 Registration/roster/round command 验证名单未知时返回
 `ROSTER_UNKNOWN`、事件游标不变，名单最终化后才允许准备轮次。
 
+M5 的 Plus adapter 消费 `duplicate-score-fact.json`：
+
+```powershell
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+pnpm -C plus --filter @artflow-plus/runtime exec vitest run test/golden-duplicate-score-fact.test.ts
+```
+
+它通过真实 Activity/release/session/registration/round/panel/performance/score
+commands 验证唯一 score fact、重复代录无副作用、原事实编辑和 stale context 拒绝。
+
 ## 规则
 
 1. 每个真实事故在 v1 修复后，追加一个 fixture；失败输入和期望拒绝原因都要

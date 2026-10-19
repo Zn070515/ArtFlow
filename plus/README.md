@@ -145,6 +145,25 @@ checked; no public or static media URL is produced. The `registration`, `roster`
 and `material` tables are current-state projections while the outbox remains the
 immutable event log.
 
+M5 Competition / Evaluation / Podium is now implemented as an authoritative
+capability slice:
+
+```text
+prepare round → activate panel → open performance → score fact(s)
+  → lock performance/round → resolve ranking → decide ties/advancement
+  → produce podium candidate
+```
+
+Round, panel, seat, performance, score fact, revision, correction, ranking,
+advancement, tie-decision, and podium-candidate tables are covered by migrations
+`0006_competition_evaluation` through `0008_resolution_candidates`. All scoring
+sources share the `(round, contestant, judge)` current-fact uniqueness constraint.
+`duplicate-score-fact.json` is consumed by
+`packages/runtime/test/golden-duplicate-score-fact.test.ts`; the adapter uses real
+commands and asserts no-side-effect rejection, immutable edit history, and stale
+context refusal. Resolver output is a candidate/read model only; M5 does not confirm
+Awards or stage results.
+
 A blocked projection is recovered through the worker's operator CLI (there is no
 unauthenticated HTTP route):
 
@@ -202,5 +221,5 @@ new architecture.
 
 ## Next slices
 
-1. M5 Competition / Evaluation: score facts, judge panels, rapid entry and
-   correction. The runtime already provides mode isolation, receipts and replay.
+1. M6 Voting / Ticketing: ballot uniqueness, capability entry, ticket sessions and
+   live projections. M5 score/ranking authority is now available as a frozen input.

@@ -33,6 +33,21 @@
 - [ ] roster 的 `unknown` 与 `final(0)` 区分；所有 round/执行准备命令在名单未知时
       返回 `ROSTER_UNKNOWN`，并保持事件、receipt 与轮次状态不变。
 
+### M5 Competition / Evaluation / Podium
+
+- [x] round、panel snapshot、seat、performance score gate 都由 competition-owned
+  command 管理；锁顺序为 Activity → round → panel/performance → score fact。
+- [x] score fact 由数据库 partial unique index 与 command 双重保证；direct、rapid、
+  proxy、paper 共用同一事实，重复返回 `DUPLICATE_SCORE_FACT`。
+- [x] panel/seat/performance/context version 在锁内复核；HOLD、superseded、closed
+  performance 和 stale context 都在写入前拒绝。
+- [x] 编辑追加 immutable `score_revision`；纠错持久化 base version 与 input
+  fingerprint，不能把 locked fact 变成无理由的普通更新。
+- [x] ranking 使用 frozen score snapshot；同分默认 HOLD，晋级 cutoff 的 tie 需要
+  显式 decision；podium 只保存 candidate，不提前确认 Award。
+- [x] duplicate-score golden、panel/score 双连接 PostgreSQL 并发、runtime/API focused
+  tests 已通过；root Django 全量 test 按 Plus 重构约束未运行。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

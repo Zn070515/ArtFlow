@@ -116,14 +116,19 @@ Evaluation/Voting 等 capability 仍由 M5-M7 实现。
 
 **出口**：已满足：`unknown-roster` golden；文件所有权/审核回归；名单未定时执行拒绝。
 
-## M5 — Competition / Evaluation / Podium
+## M5 — Competition / Evaluation / Podium（已完成，2026-10-19）
 
-- 轮次、评委组、席位、会话、score fact 唯一性。
-- 快速录分、代录、纸面、纠错 saga。
-- 排名/晋级/最终名次；tie 显式决策。
+- 轮次、评委组、席位、表演评分门和锁定状态均由 Competition capability 自有
+  projection 管理；round/panel/performance 使用 PostgreSQL 锁顺序与 CAS。
+- direct judge、staff rapid、staff proxy、paper recovery 共用一个 score fact 唯一键；
+  代录/纸面要求来源编号与原因，编辑保留 immutable revision，纠错以 fingerprint
+  绑定的 open → revise → close → recalculate saga 完成。
+- Ranking 从 frozen score snapshot 确定性计算；同分保持 HOLD，晋级跨 cutoff 必须
+  显式 tie decision；podium 仅产出 candidate，不物化 Award 或 confirmed result。
 
-**出口**：`duplicate-score-fact` golden；真实 PostgreSQL 双线程并发；
-纠错链 E2E。
+**出口**：`duplicate-score-fact` golden adapter；score fact 与 panel activation 的
+真实 PostgreSQL 双连接并发；纠错链 E2E；resolution fingerprint / tie HOLD / podium
+candidate 定向测试。
 
 ## M6 — Voting / Ticketing
 
