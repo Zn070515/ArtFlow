@@ -28,6 +28,7 @@ export interface StoredRound {
   readonly minimumJudges: number;
   readonly judgeCount: number;
   readonly completionMode: "full_matrix" | "minimum_valid";
+  readonly scoringMethod?: "average" | "drop_high_low";
   readonly advanceCount: number;
   readonly currentPanelId: string | null;
   readonly lockedAt: string | null;
@@ -96,6 +97,7 @@ function round(row: Selectable<CompetitionRoundRow>): StoredRound {
     minimumJudges: row.minimum_judges,
     judgeCount: row.judge_count,
     completionMode: row.completion_mode as StoredRound["completionMode"],
+    scoringMethod: row.scoring_method as StoredRound["scoringMethod"],
     advanceCount: row.advance_count,
     currentPanelId: row.current_panel_id,
     lockedAt: iso(row.locked_at),
@@ -160,6 +162,7 @@ export async function insertRound(db: Kysely<Database>, value: StoredRound): Pro
     minimum_judges: value.minimumJudges,
     judge_count: value.judgeCount,
     completion_mode: value.completionMode,
+    scoring_method: value.scoringMethod ?? "average",
     advance_count: value.advanceCount,
     current_panel_id: value.currentPanelId,
     locked_at: value.lockedAt,

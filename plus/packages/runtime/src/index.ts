@@ -14,3 +14,4 @@ export * from "./registration-service.js";
 export * from "./registration-projection.js";
 export * from "./material-service.js";
 export * from "./score-service.js";
+export * from "./resolution-service.js";

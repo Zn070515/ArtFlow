@@ -109,7 +109,7 @@ export function computeRanking(input: {
   readonly rows: readonly ScoreRow[];
   readonly tiePolicy: "review";
 }): RankingResult {
-  const rows = [...input.rows].sort((left, right) => right.total - left.total || left.contestantId.localeCompare(right.contestantId));
+  const rows = [...input.rows].sort((left, right) => right.total - left.total);
   const tieGroups: TieGroup[] = [];
   for (let index = 0; index < rows.length;) {
     const current = rows[index];

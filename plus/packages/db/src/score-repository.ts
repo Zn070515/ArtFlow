@@ -9,6 +9,8 @@ import type {
   ScoreCorrectionRow,
   ScoreFactRow,
   ScoreRevisionRow,
+  TieDecisionRow,
+  PodiumCandidateRow,
 } from "./types.js";
 
 export type ScoreCorrectionState = "open" | "revised" | "closed" | "cancelled";
@@ -76,6 +78,28 @@ export interface StoredAdvancementDecision {
   readonly status: AdvancementStatus;
   readonly decisions: readonly unknown[];
   readonly decidedBy: string | null;
+  readonly revision: number;
+}
+
+export interface StoredTieDecision {
+  readonly id: string;
+  readonly activityId: string;
+  readonly roundId: string;
+  readonly rankingSnapshotId: string;
+  readonly inputFingerprint: string;
+  readonly contestants: readonly string[];
+  readonly ordering: readonly string[];
+  readonly reason: string;
+  readonly revision: number;
+}
+
+export interface StoredPodiumCandidate {
+  readonly id: string;
+  readonly activityId: string;
+  readonly inputFingerprint: string;
+  readonly status: "candidate" | "hold";
+  readonly placements: readonly unknown[];
+  readonly sourceRoundIds: readonly string[];
   readonly revision: number;
 }
 
@@ -167,6 +191,32 @@ function advancement(row: Selectable<AdvancementDecisionRow>): StoredAdvancement
   };
 }
 
+function tieDecision(row: Selectable<TieDecisionRow>): StoredTieDecision {
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    roundId: row.round_id,
+    rankingSnapshotId: row.ranking_snapshot_id,
+    inputFingerprint: row.input_fingerprint,
+    contestants: arrayValue(row.contestants).map(String),
+    ordering: arrayValue(row.ordering).map(String),
+    reason: row.reason,
+    revision: row.revision,
+  };
+}
+
+function podium(row: Selectable<PodiumCandidateRow>): StoredPodiumCandidate {
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    inputFingerprint: row.input_fingerprint,
+    status: row.status as StoredPodiumCandidate["status"],
+    placements: arrayValue(row.placements),
+    sourceRoundIds: arrayValue(row.source_round_ids).map(String),
+    revision: row.revision,
+  };
+}
+
 export async function getScoreFactForUpdate(
   trx: Kysely<Database>,
   roundId: string,
@@ -186,6 +236,16 @@ export async function getScoreFactByIdForUpdate(
   const row = await trx.selectFrom("score_fact").selectAll()
     .where("id", "=", id).where("current", "=", true).forUpdate().executeTakeFirst();
   return row === undefined ? null : scoreFact(row);
+}
+
+export async function listCurrentScoreFacts(
+  db: Kysely<Database>,
+  roundId: string,
+): Promise<readonly StoredScoreFact[]> {
+  const rows = await db.selectFrom("score_fact").selectAll()
+    .where("round_id", "=", roundId).where("current", "=", true)
+    .orderBy("contestant_id", "asc").orderBy("judge_id", "asc").execute();
+  return rows.map(scoreFact);
 }
 
 export async function countCurrentScoreFacts(
@@ -342,4 +402,44 @@ export async function getLatestAdvancementDecision(db: Kysely<Database>, roundId
   const row = await db.selectFrom("advancement_decision").selectAll().where("round_id", "=", roundId)
     .orderBy("revision", "desc").executeTakeFirst();
   return row === undefined ? null : advancement(row);
+}
+
+export async function insertTieDecision(db: Kysely<Database>, value: StoredTieDecision): Promise<void> {
+  await db.insertInto("tie_decision").values({
+    id: value.id,
+    activity_id: value.activityId,
+    round_id: value.roundId,
+    ranking_snapshot_id: value.rankingSnapshotId,
+    input_fingerprint: value.inputFingerprint,
+    contestants: JSON.stringify(value.contestants),
+    ordering: JSON.stringify(value.ordering),
+    reason: value.reason,
+    revision: value.revision,
+    created_at: new Date(),
+  }).execute();
+}
+
+export async function listTieDecisions(db: Kysely<Database>, roundId: string): Promise<readonly StoredTieDecision[]> {
+  const rows = await db.selectFrom("tie_decision").selectAll()
+    .where("round_id", "=", roundId).orderBy("revision", "asc").execute();
+  return rows.map(tieDecision);
+}
+
+export async function insertPodiumCandidate(db: Kysely<Database>, value: StoredPodiumCandidate): Promise<void> {
+  await db.insertInto("podium_candidate").values({
+    id: value.id,
+    activity_id: value.activityId,
+    input_fingerprint: value.inputFingerprint,
+    status: value.status,
+    placements: JSON.stringify(value.placements),
+    source_round_ids: JSON.stringify(value.sourceRoundIds),
+    revision: value.revision,
+    created_at: new Date(),
+  }).execute();
+}
+
+export async function getLatestPodiumCandidate(db: Kysely<Database>, activityId: string): Promise<StoredPodiumCandidate | null> {
+  const row = await db.selectFrom("podium_candidate").selectAll()
+    .where("activity_id", "=", activityId).orderBy("revision", "desc").executeTakeFirst();
+  return row === undefined ? null : podium(row);
 }

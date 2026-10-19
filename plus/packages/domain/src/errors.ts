@@ -47,7 +47,10 @@ export type DomainErrorCode =
   | "SCORE_FACT_LOCKED"
   | "SCORE_FACT_NOT_FOUND"
   | "CORRECTION_NOT_FOUND"
-  | "CORRECTION_ALREADY_OPEN";
+  | "CORRECTION_ALREADY_OPEN"
+  | "STALE_RESOLUTION_INPUT"
+  | "TIE_DECISION_REQUIRED"
+  | "TIE_DECISION_INVALID";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel

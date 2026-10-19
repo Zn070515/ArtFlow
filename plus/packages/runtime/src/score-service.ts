@@ -21,6 +21,7 @@ import {
   insertScoreFact,
   insertScoreRevision,
   updateCorrection,
+  updateRound,
   updateScoreFact,
 } from "@artflow-plus/db";
 import type {
@@ -240,16 +241,21 @@ async function submitScore(
       current: true,
     };
     await insertScoreFact(trx, fact);
+    const savedRound = await updateRound(trx, {
+      ...context.round,
+      revision: context.round.revision + 1,
+      scoreVersion: context.round.scoreVersion + 1,
+    }, context.round.revision);
     await appendEngineEvent(trx, deps, {
       type: "ScoreFactRecorded",
       activityId: context.activity.id,
       aggregateType: "score_fact",
       aggregateId: fact.id,
-      revision: fact.version,
+      revision: savedRound.revision,
       capability: "competition",
       mode: context.mode,
       scope: context.scope,
-      payload: { scoreFact: result(fact), sourceReference: sourceReference ?? null, reason: reason ?? null },
+      payload: { scoreFact: result(fact), sourceReference: sourceReference ?? null, reason: reason ?? null, sourceScoreVersion: savedRound.scoreVersion },
     });
     return { body: result(fact), status: 201 };
   });
@@ -344,6 +350,11 @@ export async function editScoreFact(
       notes: normalized.notes,
       version: fact.version + 1,
     }, input.expectedVersion);
+    const savedRound = await updateRound(trx, {
+      ...context.round,
+      revision: context.round.revision + 1,
+      scoreVersion: context.round.scoreVersion + 1,
+    }, context.round.revision);
     if (correction !== null) {
       await updateCorrection(trx, { ...correction, state: "revised", revision: correction.revision + 1 }, correction.revision);
     }
@@ -354,11 +365,11 @@ export async function editScoreFact(
       activityId: context.activity.id,
       aggregateType: "score_fact",
       aggregateId: fact.id,
-      revision: updated.version,
+      revision: savedRound.revision,
       capability: "competition",
       mode: session.mode,
       scope: session.scope,
-      payload: { scoreFact: result(updated), reason, correctionId: input.correctionId ?? null },
+      payload: { scoreFact: result(updated), reason, correctionId: input.correctionId ?? null, sourceScoreVersion: savedRound.scoreVersion },
     });
     return { body: result(updated) };
   });

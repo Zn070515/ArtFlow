@@ -188,6 +188,7 @@ export interface CompetitionRoundRow {
   minimum_judges: number;
   judge_count: number;
   completion_mode: string;
+  scoring_method: string;
   advance_count: number;
   current_panel_id: string | null;
   locked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
@@ -319,6 +320,30 @@ export interface AdvancementDecisionRow {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface TieDecisionRow {
+  id: string;
+  activity_id: string;
+  round_id: string;
+  ranking_snapshot_id: string;
+  input_fingerprint: string;
+  contestants: ColumnType<unknown, string, string>;
+  ordering: ColumnType<unknown, string, string>;
+  reason: string;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface PodiumCandidateRow {
+  id: string;
+  activity_id: string;
+  input_fingerprint: string;
+  status: string;
+  placements: ColumnType<unknown, string, string>;
+  source_round_ids: ColumnType<unknown, string, string>;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -345,4 +370,6 @@ export interface Database {
   score_correction: ScoreCorrectionRow;
   ranking_snapshot: RankingSnapshotRow;
   advancement_decision: AdvancementDecisionRow;
+  tie_decision: TieDecisionRow;
+  podium_candidate: PodiumCandidateRow;
 }
