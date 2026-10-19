@@ -1,6 +1,7 @@
 import type { Database, StoredMaterial } from "@artflow-plus/db";
 import {
   getActivityForUpdate,
+  findReleaseByQuestionnaireHash,
   getMaterial,
   getMaterialForUpdate,
   getRegistration,
@@ -41,6 +42,13 @@ function artifact<T>(
   if (!activity.enabledCapabilities.includes(key)) {
     throw new DomainError("CAPABILITY_NOT_ENABLED", `Capability ${key} is not enabled on this activity.`);
   }
+  return releaseArtifact<T>(release, key);
+}
+
+function releaseArtifact<T>(
+  release: { readonly capabilities: Readonly<Record<string, { readonly ok: true; readonly artifact: unknown }>> },
+  key: string,
+): T {
   const plan = release.capabilities[key];
   if (plan === undefined || plan.ok !== true) {
     throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", `Release is missing the ${key} snapshot.`);
@@ -51,12 +59,19 @@ function artifact<T>(
 async function releasedMaterialRules(
   trx: Kysely<Database>,
   activity: { readonly id: string; readonly activeDefinitionVersion: number; readonly enabledCapabilities: readonly string[] },
+  questionnaireHash?: string,
 ): Promise<{ readonly questionnaire: CompiledQuestionnaireArtifact; readonly materials: CompiledMaterialsArtifact }> {
-  const release = await getRelease(trx, activity.id, activity.activeDefinitionVersion);
-  if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The activity has no active released definition.");
+  const release = questionnaireHash === undefined
+    ? await getRelease(trx, activity.id, activity.activeDefinitionVersion)
+    : await findReleaseByQuestionnaireHash(trx, activity.id, questionnaireHash);
+  if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The registration questionnaire snapshot is no longer available.");
   return {
-    questionnaire: artifact<CompiledQuestionnaireArtifact>(activity, release, "questionnaire"),
-    materials: artifact<CompiledMaterialsArtifact>(activity, release, "materials"),
+    questionnaire: questionnaireHash === undefined
+      ? artifact<CompiledQuestionnaireArtifact>(activity, release, "questionnaire")
+      : releaseArtifact<CompiledQuestionnaireArtifact>(release, "questionnaire"),
+    materials: questionnaireHash === undefined
+      ? artifact<CompiledMaterialsArtifact>(activity, release, "materials")
+      : releaseArtifact<CompiledMaterialsArtifact>(release, "materials"),
   };
 }
 
@@ -133,7 +148,7 @@ export async function uploadMaterial(
       if (!canActFor(actor, registration.participantId, "materials.manage")) {
         throw new DomainError("FORBIDDEN", "The actor cannot upload material for this registration.");
       }
-      const { questionnaire, materials } = await releasedMaterialRules(trx, activity);
+      const { questionnaire, materials } = await releasedMaterialRules(trx, activity, registration.questionnaireHash);
       const slot = fileSlotFor(questionnaire, input.questionKey);
       validateMaterial(slot, materials, input);
       const material: StoredMaterial = {

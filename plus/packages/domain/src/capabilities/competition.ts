@@ -218,7 +218,7 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
     commands: ["competition.configure"],
     queries: ["competition.describe"],
     events: ["CompetitionConfigured"],
-    permissions: ["competition.manage"],
+    permissions: ["competition.manage", "competition.round.prepare"],
     surfaces: ["studio", "ops", "live"],
     scopes: ["stage", "judging", "checkin", "voting"],
   },

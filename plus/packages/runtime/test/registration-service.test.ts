@@ -18,10 +18,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   finalizeRoster,
   prepareCompetitionRound,
+  reviewMaterial,
   reviewRegistration,
   saveRegistrationAnswer,
   startRegistration,
   submitRegistration,
+  uploadMaterial,
 } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
@@ -45,7 +47,13 @@ const staff: ActorContext = {
   actorId: "staff-1",
   actorType: "user",
   roles: ["staff"],
-  permissions: ["registration.review", "registration.roster.finalize", "materials.review", "materials.read"],
+  permissions: ["registration.review", "registration.roster.finalize", "materials.review", "materials.read", "competition.round.prepare"],
+};
+const roundOperator: ActorContext = {
+  actorId: "round-operator-1",
+  actorType: "user",
+  roles: ["staff"],
+  permissions: ["competition.round.prepare"],
 };
 
 function deps(actor: ActorContext): RuntimeDeps {
@@ -174,6 +182,29 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       questionKey: "name",
       value: "Alice",
     });
+    const uploadedMaterial = await uploadMaterial(db, deps(participant), {
+      commandId: "upload-material-2",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "song.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 100,
+    });
+    const reviewedMaterial = await reviewMaterial(db, deps(staff), {
+      commandId: "review-material-2",
+      activityId,
+      materialId: uploadedMaterial.body.id,
+      expectedRevision: 0,
+      status: "approved",
+      note: "clear",
+    });
+    expect(reviewedMaterial.body).toMatchObject({
+      status: "approved",
+      reviewNote: "clear",
+      reviewedBy: staff.actorId,
+      revision: 1,
+    });
     const submitted = await submitRegistration(db, deps(participant), {
       commandId: "submit-registration-2",
       activityId,
@@ -207,6 +238,96 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     });
     expect(roster.body).toMatchObject({ status: "final", approvedCount: 1 });
     expect(roster.body.revision).toBe(1);
+    const events = await readEventsSince(db, { activityId, after: 0, limit: 100 });
+    expect(events.map((event) => event.type)).toEqual(expect.arrayContaining([
+      "MaterialReviewed",
+      "RegistrationReviewed",
+      "RosterFinalized",
+    ]));
+  });
+
+  it("requires every required released question before submission", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-registration-required",
+      activityId,
+      participantId: participant.actorId,
+    });
+    const answered = await saveRegistrationAnswer(db, deps(participant), {
+      commandId: "answer-registration-required",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: started.body.revision,
+      questionKey: "name",
+      value: "Alice",
+    });
+    await expect(submitRegistration(db, deps(participant), {
+      commandId: "submit-registration-required",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: answered.body.revision,
+    })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
+  it("keeps an existing registration on its released questionnaire snapshot", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-registration-snapshot",
+      activityId,
+      participantId: participant.actorId,
+    });
+    await db.insertInto("definition_release").values({
+      activity_id: activityId,
+      version: 2,
+      content_hash: "release-hash-v2",
+      capabilities: JSON.stringify({
+        registration: { ok: true, capabilityKey: "registration", contentHash: "registration-hash-v2", artifact: { schemaVersion: 1, lifecycleVersion: 1, rosterStatus: "unknown" } },
+        questionnaire: { ok: true, capabilityKey: "questionnaire", contentHash: "questionnaire-content-hash-v2", artifact: {
+          ...questionnaireArtifact,
+          version: "v2",
+          schemaHash: "questionnaire-hash-v2",
+          questions: [{ key: "alias", label: "别名", type: "text", required: true }],
+          fileSlots: [],
+        } },
+        materials: { ok: true, capabilityKey: "materials", contentHash: "materials-hash-v2", artifact: { schemaVersion: 1, maxBytes: 25_000_000, allowedPurposes: [] } },
+      }),
+      execution_policy: JSON.stringify({ declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 }),
+      capability_versions: JSON.stringify({ registration: "1", questionnaire: "1", materials: "1", competition: "1" }),
+      bindings: JSON.stringify([]),
+      released_at: "2026-10-19T09:15:00Z",
+      source_draft_revision: 2,
+    }).execute();
+    await db.updateTable("activity")
+      .set({ active_definition_version: 2, revision: 2 })
+      .where("id", "=", activityId)
+      .execute();
+
+    const answered = await saveRegistrationAnswer(db, deps(participant), {
+      commandId: "answer-registration-snapshot",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: started.body.revision,
+      questionKey: "name",
+      value: "Alice",
+    });
+    expect(answered.body.answers).toMatchObject({ name: "Alice" });
+    const uploaded = await uploadMaterial(db, deps(participant), {
+      commandId: "upload-material-snapshot",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "song.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 100,
+    });
+    expect(uploaded.body.questionKey).toBe("audio");
+    const submitted = await submitRegistration(db, deps(participant), {
+      commandId: "submit-registration-snapshot",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: answered.body.revision,
+    });
+    expect(submitted.body.status).toBe("submitted");
   });
 
   it("rejects the execution boundary while the roster is unknown and has no side effect", async () => {
@@ -221,6 +342,17 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     })).rejects.toMatchObject({ code: "ROSTER_UNKNOWN" });
     const after = await readEventsSince(db, { activityId, after: 0, limit: 100 });
     expect(after).toEqual(before);
+  });
+
+  it("uses a competition execution permission at the round boundary", async () => {
+    const activityId = await seedActivity();
+    await seedJudgingSession(activityId);
+    await expect(prepareCompetitionRound(db, deps(roundOperator), {
+      commandId: "prepare-round-permission",
+      activityId,
+      roundKey: "round-1",
+      scope: "judging",
+    })).rejects.toMatchObject({ code: "ROSTER_UNKNOWN" });
   });
 
   it("does not allow a participant to read another participant's material", async () => {

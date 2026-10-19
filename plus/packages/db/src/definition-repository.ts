@@ -194,6 +194,27 @@ export async function getRelease(
   return row === undefined ? null : rowToRelease(row);
 }
 
+export async function findReleaseByQuestionnaireHash(
+  db: Kysely<Database>,
+  activityId: string,
+  questionnaireHash: string,
+): Promise<StoredRelease | null> {
+  const rows = await db
+    .selectFrom("definition_release")
+    .selectAll()
+    .where("activity_id", "=", activityId)
+    .orderBy("version", "desc")
+    .execute();
+  for (const row of rows) {
+    const release = rowToRelease(row);
+    const plan = release.capabilities.questionnaire;
+    if (plan?.ok !== true || typeof plan.artifact !== "object" || plan.artifact === null) continue;
+    const artifact = plan.artifact as { readonly schemaHash?: unknown };
+    if (artifact.schemaHash === questionnaireHash) return release;
+  }
+  return null;
+}
+
 export async function getLatestRelease(
   db: Kysely<Database>,
   activityId: string,

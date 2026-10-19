@@ -4,10 +4,12 @@ import {
   getRegistrationByParticipantForUpdate,
   getRegistrationForUpdate,
   getRelease,
+  findReleaseByQuestionnaireHash,
   getRosterForUpdate,
   findRunningSessionByScope,
   insertRegistration,
   listApprovedRegistrationCount,
+  listMaterials,
   updateRegistration,
   upsertRoster,
 } from "@artflow-plus/db";
@@ -44,6 +46,13 @@ function activeCapability<T>(
   if (!activity.enabledCapabilities.includes(key)) {
     throw new DomainError("CAPABILITY_NOT_ENABLED", `Capability ${key} is not enabled on this activity.`);
   }
+  return releaseCapability<T>(release, key);
+}
+
+function releaseCapability<T>(
+  release: { readonly capabilities: Readonly<Record<string, { readonly ok: true; readonly artifact: unknown }>> },
+  key: string,
+): T {
   const plan = release.capabilities[key];
   if (plan === undefined || plan.ok !== true) {
     throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", `Release is missing the ${key} snapshot.`);
@@ -54,17 +63,24 @@ function activeCapability<T>(
 async function releasedArtifacts(
   trx: Kysely<Database>,
   activity: { readonly id: string; readonly activeDefinitionVersion: number; readonly enabledCapabilities: readonly string[] },
+  questionnaireHash?: string,
 ): Promise<{
   readonly questionnaire: CompiledQuestionnaireArtifact;
   readonly materials: CompiledMaterialsArtifact;
 }> {
-  const release = await getRelease(trx, activity.id, activity.activeDefinitionVersion);
+  const release = questionnaireHash === undefined
+    ? await getRelease(trx, activity.id, activity.activeDefinitionVersion)
+    : await findReleaseByQuestionnaireHash(trx, activity.id, questionnaireHash);
   if (release === null) {
-    throw new DomainError("VERSION_NOT_RELEASED", "The activity has no active released definition.");
+    throw new DomainError("VERSION_NOT_RELEASED", "The registration questionnaire snapshot is no longer available.");
   }
   return {
-    questionnaire: activeCapability<CompiledQuestionnaireArtifact>(activity, release, "questionnaire"),
-    materials: activeCapability<CompiledMaterialsArtifact>(activity, release, "materials"),
+    questionnaire: questionnaireHash === undefined
+      ? activeCapability<CompiledQuestionnaireArtifact>(activity, release, "questionnaire")
+      : releaseCapability<CompiledQuestionnaireArtifact>(release, "questionnaire"),
+    materials: questionnaireHash === undefined
+      ? activeCapability<CompiledMaterialsArtifact>(activity, release, "materials")
+      : releaseCapability<CompiledMaterialsArtifact>(release, "materials"),
   };
 }
 
@@ -191,10 +207,16 @@ export async function saveRegistrationAnswer(
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
       requireOwnerOrManager(actor, registration.participantId);
-      const { questionnaire } = await releasedArtifacts(trx, activity);
+      const { questionnaire } = await releasedArtifacts(trx, activity, registration.questionnaireHash);
       const question = questionFor(questionnaire, input.questionKey);
       if (question.type === "file") {
         throw new DomainError("MATERIAL_NOT_ALLOWED", "File questions must be answered by uploading a material.");
+      }
+      if (question.type === "notice") {
+        throw new DomainError("INVALID_INPUT", "Notice questions cannot receive an answer.");
+      }
+      if (typeof input.value !== "string") {
+        throw new DomainError("INVALID_INPUT", `Question ${question.key} requires a text answer.`);
       }
       const next = saveRegistrationAnswerDomain(
         registration,
@@ -248,6 +270,21 @@ export async function submitRegistration(
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
       requireOwnerOrManager(actor, registration.participantId);
+      const questionnaire = (await releasedArtifacts(trx, activity, registration.questionnaireHash)).questionnaire;
+      const materials = await listMaterials(trx, registration.id);
+      for (const question of questionnaire.questions) {
+        if (!question.required || question.type === "notice") continue;
+        if (question.type === "file") {
+          if (!materials.some((material) => material.questionKey === question.key && material.current)) {
+            throw new DomainError("INVALID_INPUT", `Required file question ${question.key} is incomplete.`);
+          }
+          continue;
+        }
+        const value = registration.answers[question.key];
+        if (typeof value !== "string" || !value.trim()) {
+          throw new DomainError("INVALID_INPUT", `Required question ${question.key} is incomplete.`);
+        }
+      }
       const next = submitRegistrationDomain(registration, input.expectedRevision);
       const saved = await updateRegistration(trx, next, input.expectedRevision);
       await appendEngineEvent(trx, deps, {
@@ -402,7 +439,7 @@ export async function prepareCompetitionRound(
       payload: { roundKey: input.roundKey, scope: input.scope },
     },
     async (trx) => {
-      requirePermission(actor, "registration.roster.finalize");
+      requirePermission(actor, "competition.round.prepare");
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
