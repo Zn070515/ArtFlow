@@ -926,7 +926,9 @@ def reconcile_group_questionnaire_material_checks(*, group, version, plan):
     from questionnaire.schema import NOTICE_TYPE
 
     owner_filter = _owner_filter(group)
-    response = QuestionnaireResponse.objects.filter(group=group, ruleset_version=version).first()
+    response = QuestionnaireResponse.objects.filter(
+        group=group, ruleset_version=version, questionnaire_key=plan.key
+    ).first()
     answers = (response.answers if response else {}) or {}
     present = {
         row.question_key: row

@@ -553,3 +553,30 @@ class GroupEitherBranchFileQuestionTests(_GroupMaterialBase):
         from files.models import SubmissionFile
 
         self.assertFalse(SubmissionFile.objects.filter(group=group).exists())
+
+
+class ParticipantGroupLinkTests(_GroupMaterialBase):
+    def test_first_open_creates_the_group_material_checks(self):
+        version = self.frozen_group_version()
+        _stage, group, singers = self.confirmed_group(version)
+        self.assertEqual(group.material_checks.count(), 0)
+        self.login_member(singers[0])
+
+        response = self.client.get(reverse("questionnaire:group_form", args=[group.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(group.material_checks.count(), 2)
+
+    def test_my_registrations_shows_the_group_material_link(self):
+        version = self.frozen_group_version()
+        _stage, group, singers = self.confirmed_group(version)
+        self.login_member(singers[0])
+
+        response = self.client.get(reverse("singer_contest:my_registrations"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "分组合唱材料")
+        self.assertContains(response, group.name)
+        self.assertContains(
+            response, reverse("questionnaire:group_form", args=[group.pk])
+        )

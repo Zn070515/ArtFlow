@@ -20,6 +20,10 @@
     {% if group %}
     <p class="text-sm text-gray-500 mb-2">{{ group.stage.name }} · {{ group.name }} · 共享材料</p>
     <p class="text-xs text-gray-500 mb-6">当前成员：{% for membership in current_members %}{{ membership.singer.name }}{% if not forloop.last %}、{% endif %}{% empty %}暂无当前成员{% endfor %}</p>
+    <div class="mb-6 rounded border px-3 py-2 text-sm {% if material_status == 'open' %}border-green-200 bg-green-50 text-green-800{% elif material_status == 'supplement_only' %}border-amber-200 bg-amber-50 text-amber-800{% else %}border-gray-200 bg-gray-50 text-gray-700{% endif %}">
+        分组合唱材料窗口：<span class="font-medium">{{ material_status_label }}</span>
+        {% if material_status == 'closed' %}（当前只读，等待工作人员开放）{% elif material_status == 'supplement_only' %}（只能补交工作人员点名的题目）{% endif %}
+    </div>
     <section class="mb-6 rounded border border-gray-200 bg-gray-50 px-3 py-2"
              data-collab-presence
              data-collab-resource="group:{{ group.pk }}:materials"
@@ -43,6 +47,20 @@
         <span data-completion-answered>{{ completion.answered }}</span> 项
         {% if completion.upcoming %}<span class="text-gray-400">（另有 {{ completion.upcoming }} 项稍后开放）</span>{% endif %}
     </p>
+
+    {% if participant_groups %}
+    <section class="mb-6 rounded border border-gray-200 bg-white px-3 py-2">
+        <h2 class="text-sm font-semibold text-gray-900">我的分组合唱材料</h2>
+        <ul class="mt-2 space-y-1 text-sm text-gray-700">
+            {% for membership in participant_groups %}
+            <li>
+                <a href="{% url 'questionnaire:group_form' membership.group.pk %}" class="text-brand hover:underline">{{ membership.group.stage.name }} · {{ membership.group.name }}</a>
+                <span class="text-xs text-gray-500">（{{ membership.group.stage.get_material_status_display }}）</span>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
 
     {% if not editable %}
     <div class="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2 rounded mb-4">
@@ -91,6 +109,7 @@
                 {% elif q.type == 'file' %}
                 <div class="flex items-center gap-3">
                     <input type="file" id="q-{{ q.key }}" name="{{ q.key }}" data-file-answer="{{ q.key }}"
+                           accept="{{ q.file.extensions|join:',' }}"
                            {% if not q.editable or not q.file.direct_upload_allowed %}disabled{% endif %}
                            class="text-sm text-gray-600">
                     <span class="text-xs text-gray-500" data-file-name="{{ q.key }}" data-file-version="{{ q.file_version }}">{{ q.file_name }}</span>

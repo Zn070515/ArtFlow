@@ -22,7 +22,7 @@ from files.services import (
 )
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 
-from .models import SingerRegistration
+from .models import GroupMembership, GroupStage, SingerRegistration
 
 
 def _apply_form_context(request, activities, *, errors=None, video_upload_allowed=False):
@@ -227,6 +227,20 @@ def my_registrations_view(request):
     )
     for registration in registrations:
         registration.song_label = generic_song_label(registration)
+    memberships = GroupMembership.objects.filter(
+        singer__in=registrations,
+        is_current=True,
+        group__is_active=True,
+        group__stage__status__in=[
+            GroupStage.Status.CONFIRMED,
+            GroupStage.Status.FROZEN,
+        ],
+    ).select_related("group__stage")
+    groups_by_registration: dict[int, list[GroupMembership]] = {}
+    for membership in memberships:
+        groups_by_registration.setdefault(membership.singer_id, []).append(membership)
+    for registration in registrations:
+        registration.current_groups = groups_by_registration.get(registration.pk, [])
     return render(
         request,
         "singer_contest/my_registrations.html",

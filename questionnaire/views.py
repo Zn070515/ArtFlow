@@ -29,7 +29,13 @@ from django.views.decorators.http import require_POST
 from files.policies import effective_file_policy
 from ruleset.services import current_frozen_version
 from singer_contest.group_chorus import current_group_members
-from singer_contest.models import ContestRound, Group, GroupStage, SingerRegistration
+from singer_contest.models import (
+    ContestRound,
+    Group,
+    GroupMembership,
+    GroupStage,
+    SingerRegistration,
+)
 
 from .registration import (
     build_group_submission_context,
@@ -37,7 +43,7 @@ from .registration import (
     current_answer_files,
     current_group_answer_files,
     get_or_create_draft_registration,
-    get_or_create_group_response,
+    get_or_create_group_draft,
     questionnaire_plan,
     save_draft,
     save_group_draft,
@@ -329,6 +335,22 @@ def form_view(request: HttpRequest, activity_pk: int):
         registration, response = get_or_create_draft_registration(
             version=version, user=cast(AccountUser, request.user)
         )
+    participant_groups = []
+    if not staff:
+        participant_groups = list(
+            GroupMembership.objects.filter(
+                singer__user=request.user,
+                singer__activity=activity,
+                is_current=True,
+                group__is_active=True,
+                group__stage__status__in=[
+                    GroupStage.Status.CONFIRMED,
+                    GroupStage.Status.FROZEN,
+                ],
+            )
+            .select_related("group__stage")
+            .order_by("group__stage_id", "group__group_order")
+        )
     writable = (
         None
         if staff
@@ -365,6 +387,7 @@ def form_view(request: HttpRequest, activity_pk: int):
             "pages": _page_model(plan, rows),
             "editable": editable,
             "preview": staff,
+            "participant_groups": participant_groups,
             "schema_hash": plan.schema_hash,
             "completion": completion_summary(
                 plan,
@@ -390,14 +413,15 @@ def group_form_view(request: HttpRequest, group_pk: int):
     activity = group.stage.activity
     if not _is_staff(request.user):
         _require_group_page(activity)
-    version, plan = _frozen_plan(activity, subject="group")
+    try:
+        version, plan = _frozen_plan(activity, subject="group")
+    except ValidationError as error:
+        raise PermissionDenied("当前赛制尚未配置分组合唱问卷，请联系工作人员。") from error
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     staff = _is_staff(request.user)
     response = (
-        get_or_create_group_response(
-            group=group, ruleset_version=version, questionnaire_key=plan.key
-        )
+        get_or_create_group_draft(group=group, version=version, plan=plan)
         if not staff
         else None
     )
@@ -443,6 +467,8 @@ def group_form_view(request: HttpRequest, group_pk: int):
             "answer_bases": answer_bases(answers),
             "group": group,
             "current_members": current_group_members(group),
+            "material_status": group.stage.material_status,
+            "material_status_label": group.stage.get_material_status_display(),
         },
     )
 

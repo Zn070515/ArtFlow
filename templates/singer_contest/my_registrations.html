@@ -8,7 +8,8 @@
     {% if registrations %}
     <div class="grid gap-4">
         {% for reg in registrations %}
-        <a href="{% url 'singer_contest:my_registration_detail' reg.pk %}" class="bg-white border border-gray-200 rounded-lg p-5 text-sm hover:border-brand transition-colors block">
+        <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm hover:border-brand transition-colors">
+            <a href="{% url 'singer_contest:my_registration_detail' reg.pk %}" class="block">
             <div class="flex justify-between items-center">
                 <div>
                     <h3 class="font-medium text-gray-900">{{ reg.activity.title }}</h3>
@@ -29,7 +30,16 @@
                     <span class="text-gray-400">&rarr;</span>
                 </div>
             </div>
-        </a>
+            </a>
+            {% if reg.current_groups %}
+            <div class="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-600">
+                分组合唱材料：
+                {% for membership in reg.current_groups %}
+                <a href="{% url 'questionnaire:group_form' membership.group.pk %}" class="text-brand hover:underline mr-2">{{ membership.group.stage.name }} · {{ membership.group.name }}（{{ membership.group.stage.get_material_status_display }}）</a>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
         {% endfor %}
     </div>
     {% else %}

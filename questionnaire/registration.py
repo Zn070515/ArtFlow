@@ -445,6 +445,32 @@ def get_or_create_draft_registration(*, version, user):
 
 
 @transaction.atomic
+def get_or_create_group_draft(*, group, version, plan) -> QuestionnaireResponse:
+    """The group's shared response for this version, with first-open material checks.
+
+    ``get_or_create_draft_registration`` already creates a participant's checks on first
+    open; without the matching behaviour here, staff cannot review a group's questions
+    until somebody uploads, and a supplement request has no check to point at.
+    """
+    from files.services import reconcile_group_questionnaire_material_checks
+
+    first_open = not QuestionnaireResponse.objects.filter(
+        group=group, ruleset_version=version, questionnaire_key=plan.key
+    ).exists()
+    response = get_or_create_group_response(
+        group=group,
+        ruleset_version=version,
+        questionnaire_key=plan.key,
+        schema_hash=plan.schema_hash,
+    )
+    if first_open:
+        reconcile_group_questionnaire_material_checks(
+            group=group, version=version, plan=plan
+        )
+    return response
+
+
+@transaction.atomic
 def save_draft(*, version, registration, answers, schema_hash: str = "") -> QuestionnaireResponse:
     """Persist one autosave: bound answers onto the registration, the rest into the response."""
     plan = questionnaire_plan(version)
