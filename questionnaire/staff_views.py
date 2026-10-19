@@ -428,7 +428,9 @@ def builder_view(request: HttpRequest, pk: int, subject: str = "participant"):
                     request, f"这道题不能再向{direction}移动：条件依赖必须保持在前面。"
                 )
                 return redirect(builder_route, pk=version.pk)
-            sections = {QUESTIONNAIRE_ROOT_KEYS[subject]: questionnaire}
+            sections: dict[str, object] = {
+                QUESTIONNAIRE_ROOT_KEYS[subject]: questionnaire
+            }
             if subject == "group":
                 # A pre-split version stored its group document in the participant slot.
                 # Saving the group designer is the migration seam: move it out, so the
