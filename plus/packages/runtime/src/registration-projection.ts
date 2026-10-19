@@ -58,6 +58,16 @@ export function applyRegistrationEvent(
   event: RuntimeEvent,
 ): RegistrationProjectionState {
   if (event.activityId !== state.activityId) return state;
+  if (
+    event.type !== "RegistrationStarted" &&
+    event.type !== "RegistrationSubmitted" &&
+    event.type !== "RegistrationReviewed" &&
+    event.type !== "MaterialUploaded" &&
+    event.type !== "MaterialReviewed" &&
+    event.type !== "RosterFinalized"
+  ) {
+    return state;
+  }
   const payload = record(event.payload);
 
   if (event.type === "RegistrationStarted") {

@@ -5,22 +5,32 @@ import { randomUUID } from "node:crypto";
 import {
   closeDb,
   createDb,
-  insertRelease,
-  insertSession,
   migrate,
   readEventsSince,
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
-import type { ActorContext, ExecutionSession } from "@artflow-plus/domain";
+import {
+  createEmptyCompetitionDefinition,
+  createEmptyRegistrationDefinition,
+  createMaterialsDefinition,
+  createQuestionnaireDefinition,
+  defaultCapabilityRegistry,
+  type ActorContext,
+} from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  activateActivity,
+  compileDefinition,
+  createActivity,
   finalizeRoster,
   prepareCompetitionRound,
+  releaseDefinitionCommand,
   reviewRegistration,
   startRegistration,
+  startExecution,
   submitRegistration,
 } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
@@ -44,7 +54,7 @@ const staff: ActorContext = {
   actorId: "fixture-staff",
   actorType: "user",
   roles: ["staff"],
-  permissions: ["registration.review", "registration.roster.finalize"],
+  permissions: ["registration.review", "registration.roster.finalize", "competition.round.prepare"],
 };
 
 let db: Kysely<Database>;
@@ -60,42 +70,29 @@ function deps(actor: ActorContext): RuntimeDeps {
 }
 
 async function seedActivity(): Promise<string> {
-  const activityId = "act-2026";
-  await db.insertInto("activity").values({
-    id: activityId,
-    title: "Unknown roster golden",
-    status: "active",
-    revision: 1,
-    enabled_capabilities: JSON.stringify(["competition", "registration", "questionnaire", "materials"]),
-    active_definition_version: 1,
-  }).execute();
-  await insertRelease(db, {
-    activityId,
-    version: 1,
-    contentHash: "golden-release",
+  const definition = {
+    schemaVersion: 1 as const,
+    manifest: { key: "unknown-roster", title: "Unknown roster golden" },
     capabilities: {
-      registration: { ok: true, capabilityKey: "registration", contentHash: "registration", artifact: { schemaVersion: 1, lifecycleVersion: 1, rosterStatus: "unknown" } },
-      questionnaire: { ok: true, capabilityKey: "questionnaire", contentHash: "questionnaire", artifact: { schemaVersion: 1, version: "v1", schemaHash: "questionnaire", questions: [], fileSlots: [] } },
-      materials: { ok: true, capabilityKey: "materials", contentHash: "materials", artifact: { schemaVersion: 1, maxBytes: 25_000_000, allowedPurposes: [] } },
+      competition: createEmptyCompetitionDefinition(),
+      registration: createEmptyRegistrationDefinition(),
+      questionnaire: createQuestionnaireDefinition("v1", []),
+      materials: createMaterialsDefinition(25_000_000, []),
     },
-    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
-    capabilityVersions: { competition: "1", registration: "1", questionnaire: "1", materials: "1" },
     bindings: [],
-    releasedAt: "2026-10-19T11:00:00Z",
-    sourceDraftRevision: 1,
-  });
-  const session: ExecutionSession = {
-    id: "golden-judging-session",
-    activityId,
-    definitionVersion: 1,
-    contentHash: "golden-release",
-    scope: "judging",
-    mode: "formal",
-    status: "running",
-    revision: 0,
   };
-  await insertSession(db, session, "2026-10-19T11:30:00Z");
-  return activityId;
+  const created = await createActivity(db, defaultCapabilityRegistry, deps(staff), {
+    commandId: "golden-create-activity",
+    title: "Unknown roster golden",
+    capabilities: ["competition", "registration", "questionnaire", "materials"],
+    initialDefinition: definition,
+  });
+  await activateActivity(db, deps(staff), {
+    commandId: "golden-activate-activity",
+    activityId: created.body.id,
+    expectedRevision: created.body.revision,
+  });
+  return created.body.id;
 }
 
 describe.skipIf(!connectionString)("unknown-roster golden", () => {
@@ -118,6 +115,45 @@ describe.skipIf(!connectionString)("unknown-roster golden", () => {
   it("keeps unknown distinct from zero at the execution boundary", async () => {
     expect(fixture.id).toBe("unknown-roster");
     const activityId = await seedActivity();
+    const compileStep = fixture.steps.find((step) => step.command === "compile_ruleset");
+    expect(compileStep?.expect).toMatchObject({ outcome: "accepted", events: ["RulesetCompiled"] });
+    const compiled = await compileDefinition(db, defaultCapabilityRegistry, deps(staff), {
+      commandId: "golden-compile-ruleset",
+      activityId,
+      expectedDraftRevision: 0,
+      package: {
+        schemaVersion: 1,
+        manifest: { key: "unknown-roster", title: "Unknown roster golden" },
+        capabilities: {
+          competition: createEmptyCompetitionDefinition(),
+          registration: createEmptyRegistrationDefinition(),
+          questionnaire: createQuestionnaireDefinition("v1", []),
+          materials: createMaterialsDefinition(25_000_000, []),
+        },
+        bindings: [],
+      },
+    });
+    expect(compiled.status).toBe(200);
+    let events = await readEventsSince(db, { activityId, after: 0, limit: 500 });
+    expect(events.some((event) => event.type === "DefinitionCompiled")).toBe(true);
+    const freezeStep = fixture.steps.find((step) => step.command === "freeze_ruleset");
+    expect(freezeStep?.expect).toMatchObject({ outcome: "accepted", events: ["RulesetFrozen"] });
+    const released = await releaseDefinitionCommand(db, defaultCapabilityRegistry, deps(staff), {
+      commandId: "golden-freeze-ruleset",
+      activityId,
+      expectedDraftRevision: compiled.body.draftRevision,
+    });
+    expect(released.status).toBe(201);
+    events = await readEventsSince(db, { activityId, after: 0, limit: 500 });
+    expect(events.some((event) => event.type === "DefinitionReleased")).toBe(true);
+    await startExecution(db, defaultCapabilityRegistry, deps(staff), {
+      commandId: "golden-start-judging",
+      activityId,
+      scope: "judging",
+      mode: "formal",
+    });
+    events = await readEventsSince(db, { activityId, after: 0, limit: 500 });
+    expect(events.some((event) => event.type === "ExecutionSessionStarted")).toBe(true);
     const rejectedStep = fixture.steps.find(
       (step) => step.command === "prepare_round" && step.expect.outcome === "rejected",
     );
@@ -165,6 +201,8 @@ describe.skipIf(!connectionString)("unknown-roster golden", () => {
       expectedRevision: 0,
     });
     expect(roster.body).toMatchObject({ status: "final", approvedCount: 15 });
+    const finalRosterStep = fixture.steps.find((step) => step.command === "set_roster_final");
+    expect(finalRosterStep?.expect).toMatchObject({ outcome: "accepted", events: ["RosterFinalized"] });
 
     const accepted = await prepareCompetitionRound(db, deps(staff), {
       commandId: "golden-prepare-after-roster",
@@ -173,7 +211,11 @@ describe.skipIf(!connectionString)("unknown-roster golden", () => {
       scope: "judging",
     });
     expect(accepted.body).toMatchObject({ roundKey: "round-1", participantCount: 15 });
-    const events = await readEventsSince(db, { activityId, after: before.at(-1)?.sequence ?? 0, limit: 500 });
+    const acceptedStep = fixture.steps.find(
+      (step) => step.command === "prepare_round" && step.expect.outcome === "accepted",
+    );
+    expect(acceptedStep?.expect).toMatchObject({ outcome: "accepted", events: ["RoundPrepared"] });
+    events = await readEventsSince(db, { activityId, after: before.at(-1)?.sequence ?? 0, limit: 500 });
     expect(events.some((event) => event.type === "CompetitionRoundPrepared")).toBe(true);
   });
 });
