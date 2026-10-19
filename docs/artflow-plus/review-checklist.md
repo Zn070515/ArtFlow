@@ -79,6 +79,17 @@
 - [x] ticket redeem、ticket ballot、judge seat claim 使用真实 PostgreSQL 双连接并发
   回归；runtime/API focused gates 已通过，root Django 全量 test 按 Plus 重构约束未运行。
 
+### M6.5 / Plus authority follow-up
+
+- [x] voting release artifact 已版本化为 v2；旧的双布尔 artifact 只能触发
+  `RELEASE_REISSUE_REQUIRED`，不能在运行时猜测身份策略；已打开 session 继续使用冻结行。
+- [x] closed vote tally 由单条 PostgreSQL snapshot 同时读取有效 ballot、vote record 与
+  frozen option，正式计票不再拼接分离查询。
+- [x] consequential decimal authority 值以 canonical string 保留；Decimal.js 与
+  PostgreSQL numeric 均使用 `ROUND_HALF_UP`，authority mapper 不调用 `.toNumber()`。
+- [x] `0011_voting_identity_policy` rollback 恢复旧 identity constraint；Pack 不再暴露
+  与 baseline `competition` 重复的 `judges` 开关。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

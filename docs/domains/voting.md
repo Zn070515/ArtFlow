@@ -58,6 +58,17 @@ open session（候选名单 + 规则）
 - `singer_contest/services.py::_source_vote_scores`
 - 票据交叉：`docs/domains/tickets.md`
 
+## Plus runtime authority notes
+
+- 新发布的 voting artifact 使用 schema/version 2。历史 release 中的
+  `requiresTicket` / `allowBrowserIdentity` 双布尔 artifact 不做猜测式转换；从该
+  release 新开 VoteSession 必须先重新发布定义并返回 `RELEASE_REISSUE_REQUIRED`。
+  已经打开的 VoteSession 继续使用自身冻结的 identity policy。
+- 关闭场次的正式计票由一个 PostgreSQL tally snapshot 同时读取有效 ballot、vote
+  record 与冻结 option；ticket-backed ballot 只有在 ticket 仍为 `redeemed` 时有效。
+- score inputs 与评分 authority 值以固定小数位的 canonical decimal string 暴露，采用
+  `ROUND_HALF_UP`；PostgreSQL numeric 读回不得转换为 JavaScript number。
+
 ## Plus 要求
 
 - Ballot 唯一性是数据库约束，不只是应用检查。

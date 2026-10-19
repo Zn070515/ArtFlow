@@ -138,6 +138,10 @@ candidate 定向测试。
 
 ## M6 — Voting / Ticketing（功能完成；M6.5 authority hardening 已完成，2026-10-19）
 
+M6.5 收尾语义：voting artifact 采用 v2；旧 release 重新发布前不能新开场次；closed
+tally 使用单一 PostgreSQL snapshot；评分和票数百分比的 authority decimal 以 canonical
+string 保留；0011 回滚恢复旧 identity constraint。
+
 - 投票场次、ballot 唯一性、成绩组成规则快照均绑定 execution session 的
   frozen definition release；运行中禁止换版，ballot/close 会拒绝 stale release。
 - 票据使用 redeemed ticket access session，judge scoring 使用 HttpOnly judge
