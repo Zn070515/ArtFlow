@@ -13,6 +13,7 @@ import json
 from typing import Any
 
 from django.db import transaction
+from questionnaire.schema import parse_questionnaire
 
 from .schema import ENTRY_KEY, content_hash, parse_definition
 
@@ -30,18 +31,19 @@ def _d_with_checkpoints(nodes, checkpoints):
     )
 
 
-def _d_with_questionnaire(nodes, questionnaire):
-    """A definition that also ships the participant questionnaire it depends on.
+def _d_with_questionnaire(nodes, questionnaire, group_questionnaire=None):
+    """A definition that also ships the questionnaires it depends on.
 
     The live formats collect their material through the questionnaire, so the format and the
     questions it requires have to travel together. A ``RulesetTemplate`` is definition-only,
-    so this section is the only place they can be carried.
+    so this section is the only place they can be carried. A group questionnaire is optional
+    so versions created before the second slot existed remain valid.
     """
 
-    return json.dumps(
-        {"schema_version": 1, "nodes": nodes, "questionnaire": questionnaire},
-        ensure_ascii=False,
-    )
+    definition = {"schema_version": 1, "nodes": nodes, "questionnaire": questionnaire}
+    if group_questionnaire is not None:
+        definition["group_questionnaire"] = group_questionnaire
+    return json.dumps(definition, ensure_ascii=False)
 
 
 # --- 2025 golden definitions (single source of truth) -----------------------
@@ -621,12 +623,28 @@ LIVE_2026_PODIUM_KEYS = {
 }
 
 
+LIVE_2026_MEDIA_EXTENSIONS = [
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".flac",
+    ".aac",
+    ".ogg",
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".mkv",
+]
+
+
 def live_2026_questionnaire():
-    """The material this format collects: R2 and R3 songs plus accompaniments, for everyone.
+    """The material this format collects: R2 and R3 songs plus media, for everyone.
 
     Every entrant prepares both rounds up front — a singer who never challenges may still
     be challenged, and one who never reaches the third round may still get there — so both
-    rounds are declared ``required`` for every participant.
+    rounds are declared ``required`` for every participant. The media question accepts one
+    accompaniment or performance video; the upload path derives the technical purpose from
+    the file itself.
     """
 
     questions = []
@@ -646,12 +664,13 @@ def live_2026_questionnaire():
                 {
                     "key": f"{round_key}.accompaniment",
                     "type": "file",
-                    "label": f"{label}伴奏",
+                    "label": f"{label}伴奏或演唱视频",
                     "round": round_key,
                     "required": True,
                     "file": {
                         "purpose": "accompaniment",
-                        "extensions": [".mp3"],
+                        "accepts": ["performance_video"],
+                        "extensions": LIVE_2026_MEDIA_EXTENSIONS,
                         "max_mb": 100,
                     },
                 },
@@ -665,6 +684,48 @@ def live_2026_questionnaire():
                 "key": "materials",
                 "title": "现场材料",
                 "sections": [{"key": "songs", "title": "歌曲", "questions": questions}],
+            }
+        ],
+    }
+
+
+def live_2026_group_questionnaire():
+    """The shared material a confirmed first-round group submits together."""
+
+    return {
+        "schema_version": 1,
+        "key": "group_submission",
+        "subject": "group",
+        "pages": [
+            {
+                "key": "group_materials",
+                "title": "分组合唱材料",
+                "sections": [
+                    {
+                        "key": "songs",
+                        "title": "歌曲",
+                        "questions": [
+                            {
+                                "key": "group.song",
+                                "type": "text",
+                                "label": "合唱曲目",
+                                "required": True,
+                            },
+                            {
+                                "key": "group.media",
+                                "type": "file",
+                                "label": "合唱音视频",
+                                "required": True,
+                                "file": {
+                                    "purpose": "accompaniment",
+                                    "accepts": ["performance_video"],
+                                    "extensions": LIVE_2026_MEDIA_EXTENSIONS,
+                                    "max_mb": 100,
+                                },
+                            },
+                        ],
+                    }
+                ],
             }
         ],
     }
@@ -685,6 +746,7 @@ def live_2026_definition():
             {"key": "top10", "type": "SELECT", "source": "rank1", "count": LIVE_2026_SEAT_COUNT},
         ],
         live_2026_questionnaire(),
+        live_2026_group_questionnaire(),
     )
 
 
@@ -813,6 +875,19 @@ def seed_ruleset_templates(operator=None, *, status=None):
     created = 0
     for name, definition, description in catalog:
         parsed = parse_definition(definition)
+        root = json.loads(definition)
+        for questionnaire_key, expected_subject in (
+            ("questionnaire", "participant"),
+            ("group_questionnaire", "group"),
+        ):
+            raw_questionnaire = root.get(questionnaire_key)
+            if raw_questionnaire is None:
+                continue
+            questionnaire = parse_questionnaire(raw_questionnaire)
+            if questionnaire.get("subject", "participant") != expected_subject:
+                raise ValueError(
+                    f"template {name!r}: {questionnaire_key} must be {expected_subject}"
+                )
         builtin_key = _BUILTIN_KEYS_BY_NAME.get(name, "")
         lookup: dict[str, Any]
         if builtin_key:

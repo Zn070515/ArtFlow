@@ -89,7 +89,10 @@ class SubmissionFileLifecycleTests(TestCase):
     def test_accompaniment_policy_matches_questionnaire_contract(self):
         policy = file_purpose_policy(SubmissionFile.Purpose.ACCOMPANIMENT)
         self.assertEqual(policy.max_mb, 100)
-        self.assertEqual(policy.extensions, frozenset({".mp3", ".wav", ".m4a", ".flac"}))
+        self.assertEqual(
+            policy.extensions,
+            frozenset({".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}),
+        )
         self.assertNotIn(".mp4", policy.extensions)
 
     def test_upload_policy_rejects_disallowed_extension(self):
@@ -111,6 +114,24 @@ class SubmissionFileLifecycleTests(TestCase):
 
         with self.assertRaises(ValidationError):
             validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
+
+    def test_upload_policy_accepts_ogg_and_aac_audio(self):
+        ogg = SimpleUploadedFile(
+            "song.ogg", b"OggS" + b"\x00" * 64, content_type="audio/ogg"
+        )
+        validate_upload(ogg, SubmissionFile.Purpose.ACCOMPANIMENT)
+        aac = SimpleUploadedFile(
+            "song.aac", b"\xff\xf1" + b"\x00" * 64, content_type="audio/aac"
+        )
+        validate_upload(aac, SubmissionFile.Purpose.ACCOMPANIMENT)
+
+    def test_upload_policy_accepts_mkv_video(self):
+        mkv = SimpleUploadedFile(
+            "song.mkv",
+            b"\x1a\x45\xdf\xa3" + b"\x00" * 64,
+            content_type="video/x-matroska",
+        )
+        validate_upload(mkv, SubmissionFile.Purpose.PERFORMANCE_VIDEO)
 
     def test_upload_policy_rejects_malformed_image_bytes(self):
         upload = SimpleUploadedFile("poster.png", b"not a png", content_type="image/png")

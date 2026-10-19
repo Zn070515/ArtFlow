@@ -161,15 +161,22 @@ def _validate_file_signature(uploaded_file, extension: str) -> None:
         elif extension == ".flac":
             if not header.startswith(b"fLaC"):
                 raise ValueError("invalid FLAC header")
+        elif extension == ".ogg":
+            if not header.startswith(b"OggS"):
+                raise ValueError("invalid Ogg container")
+        elif extension == ".aac":
+            # ADTS syncword: 0xFFF in the first 12 bits, layer bits 00.
+            if len(header) < 2 or header[0] != 0xFF or (header[1] & 0xF6) != 0xF0:
+                raise ValueError("invalid AAC (ADTS) stream")
         elif extension == ".m4a":
             if len(header) < 12 or header[4:8] != b"ftyp":
                 raise ValueError("invalid M4A container")
         elif extension in {".mp4", ".mov"}:
             if len(header) < 12 or header[4:8] != b"ftyp":
                 raise ValueError("invalid MP4/MOV container")
-        elif extension == ".webm":
+        elif extension in {".webm", ".mkv"}:
             if not header.startswith(b"\x1a\x45\xdf\xa3"):
-                raise ValueError("invalid WebM container")
+                raise ValueError("invalid WebM/Matroska container")
         elif extension == ".pdf":
             if not header.startswith(b"%PDF-"):
                 raise ValueError("invalid PDF header")
@@ -569,7 +576,7 @@ def store_questionnaire_group_file(
     version = current_frozen_version(_owner_activity(group))
     if version is None:
         raise ValidationError("当前活动没有已确认的赛制，无法上传材料。")
-    plan = questionnaire_plan(version)
+    plan = questionnaire_plan(version, subject="group")
     if plan.subject != "group":
         raise ValidationError("当前赛制没有分组合唱组问卷。")
     if expected_schema_hash and expected_schema_hash != plan.schema_hash:
@@ -919,7 +926,9 @@ def reconcile_group_questionnaire_material_checks(*, group, version, plan):
     from questionnaire.schema import NOTICE_TYPE
 
     owner_filter = _owner_filter(group)
-    response = QuestionnaireResponse.objects.filter(group=group, ruleset_version=version).first()
+    response = QuestionnaireResponse.objects.filter(
+        group=group, ruleset_version=version, questionnaire_key=plan.key
+    ).first()
     answers = (response.answers if response else {}) or {}
     present = {
         row.question_key: row
@@ -1246,16 +1255,22 @@ def _reconcile_owner_checks(owner, requirements):
     """
     owner_filter = _owner_filter(owner)
     file_queryset = SubmissionFile.objects.filter(**owner_filter)
-    current = {c.item_name: c for c in MaterialCheck.objects.filter(**owner_filter)}
+    # ``question_key`` belongs to the questionnaire's own checks. The legacy requirement
+    # writer owns only the unkeyed rows; treating a questionnaire check as its own would
+    # delete it on the next requirement save.
+    current = {
+        c.item_name: c
+        for c in MaterialCheck.objects.filter(**owner_filter, question_key="")
+    }
     present_names = set()
     checks = []
     for index, (item_name, file_purpose) in enumerate(requirements or []):
         present_names.add(item_name)
         existing = current.get(item_name)
         purpose = file_purpose or ""
-        has_file = (
-            bool(purpose) and file_queryset.filter(file_purpose=purpose, is_current=True).exists()
-        )
+        has_file = bool(purpose) and file_queryset.filter(
+            file_purpose=purpose, is_current=True, question_key=""
+        ).exists()
         defaults: dict = {"sort_order": index, "file_purpose": purpose}
         if existing is not None and existing.file_purpose != purpose:
             # The requirement's material type changed. A staff approval of the old type
@@ -1280,6 +1295,7 @@ def _reconcile_owner_checks(owner, requirements):
             defaults["status"] = existing.status if existing else MaterialCheck.Status.UPLOADED
         check, _ = MaterialCheck.objects.update_or_create(
             item_name=item_name,
+            question_key="",
             defaults=defaults,
             **owner_filter,
         )

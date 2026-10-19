@@ -37,6 +37,7 @@ from singer_contest.models import (
 from .compiler import QuestionnairePlan, compile_questionnaire
 from .models import QuestionnaireResponse
 from .runtime import missing_required, resolve_question_value
+from .schema import QUESTIONNAIRE_ROOT_KEYS
 from .services import (
     get_or_create_group_response,
     get_or_create_response,
@@ -45,13 +46,32 @@ from .services import (
 )
 
 
-def questionnaire_plan(version) -> QuestionnairePlan:
-    """The compiled questionnaire of a frozen version (``None`` when it has none)."""
+def questionnaire_plan(version, *, subject: str = "participant") -> QuestionnairePlan:
+    """The compiled questionnaire for one subject.
+
+    A version may carry a participant questionnaire and a group questionnaire at the same
+    time (``questionnaire`` / ``group_questionnaire``). ``subject`` selects the matching
+    root key; the legacy shape — a group-only document stored under ``questionnaire`` — is
+    still accepted for versions created before the second key existed.
+    """
+    if subject not in QUESTIONNAIRE_ROOT_KEYS:
+        raise ValidationError("未知的问卷主体。")
     root = json.loads(version.definition)
-    raw = root.get("questionnaire")
+    raw = root.get(QUESTIONNAIRE_ROOT_KEYS[subject])
+    if raw is None and subject == "group":
+        legacy = root.get("questionnaire")
+        if legacy is not None:
+            legacy_plan = compile_questionnaire(legacy)
+            if legacy_plan.subject == "group":
+                raw = legacy
     if raw is None:
+        if subject == "group":
+            raise ValidationError("当前赛制尚未配置分组合唱组问卷。")
         raise ValidationError("当前赛制尚未配置报名问卷。")
-    return compile_questionnaire(raw)
+    plan = compile_questionnaire(raw)
+    if plan.subject != subject:
+        raise ValidationError("问卷主体与所在定义段不一致。")
+    return plan
 
 
 def build_submission_context(*, version, registration) -> dict:
@@ -425,6 +445,32 @@ def get_or_create_draft_registration(*, version, user):
 
 
 @transaction.atomic
+def get_or_create_group_draft(*, group, version, plan) -> QuestionnaireResponse:
+    """The group's shared response for this version, with first-open material checks.
+
+    ``get_or_create_draft_registration`` already creates a participant's checks on first
+    open; without the matching behaviour here, staff cannot review a group's questions
+    until somebody uploads, and a supplement request has no check to point at.
+    """
+    from files.services import reconcile_group_questionnaire_material_checks
+
+    first_open = not QuestionnaireResponse.objects.filter(
+        group=group, ruleset_version=version, questionnaire_key=plan.key
+    ).exists()
+    response = get_or_create_group_response(
+        group=group,
+        ruleset_version=version,
+        questionnaire_key=plan.key,
+        schema_hash=plan.schema_hash,
+    )
+    if first_open:
+        reconcile_group_questionnaire_material_checks(
+            group=group, version=version, plan=plan
+        )
+    return response
+
+
+@transaction.atomic
 def save_draft(*, version, registration, answers, schema_hash: str = "") -> QuestionnaireResponse:
     """Persist one autosave: bound answers onto the registration, the rest into the response."""
     plan = questionnaire_plan(version)
@@ -574,7 +620,7 @@ def save_group_draft(
     the writer refuses a base that has moved instead of overwriting a teammate's text.
     """
     current_actor = _require_group_member(group, actor)
-    plan = questionnaire_plan(version)
+    plan = questionnaire_plan(version, subject="group")
     if plan.subject != "group":
         raise ValidationError("当前赛制问卷不是分组合唱组问卷。")
     if schema_hash and schema_hash != plan.schema_hash:
@@ -659,7 +705,7 @@ def submit_group_response(
     from files.services import reconcile_group_questionnaire_material_checks
 
     current_actor = _require_group_member(group, actor)
-    plan = questionnaire_plan(version)
+    plan = questionnaire_plan(version, subject="group")
     if plan.subject != "group":
         raise ValidationError("当前赛制问卷不是分组合唱组问卷。")
     if expected_schema_hash and expected_schema_hash != plan.schema_hash:

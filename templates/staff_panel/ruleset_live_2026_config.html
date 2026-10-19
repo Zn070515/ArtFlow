@@ -247,6 +247,7 @@
         <div class="flex flex-wrap items-center gap-3">
             <button class="touch-target bg-brand text-white rounded text-sm">保存赛制</button>
             <a href="{% url 'staff:ruleset_questionnaire' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">选手问卷</a>
+            <a href="{% url 'staff:ruleset_group_questionnaire' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">分组问卷</a>
         </div>
         <p class="text-xs text-gray-500">若两个页面同时打开，后保存的一方会被提示「已被其他编辑修改」。</p>
         {% if user.is_admin %}

@@ -1,16 +1,21 @@
 {% extends "base.html" %}
 
-{% block title %}问卷预览 — {{ activity.title }} — ArtFlow{% endblock %}
+{% block title %}{{ subject_label }}预览 — {{ activity.title }} — ArtFlow{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl mx-auto px-4 py-8">
     <div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-2 rounded mb-4">
-        工作人员预览：{{ context_label }}。这里展示的是选手在已冻结赛制下会看到的页面。
+        工作人员预览：{{ subject_label }} · {{ context_label }}。这里展示的是选手在已冻结赛制下会看到的页面。
     </div>
 
     <p class="text-sm text-gray-500 mb-2">
-        {% for key, label in preview_contexts.items %}
-        <a href="{% url 'staff:ruleset_questionnaire_preview' version.pk key %}"
+        <a href="{{ participant_builder_url }}" class="mr-2 {% if not is_group %}font-semibold text-brand{% else %}text-gray-500 hover:text-gray-800{% endif %}">选手问卷</a>
+        <a href="{{ group_builder_url }}" class="mr-2 {% if is_group %}font-semibold text-brand{% else %}text-gray-500 hover:text-gray-800{% endif %}">分组合唱问卷</a>
+    </p>
+
+    <p class="text-sm text-gray-500 mb-2">
+        {% for key, label, url in preview_links %}
+        <a href="{{ url }}"
            class="mr-2 {% if key == context_key %}font-semibold text-brand{% else %}text-gray-500 hover:text-gray-800{% endif %}">{{ label }}</a>
         {% endfor %}
     </p>
@@ -54,6 +59,6 @@
     </section>
     {% endfor %}
 
-    <a href="{% url 'staff:ruleset_questionnaire' version.pk %}" class="text-sm text-brand hover:underline">返回设计器</a>
+    <a href="{{ builder_url }}" class="text-sm text-brand hover:underline">返回设计器</a>
 </div>
 {% endblock %}

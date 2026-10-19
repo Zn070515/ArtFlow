@@ -194,7 +194,7 @@ _PREPARATION_TASK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("judges", "三轮评委", ("judges", "round_judges")),
     ("rubric", "三轮统一评分标准", ("rubric",)),
     ("groups", "第一轮分组", ("groups",)),
-    ("questionnaire", "选手问卷", ("questionnaire",)),
+    ("questionnaire", "选手问卷与分组问卷", ("questionnaire",)),
 )
 
 #: Every granular row that belongs to a user task. Rows outside this set are system checks.

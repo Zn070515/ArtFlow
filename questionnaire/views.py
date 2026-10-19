@@ -29,7 +29,13 @@ from django.views.decorators.http import require_POST
 from files.policies import effective_file_policy
 from ruleset.services import current_frozen_version
 from singer_contest.group_chorus import current_group_members
-from singer_contest.models import ContestRound, Group, GroupStage, SingerRegistration
+from singer_contest.models import (
+    ContestRound,
+    Group,
+    GroupMembership,
+    GroupStage,
+    SingerRegistration,
+)
 
 from .registration import (
     build_group_submission_context,
@@ -37,7 +43,7 @@ from .registration import (
     current_answer_files,
     current_group_answer_files,
     get_or_create_draft_registration,
-    get_or_create_group_response,
+    get_or_create_group_draft,
     questionnaire_plan,
     save_draft,
     save_group_draft,
@@ -137,11 +143,11 @@ def _invalid_questionnaire_response() -> JsonResponse:
     return JsonResponse({"error": "问卷内容未通过校验，请检查后重试。"}, status=409)
 
 
-def _frozen_plan(activity: Activity):
+def _frozen_plan(activity: Activity, *, subject: str = "participant"):
     version = current_frozen_version(activity)
     if version is None:
         raise PermissionDenied("当前活动没有已确认的赛制。")
-    return version, questionnaire_plan(version)
+    return version, questionnaire_plan(version, subject=subject)
 
 
 # Phases in which a participant may open their own questionnaire. Reading it stays open
@@ -316,6 +322,8 @@ def form_view(request: HttpRequest, activity_pk: int):
         # legacy entry, not expose an internal "no questionnaire" error page.
         return redirect(f"{reverse('singer_contest:apply')}?activity={activity.pk}")
     version, plan = _frozen_plan(activity)
+    if plan.subject != "participant":
+        raise PermissionDenied("当前赛制没有启用选手问卷。")
     staff = _is_staff(request.user)
     if staff:
         # A preview: an unsaved registration, so opening the page never creates a draft
@@ -327,6 +335,27 @@ def form_view(request: HttpRequest, activity_pk: int):
         registration, response = get_or_create_draft_registration(
             version=version, user=cast(AccountUser, request.user)
         )
+    participant_groups = []
+    if not staff:
+        try:
+            questionnaire_plan(version, subject="group")
+        except ValidationError:
+            pass
+        else:
+            participant_groups = list(
+                GroupMembership.objects.filter(
+                    singer__user=request.user,
+                    singer__activity=activity,
+                    is_current=True,
+                    group__is_active=True,
+                    group__stage__status__in=[
+                        GroupStage.Status.CONFIRMED,
+                        GroupStage.Status.FROZEN,
+                    ],
+                )
+                .select_related("group__stage")
+                .order_by("group__stage_id", "group__group_order")
+            )
     writable = (
         None
         if staff
@@ -363,6 +392,7 @@ def form_view(request: HttpRequest, activity_pk: int):
             "pages": _page_model(plan, rows),
             "editable": editable,
             "preview": staff,
+            "participant_groups": participant_groups,
             "schema_hash": plan.schema_hash,
             "completion": completion_summary(
                 plan,
@@ -388,14 +418,15 @@ def group_form_view(request: HttpRequest, group_pk: int):
     activity = group.stage.activity
     if not _is_staff(request.user):
         _require_group_page(activity)
-    version, plan = _frozen_plan(activity)
+    try:
+        version, plan = _frozen_plan(activity, subject="group")
+    except ValidationError as error:
+        raise PermissionDenied("当前赛制尚未配置分组合唱问卷，请联系工作人员。") from error
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     staff = _is_staff(request.user)
     response = (
-        get_or_create_group_response(
-            group=group, ruleset_version=version, questionnaire_key=plan.key
-        )
+        get_or_create_group_draft(group=group, version=version, plan=plan)
         if not staff
         else None
     )
@@ -441,6 +472,8 @@ def group_form_view(request: HttpRequest, group_pk: int):
             "answer_bases": answer_bases(answers),
             "group": group,
             "current_members": current_group_members(group),
+            "material_status": group.stage.material_status,
+            "material_status_label": group.stage.get_material_status_display(),
         },
     )
 
@@ -457,7 +490,10 @@ def _json_body(request: HttpRequest) -> dict | None:
 @require_POST
 def autosave_view(request: HttpRequest, activity_pk: int):
     activity = _activity_or_404(request, activity_pk)
-    version, plan = _frozen_plan(activity)
+    try:
+        version, plan = _frozen_plan(activity)
+    except ValidationError:
+        return JsonResponse({"error": "当前赛制没有启用选手问卷。"}, status=409)
     _require_participant_writer(request, activity)
     payload = _json_body(request)
     if payload is None:
@@ -495,11 +531,17 @@ def autosave_view(request: HttpRequest, activity_pk: int):
 
 
 def _has_questionnaire(version) -> bool:
+    """Whether this version carries a participant questionnaire.
+
+    A legacy group-only version stored its group document in the ``questionnaire`` slot;
+    its presence is not enough to route a participant into the questionnaire form, because
+    the participant selector correctly refuses it.
+    """
     try:
-        root = json.loads(version.definition)
-    except (TypeError, ValueError):
+        questionnaire_plan(version, subject="participant")
+    except (ValidationError, TypeError, ValueError):
         return False
-    return isinstance(root, dict) and root.get("questionnaire") is not None
+    return True
 
 
 @login_required
@@ -553,7 +595,10 @@ def submit_view(request: HttpRequest, activity_pk: int):
     let a page that cannot see the current questionnaire write into it.
     """
     activity = _activity_or_404(request, activity_pk)
-    version, plan = _frozen_plan(activity)
+    try:
+        version, plan = _frozen_plan(activity)
+    except ValidationError:
+        return JsonResponse({"error": "当前赛制没有启用选手问卷。"}, status=409)
     _require_participant_writer(request, activity)
     payload = _json_body(request)
     if payload is None:
@@ -599,7 +644,10 @@ def upload_view(request: HttpRequest, activity_pk: int, question_key: str):
     from files.services import store_questionnaire_file
 
     activity = _activity_or_404(request, activity_pk)
-    version, plan = _frozen_plan(activity)
+    try:
+        version, plan = _frozen_plan(activity)
+    except ValidationError:
+        return JsonResponse({"error": "当前赛制没有启用选手问卷。"}, status=409)
     _require_participant_writer(request, activity)
     uploaded = request.FILES.get("file")
     if not uploaded:
@@ -633,7 +681,10 @@ def group_autosave_view(request: HttpRequest, group_pk: int):
     if _is_staff(request.user):
         raise PermissionDenied("工作人员不能通过选手入口修改分组合唱资料。")
     _require_group_page(group.stage.activity)
-    version, plan = _frozen_plan(group.stage.activity)
+    try:
+        version, plan = _frozen_plan(group.stage.activity, subject="group")
+    except ValidationError:
+        return JsonResponse({"error": "当前赛制尚未配置分组合唱问卷。"}, status=409)
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     payload = _json_body(request)
@@ -690,7 +741,10 @@ def group_submit_view(request: HttpRequest, group_pk: int):
     if _is_staff(request.user):
         raise PermissionDenied("工作人员不能通过选手入口提交分组合唱资料。")
     _require_group_page(group.stage.activity)
-    version, plan = _frozen_plan(group.stage.activity)
+    try:
+        version, plan = _frozen_plan(group.stage.activity, subject="group")
+    except ValidationError:
+        return JsonResponse({"error": "当前赛制尚未配置分组合唱问卷。"}, status=409)
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     payload = _json_body(request)
@@ -756,7 +810,10 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
     uploaded = request.FILES.get("file")
     if not uploaded:
         return JsonResponse({"error": "请选择要上传的文件。"}, status=400)
-    version, plan = _frozen_plan(group.stage.activity)
+    try:
+        version, plan = _frozen_plan(group.stage.activity, subject="group")
+    except ValidationError:
+        return JsonResponse({"error": "当前赛制尚未配置分组合唱问卷。"}, status=409)
     stale = _stale_or_missing_schema_hash({"schema_hash": request.POST.get("schema_hash")}, plan)
     if stale is not None:
         return stale

@@ -352,6 +352,18 @@ urlpatterns = [
         questionnaire_staff_views.preview_view,
         name="ruleset_questionnaire_preview",
     ),
+    path(
+        "rulesets/<int:pk>/questionnaire/group/",
+        questionnaire_staff_views.builder_view,
+        {"subject": "group"},
+        name="ruleset_group_questionnaire",
+    ),
+    path(
+        "rulesets/<int:pk>/questionnaire/group/preview/<str:context>/",
+        questionnaire_staff_views.preview_view,
+        {"subject": "group"},
+        name="ruleset_group_questionnaire_preview",
+    ),
     path("rulesets/<int:pk>/bind/", views.ruleset_bind, name="ruleset_bind"),
     path("rulesets/<int:pk>/validate/", views.ruleset_validate, name="ruleset_validate"),
     path("rulesets/<int:pk>/preview/", views.ruleset_preview, name="ruleset_preview"),

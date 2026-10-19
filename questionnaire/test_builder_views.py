@@ -58,6 +58,46 @@ QUESTIONNAIRE = {
 }
 
 
+GROUP_QUESTIONNAIRE = {
+    "schema_version": 1,
+    "key": "group_submission",
+    "subject": "group",
+    "pages": [
+        {
+            "key": "group_materials",
+            "title": "分组合唱材料",
+            "sections": [
+                {
+                    "key": "songs",
+                    "title": "歌曲",
+                    "questions": [
+                        {
+                            "key": "group.song",
+                            "type": "text",
+                            "label": "合唱曲目",
+                            "required": True,
+                        },
+                        {
+                            "key": "group.media",
+                            "type": "file",
+                            "label": "合唱音视频",
+                            "required": True,
+                            "file": {
+                                "purpose": "accompaniment",
+                                "accepts": ["performance_video"],
+                                "extensions": [".mp3", ".mp4"],
+                                "max_mb": 100,
+                                "max_files": 1,
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+    ],
+}
+
+
 def _logical_round_questionnaire():
     """The 2026 shape: one question per personal round, bound to a round key, not a round."""
 
@@ -139,6 +179,7 @@ class _BuilderBase(_CharacterizationBase):
         frozen=False,
         round_name="r1",
         questionnaire=None,
+        group_questionnaire=None,
         live_challenge=None,
     ):
         activity = self.make_activity(is_test_mode=True, title=f"builder-{uuid4().hex[:6]}")
@@ -167,6 +208,8 @@ class _BuilderBase(_CharacterizationBase):
         root = json.loads(_definition())
         if with_questionnaire:
             root["questionnaire"] = QUESTIONNAIRE if questionnaire is None else questionnaire
+        if group_questionnaire is not None:
+            root["group_questionnaire"] = group_questionnaire
         version = RulesetVersion.objects.create(
             ruleset=ruleset, definition=json.dumps(root, ensure_ascii=False)
         )
@@ -177,6 +220,14 @@ class _BuilderBase(_CharacterizationBase):
 
     def designer_url(self, version):
         return reverse("staff:ruleset_questionnaire", args=[version.pk])
+
+    def group_designer_url(self, version):
+        return reverse("staff:ruleset_group_questionnaire", args=[version.pk])
+
+    def group_preview_url(self, version, context="participant"):
+        return reverse(
+            "staff:ruleset_group_questionnaire_preview", args=[version.pk, context]
+        )
 
 
 class BuilderViewTests(_BuilderBase):
@@ -507,3 +558,101 @@ class PreviewViewTests(_BuilderBase):
 
     def test_an_unknown_context_is_refused(self):
         self.assertEqual(self.client.get(self._url("imaginary")).status_code, 403)
+
+
+class GroupBuilderViewTests(_BuilderBase):
+    def setUp(self):
+        super().setUp()
+        self.version = self.make_version(group_questionnaire=GROUP_QUESTIONNAIRE)
+        self.client.force_login(self.staff())
+
+    def _stored(self):
+        self.version.refresh_from_db()
+        root = json.loads(self.version.definition)
+        return root["questionnaire"], root["group_questionnaire"]
+
+    def _post(self, **payload):
+        self.version.refresh_from_db()
+        payload.setdefault("base_content_hash", self.version.content_hash)
+        return self.client.post(self.group_designer_url(self.version), payload)
+
+    def test_group_designer_renders_the_group_questions(self):
+        response = self.client.get(self.group_designer_url(self.version))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "合唱曲目")
+        self.assertContains(response, "group.media")
+
+    def test_editing_group_question_leaves_participant_untouched(self):
+        before_participant, _ = self._stored()
+
+        response = self._post(action="edit", key="group.song", label="合唱歌名")
+
+        self.assertEqual(response.status_code, 302)
+        participant, group = self._stored()
+        self.assertEqual(participant, before_participant)
+        self.assertEqual(
+            group["pages"][0]["sections"][0]["questions"][0]["label"], "合唱歌名"
+        )
+
+    def test_editing_group_file_question_keeps_accepts(self):
+        self._post(
+            action="edit",
+            key="group.media",
+            label="合唱音视频",
+            file_purpose="accompaniment",
+            file_extensions=".mp3, .mp4",
+            file_max_mb="100",
+            file_accepts=["performance_video"],
+        )
+
+        _, group = self._stored()
+        question = group["pages"][0]["sections"][0]["questions"][1]
+        self.assertEqual(question["file"]["accepts"], ["performance_video"])
+
+    def test_json_mode_cannot_put_the_participant_document_in_the_group_slot(self):
+        _, before_group = self._stored()
+
+        response = self._post(
+            action="save_json", questionnaire_json=json.dumps(QUESTIONNAIRE)
+        )
+
+        self.assertEqual(response.status_code, 302)
+        _, after_group = self._stored()
+        self.assertEqual(after_group, before_group)
+
+    def test_group_preview_renders(self):
+        response = self.client.get(self.group_preview_url(self.version, "partial"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "分组合唱材料")
+        self.assertContains(response, "合唱音视频")
+
+    def test_saving_a_legacy_group_document_moves_it_to_the_group_slot(self):
+        version = self.make_version(with_questionnaire=False)
+        root = json.loads(version.definition)
+        root["questionnaire"] = GROUP_QUESTIONNAIRE
+        version.definition = json.dumps(root, ensure_ascii=False)
+        version.save(update_fields=["definition"])
+        version.refresh_from_db()
+
+        response = self.client.post(
+            self.group_designer_url(version),
+            {
+                "action": "edit",
+                "key": "group.song",
+                "label": "合唱歌名",
+                "base_content_hash": version.content_hash,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        version.refresh_from_db()
+        stored = json.loads(version.definition)
+        self.assertNotIn("questionnaire", stored)
+        self.assertIn("group_questionnaire", stored)
+        self.assertEqual(
+            stored["group_questionnaire"]["pages"][0]["sections"][0]["questions"][0][
+                "label"
+            ],
+            "合唱歌名",
+        )

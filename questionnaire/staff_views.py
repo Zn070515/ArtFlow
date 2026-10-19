@@ -22,14 +22,16 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from files.policies import FILE_PURPOSE_LABELS, FILE_PURPOSE_POLICIES, effective_file_policy
 from ruleset.models import RulesetVersion
 from ruleset.services import (
     LIVE_CHALLENGE_FORMAT_KEY,
     newer_ruleset_version,
-    update_ruleset_definition_section,
+    update_ruleset_definition_sections,
     version_is_editable,
 )
+from ruleset.templates import live_2026_group_questionnaire
 
 from .builder import (
     add_question,
@@ -40,7 +42,7 @@ from .builder import (
 )
 from .compiler import compile_questionnaire
 from .runtime import completion_summary, resolve_question_value, resolve_questions
-from .schema import FILE_PURPOSES, parse_questionnaire
+from .schema import FILE_PURPOSES, QUESTIONNAIRE_ROOT_KEYS, parse_questionnaire
 
 ACTION_LABELS = {
     "add": "新增题目",
@@ -83,6 +85,10 @@ EMPTY_QUESTIONNAIRE = {
     ],
 }
 
+# The designer's starter is the same document the built-in template ships, so the two
+# cannot drift. ``_current_questionnaire`` returns a copy before any edit.
+EMPTY_GROUP_QUESTIONNAIRE = live_2026_group_questionnaire()
+
 
 def _definition_root(version: RulesetVersion) -> dict:
     try:
@@ -94,9 +100,29 @@ def _definition_root(version: RulesetVersion) -> dict:
     return root
 
 
-def _current_questionnaire(version: RulesetVersion) -> dict:
-    raw = _definition_root(version).get("questionnaire")
-    return raw if raw is not None else dict(EMPTY_QUESTIONNAIRE)
+def _current_questionnaire(version: RulesetVersion, *, subject: str = "participant") -> dict:
+    if subject not in QUESTIONNAIRE_ROOT_KEYS:
+        raise ValidationError("未知的问卷主体。")
+    root = _definition_root(version)
+    raw = root.get(QUESTIONNAIRE_ROOT_KEYS[subject])
+    if raw is None and subject == "group":
+        legacy = root.get("questionnaire")
+        if legacy is not None:
+            try:
+                if compile_questionnaire(legacy).subject == "group":
+                    return legacy
+            except ValidationError:
+                pass
+    if raw is not None:
+        return raw
+    starter = EMPTY_GROUP_QUESTIONNAIRE if subject == "group" else EMPTY_QUESTIONNAIRE
+    return dict(starter)
+
+
+def _require_subject(questionnaire: dict, subject: str) -> dict:
+    if questionnaire.get("subject", "participant") != subject:
+        raise ValidationError("问卷主体与当前编辑页不一致，请刷新后重试。")
+    return questionnaire
 
 
 def _bound_rounds(version: RulesetVersion) -> frozenset[str]:
@@ -246,12 +272,19 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
                 max_mb = int(post.get("file_max_mb") or "")
             except (TypeError, ValueError) as exc:
                 raise ValidationError("文件大小上限必须是正整数 MB。") from exc
+            accepts = [
+                purpose.strip()
+                for purpose in post.getlist("file_accepts")
+                if purpose.strip()
+            ]
             file_config = {
                 "purpose": post.get("file_purpose") or "",
                 "extensions": extensions,
                 "max_mb": max_mb,
                 "max_files": 1,
             }
+            if accepts:
+                file_config["accepts"] = accepts
         return update_question(
             questionnaire,
             key=post.get("key") or "",
@@ -357,8 +390,20 @@ def _round_choices(version: RulesetVersion, questionnaire: dict) -> list[tuple[s
     return choices
 
 
-def builder_view(request: HttpRequest, pk: int):
+def builder_view(request: HttpRequest, pk: int, subject: str = "participant"):
     """The designer, its JSON mode, and the write path they share."""
+    if subject not in QUESTIONNAIRE_ROOT_KEYS:
+        raise PermissionDenied("未知的问卷主体。")
+    builder_route = (
+        "staff:ruleset_group_questionnaire"
+        if subject == "group"
+        else "staff:ruleset_questionnaire"
+    )
+    preview_route = (
+        "staff:ruleset_group_questionnaire_preview"
+        if subject == "group"
+        else "staff:ruleset_questionnaire_preview"
+    )
     require_current_staff(request.user)
     version = get_object_or_404(RulesetVersion, pk=pk)
     # The same rule every other editor asks: the newest row, and only while it is a DRAFT.
@@ -374,28 +419,43 @@ def builder_view(request: HttpRequest, pk: int):
             base_content_hash = request.POST.get("base_content_hash") or ""
             if not base_content_hash:
                 raise ValidationError("问卷已更新，请刷新后再操作。")
-            before = parse_questionnaire(_current_questionnaire(version))
+            before = parse_questionnaire(_current_questionnaire(version, subject=subject))
             questionnaire = _apply_action(before, action, request.POST)
+            _require_subject(questionnaire, subject)
             if action in {"move_up", "move_down"} and questionnaire == before:
                 direction = "上" if action == "move_up" else "下"
                 messages.warning(
                     request, f"这道题不能再向{direction}移动：条件依赖必须保持在前面。"
                 )
-                return redirect("staff:ruleset_questionnaire", pk=version.pk)
-            update_ruleset_definition_section(
+                return redirect(builder_route, pk=version.pk)
+            sections: dict[str, object] = {
+                QUESTIONNAIRE_ROOT_KEYS[subject]: questionnaire
+            }
+            if subject == "group":
+                # A pre-split version stored its group document in the participant slot.
+                # Saving the group designer is the migration seam: move it out, so the
+                # participant slot is no longer a group document.
+                legacy = _definition_root(version).get("questionnaire")
+                if legacy is not None:
+                    try:
+                        legacy_is_group = compile_questionnaire(legacy).subject == "group"
+                    except ValidationError:
+                        legacy_is_group = False
+                    if legacy_is_group:
+                        sections["questionnaire"] = None
+            update_ruleset_definition_sections(
                 version,
-                section="questionnaire",
-                value=questionnaire,
+                sections=sections,
                 operator=request.user,
                 base_content_hash=base_content_hash,
             )
         except ValidationError as exc:
             messages.error(request, "；".join(getattr(exc, "messages", None) or [str(exc)]))
-            return redirect("staff:ruleset_questionnaire", pk=version.pk)
+            return redirect(builder_route, pk=version.pk)
         messages.success(request, f"{ACTION_LABELS.get(action, action)}成功。")
-        return redirect("staff:ruleset_questionnaire", pk=version.pk)
+        return redirect(builder_route, pk=version.pk)
 
-    questionnaire = _current_questionnaire(version)
+    questionnaire = _current_questionnaire(version, subject=subject)
     plan = compile_questionnaire(questionnaire)
     rows = _rows(plan, answers={}, context={}, due_rounds=_bound_rounds(version))
     round_choices = [("", "不限定轮次")]
@@ -407,6 +467,17 @@ def builder_view(request: HttpRequest, pk: int):
             "version": version,
             "ruleset": version.ruleset,
             "activity": version.ruleset.activity,
+            "subject": subject,
+            "subject_label": "分组合唱问卷" if subject == "group" else "选手问卷",
+            "is_group": subject == "group",
+            "builder_url": reverse(builder_route, args=[version.pk]),
+            "preview_url_name": preview_route,
+            "preview_links": [
+                (key, label, reverse(preview_route, args=[version.pk, key]))
+                for key, label in PREVIEW_CONTEXTS.items()
+            ],
+            "participant_builder_url": reverse("staff:ruleset_questionnaire", args=[version.pk]),
+            "group_builder_url": reverse("staff:ruleset_group_questionnaire", args=[version.pk]),
             "read_only": read_only,
             "read_only_reason": read_only_reason,
             "questionnaire": questionnaire,
@@ -463,17 +534,40 @@ def _preview_answers(plan) -> dict:
     return answers
 
 
-def preview_view(request: HttpRequest, pk: int, context: str):
-    """Render the participant form in one of the four states staff need to see."""
+def preview_view(
+    request: HttpRequest, pk: int, context: str, subject: str = "participant"
+):
+    """Render the form in one of the four states staff need to see."""
+    if subject not in QUESTIONNAIRE_ROOT_KEYS:
+        raise PermissionDenied("未知的问卷主体。")
+    builder_route = (
+        "staff:ruleset_group_questionnaire"
+        if subject == "group"
+        else "staff:ruleset_questionnaire"
+    )
+    preview_route = (
+        "staff:ruleset_group_questionnaire_preview"
+        if subject == "group"
+        else "staff:ruleset_questionnaire_preview"
+    )
     require_current_staff(request.user)
     if context not in PREVIEW_CONTEXTS:
         raise PermissionDenied("未知的预览语境。")
     version = get_object_or_404(RulesetVersion, pk=pk)
-    plan = compile_questionnaire(_current_questionnaire(version))
+    plan = compile_questionnaire(_current_questionnaire(version, subject=subject))
     activity = version.ruleset.activity
     server_context: dict[str, object] = {"activity.phase": activity.phase}
-    for key in _bound_rounds(version):
-        server_context[f"qualified.{key}"] = context in {"partial", "closed", "supplement"}
+    if subject == "group":
+        server_context.update(
+            {
+                "group.stage": "chorus",
+                "group.order": 1,
+                "group.member_count": 3,
+            }
+        )
+    else:
+        for key in _bound_rounds(version):
+            server_context[f"qualified.{key}"] = context in {"partial", "closed", "supplement"}
 
     answers = {} if context == "participant" else _preview_answers(plan)
     rows = _rows(
@@ -498,6 +592,17 @@ def preview_view(request: HttpRequest, pk: int, context: str):
             "context_key": context,
             "context_label": PREVIEW_CONTEXTS[context],
             "preview_contexts": PREVIEW_CONTEXTS,
+            "subject": subject,
+            "subject_label": "分组合唱问卷" if subject == "group" else "选手问卷",
+            "is_group": subject == "group",
+            "builder_url": reverse(builder_route, args=[version.pk]),
+            "preview_url_name": preview_route,
+            "preview_links": [
+                (key, label, reverse(preview_route, args=[version.pk, key]))
+                for key, label in PREVIEW_CONTEXTS.items()
+            ],
+            "participant_builder_url": reverse("staff:ruleset_questionnaire", args=[version.pk]),
+            "group_builder_url": reverse("staff:ruleset_group_questionnaire", args=[version.pk]),
             "read_only": context != "participant",
             "pages": _page_model(plan, rows),
             "completion": completion_summary(

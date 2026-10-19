@@ -19,11 +19,13 @@ The rules the gate enforces, from the Questionnaire workflow spec:
 """
 
 import json
+from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
 from questionnaire.compiler import compile_questionnaire
+from questionnaire.registration import questionnaire_plan
 from questionnaire.schema import parse_questionnaire, schema_hash
 
 
@@ -427,3 +429,66 @@ class QuestionnairePlanTests(SimpleTestCase):
         )
         self.assertEqual([q["key"] for q in plan.questions], ["r3.song"])
         self.assertEqual([n["key"] for n in plan.notices], ["r3.notice"])
+
+
+class QuestionnairePlanSubjectTests(SimpleTestCase):
+    def _group_questionnaire(self):
+        document = _questionnaire(
+            [
+                {
+                    "key": "group.media",
+                    "type": "file",
+                    "label": "合唱音视频",
+                    "required": True,
+                    "file": {
+                        "purpose": "accompaniment",
+                        "accepts": ["performance_video"],
+                        "extensions": [".mp3", ".mp4"],
+                        "max_mb": 100,
+                    },
+                }
+            ],
+            key="group_submission",
+        )
+        document["subject"] = "group"
+        return document
+
+    def _version(self, **documents):
+        return SimpleNamespace(
+            definition=json.dumps({"schema_version": 1, "nodes": [], **documents})
+        )
+
+    def test_selects_each_subject_from_the_same_definition(self):
+        version = self._version(
+            questionnaire=_questionnaire([_question("r2.song", round="r2")]),
+            group_questionnaire=self._group_questionnaire(),
+        )
+
+        self.assertEqual(questionnaire_plan(version).subject, "participant")
+        self.assertEqual(questionnaire_plan(version, subject="group").subject, "group")
+
+    def test_subject_mismatch_is_rejected(self):
+        version = self._version(
+            questionnaire=self._group_questionnaire(),
+            group_questionnaire=_questionnaire([_question("r2.song", round="r2")]),
+        )
+
+        self.assertRaises(ValidationError, questionnaire_plan, version)
+        self.assertRaises(
+            ValidationError, questionnaire_plan, version, subject="group"
+        )
+
+    def test_unknown_subject_is_rejected(self):
+        version = self._version(
+            questionnaire=_questionnaire([_question("r2.song", round="r2")])
+        )
+
+        self.assertRaises(
+            ValidationError, questionnaire_plan, version, subject="audience"
+        )
+
+    def test_group_selector_accepts_the_legacy_single_document(self):
+        version = self._version(questionnaire=self._group_questionnaire())
+
+        self.assertEqual(questionnaire_plan(version, subject="group").subject, "group")
+        self.assertRaises(ValidationError, questionnaire_plan, version)

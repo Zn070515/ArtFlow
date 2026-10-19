@@ -1,19 +1,20 @@
 {% extends "base.html" %}
 
-{% block title %}选手问卷 — {{ activity.title }} — ArtFlow{% endblock %}
+{% block title %}{{ subject_label }} — {{ activity.title }} — ArtFlow{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl mx-auto px-4 py-8">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
-            <h1 class="text-xl font-bold text-gray-900">选手问卷</h1>
+            <h1 class="text-xl font-bold text-gray-900">{{ subject_label }}</h1>
             <p class="text-sm text-gray-500">{{ activity.title }} · 版本 v{{ version.version }}</p>
         </div>
-        <div class="flex items-center gap-2 text-sm">
+        <div class="flex flex-wrap items-center gap-2 text-sm">
             <a href="{% url 'staff:ruleset_edit' version.pk %}" class="rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50">比赛流程</a>
-            <span class="rounded bg-brand px-3 py-1.5 text-white">选手问卷</span>
-            {% for key, label in preview_contexts.items %}
-            <a href="{% url 'staff:ruleset_questionnaire_preview' version.pk key %}" class="rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50">预览：{{ label }}</a>
+            <a href="{{ participant_builder_url }}" class="rounded border px-3 py-1.5 {% if not is_group %}bg-brand text-white border-brand{% else %}border-gray-300 text-gray-700 hover:bg-gray-50{% endif %}">选手问卷</a>
+            <a href="{{ group_builder_url }}" class="rounded border px-3 py-1.5 {% if is_group %}bg-brand text-white border-brand{% else %}border-gray-300 text-gray-700 hover:bg-gray-50{% endif %}">分组合唱问卷</a>
+            {% for key, label, url in preview_links %}
+            <a href="{{ url }}" class="rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50">预览：{{ label }}</a>
             {% endfor %}
         </div>
     </div>
@@ -116,6 +117,11 @@
                                 <label class="mt-1 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-purpose">用途
                                     <select id="{{ q.key|slugify }}-file-purpose" name="file_purpose" required class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
                                         {% for purpose, label in file_purpose_options %}<option value="{{ purpose }}"{% if q.file.purpose == purpose %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                                    </select>
+                                </label>
+                                <label class="mt-2 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-accepts">同时接受（可选，按 Ctrl/Cmd 多选）
+                                    <select id="{{ q.key|slugify }}-file-accepts" name="file_accepts" multiple class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
+                                        {% for purpose, label in file_purpose_options %}{% if purpose != q.file.purpose %}<option value="{{ purpose }}"{% if purpose in q.file.accepts %} selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
                                     </select>
                                 </label>
                                 <label class="mt-2 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-extensions">允许扩展名（逗号分隔）

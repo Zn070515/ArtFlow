@@ -16,6 +16,7 @@ The boundary the other two cases protect is the one the whole phase exists for:
 """
 
 import json
+from types import SimpleNamespace
 
 from common.authority import authority_write
 from django.core.exceptions import ValidationError
@@ -29,12 +30,16 @@ from singer_contest.models import (
 )
 
 from ruleset.editor import preview_definition
+from ruleset.live_format import LIVE_CHALLENGE_FORMAT_KEY
 from ruleset.schema import ENTRY_KEY
 from ruleset.services import (
+    _questionnaire_plan_of,
+    _validate_frozen_questionnaire,
     freeze_ruleset_version,
     supersede_ruleset_version,
     update_ruleset_definition_section,
 )
+from ruleset.templates import live_2026_group_questionnaire, live_2026_questionnaire
 from ruleset.test_schema import _RulesetModelBase
 
 from .models import ContestRuleset, RulesetVersion
@@ -178,6 +183,29 @@ class QuestionnaireFreezeGateTests(_QuestionnaireFreezeBase):
         with self.assertRaises(ValidationError):
             freeze_ruleset_version(
                 self.version(ruleset, json.dumps(root, ensure_ascii=False)), self._operator()
+            )
+
+    def test_plan_selection_does_not_treat_a_legacy_group_document_as_participant(self):
+        version = SimpleNamespace(
+            definition=json.dumps(
+                {"questionnaire": live_2026_group_questionnaire()},
+                ensure_ascii=False,
+            )
+        )
+
+        self.assertIsNone(_questionnaire_plan_of(version))
+        group_plan = _questionnaire_plan_of(version, subject="group")
+        self.assertIsNotNone(group_plan)
+        self.assertEqual(group_plan.subject, "group")
+
+    def test_live_2026_freeze_requires_the_group_questionnaire(self):
+        root = json.loads(_flow_definition())
+        root["questionnaire"] = live_2026_questionnaire()
+
+        with self.assertRaisesMessage(ValidationError, "分组合唱组问卷"):
+            _validate_frozen_questionnaire(
+                json.dumps(root, ensure_ascii=False),
+                {"live_challenge": {"format_key": LIVE_CHALLENGE_FORMAT_KEY}},
             )
 
     def test_freeze_rejects_a_question_binding_an_unbound_round(self):
