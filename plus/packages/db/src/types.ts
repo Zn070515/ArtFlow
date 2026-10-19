@@ -285,6 +285,7 @@ export interface ScoreRevisionRow {
 export interface ScoreCorrectionRow {
   id: string;
   score_fact_id: string;
+  input_fingerprint: string;
   state: string;
   base_version: number;
   reason: string;

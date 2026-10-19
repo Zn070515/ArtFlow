@@ -49,6 +49,7 @@ export interface StoredScoreRevision {
 export interface StoredScoreCorrection {
   readonly id: string;
   readonly scoreFactId: string;
+  readonly inputFingerprint: string;
   readonly state: ScoreCorrectionState;
   readonly baseVersion: number;
   readonly reason: string;
@@ -131,6 +132,7 @@ function correction(row: Selectable<ScoreCorrectionRow>): StoredScoreCorrection 
   return {
     id: row.id,
     scoreFactId: row.score_fact_id,
+    inputFingerprint: row.input_fingerprint,
     state: row.state as ScoreCorrectionState,
     baseVersion: row.base_version,
     reason: row.reason,
@@ -174,6 +176,15 @@ export async function getScoreFactForUpdate(
   const row = await trx.selectFrom("score_fact").selectAll()
     .where("round_id", "=", roundId).where("contestant_id", "=", contestantId)
     .where("judge_id", "=", judgeId).where("current", "=", true).forUpdate().executeTakeFirst();
+  return row === undefined ? null : scoreFact(row);
+}
+
+export async function getScoreFactByIdForUpdate(
+  trx: Kysely<Database>,
+  id: string,
+): Promise<StoredScoreFact | null> {
+  const row = await trx.selectFrom("score_fact").selectAll()
+    .where("id", "=", id).where("current", "=", true).forUpdate().executeTakeFirst();
   return row === undefined ? null : scoreFact(row);
 }
 
@@ -250,6 +261,7 @@ export async function insertCorrection(db: Kysely<Database>, value: StoredScoreC
   await db.insertInto("score_correction").values({
     id: value.id,
     score_fact_id: value.scoreFactId,
+    input_fingerprint: value.inputFingerprint,
     state: value.state,
     base_version: value.baseVersion,
     reason: value.reason,
@@ -263,6 +275,32 @@ export async function getOpenCorrectionForUpdate(trx: Kysely<Database>, scoreFac
   const row = await trx.selectFrom("score_correction").selectAll()
     .where("score_fact_id", "=", scoreFactId).where("state", "=", "open").forUpdate().executeTakeFirst();
   return row === undefined ? null : correction(row);
+}
+
+export async function getCorrectionForUpdate(
+  trx: Kysely<Database>,
+  id: string,
+): Promise<StoredScoreCorrection | null> {
+  const row = await trx.selectFrom("score_correction").selectAll()
+    .where("id", "=", id).forUpdate().executeTakeFirst();
+  return row === undefined ? null : correction(row);
+}
+
+export async function updateCorrection(
+  trx: Kysely<Database>,
+  value: StoredScoreCorrection,
+  expectedRevision: number,
+): Promise<StoredScoreCorrection> {
+  const row = await trx.updateTable("score_correction").set({
+    state: value.state,
+    base_version: value.baseVersion,
+    reason: value.reason,
+    revision: value.revision,
+    updated_at: new Date(),
+  }).where("id", "=", value.id).where("revision", "=", expectedRevision)
+    .returningAll().executeTakeFirst();
+  if (row === undefined) throw new StaleRevisionError(value.id);
+  return correction(row);
 }
 
 export async function insertRankingSnapshot(db: Kysely<Database>, value: StoredRankingSnapshot): Promise<void> {

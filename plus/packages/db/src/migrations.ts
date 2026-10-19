@@ -697,6 +697,16 @@ const migrations: Record<string, Migration> = {
       await db.schema.dropTable("competition_round").ifExists().execute();
     },
   },
+  "0007_score_correction_fingerprint": {
+    async up(db: Kysely<Database>): Promise<void> {
+      await db.schema.alterTable("score_correction")
+        .addColumn("input_fingerprint", "varchar(64)", (column) => column.notNull().defaultTo(""))
+        .execute();
+    },
+    async down(db: Kysely<Database>): Promise<void> {
+      await db.schema.alterTable("score_correction").dropColumn("input_fingerprint").execute();
+    },
+  },
 };
 
 class StaticMigrationProvider implements MigrationProvider {
