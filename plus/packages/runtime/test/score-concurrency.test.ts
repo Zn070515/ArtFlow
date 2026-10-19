@@ -117,6 +117,20 @@ async function seed(): Promise<{
     finalized_at: "2026-10-19T16:45:00Z",
     updated_at: new Date(),
   }).execute();
+  await db1.insertInto("registration").values({
+    id: `registration-${activityId}-singer-a`,
+    activity_id: activityId,
+    participant_id: "singer-a",
+    questionnaire_version: "v1",
+    questionnaire_hash: "questionnaire-hash",
+    status: "approved",
+    answers: JSON.stringify({}),
+    revision: 1,
+    review_note: "",
+    reviewed_by: "staff",
+    created_at: new Date(),
+    updated_at: new Date(),
+  }).execute();
   const round = await prepareCompetitionRound(db1, deps(staff), {
     commandId: `prepare-${activityId}`,
     activityId,

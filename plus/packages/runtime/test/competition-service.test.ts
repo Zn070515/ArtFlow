@@ -110,6 +110,22 @@ async function seedActivity(finalRoster = false): Promise<string> {
       finalized_at: "2026-10-19T13:45:00Z",
       updated_at: new Date(),
     }).execute();
+    for (const participantId of ["contestant-1", "contestant-2"]) {
+      await db.insertInto("registration").values({
+        id: `registration-${activityId}-${participantId}`,
+        activity_id: activityId,
+        participant_id: participantId,
+        questionnaire_version: "v1",
+        questionnaire_hash: "questionnaire-hash",
+        status: "approved",
+        answers: JSON.stringify({}),
+        revision: 1,
+        review_note: "",
+        reviewed_by: "staff",
+        created_at: new Date(),
+        updated_at: new Date(),
+      }).execute();
+    }
   }
   return activityId;
 }
@@ -205,5 +221,70 @@ describe.skipIf(!connectionString)("competition lifecycle commands on PostgreSQL
       expectedRevision: 2,
       scope: "judging",
     })).rejects.toMatchObject({ code: "PERFORMANCE_SCORE_OPEN" });
+  });
+
+  it("binds performances to the final roster and reserves lifecycle commands for competition managers", async () => {
+    const activityId = await seedActivity(true);
+    const prepared = await prepareCompetitionRound(db, deps(), {
+      commandId: "prepare-roster-boundary",
+      activityId,
+      roundKey: "final",
+      scope: "judging",
+    });
+    await expect(activateCompetitionPanel(db, deps({
+      ...staff,
+      permissions: ["competition.round.prepare"],
+    }), {
+      commandId: "activate-panel-with-prepare-only",
+      activityId,
+      roundId: prepared.body.id,
+      scope: "judging",
+      judges: [
+        { judgeId: "judge-1", seatKey: "seat-1" },
+        { judgeId: "judge-2", seatKey: "seat-2" },
+      ],
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const panel = await activateCompetitionPanel(db, deps(), {
+      commandId: "activate-roster-boundary-panel",
+      activityId,
+      roundId: prepared.body.id,
+      scope: "judging",
+      judges: [
+        { judgeId: "judge-1", seatKey: "seat-1" },
+        { judgeId: "judge-2", seatKey: "seat-2" },
+      ],
+    });
+    await expect(openPerformance(db, deps(), {
+      commandId: "open-not-approved-contestant",
+      activityId,
+      roundId: prepared.body.id,
+      scope: "judging",
+      contestantId: "not-approved",
+      sequence: 1,
+    })).rejects.toMatchObject({ code: "CONTESTANT_NOT_IN_ROSTER" });
+    const count = await db.selectFrom("performance").select(({ fn }) => fn.countAll().as("count"))
+      .where("round_id", "=", prepared.body.id).executeTakeFirstOrThrow();
+    expect(Number(count.count)).toBe(0);
+    const opened = await openPerformance(db, deps(), {
+      commandId: "open-path-identified-performance",
+      activityId,
+      roundId: prepared.body.id,
+      scope: "judging",
+      performanceId: "path-performance-1",
+      contestantId: "contestant-1",
+      sequence: 1,
+    });
+    expect(opened.body.id).toBe("path-performance-1");
+    await expect(openPerformance(db, deps(), {
+      commandId: "open-path-identity-mismatch",
+      activityId,
+      roundId: prepared.body.id,
+      scope: "judging",
+      performanceId: "path-performance-2",
+      contestantId: "contestant-1",
+      sequence: 1,
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(panel.body.current).toBe(true);
   });
 });

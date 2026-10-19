@@ -116,6 +116,22 @@ async function seedLockedRound(): Promise<{ readonly activityId: string; readonl
     finalized_at: "2026-10-19T17:45:00Z",
     updated_at: new Date(),
   }).execute();
+  for (const contestantId of ["singer-a", "singer-b", "singer-c"]) {
+    await db.insertInto("registration").values({
+      id: `registration-${activityId}-${contestantId}`,
+      activity_id: activityId,
+      participant_id: contestantId,
+      questionnaire_version: "v1",
+      questionnaire_hash: "questionnaire-hash",
+      status: "approved",
+      answers: JSON.stringify({}),
+      revision: 1,
+      review_note: "",
+      reviewed_by: "staff",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }).execute();
+  }
   const round = await prepareCompetitionRound(db, deps(staff), {
     commandId: `prepare-${activityId}`,
     activityId,
@@ -202,7 +218,8 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
       scope: "judging",
     });
     expect(ranking.body.status).toBe("hold");
-    expect(ranking.body.tieGroups).toEqual([{ total: 90, contestants: ["singer-a", "singer-b"] }]);
+    expect(ranking.body.tieGroups).toMatchObject([{ total: 90, contestants: ["singer-a", "singer-b"], id: expect.any(String) }]);
+    const tieId = (ranking.body.tieGroups[0] as { id: string }).id;
     const held = await finalizeAdvancement(db, deps(staff), {
       commandId: "advance-held",
       activityId: context.activityId,
@@ -211,11 +228,24 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
       scope: "judging",
     });
     expect(held.body.status).toBe("needs_review");
+    await expect(recordTieDecision(db, deps(staff), {
+      commandId: "tie-decision-wrong-path",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      rankingSnapshotId: ranking.body.id,
+      tieId: "tie-wrong",
+      inputFingerprint: ranking.body.inputFingerprint,
+      contestants: ["singer-a", "singer-b"],
+      order: ["singer-b", "singer-a"],
+      reason: "错误路径",
+      scope: "judging",
+    })).rejects.toMatchObject({ code: "TIE_DECISION_INVALID" });
     const decided = await recordTieDecision(db, deps(staff), {
       commandId: "tie-decision-final",
       activityId: context.activityId,
       roundId: context.roundId,
       rankingSnapshotId: ranking.body.id,
+      tieId,
       inputFingerprint: ranking.body.inputFingerprint,
       contestants: ["singer-a", "singer-b"],
       order: ["singer-b", "singer-a"],
@@ -237,7 +267,8 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
       { contestantId: "singer-c", advanced: false },
     ]);
     const podiumInput = buildPodiumCandidate({
-      rounds: [{ roundId: context.roundId, locked: true, ranking: {
+      requiredRoundIds: [context.roundId],
+      rounds: [{ roundId: context.roundId, sourceScoreVersion: 3, locked: true, ranking: {
         status: decided.body.status,
         rows: decided.body.rows as { contestantId: string; total: number; judgeCount: number }[],
         tieGroups: decided.body.tieGroups as { total: number; contestants: string[] }[],
@@ -252,6 +283,7 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
       scope: "judging",
     });
     expect(candidate.body.status).toBe("candidate");
+    expect(candidate.body.sourceScoreVersions).toEqual([{ roundId: context.roundId, sourceScoreVersion: 3 }]);
     await expect(recomputePodiumCandidate(db, deps(staff), {
       commandId: "podium-stale",
       activityId: context.activityId,
@@ -261,14 +293,29 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
     })).rejects.toMatchObject({ code: "STALE_RESOLUTION_INPUT" });
   });
 
+  it("rejects a score fact whose context no longer matches the locked performance", async () => {
+    const context = await seedLockedRound();
+    await db.updateTable("score_fact").set({ context_version: 2 })
+      .where("round_id", "=", context.roundId).execute();
+    await expect(resolveRound(db, deps(staff), {
+      commandId: "resolve-stale-fact-context",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      scope: "judging",
+    })).rejects.toMatchObject({ code: "STALE_CONTEXT" });
+  });
+
   it("keeps a pure podium candidate on HOLD until locked, complete, and tie-free", () => {
     const held = buildPodiumCandidate({
-      rounds: [{ roundId: "final", locked: false, ranking: { status: "ready", rows: [], tieGroups: [], inputFingerprint: "x" } }],
+      requiredRoundIds: ["final"],
+      rounds: [{ roundId: "final", sourceScoreVersion: 1, locked: false, ranking: { status: "ready", rows: [], tieGroups: [], inputFingerprint: "x" } }],
     });
     expect(held.status).toBe("hold");
     const candidate = buildPodiumCandidate({
+      requiredRoundIds: ["final"],
       rounds: [{
         roundId: "final",
+        sourceScoreVersion: 1,
         locked: true,
         ranking: {
           status: "ready",
@@ -280,5 +327,24 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
     });
     expect(candidate.status).toBe("candidate");
     expect(candidate.placements).toEqual([{ place: 1, contestantId: "singer-a", total: 91 }]);
+  });
+
+  it("holds a podium candidate when a required round is missing", () => {
+    const candidate = buildPodiumCandidate({
+      requiredRoundIds: ["semi", "final"],
+      rounds: [{
+        roundId: "final",
+        sourceScoreVersion: 2,
+        locked: true,
+        ranking: {
+          status: "ready",
+          rows: [{ contestantId: "singer-a", total: 91, judgeCount: 3 }],
+          tieGroups: [],
+          inputFingerprint: "final-fingerprint",
+        },
+      }],
+    });
+    expect(candidate.status).toBe("hold");
+    expect(candidate.sourceRoundIds).toEqual(["final"]);
   });
 });

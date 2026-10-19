@@ -49,6 +49,25 @@ it("holds equal totals until an explicit tie decision is applied", () => {
   })).not.toThrow();
 });
 
+it("keeps other unresolved tie groups on hold after one tie decision", () => {
+  const ranking = computeRanking({
+    rows: [row("a", 91), row("b", 91), row("c", 88), row("d", 88)],
+    tiePolicy: "review",
+  });
+
+  const decided = applyTieDecision(ranking, {
+    contestants: ["a", "b"],
+    order: ["b", "a"],
+    reason: "第一组现场裁决",
+  });
+
+  expect(decided.status).toBe("hold");
+  expect(decided.tieGroups).toEqual([
+    expect.objectContaining({ total: 88, contestants: ["c", "d"] }),
+  ]);
+  expect(decided.rows.map((item) => item.contestantId)).toEqual(["b", "a", "c", "d"]);
+});
+
 it("rejects a score outside the frozen criterion range", () => {
   expect(() => normalizeScoreSubmission(
     { criteria: { technique: 101, stage: 0, emotion: 0 }, notes: "" },

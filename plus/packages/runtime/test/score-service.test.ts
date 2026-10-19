@@ -19,10 +19,12 @@ import {
   closeScoreCorrection,
   editScoreFact,
   lockPerformance,
+  lockRound,
   openPerformance,
   openScoreCorrection,
   prepareCompetitionRound,
   recalculateAfterCorrection,
+  resolveRound,
   submitJudgeScore,
   submitProxyScore,
 } from "../src/index.js";
@@ -128,6 +130,20 @@ async function seedScoreWindow(): Promise<{
     approved_count: 1,
     revision: 1,
     finalized_at: "2026-10-19T15:45:00Z",
+    updated_at: new Date(),
+  }).execute();
+  await db.insertInto("registration").values({
+    id: `registration-${activityId}-singer-a`,
+    activity_id: activityId,
+    participant_id: "singer-a",
+    questionnaire_version: "v1",
+    questionnaire_hash: "questionnaire-hash",
+    status: "approved",
+    answers: JSON.stringify({}),
+    revision: 1,
+    review_note: "",
+    reviewed_by: "staff",
+    created_at: new Date(),
     updated_at: new Date(),
   }).execute();
   const prepared = await prepareCompetitionRound(db, deps(staff), {
@@ -280,6 +296,54 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
     })).rejects.toMatchObject({ code: "STALE_CONTEXT" });
   });
 
+  it("retires score facts when a performance context advances", async () => {
+    const context = await seedScoreWindow();
+    await submitJudgeScore(db, deps(judge), {
+      commandId: "cmd-score-before-reopen",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      panelSnapshotId: context.panelSnapshotId,
+      seatId: context.seatId,
+      contextVersion: 1,
+      criteria,
+      notes: "",
+      scope: "judging",
+    });
+    const reopened = await openPerformance(db, deps(staff), {
+      commandId: "cmd-reopen-performance",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      scope: "judging",
+      contestantId: "singer-a",
+      sequence: 1,
+    });
+    expect(reopened.body.contextVersion).toBe(2);
+    const currentFacts = await db.selectFrom("score_fact").selectAll()
+      .where("performance_id", "=", context.performanceId).where("current", "=", true).execute();
+    expect(currentFacts).toHaveLength(0);
+    await expect(lockPerformance(db, deps(staff), {
+      commandId: "cmd-lock-reopened-too-early",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      scope: "judging",
+    })).rejects.toMatchObject({ code: "SCORE_GATE_OPEN" });
+    const replacement = await submitJudgeScore(db, deps(judge), {
+      commandId: "cmd-score-after-reopen",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      panelSnapshotId: context.panelSnapshotId,
+      seatId: context.seatId,
+      contextVersion: 2,
+      criteria,
+      notes: "",
+      scope: "judging",
+    });
+    expect(replacement.body.contextVersion).toBe(2);
+  });
+
   it("runs an explicit correction after the performance is locked", async () => {
     const context = await seedScoreWindow();
     const first = await submitJudgeScore(db, deps(judge), {
@@ -343,6 +407,15 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
       scope: "judging",
     });
     expect(revised.body).toMatchObject({ version: 2, total: 93 });
+    await expect(closeScoreCorrection(db, deps(staff), {
+      commandId: "cmd-close-correction-without-session",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      scoreFactId: first.body.id,
+      correctionId: correction.body.id,
+      panelSnapshotId: context.panelSnapshotId,
+      scope: "missing-session",
+    })).rejects.toMatchObject({ code: "SESSION_NOT_RUNNING" });
     const closed = await closeScoreCorrection(db, deps(staff), {
       commandId: "cmd-close-correction",
       activityId: context.activityId,
@@ -362,6 +435,23 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
       panelSnapshotId: context.panelSnapshotId,
       scope: "judging",
     });
-    expect(recalculated.body).toMatchObject({ id: correction.body.id, state: "closed" });
+    expect(recalculated.body).toMatchObject({ id: correction.body.id, state: "recalculated" });
+    const currentRound = await db.selectFrom("competition_round").selectAll()
+      .where("id", "=", context.roundId).executeTakeFirstOrThrow();
+    await lockRound(db, deps(staff), {
+      commandId: "cmd-lock-after-correction",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      expectedRevision: currentRound.revision,
+      scope: "judging",
+    });
+    const ranking = await resolveRound(db, deps(staff), {
+      commandId: "cmd-resolve-after-correction",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      scope: "judging",
+    });
+    expect(ranking.body.sourceScoreVersion).toBe(3);
+    expect(ranking.body.rows).toContainEqual(expect.objectContaining({ contestantId: "singer-a", total: 92 }));
   });
 });
