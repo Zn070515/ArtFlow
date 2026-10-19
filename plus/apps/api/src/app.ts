@@ -22,6 +22,7 @@ import type {
 import {
   activateActivity,
   appendRuntimeFact,
+  authenticateLocalAccount,
   closeExecution,
   compileDefinition,
   createActivity,
@@ -30,6 +31,16 @@ import {
   getExecutionState,
   listEvents,
   listExecutions,
+  finalizeRoster,
+  prepareCompetitionRound,
+  readMaterialForActor,
+  reviewMaterial,
+  reviewRegistration,
+  resolveActorFromBearer,
+  saveRegistrationAnswer,
+  startRegistration,
+  submitRegistration,
+  uploadMaterial,
   releaseDefinitionCommand,
   startExecution,
 } from "@artflow-plus/runtime";
@@ -53,6 +64,11 @@ export interface AppOptions {
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   INVALID_INPUT: 400,
   VALIDATION_FAILED: 400,
+  UNAUTHENTICATED: 401,
+  FORBIDDEN: 403,
+  QUESTION_UNKNOWN: 422,
+  MATERIAL_NOT_ALLOWED: 422,
+  ROSTER_UNKNOWN: 409,
   NOT_FOUND: 404,
   CROSS_ACTIVITY: 404,
   STALE_REVISION: 409,
@@ -152,6 +168,91 @@ const RuntimeFactBody = Type.Object(
   { additionalProperties: false },
 );
 
+const LoginBody = Type.Object(
+  {
+    username: Type.String({ minLength: 1, maxLength: 100 }),
+    password: Type.String({ minLength: 1, maxLength: 200 }),
+  },
+  { additionalProperties: false },
+);
+
+const RegistrationBody = Type.Object(
+  { participantId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })) },
+  { additionalProperties: false },
+);
+
+const RegistrationParams = Type.Object(
+  { id: Type.String({ minLength: 1 }), registrationId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const AnswerBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    questionKey: Type.String({ minLength: 1, maxLength: 100 }),
+    value: Type.Unknown(),
+  },
+  { additionalProperties: false },
+);
+
+const SubmitBody = Type.Object(
+  { expectedRevision: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+
+const ReviewRegistrationBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    status: Type.Union([Type.Literal("approved"), Type.Literal("need_supplement"), Type.Literal("rejected")]),
+    note: Type.String({ maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+
+const MaterialBody = Type.Object(
+  {
+    registrationId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    questionKey: Type.String({ minLength: 1, maxLength: 100 }),
+    originalName: Type.String({ minLength: 1, maxLength: 255 }),
+    contentType: Type.String({ minLength: 1, maxLength: 150 }),
+    byteLength: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+const MaterialParams = Type.Object(
+  { id: Type.String({ minLength: 1 }), materialId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const RegistrationMaterialParams = Type.Object(
+  {
+    id: Type.String({ minLength: 1 }),
+    registrationId: Type.String({ minLength: 1 }),
+    materialId: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const ReviewMaterialBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    status: Type.Union([Type.Literal("approved"), Type.Literal("needs_supplement")]),
+    note: Type.String({ maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+
+const RoundParams = Type.Object(
+  { id: Type.String({ minLength: 1 }), roundKey: Type.String({ minLength: 1, maxLength: 100 }) },
+  { additionalProperties: false },
+);
+
+const PrepareRoundBody = Type.Object(
+  { scope: Type.String({ minLength: 1, maxLength: 100 }) },
+  { additionalProperties: false },
+);
+
 function requireIdempotency(request: FastifyRequest): string {
   const header = request.headers["idempotency-key"];
   const value = Array.isArray(header) ? header[0] : header;
@@ -159,6 +260,14 @@ function requireIdempotency(request: FastifyRequest): string {
     throw new DomainError("INVALID_INPUT", "An Idempotency-Key header is required.");
   }
   return value.trim();
+}
+
+function bearerToken(request: FastifyRequest): string | undefined {
+  const header = request.headers.authorization;
+  const value = Array.isArray(header) ? header[0] : header;
+  if (typeof value !== "string") return undefined;
+  const match = /^Bearer\s+(.+)$/i.exec(value.trim());
+  return match?.[1];
 }
 
 function asPackage(value: unknown): ActivityDefinitionPackage {
@@ -202,6 +311,22 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const deps =
     options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
+  async function requestActor(request: FastifyRequest): Promise<ActorContext> {
+    if (options.actor !== undefined) return options.actor;
+    if (baseDeps.actor !== undefined && baseDeps.actor.actorId !== "system") {
+      return baseDeps.actor;
+    }
+    const actor = await resolveActorFromBearer(db, bearerToken(request));
+    if (actor === null) {
+      throw new DomainError("UNAUTHENTICATED", "A valid Bearer session is required.");
+    }
+    return actor;
+  }
+
+  async function requestDeps(request: FastifyRequest): Promise<RuntimeDeps> {
+    return { ...deps, actor: await requestActor(request) };
+  }
+
   await app.register(swagger, {
     openapi: {
       info: { title: "ArtFlow-Plus API", version: "0.0.0" },
@@ -219,6 +344,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
   });
   app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+
+  app.post(
+    "/api/auth/login",
+    { schema: { body: LoginBody } },
+    async (request) => {
+      const body = request.body as { username: string; password: string };
+      const result = await authenticateLocalAccount(db, body);
+      return { token: result.token, expiresAt: result.expiresAt };
+    },
+  );
 
   app.get("/api/capabilities", async () => ({
     capabilities: registry.list().map((registration) => registration.manifest),
@@ -315,6 +450,261 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
     return activity;
   });
+
+  app.post(
+    "/api/activities/:id/registrations",
+    { schema: { params: ActivityParams, body: RegistrationBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { participantId?: string };
+      const actor = await requestActor(request);
+      const outcome = await startRegistration(db, { ...deps, actor }, {
+        commandId,
+        activityId: id,
+        participantId: body.participantId ?? actor.actorId,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.patch(
+    "/api/activities/:id/registrations/:registrationId",
+    { schema: { params: RegistrationParams, body: AnswerBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const body = request.body as { expectedRevision: number; questionKey: string; value: unknown };
+      const outcome = await saveRegistrationAnswer(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+        expectedRevision: body.expectedRevision,
+        questionKey: body.questionKey,
+        value: body.value,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.patch(
+    "/api/activities/:id/registrations/:registrationId/answers",
+    { schema: { params: RegistrationParams, body: AnswerBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const body = request.body as { expectedRevision: number; questionKey: string; value: unknown };
+      const outcome = await saveRegistrationAnswer(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+        expectedRevision: body.expectedRevision,
+        questionKey: body.questionKey,
+        value: body.value,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/registrations/:registrationId/submit",
+    { schema: { params: RegistrationParams, body: SubmitBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const body = request.body as { expectedRevision: number };
+      const outcome = await submitRegistration(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/registrations/:registrationId/review",
+    { schema: { params: RegistrationParams, body: ReviewRegistrationBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const body = request.body as {
+        expectedRevision: number;
+        status: "approved" | "need_supplement" | "rejected";
+        note: string;
+      };
+      const outcome = await reviewRegistration(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+        expectedRevision: body.expectedRevision,
+        status: body.status,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/roster/finalize",
+    { schema: { params: ActivityParams, body: SubmitBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { expectedRevision: number };
+      const outcome = await finalizeRoster(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/materials",
+    { schema: { params: ActivityParams, body: MaterialBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        registrationId?: string;
+        questionKey: string;
+        originalName: string;
+        contentType: string;
+        byteLength: number;
+      };
+      const outcome = await uploadMaterial(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId: body.registrationId ?? "",
+        questionKey: body.questionKey,
+        originalName: body.originalName,
+        contentType: body.contentType,
+        byteLength: body.byteLength,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/registrations/:registrationId/materials",
+    { schema: { params: RegistrationParams, body: MaterialBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const body = request.body as {
+        questionKey: string;
+        originalName: string;
+        contentType: string;
+        byteLength: number;
+      };
+      const outcome = await uploadMaterial(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+        questionKey: body.questionKey,
+        originalName: body.originalName,
+        contentType: body.contentType,
+        byteLength: body.byteLength,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/materials/:materialId",
+    { schema: { params: MaterialParams } },
+    async (request) => {
+      const { id, materialId } = request.params as { id: string; materialId: string };
+      return readMaterialForActor(db, {
+        activityId: id,
+        materialId,
+        actor: await requestActor(request),
+      });
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/materials/:materialId/review",
+    { schema: { params: MaterialParams, body: ReviewMaterialBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, materialId } = request.params as { id: string; materialId: string };
+      const body = request.body as {
+        expectedRevision: number;
+        status: "approved" | "needs_supplement";
+        note: string;
+      };
+      const outcome = await reviewMaterial(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        materialId,
+        expectedRevision: body.expectedRevision,
+        status: body.status,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/registrations/:registrationId/materials/:materialId/review",
+    { schema: { params: RegistrationMaterialParams, body: ReviewMaterialBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, materialId } = request.params as { id: string; materialId: string };
+      const body = request.body as {
+        expectedRevision: number;
+        status: "approved" | "needs_supplement";
+        note: string;
+      };
+      const outcome = await reviewMaterial(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        materialId,
+        expectedRevision: body.expectedRevision,
+        status: body.status,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/rounds/:roundKey/prepare",
+    { schema: { params: RoundParams, body: PrepareRoundBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string };
+      const outcome = await prepareCompetitionRound(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundKey,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/prepare",
+    { schema: { params: RoundParams, body: PrepareRoundBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string };
+      const outcome = await prepareCompetitionRound(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundKey,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
 
   app.post(
     "/api/activities/:id/activate",

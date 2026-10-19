@@ -4,7 +4,7 @@ import {
   CapabilityManifestSchema,
   PackInstantiateBodySchema,
 } from "@artflow-plus/contracts";
-import { closeDb, createDb, migrate } from "@artflow-plus/db";
+import { closeDb, createDb, insertLocalAccount, migrate } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import {
   capabilityDefinitionHash,
@@ -17,7 +17,7 @@ import type {
   CapabilityCompiler,
   CapabilityRegistration,
 } from "@artflow-plus/domain";
-import { relayOutboxOnce } from "@artflow-plus/runtime";
+import { hashPassword, relayOutboxOnce } from "@artflow-plus/runtime";
 import type { RuntimeDeps } from "@artflow-plus/runtime";
 import { Value } from "@sinclair/typebox/value";
 import type { FastifyInstance } from "fastify";
@@ -200,6 +200,50 @@ dbIt("requires an idempotency key", async () => {
   expect(response.json()).toMatchObject({ code: "INVALID_INPUT" });
 });
 
+dbIt("uses local bearer sessions for registration routes", async () => {
+  const unauthenticated = await app.inject({
+    method: "POST",
+    url: "/api/activities/not-real/registrations",
+    headers: { "content-type": "application/json", "idempotency-key": "m4-auth-missing" },
+    payload: {},
+  });
+  expect(unauthenticated.statusCode).toBe(401);
+  expect(unauthenticated.json()).toMatchObject({ code: "UNAUTHENTICATED" });
+
+  const username = `m4-${randomUUID()}`;
+  await insertLocalAccount(db, {
+    username,
+    passwordDigest: hashPassword("m4-password"),
+    actor: {
+      actorId: "http-student",
+      actorType: "user",
+      roles: ["participant"],
+      permissions: [],
+    },
+    active: true,
+  });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    headers: { "content-type": "application/json" },
+    payload: { username, password: "m4-password" },
+  });
+  expect(login.statusCode).toBe(200);
+  expect(login.json().token).toEqual(expect.any(String));
+
+  const authenticated = await app.inject({
+    method: "POST",
+    url: "/api/activities/not-real/registrations",
+    headers: {
+      ...headers("m4-auth-present"),
+      authorization: `Bearer ${login.json().token}`,
+    },
+    payload: {},
+  });
+  expect(authenticated.statusCode).toBe(404);
+  expect(authenticated.json()).toMatchObject({ code: "NOT_FOUND" });
+});
+
 dbIt("creates, replays and activates an activity", async () => {
   const commandId = `cmd-${randomUUID()}`;
   const created = await app.inject({
@@ -337,9 +381,14 @@ dbIt("lists the registered capabilities using the shared manifest contract", asy
   const response = await app.inject({ method: "GET", url: "/api/capabilities" });
   expect(response.statusCode).toBe(200);
   const body = response.json() as { capabilities: unknown[] };
-  expect(body.capabilities).toHaveLength(1);
+  expect(body.capabilities).toHaveLength(4);
   expect(Value.Check(CapabilityManifestSchema, body.capabilities[0])).toBe(true);
-  expect(body.capabilities[0]).toMatchObject({ identity: "competition" });
+  expect((body.capabilities as { identity: string }[]).map((item) => item.identity)).toEqual([
+    "competition",
+    "materials",
+    "questionnaire",
+    "registration",
+  ]);
 });
 
 dbIt("lists activity packs and explains missing capabilities", async () => {
