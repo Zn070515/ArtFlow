@@ -42,6 +42,8 @@ Thumbs.db
 # Node / Tailwind
 node_modules/
 dist/
+# ArtFlow-Plus build output
+plus/packages/domain/dist/
 !static/dist/
 !static/dist/rapid_score.js
 !static/dist/*.js
