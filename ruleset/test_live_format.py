@@ -185,11 +185,21 @@ class Live2026BuiltinTests(TestCase):
         self.assertEqual(nodes["top10"]["type"], "SELECT")
         self.assertEqual(nodes["top10"]["count"], LIVE_2026_DEFAULTS["seat_count"])
 
-        # The material contract the format requires: R2 and R3 songs plus accompaniments,
+        # The material contract the format requires: R2 and R3 songs plus one media answer,
         # both required for every entrant — including those who never reach those rounds.
-        section = json.loads(LIVE_2026_DEFINITION)["questionnaire"]
-        plan = compile_questionnaire(section)
+        root = json.loads(LIVE_2026_DEFINITION)
+        plan = compile_questionnaire(root["questionnaire"])
         validate_live_material_plan(plan)
+        media = next(q for q in plan.questions if q["key"] == "r2.accompaniment")
+        self.assertEqual(media["file"]["purpose"], "accompaniment")
+        self.assertEqual(media["file"]["accepts"], ["performance_video"])
+        self.assertIn(".mp4", media["file"]["extensions"])
+        self.assertIn(".mp3", media["file"]["extensions"])
+
+        # The shared group material travels in the same definition under its own subject.
+        group = compile_questionnaire(root["group_questionnaire"])
+        self.assertEqual(group.subject, "group")
+        self.assertEqual([q["key"] for q in group.questions], ["group.song", "group.media"])
 
     def test_preset_carries_only_platform_invariants(self):
         preset = live_2026_binding_preset()

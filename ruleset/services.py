@@ -42,7 +42,7 @@ from questionnaire.cross_domain import (
     validate_questionnaire_context_keys,
     validate_questionnaire_rounds,
 )
-from questionnaire.schema import parse_questionnaire
+from questionnaire.schema import QUESTIONNAIRE_ROOT_KEYS, parse_questionnaire
 from singer_contest.scoring import scoring_standard_snapshot
 
 from .business_editor import business_definition_from_stages, infer_business_stages
@@ -1397,6 +1397,11 @@ def update_ruleset_definition(
     if base_content_hash is not None and locked.content_hash != base_content_hash:
         raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
     parse_definition(definition)
+    try:
+        root = json.loads(definition)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("赛制定义不是合法 JSON。") from exc
+    _validate_questionnaire_sections(root)
     locked.definition = definition
     locked.save(update_fields=["definition"])
     return locked
@@ -1405,7 +1410,34 @@ def update_ruleset_definition(
 # The definition root's operator-editable sections. Each editor owns exactly one of them;
 # replacing the whole document is reserved for the advanced JSON editor, which goes through
 # ``update_ruleset_definition``.
-DEFINITION_SECTIONS: tuple[str, ...] = ("nodes", "checkpoints", "context", "questionnaire")
+DEFINITION_SECTIONS: tuple[str, ...] = (
+    "nodes",
+    "checkpoints",
+    "context",
+    "questionnaire",
+    "group_questionnaire",
+)
+
+
+def _validate_questionnaire_sections(root: dict) -> None:
+    """Each root questionnaire slot has exactly one subject.
+
+    A version may carry both documents; putting a group document under ``questionnaire``
+    (or the reverse) would make the participant entry and the group form read each other's
+    contract, so it is refused at every write gate rather than left to freeze.
+    """
+    raw = root.get("questionnaire")
+    if raw is not None:
+        plan = compile_questionnaire(raw)
+        if plan.subject != "participant":
+            raise ValidationError("questionnaire 必须是选手问卷（subject=participant）。")
+    raw_group = root.get("group_questionnaire")
+    if raw_group is not None:
+        plan = compile_questionnaire(raw_group)
+        if plan.subject != "group":
+            raise ValidationError(
+                "group_questionnaire 必须是分组合唱组问卷（subject=group）。"
+            )
 
 
 @transaction.atomic
@@ -1458,12 +1490,17 @@ def update_ruleset_definition_sections(
         # omitted optional field.
         root.pop("checkpoints", None)
         sections_to_apply.pop("checkpoints")
-    root.update(sections_to_apply)
+    for name, value in sections_to_apply.items():
+        if name == "group_questionnaire" and value is None:
+            # The optional group document is removed by sending null, not by storing null.
+            root.pop(name, None)
+        else:
+            root[name] = value
     parse_definition(root)
-    if "questionnaire" in root:
-        # The questionnaire editor's save is a schema gate too, so a broken question is
-        # refused where it was written rather than at freeze.
-        parse_questionnaire(root["questionnaire"])
+    # The questionnaire editors' saves are schema gates too, so a broken question is
+    # refused where it was written rather than at freeze. Each subject must live in its
+    # own root key.
+    _validate_questionnaire_sections(root)
     locked.definition = json.dumps(root, ensure_ascii=False)
     locked.save(update_fields=["definition"])
     return locked
@@ -2332,15 +2369,23 @@ def _annotated_capacity(rpk, activity):
     )
 
 
-def _questionnaire_plan_of(version: RulesetVersion) -> QuestionnairePlan | None:
-    """The compiled questionnaire of a version, or ``None`` when it carries none."""
+def _questionnaire_plan_of(
+    version: RulesetVersion, *, subject: str = "participant"
+) -> QuestionnairePlan | None:
+    """The compiled questionnaire for one subject, or ``None`` when absent."""
     try:
         root = json.loads(version.definition)
     except (TypeError, ValueError):
         return None
     if not isinstance(root, dict):
         return None
-    raw = root.get("questionnaire")
+    raw = root.get(QUESTIONNAIRE_ROOT_KEYS[subject])
+    if raw is None and subject == "group":
+        legacy = root.get("questionnaire")
+        if legacy is not None:
+            legacy_plan = compile_questionnaire(legacy)
+            if legacy_plan.subject == "group":
+                return legacy_plan
     return compile_questionnaire(raw) if raw is not None else None
 
 
@@ -2357,15 +2402,15 @@ def _validate_successor_questionnaire(
         return
     from questionnaire.successor import validate_successor
 
-    before = _questionnaire_plan_of(previous)
-    after = _questionnaire_plan_of(version)
-    if before is None or after is None:
-        return
-    validate_successor(before, after)
+    for subject in QUESTIONNAIRE_ROOT_KEYS:
+        before = _questionnaire_plan_of(previous, subject=subject)
+        after = _questionnaire_plan_of(version, subject=subject)
+        if before is not None and after is not None:
+            validate_successor(before, after)
 
 
 def _carry_questionnaire_answers(
-    previous: RulesetVersion | None, version: RulesetVersion, plan: QuestionnairePlan | None
+    previous: RulesetVersion | None, version: RulesetVersion
 ) -> int:
     """Open a response on the new version for everyone who answered the old one.
 
@@ -2373,21 +2418,27 @@ def _carry_questionnaire_answers(
     answers are read by ``question_key`` through ``is_current``, so both carry themselves.
     A participant who never filled anything in gets no row — a response means someone
     answered something, and blank rows would be noise rather than migration.
+
+    A version may carry a participant and a group questionnaire. Each prior response is
+    carried under its own subject's successor plan; a response whose subject has no
+    successor plan is left behind rather than copied into the other plan.
     """
-    if previous is None or plan is None:
+    if previous is None:
         return 0
     from questionnaire.models import QuestionnaireResponse
     from questionnaire.successor import carry_answers
 
-    before = _questionnaire_plan_of(previous)
-    if before is None:
-        return 0
     carried = 0
     rows = QuestionnaireResponse.objects.filter(ruleset_version=previous).select_related(
         "group", "singer_registration"
     )
     for old in rows:
-        answers = carry_answers(before, plan, old.answers)
+        subject = "group" if old.group_id else "participant"
+        before = _questionnaire_plan_of(previous, subject=subject)
+        after = _questionnaire_plan_of(version, subject=subject)
+        if before is None or after is None:
+            continue
+        answers = carry_answers(before, after, old.answers)
         identity = (
             {"group_id": old.group_id, "subject": QuestionnaireResponse.Subject.GROUP}
             if old.group_id
@@ -2399,9 +2450,9 @@ def _carry_questionnaire_answers(
         QuestionnaireResponse.objects.update_or_create(
             **identity,
             ruleset_version=version,
-            questionnaire_key=plan.key,
+            questionnaire_key=after.key,
             defaults={
-                "schema_hash": plan.schema_hash,
+                "schema_hash": after.schema_hash,
                 "answers": answers,
                 "is_test_data": old.is_test_data,
             },
@@ -2414,9 +2465,18 @@ def _carry_questionnaire_answers(
         # participant can never answer a question they were never asked to answer.
         owner = old.group if old.group_id else old.singer_registration
         if owner is not None:
-            from files.services import reconcile_questionnaire_material_checks
+            if old.group_id:
+                from files.services import reconcile_group_questionnaire_material_checks
 
-            reconcile_questionnaire_material_checks(registration=owner, version=version, plan=plan)
+                reconcile_group_questionnaire_material_checks(
+                    group=owner, version=version, plan=after
+                )
+            else:
+                from files.services import reconcile_questionnaire_material_checks
+
+                reconcile_questionnaire_material_checks(
+                    registration=owner, version=version, plan=after
+                )
         carried += 1
     return carried
 
@@ -2701,30 +2761,48 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
         raise ValidationError("赛制定义不是合法 JSON。") from exc
     if not isinstance(root, dict):
         raise ValidationError("赛制定义的根必须是对象。")
-    raw = root.get("questionnaire")
     live_config = binding.get("live_challenge") or {}
     is_live_2026 = (
         isinstance(live_config, dict) and live_config.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
     )
+    bound_round_keys = binding.get("round_keys") or {}
+    logical_material_rounds = {"r2", "r3"} if is_live_2026 else set()
+
+    raw = root.get("questionnaire")
     if raw is None:
         if is_live_2026:
             raise ValidationError("2026 赛制必须使用选手问卷收集第二、第三轮个人材料。")
-        return
-    plan = compile_questionnaire(raw)
-    bound_round_keys = binding.get("round_keys") or {}
-    logical_material_rounds = {"r2", "r3"} if is_live_2026 else set()
-    validate_questionnaire_rounds(
-        plan, bound_round_keys, logical_round_keys=logical_material_rounds
-    )
-    validate_questionnaire_context_keys(plan, bound_round_keys)
-    if is_live_2026:
-        from singer_contest.materials import validate_live_material_plan
+    else:
+        plan = compile_questionnaire(raw)
+        if plan.subject != "participant":
+            raise ValidationError("questionnaire 必须是选手问卷（subject=participant）。")
+        validate_questionnaire_rounds(
+            plan, bound_round_keys, logical_round_keys=logical_material_rounds
+        )
+        validate_questionnaire_context_keys(plan, bound_round_keys)
+        if is_live_2026:
+            from singer_contest.materials import validate_live_material_plan
 
-        validate_live_material_plan(plan)
-        # The 2026 format's own cross-domain contract is *not* re-checked here: it is about
-        # the plan and the rounds, not about the questionnaire, and the freeze gate runs it
-        # as its own step (``evaluate_freeze_gate``) so a failure is reported as the thing it
-        # actually is rather than as a questionnaire problem.
+            validate_live_material_plan(plan)
+            # The 2026 format's own cross-domain contract is *not* re-checked here: it is
+            # about the plan and the rounds, not about the questionnaire, and the freeze gate
+            # runs it as its own step (``evaluate_freeze_gate``) so a failure is reported as
+            # the thing it actually is rather than as a questionnaire problem.
+
+    raw_group = root.get("group_questionnaire")
+    if raw_group is None:
+        if is_live_2026:
+            raise ValidationError("2026 赛制必须配置分组合唱组问卷，用于收集合唱材料。")
+    else:
+        group_plan = compile_questionnaire(raw_group)
+        if group_plan.subject != "group":
+            raise ValidationError(
+                "group_questionnaire 必须是分组合唱组问卷（subject=group）。"
+            )
+        validate_questionnaire_rounds(
+            group_plan, bound_round_keys, logical_round_keys=logical_material_rounds
+        )
+        validate_questionnaire_context_keys(group_plan, bound_round_keys)
 
 
 #: The freeze gate's checks, in the order they run. The label is what the readiness page
@@ -2735,7 +2813,7 @@ FREEZE_GATE_LABELS: dict[str, str] = {
     "binding": "人数、分组、两套权重与三轮评委齐备",
     "definition": "赛制定义可以编译（晋级名额与席位数一致）",
     "round": "第一轮的评分轮、评委、晋级名额与分组都和配置一致",
-    "questionnaire": "选手问卷与第二、三轮材料契约齐备",
+    "questionnaire": "选手问卷与分组合唱问卷齐备",
     "successor": "换版后的问卷答案可以承接",
 }
 
@@ -3151,7 +3229,7 @@ def freeze_ruleset_version(
         ),
     )
     # Everybody who answered the previous version keeps their answers, under the new one.
-    _carry_questionnaire_answers(prior, locked, _questionnaire_plan_of(locked))
+    _carry_questionnaire_answers(prior, locked)
     return locked
 
 
