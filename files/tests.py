@@ -116,13 +116,9 @@ class SubmissionFileLifecycleTests(TestCase):
             validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
 
     def test_upload_policy_accepts_ogg_and_aac_audio(self):
-        ogg = SimpleUploadedFile(
-            "song.ogg", b"OggS" + b"\x00" * 64, content_type="audio/ogg"
-        )
+        ogg = SimpleUploadedFile("song.ogg", b"OggS" + b"\x00" * 64, content_type="audio/ogg")
         validate_upload(ogg, SubmissionFile.Purpose.ACCOMPANIMENT)
-        aac = SimpleUploadedFile(
-            "song.aac", b"\xff\xf1" + b"\x00" * 64, content_type="audio/aac"
-        )
+        aac = SimpleUploadedFile("song.aac", b"\xff\xf1" + b"\x00" * 64, content_type="audio/aac")
         validate_upload(aac, SubmissionFile.Purpose.ACCOMPANIMENT)
 
     def test_upload_policy_accepts_mkv_video(self):

@@ -1435,9 +1435,7 @@ def _validate_questionnaire_sections(root: dict) -> None:
     if raw_group is not None:
         plan = compile_questionnaire(raw_group)
         if plan.subject != "group":
-            raise ValidationError(
-                "group_questionnaire 必须是分组合唱组问卷（subject=group）。"
-            )
+            raise ValidationError("group_questionnaire 必须是分组合唱组问卷（subject=group）。")
 
 
 @transaction.atomic
@@ -2413,9 +2411,7 @@ def _validate_successor_questionnaire(
             validate_successor(before, after)
 
 
-def _carry_questionnaire_answers(
-    previous: RulesetVersion | None, version: RulesetVersion
-) -> int:
+def _carry_questionnaire_answers(previous: RulesetVersion | None, version: RulesetVersion) -> int:
     """Open a response on the new version for everyone who answered the old one.
 
     Only free-text answers move: bound answers already live on the registration, and file
@@ -2806,9 +2802,7 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
     else:
         group_plan = compile_questionnaire(raw_group)
         if group_plan.subject != "group":
-            raise ValidationError(
-                "group_questionnaire 必须是分组合唱组问卷（subject=group）。"
-            )
+            raise ValidationError("group_questionnaire 必须是分组合唱组问卷（subject=group）。")
         validate_questionnaire_rounds(
             group_plan, bound_round_keys, logical_round_keys=logical_material_rounds
         )

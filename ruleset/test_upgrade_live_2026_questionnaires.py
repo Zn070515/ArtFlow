@@ -36,9 +36,7 @@ def _old_participant_questionnaire() -> dict:
 class UpgradeLive2026QuestionnairesTests(_CharacterizationBase):
     def setUp(self):
         super().setUp()
-        self.activity = self.make_activity(
-            is_test_mode=True, title="升级 2026 问卷"
-        )
+        self.activity = self.make_activity(is_test_mode=True, title="升级 2026 问卷")
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity,
             name="2026 赛制",
@@ -105,9 +103,7 @@ class UpgradeLive2026QuestionnairesTests(_CharacterizationBase):
         }
         for key in ("r2.accompaniment", "r3.accompaniment"):
             self.assertIn(".mp4", questions[key]["file"]["extensions"])
-            self.assertEqual(
-                questions[key]["file"]["accepts"], ["performance_video"]
-            )
+            self.assertEqual(questions[key]["file"]["accepts"], ["performance_video"])
         self.assertEqual(
             [q["key"] for q in root["group_questionnaire"]["pages"][0]["sections"][0]["questions"]],
             ["group.song", "group.media"],

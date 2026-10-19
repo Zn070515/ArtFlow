@@ -48,11 +48,7 @@ def _questions(document: dict):
 
 
 def _latest_draft(ruleset: ContestRuleset) -> RulesetVersion | None:
-    return (
-        ruleset.versions.filter(status=RulesetVersion.Status.DRAFT)
-        .order_by("-version")
-        .first()
-    )
+    return ruleset.versions.filter(status=RulesetVersion.Status.DRAFT).order_by("-version").first()
 
 
 class Command(BaseCommand):
@@ -78,10 +74,7 @@ class Command(BaseCommand):
         ruleset = ContestRuleset.objects.filter(activity=activity).first()
         if ruleset is None:
             raise CommandError("activity has no ContestRuleset")
-        if (
-            str((ruleset.live_challenge or {}).get("format_key") or "")
-            != LIVE_CHALLENGE_FORMAT_KEY
-        ):
+        if str((ruleset.live_challenge or {}).get("format_key") or "") != LIVE_CHALLENGE_FORMAT_KEY:
             raise CommandError("activity's ruleset is not the 2026 live format")
 
         version = _latest_draft(ruleset)
@@ -119,9 +112,10 @@ class Command(BaseCommand):
             key = str(question.get("key") or "")
             if key not in MEDIA_LABELS:
                 continue
-            if question.get("file") != COMBINED_FILE_CONFIG or question.get(
-                "label"
-            ) != MEDIA_LABELS[key]:
+            if (
+                question.get("file") != COMBINED_FILE_CONFIG
+                or question.get("label") != MEDIA_LABELS[key]
+            ):
                 changed_questions.append(key)
             question["file"] = copy.deepcopy(COMBINED_FILE_CONFIG)
             question["label"] = MEDIA_LABELS[key]

@@ -273,9 +273,7 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
             except (TypeError, ValueError) as exc:
                 raise ValidationError("文件大小上限必须是正整数 MB。") from exc
             accepts = [
-                purpose.strip()
-                for purpose in post.getlist("file_accepts")
-                if purpose.strip()
+                purpose.strip() for purpose in post.getlist("file_accepts") if purpose.strip()
             ]
             file_config = {
                 "purpose": post.get("file_purpose") or "",
@@ -395,9 +393,7 @@ def builder_view(request: HttpRequest, pk: int, subject: str = "participant"):
     if subject not in QUESTIONNAIRE_ROOT_KEYS:
         raise PermissionDenied("未知的问卷主体。")
     builder_route = (
-        "staff:ruleset_group_questionnaire"
-        if subject == "group"
-        else "staff:ruleset_questionnaire"
+        "staff:ruleset_group_questionnaire" if subject == "group" else "staff:ruleset_questionnaire"
     )
     preview_route = (
         "staff:ruleset_group_questionnaire_preview"
@@ -428,9 +424,7 @@ def builder_view(request: HttpRequest, pk: int, subject: str = "participant"):
                     request, f"这道题不能再向{direction}移动：条件依赖必须保持在前面。"
                 )
                 return redirect(builder_route, pk=version.pk)
-            sections: dict[str, object] = {
-                QUESTIONNAIRE_ROOT_KEYS[subject]: questionnaire
-            }
+            sections: dict[str, object] = {QUESTIONNAIRE_ROOT_KEYS[subject]: questionnaire}
             if subject == "group":
                 # A pre-split version stored its group document in the participant slot.
                 # Saving the group designer is the migration seam: move it out, so the
@@ -534,16 +528,12 @@ def _preview_answers(plan) -> dict:
     return answers
 
 
-def preview_view(
-    request: HttpRequest, pk: int, context: str, subject: str = "participant"
-):
+def preview_view(request: HttpRequest, pk: int, context: str, subject: str = "participant"):
     """Render the form in one of the four states staff need to see."""
     if subject not in QUESTIONNAIRE_ROOT_KEYS:
         raise PermissionDenied("未知的问卷主体。")
     builder_route = (
-        "staff:ruleset_group_questionnaire"
-        if subject == "group"
-        else "staff:ruleset_questionnaire"
+        "staff:ruleset_group_questionnaire" if subject == "group" else "staff:ruleset_questionnaire"
     )
     preview_route = (
         "staff:ruleset_group_questionnaire_preview"

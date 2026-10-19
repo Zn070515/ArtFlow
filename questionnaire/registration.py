@@ -464,9 +464,7 @@ def get_or_create_group_draft(*, group, version, plan) -> QuestionnaireResponse:
         schema_hash=plan.schema_hash,
     )
     if first_open:
-        reconcile_group_questionnaire_material_checks(
-            group=group, version=version, plan=plan
-        )
+        reconcile_group_questionnaire_material_checks(group=group, version=version, plan=plan)
     return response
 
 
