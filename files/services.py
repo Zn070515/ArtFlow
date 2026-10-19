@@ -161,15 +161,22 @@ def _validate_file_signature(uploaded_file, extension: str) -> None:
         elif extension == ".flac":
             if not header.startswith(b"fLaC"):
                 raise ValueError("invalid FLAC header")
+        elif extension == ".ogg":
+            if not header.startswith(b"OggS"):
+                raise ValueError("invalid Ogg container")
+        elif extension == ".aac":
+            # ADTS syncword: 0xFFF in the first 12 bits, layer bits 00.
+            if len(header) < 2 or header[0] != 0xFF or (header[1] & 0xF6) != 0xF0:
+                raise ValueError("invalid AAC (ADTS) stream")
         elif extension == ".m4a":
             if len(header) < 12 or header[4:8] != b"ftyp":
                 raise ValueError("invalid M4A container")
         elif extension in {".mp4", ".mov"}:
             if len(header) < 12 or header[4:8] != b"ftyp":
                 raise ValueError("invalid MP4/MOV container")
-        elif extension == ".webm":
+        elif extension in {".webm", ".mkv"}:
             if not header.startswith(b"\x1a\x45\xdf\xa3"):
-                raise ValueError("invalid WebM container")
+                raise ValueError("invalid WebM/Matroska container")
         elif extension == ".pdf":
             if not header.startswith(b"%PDF-"):
                 raise ValueError("invalid PDF header")

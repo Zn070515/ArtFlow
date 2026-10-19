@@ -47,9 +47,19 @@ FILE_PURPOSE_POLICIES: dict[str, FilePurposePolicy] = {
     ),
     "accompaniment": FilePurposePolicy(
         max_mb=100,
-        extensions=frozenset({".mp3", ".wav", ".m4a", ".flac"}),
+        extensions=frozenset({".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}),
         content_types=frozenset(
-            {"audio/flac", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav"}
+            {
+                "audio/aac",
+                "audio/flac",
+                "audio/mp4",
+                "audio/mpeg",
+                "audio/ogg",
+                "audio/wav",
+                "audio/x-aac",
+                "audio/x-wav",
+                "application/ogg",
+            }
         ),
     ),
     "background_video": FilePurposePolicy(
@@ -59,8 +69,16 @@ FILE_PURPOSE_POLICIES: dict[str, FilePurposePolicy] = {
     ),
     "performance_video": FilePurposePolicy(
         max_mb=500,
-        extensions=frozenset({".mp4", ".mov", ".webm"}),
-        content_types=frozenset({"video/mp4", "video/quicktime", "video/webm"}),
+        extensions=frozenset({".mp4", ".mov", ".webm", ".mkv"}),
+        content_types=frozenset(
+            {
+                "application/x-matroska",
+                "video/mp4",
+                "video/quicktime",
+                "video/webm",
+                "video/x-matroska",
+            }
+        ),
     ),
     "lyrics_script": FilePurposePolicy(
         max_mb=20,
