@@ -4,6 +4,7 @@ import {
   compileVotingDefinition,
   computeVoteScores,
   createVotingDefinition,
+  decodeVotingArtifact,
   votingCapability,
 } from "../src/index.js";
 
@@ -21,10 +22,27 @@ it("compiles a voting definition with a frozen scoring rule", () => {
   expect(result.ok).toBe(true);
   if (!result.ok) return;
   expect(result.artifact).toMatchObject({
+    version: 2,
+    schemaVersion: 2,
     purpose: "score_component",
     identityPolicy: "ticket",
     scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
   });
+});
+
+it("identifies the former boolean voting artifact as legacy", () => {
+  const legacy = {
+    version: 1,
+    schemaVersion: 1,
+    purpose: "score_component",
+    selectionType: "single",
+    maxSelections: 1,
+    requiresTicket: true,
+    allowBrowserIdentity: false,
+    scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+  };
+
+  expect(decodeVotingArtifact(legacy)).toMatchObject({ kind: "legacy", artifact: legacy });
 });
 
 it("rejects multi-select definitions whose limit is not explicit", () => {

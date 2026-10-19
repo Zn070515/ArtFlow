@@ -41,6 +41,7 @@ import {
 } from "@artflow-plus/db";
 import {
   computeVoteScores,
+  decodeVotingArtifact,
   DomainError,
   requirePermission,
 } from "@artflow-plus/domain";
@@ -142,7 +143,11 @@ async function votingArtifact(
   if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The activity has no active released definition.");
   const plan = release.capabilities.voting;
   if (plan === undefined || plan.ok !== true) throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The release has no voting snapshot.");
-  return plan.artifact as CompiledVotingArtifact;
+  const decoded = decodeVotingArtifact(plan.artifact);
+  if (decoded.kind === "legacy") {
+    throw new DomainError("RELEASE_REISSUE_REQUIRED", "This voting release uses a legacy identity policy; publish a new definition before opening a session.");
+  }
+  return decoded.artifact;
 }
 
 export interface OpenVoteSessionInput {

@@ -128,8 +128,8 @@ async function seedActivity(
         capabilityKey: "voting",
         contentHash: "voting",
         artifact: {
-          version: 1,
-          schemaVersion: 1,
+          version: 2,
+          schemaVersion: 2,
           purpose: "score_component",
           selectionType: "single",
           maxSelections: 1,
@@ -495,8 +495,8 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
           capabilityKey: "voting",
           contentHash: "voting-2",
           artifact: {
-            version: 1,
-            schemaVersion: 1,
+            version: 2,
+            schemaVersion: 2,
             purpose: "popularity",
             selectionType: "multi",
             maxSelections: 2,
@@ -523,6 +523,44 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     expect(opened.body.session.identityPolicy).toBe("ticket");
   });
 
+  it("fails closed when the execution release contains the legacy boolean voting artifact", async () => {
+    const activityId = await seedActivity("act-legacy-voting-release");
+    await db
+      .updateTable("definition_release")
+      .set({
+        capabilities: JSON.stringify({
+          ticketing: { ok: true, capabilityKey: "ticketing", contentHash: "ticketing", artifact: { schemaVersion: 1 } },
+          voting: {
+            ok: true,
+            capabilityKey: "voting",
+            contentHash: "legacy-voting",
+            artifact: {
+              version: 1,
+              schemaVersion: 1,
+              purpose: "score_component",
+              selectionType: "single",
+              maxSelections: 1,
+              requiresTicket: true,
+              allowBrowserIdentity: false,
+              scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+            },
+          },
+        }),
+      })
+      .where("activity_id", "=", activityId)
+      .where("version", "=", 1)
+      .execute();
+
+    await expect(openVoteSession(db, deps(staff), {
+      commandId: "m6-legacy-voting-open",
+      activityId,
+      sessionId: "m6-legacy-voting-session",
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    })).rejects.toMatchObject({ code: "RELEASE_REISSUE_REQUIRED" });
+    expect(await db.selectFrom("vote_session").select("id").where("activity_id", "=", activityId).execute()).toHaveLength(0);
+  });
+
   it("rejects vote commands when the running execution release no longer matches", async () => {
     const activityId = await seedActivity("act-stale-vote");
     const ticket = await issueTicket(db, deps(staff), { commandId: "m6-stale-ticket", activityId });
@@ -544,8 +582,8 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
           capabilityKey: "voting",
           contentHash: "voting-stale-2",
           artifact: {
-            version: 1,
-            schemaVersion: 1,
+            version: 2,
+            schemaVersion: 2,
             purpose: "score_component",
             selectionType: "single",
             maxSelections: 1,

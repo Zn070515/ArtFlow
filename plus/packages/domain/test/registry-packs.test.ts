@@ -296,7 +296,7 @@ it("allows browser voting without ticketing and rejects ticket voting without it
         voting: {
           schemaVersion: 1,
           payload: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             purpose: "popularity",
             selectionType: "single",
             maxSelections: 1,
@@ -319,7 +319,7 @@ it("allows browser voting without ticketing and rejects ticket voting without it
         voting: {
           schemaVersion: 1,
           payload: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             purpose: "score_component",
             selectionType: "single",
             maxSelections: 1,

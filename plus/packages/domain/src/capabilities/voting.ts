@@ -14,6 +14,7 @@ import type { CapabilityRegistration } from "../registry.js";
 export type VotingPurpose = "popularity" | "score_component";
 export type VotingSelectionType = "single" | "multi";
 export type VotingIdentityPolicy = "ticket" | "browser" | "anonymous";
+export type VotingDefinitionSchemaVersion = 2;
 
 export interface VotingScoringRule {
   readonly kind: "ballot_share_percent";
@@ -22,7 +23,7 @@ export interface VotingScoringRule {
 }
 
 export interface VotingDefinition {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: VotingDefinitionSchemaVersion;
   readonly purpose: VotingPurpose;
   readonly selectionType: VotingSelectionType;
   readonly maxSelections: number;
@@ -31,13 +32,28 @@ export interface VotingDefinition {
 }
 
 export interface CompiledVotingArtifact extends VotingDefinition {
-  readonly version: 1;
+  readonly version: 2;
 }
+
+export interface LegacyVotingArtifact {
+  readonly version: 1;
+  readonly schemaVersion: 1;
+  readonly purpose: VotingPurpose;
+  readonly selectionType: VotingSelectionType;
+  readonly maxSelections: number;
+  readonly requiresTicket: boolean;
+  readonly allowBrowserIdentity: boolean;
+  readonly scoringRule: VotingScoringRule;
+}
+
+export type DecodedVotingArtifact =
+  | { readonly kind: "current"; readonly artifact: CompiledVotingArtifact }
+  | { readonly kind: "legacy"; readonly artifact: LegacyVotingArtifact };
 
 export function createVotingDefinition(
   input: Omit<VotingDefinition, "schemaVersion">,
 ): CapabilityDefinition {
-  return { schemaVersion: 1, payload: { schemaVersion: 1, ...input } };
+  return { schemaVersion: 1, payload: { schemaVersion: 2, ...input } };
 }
 
 function issue(code: string, message: string, path: string): CompileIssue {
@@ -47,8 +63,28 @@ function issue(code: string, message: string, path: string): CompileIssue {
 function asDefinition(payload: unknown): VotingDefinition | null {
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return null;
   const value = payload as Partial<VotingDefinition>;
-  if (value.schemaVersion !== 1) return null;
+  if (value.schemaVersion !== 2) return null;
   return value as VotingDefinition;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function decodeVotingArtifact(value: unknown): DecodedVotingArtifact {
+  if (!isRecord(value)) fail("RELEASE_SNAPSHOT_INCOMPLETE", "The voting release artifact is invalid.");
+  if (value.version === 2 && value.schemaVersion === 2 && typeof value.identityPolicy === "string") {
+    return { kind: "current", artifact: value as unknown as CompiledVotingArtifact };
+  }
+  if (
+    value.version === 1 &&
+    value.schemaVersion === 1 &&
+    typeof value.requiresTicket === "boolean" &&
+    typeof value.allowBrowserIdentity === "boolean"
+  ) {
+    return { kind: "legacy", artifact: value as unknown as LegacyVotingArtifact };
+  }
+  fail("RELEASE_SNAPSHOT_INCOMPLETE", "The voting release artifact version is unsupported.");
 }
 
 export function compileVotingDefinition(
@@ -97,8 +133,8 @@ export function compileVotingDefinition(
   if (issues.length > 0) return deepFreeze({ ok: false, issues });
 
   const artifact: CompiledVotingArtifact = {
-    version: 1,
-    schemaVersion: 1,
+    version: 2,
+    schemaVersion: 2,
     purpose: payload.purpose,
     selectionType: payload.selectionType,
     maxSelections: payload.maxSelections,
@@ -142,7 +178,7 @@ export const votingCapability: CapabilityRegistration = deepFreeze({
     version: "1",
     dependencies: [],
     conflicts: [],
-    definitionSchemaVersion: 1,
+    definitionSchemaVersion: 2,
     commands: [
       "voting.session.open",
       "voting.ballot.submit",
