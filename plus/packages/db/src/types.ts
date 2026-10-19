@@ -2,12 +2,15 @@ import type { ColumnType, Generated } from "kysely";
 
 export interface ActivityRow {
   id: string;
+  public_code: ColumnType<string, string | undefined, string | undefined>;
   title: string;
   status: string;
   revision: number;
   // pg returns jsonb as an object, but a parameter must be sent as JSON text.
   enabled_capabilities: ColumnType<string[] | string, string, string>;
   active_definition_version: number;
+  judge_entry_open: ColumnType<boolean, boolean | undefined, boolean | undefined>;
+  judge_entry_version: ColumnType<number, number | undefined, number | undefined>;
 }
 
 export interface CommandReceiptRow {
@@ -345,6 +348,110 @@ export interface PodiumCandidateRow {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface VoteSessionRow {
+  id: string;
+  activity_id: string;
+  definition_version: number;
+  purpose: string;
+  selection_type: string;
+  max_selections: number;
+  requires_ticket: boolean;
+  allow_browser_identity: boolean;
+  scoring_rule: ColumnType<unknown, string, string>;
+  status: string;
+  revision: number;
+  opened_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  closed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface VoteOptionRow {
+  id: string;
+  activity_id: string;
+  session_id: string;
+  candidate_id: string;
+  ordinal: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface BallotRow {
+  id: string;
+  activity_id: string;
+  session_id: string;
+  identity_type: string;
+  identity_digest: string | null;
+  ticket_id: string | null;
+  submitted_at: ColumnType<Date, Date | string, Date | string>;
+}
+
+export interface VoteRecordRow {
+  id: string;
+  activity_id: string;
+  session_id: string;
+  ballot_id: string;
+  option_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface TicketRow {
+  id: string;
+  activity_id: string;
+  public_code: string;
+  credential_digest: string;
+  credential_version: number;
+  state: string;
+  issued_at: ColumnType<Date, Date | string, Date | string>;
+  redeemed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  revoked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface TicketAccessSessionRow {
+  id: string;
+  activity_id: string;
+  ticket_id: string;
+  token_digest: string;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  last_seen_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  revoked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface JudgeSeatGrantRow {
+  id: string;
+  activity_id: string;
+  seat_key: string;
+  judge_id: string | null;
+  state: string;
+  session_id: string | null;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface JudgeSessionRow {
+  id: string;
+  activity_id: string;
+  seat_id: string;
+  actor_id: string;
+  token_digest: string;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  revoked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface LiveStateRow {
+  activity_id: string;
+  aggregate_type: string;
+  aggregate_id: string;
+  last_sequence: ColumnType<string, string | number, string | number>;
+  state: ColumnType<unknown, string, string>;
+  status: string;
+  blocked_sequence: ColumnType<string | null, string | number | null, string | number | null>;
+  blocked_reason: string | null;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -373,4 +480,13 @@ export interface Database {
   advancement_decision: AdvancementDecisionRow;
   tie_decision: TieDecisionRow;
   podium_candidate: PodiumCandidateRow;
+  vote_session: VoteSessionRow;
+  vote_option: VoteOptionRow;
+  ballot: BallotRow;
+  vote_record: VoteRecordRow;
+  ticket: TicketRow;
+  ticket_access_session: TicketAccessSessionRow;
+  judge_seat_grant: JudgeSeatGrantRow;
+  judge_session: JudgeSessionRow;
+  live_state: LiveStateRow;
 }

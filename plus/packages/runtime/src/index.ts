@@ -15,3 +15,6 @@ export * from "./registration-projection.js";
 export * from "./material-service.js";
 export * from "./score-service.js";
 export * from "./resolution-service.js";
+export * from "./voting-ticket-service.js";
+export * from "./live-projection.js";
+export * from "./rate-limit.js";

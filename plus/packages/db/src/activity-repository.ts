@@ -34,6 +34,7 @@ export async function insertActivity(db: Kysely<Database>, activity: Activity): 
     .insertInto("activity")
     .values({
       id: activity.id,
+      public_code: activity.id,
       title: activity.title,
       status: activity.status,
       revision: activity.revision,

@@ -1,17 +1,22 @@
 import type { Database } from "@artflow-plus/db";
 import {
   blockExecutionProjection,
+  blockLiveState,
   claimPendingEventsForPartition,
   clearExecutionProjectionBlock,
+  deleteLiveState,
   deleteExecutionProjection,
   getExecutionProjection,
+  getLiveState,
   listPendingPartitions,
   markPublished,
   readExecutionHistory,
+  readEventsSince,
   recordFailure,
   retryEvent,
   tryLockPartition,
   upsertExecutionProjection,
+  upsertLiveState,
 } from "@artflow-plus/db";
 import type { ExecutionMode, RuntimeEvent } from "@artflow-plus/domain";
 import {
@@ -21,6 +26,9 @@ import {
   EXECUTION_SESSION_STARTED,
 } from "@artflow-plus/domain";
 import type { Kysely, Transaction } from "kysely";
+
+import { applyVotingLiveEvent } from "./live-projection.js";
+import type { VotingLiveState } from "./live-projection.js";
 
 export interface RelayOptions {
   readonly batchSize?: number;
@@ -68,6 +76,28 @@ async function applyToProjection(
     lastSequence: event.sequence,
     state: next,
   });
+}
+
+function isVotingLiveEvent(event: RuntimeEvent): boolean {
+  return event.type === "VoteSessionOpened" || event.type === "BallotSubmitted" || event.type === "VoteSessionClosed";
+}
+
+async function applyToLiveProjection(
+  trx: Transaction<Database>,
+  event: RuntimeEvent,
+): Promise<void> {
+  if (!isVotingLiveEvent(event)) return;
+  const current = await getLiveState(trx, event.activityId, "vote_session", event.aggregateId);
+  const next = applyVotingLiveEvent(current?.state as Parameters<typeof applyVotingLiveEvent>[0] ?? null, event);
+  if (next !== null) {
+    await upsertLiveState(trx, {
+      activityId: event.activityId,
+      aggregateType: "vote_session",
+      aggregateId: event.aggregateId,
+      lastSequence: event.sequence,
+      state: next,
+    });
+  }
 }
 
 /**
@@ -145,6 +175,23 @@ export async function relayOutboxOnce(
           if (mode !== null) {
             await applyToProjection(trx, event, mode);
           }
+          if (isVotingLiveEvent(event)) {
+            try {
+              await applyToLiveProjection(trx, event);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              await blockLiveState(trx, {
+                activityId: event.activityId,
+                aggregateType: "vote_session",
+                aggregateId: event.aggregateId,
+                sequence: event.sequence,
+                reason: message,
+              });
+              // A live projection is derived convenience state. Its failure is
+              // visible and recoverable, but it must not reject the authority
+              // command or stop the HTTP path.
+            }
+          }
           await markPublished(trx, event.sequence);
           applied += 1;
         } catch (error) {
@@ -181,6 +228,50 @@ export async function relayOutboxOnce(
 export interface RebuildResult {
   readonly state: ReturnType<typeof emptyExecutionProjection>;
   readonly lastSequence: number;
+}
+
+export interface RebuildVotingLiveResult {
+  readonly state: VotingLiveState | null;
+  readonly lastSequence: number;
+}
+
+/** Rebuilds one vote-session live projection from the durable event history. */
+export async function rebuildVotingLiveProjection(
+  db: Kysely<Database>,
+  activityId: string,
+  sessionId: string,
+  mode: ExecutionMode,
+): Promise<RebuildVotingLiveResult> {
+  return db.transaction().execute(async (trx) => {
+    if (!(await tryLockPartition(trx, partitionKey(activityId, mode)))) {
+      throw new Error(`Voting live projection ${activityId}/${sessionId} is being updated by the relay; retry the rebuild.`);
+    }
+    await deleteLiveState(trx, activityId, "vote_session", sessionId);
+    let state: VotingLiveState | null = null;
+    let cursor = 0;
+    let lastSequence = 0;
+    for (;;) {
+      const events = await readEventsSince(trx, { activityId, after: cursor, limit: 500, mode });
+      if (events.length === 0) break;
+      for (const event of events) {
+        cursor = event.sequence;
+        if (!isVotingLiveEvent(event) || event.aggregateId !== sessionId) continue;
+        state = applyVotingLiveEvent(state, event);
+        lastSequence = event.sequence;
+      }
+      if (events.length < 500) break;
+    }
+    if (state !== null) {
+      await upsertLiveState(trx, {
+        activityId,
+        aggregateType: "vote_session",
+        aggregateId: sessionId,
+        lastSequence,
+        state,
+      });
+    }
+    return { state, lastSequence };
+  });
 }
 
 /**

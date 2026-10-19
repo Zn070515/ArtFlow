@@ -2,6 +2,8 @@ import { competitionCapability } from "./capabilities/competition.js";
 import { materialsCapability } from "./capabilities/materials.js";
 import { questionnaireCapability } from "./capabilities/questionnaire.js";
 import { registrationCapability } from "./capabilities/registration.js";
+import { votingCapability } from "./capabilities/voting.js";
+import { ticketingCapability } from "./capabilities/ticketing.js";
 import { createCapabilityRegistry } from "./registry.js";
 import type { CapabilityRegistry } from "./registry.js";
 
@@ -16,6 +18,8 @@ export function createDefaultCapabilityRegistry(): CapabilityRegistry {
     materialsCapability,
     questionnaireCapability,
     registrationCapability,
+    votingCapability,
+    ticketingCapability,
   ]);
   if (!result.ok) {
     throw new Error(

@@ -30,6 +30,12 @@ export interface CommandOutcome<T> {
 export interface CommandHandlerResult<T> {
   readonly body: T;
   readonly status?: number;
+  /**
+   * Sensitive one-time response fields (ticket/session credentials) must not
+   * be put into the replay receipt. The first response still returns `body`,
+   * while retries replay this redacted representation.
+   */
+  readonly persistedBody?: unknown;
 }
 
 /**
@@ -86,7 +92,7 @@ export async function executeCommand<T>(
         payloadHash,
       },
     });
-    await completeCommand(trx, meta.commandId, result.body, status);
+    await completeCommand(trx, meta.commandId, result.persistedBody ?? result.body, status);
     return { body: result.body, status, replayed: false };
   });
 }

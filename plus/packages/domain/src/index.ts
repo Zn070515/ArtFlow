@@ -4,6 +4,8 @@ export * from "./capabilities/competition.js";
 export * from "./capabilities/materials.js";
 export * from "./capabilities/questionnaire.js";
 export * from "./capabilities/registration.js";
+export * from "./capabilities/voting.js";
+export * from "./capabilities/ticketing.js";
 export * from "./commands.js";
 export * from "./compiler.js";
 export * from "./defaults.js";

@@ -18,13 +18,20 @@ import {
   ScoreCorrectionLifecycleBodySchema,
   StartExecutionBodySchema,
   TieDecisionBodySchema,
+  CloseVoteSessionBodySchema,
+  JudgeEntryBodySchema,
+  OpenVoteSessionBodySchema,
+  ReasonBodySchema,
+  SubmitBallotBodySchema,
+  TicketCredentialBodySchema,
 } from "@artflow-plus/contracts";
-import { checkReady, getCurrentRankingSnapshot, getRoundByKey, type Database } from "@artflow-plus/db";
+import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, getVoteSession, type Database } from "@artflow-plus/db";
 import {
   defaultCapabilityRegistry,
   DomainError,
   instantiateActivityPack,
   SINGER_COMPETITION_PACK,
+  SYSTEM_ACTOR,
 } from "@artflow-plus/domain";
 import type {
   ActivityDefinitionPackage,
@@ -73,9 +80,23 @@ import {
   uploadMaterial,
   releaseDefinitionCommand,
   startExecution,
+  claimJudgeSeat,
+  closeJudgeEntry,
+  closeVoteSession,
+  getClosedVoteScores,
+  issueTicket,
+  openVoteSession,
+  reissueJudgeCapability,
+  redeemTicketCredential,
+  rotateTicketCredential,
+  revokeTicket,
+  revokeTicketAccessSession,
+  submitBallot,
 } from "@artflow-plus/runtime";
-import type { RuntimeDeps } from "@artflow-plus/runtime";
+import { MemoryRateLimiter } from "@artflow-plus/runtime";
+import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
 import swagger from "@fastify/swagger";
+import { randomBytes } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import type { Kysely } from "kysely";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
@@ -89,6 +110,8 @@ export interface AppOptions {
   readonly actor?: ActorContext;
   /** Exposes the generic capability fact seam for the M3 skeleton proof. */
   readonly enableRuntimeFacts?: boolean;
+  /** Gateway/app limiter seam; public capability entry fails closed if it errors. */
+  readonly rateLimiter?: RateLimiter;
 }
 
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
@@ -147,6 +170,21 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   STALE_RESOLUTION_INPUT: 409,
   TIE_DECISION_REQUIRED: 422,
   TIE_DECISION_INVALID: 422,
+  VOTE_SESSION_NOT_OPEN: 409,
+  VOTE_SESSION_CLOSED: 409,
+  DUPLICATE_BALLOT: 409,
+  BALLOT_IDENTITY_INVALID: 422,
+  OPTION_NOT_IN_SESSION: 422,
+  TOO_MANY_SELECTIONS: 422,
+  TICKET_REQUIRED: 403,
+  INVALID_TICKET: 404,
+  TICKET_REPLAYED: 409,
+  JUDGE_ENTRY_CLOSED: 409,
+  INVALID_JUDGE_ENTRY: 404,
+  SEAT_UNAVAILABLE: 409,
+  TICKET_SESSION_EXPIRED: 401,
+  TICKET_SESSION_REVOKED: 401,
+  RATE_LIMITED: 429,
 };
 
 const CreateActivityBody = Type.Object(
@@ -178,6 +216,16 @@ const PackParams = Type.Object(
 );
 
 const SessionParams = Type.Object(
+  { id: Type.String({ minLength: 1 }), sessionId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const TicketParams = Type.Object(
+  { id: Type.String({ minLength: 1 }), ticketId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const TicketSessionParams = Type.Object(
   { id: Type.String({ minLength: 1 }), sessionId: Type.String({ minLength: 1 }) },
   { additionalProperties: false },
 );
@@ -326,6 +374,31 @@ function bearerToken(request: FastifyRequest): string | undefined {
   return match?.[1];
 }
 
+function cookieValue(request: FastifyRequest, name: string): string | undefined {
+  const header = request.headers.cookie;
+  if (typeof header !== "string") return undefined;
+  for (const pair of header.split(";")) {
+    const separator = pair.indexOf("=");
+    if (separator < 0) continue;
+    if (pair.slice(0, separator).trim() !== name) continue;
+    try {
+      return decodeURIComponent(pair.slice(separator + 1).trim());
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function setSessionCookie(reply: { header(name: string, value: string): unknown }, name: string, value: string, expiresAt: string): void {
+  const maxAge = Math.max(0, Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000));
+  const secure = process.env.APP_ENV === "production" ? "; Secure" : "";
+  reply.header(
+    "set-cookie",
+    `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`,
+  );
+}
+
 function asPackage(value: unknown): ActivityDefinitionPackage {
   if (value === null || typeof value !== "object") {
     throw new DomainError("INVALID_INPUT", "A definition package object is required.");
@@ -364,6 +437,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const registry = options.registry ?? defaultCapabilityRegistry;
   const packs = options.packs ?? [SINGER_COMPETITION_PACK];
   const baseDeps = options.deps ?? defaultRuntimeDeps();
+  const rateLimiter = options.rateLimiter ?? new MemoryRateLimiter();
   const deps =
     options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
@@ -381,6 +455,20 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   async function requestDeps(request: FastifyRequest): Promise<RuntimeDeps> {
     return { ...deps, actor: await requestActor(request) };
+  }
+
+  function publicDeps(): RuntimeDeps {
+    return { ...deps, actor: SYSTEM_ACTOR };
+  }
+
+  async function requirePublicRateLimit(request: FastifyRequest, key: string, limit: number): Promise<void> {
+    try {
+      const allowed = await rateLimiter.allow({ key: `${key}:${request.ip}`, limit, windowMs: 60_000 });
+      if (!allowed) throw new DomainError("RATE_LIMITED", "The public action is rate limited.");
+    } catch (error) {
+      if (error instanceof DomainError) throw error;
+      throw new DomainError("RATE_LIMITED", "The public action is temporarily unavailable.");
+    }
   }
 
   async function routeRound(activityId: string, roundKey: string) {
@@ -1267,6 +1355,235 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         limit: query.limit ?? 100,
         ...(query.mode === undefined ? {} : { mode: query.mode }),
       });
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/voting/sessions",
+    { schema: { params: ActivityParams, body: OpenVoteSessionBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { sessionId: string; scope: string; candidateIds: string[] };
+      const outcome = await openVoteSession(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        sessionId: body.sessionId,
+        scope: body.scope,
+        candidateIds: body.candidateIds,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/voting/browser-identity",
+    { schema: { params: ActivityParams } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      await requirePublicRateLimit(request, `browser-identity:${id}`, 10);
+      const activity = await getActivity(db, id);
+      if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+      const existing = cookieValue(request, "artflow_browser_id");
+      if (existing !== undefined && existing.length >= 32) {
+        reply.header("cache-control", "no-store");
+        return { ready: true };
+      }
+      const browserId = randomBytes(32).toString("base64url");
+      reply.header("set-cookie", `artflow_browser_id=${browserId}; Path=/; HttpOnly; SameSite=Lax`);
+      reply.header("cache-control", "no-store");
+      return { ready: true };
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/voting/sessions/:sessionId/ballots",
+    { schema: { params: SessionParams, body: SubmitBallotBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, sessionId } = request.params as { id: string; sessionId: string };
+      const body = request.body as {
+        scope: string;
+        optionIds: string[];
+        identity:
+          | { type: "ticket"; credential: string }
+          | { type: "browser" }
+          | { type: "anonymous" };
+      };
+      await requirePublicRateLimit(request, `ballot:${id}:${sessionId}`, 30);
+      const identity = body.identity.type === "browser"
+        ? (() => {
+            const fingerprint = cookieValue(request, "artflow_browser_id");
+            if (fingerprint === undefined || fingerprint.length < 32) {
+              throw new DomainError("BALLOT_IDENTITY_INVALID", "A browser identity cookie is required.");
+            }
+            return { type: "browser" as const, fingerprint };
+          })()
+        : body.identity;
+      const outcome = await submitBallot(db, publicDeps(), {
+        commandId,
+        activityId: id,
+        sessionId,
+        scope: body.scope,
+        optionIds: body.optionIds,
+        identity,
+      });
+      reply.header("cache-control", "no-store");
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/voting/sessions/:sessionId/close",
+    { schema: { params: SessionParams, body: CloseVoteSessionBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, sessionId } = request.params as { id: string; sessionId: string };
+      const body = request.body as { scope: string; expectedRevision: number };
+      const outcome = await closeVoteSession(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        sessionId,
+        scope: body.scope,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/voting/sessions/:sessionId/scores",
+    { schema: { params: SessionParams } },
+    async (request, reply) => {
+      const { id, sessionId } = request.params as { id: string; sessionId: string };
+      const session = await getVoteSession(db, sessionId);
+      if (session === null || session.activityId !== id) throw new DomainError("NOT_FOUND", "The voting session was not found.");
+      reply.header("cache-control", "no-store");
+      return getClosedVoteScores(db, sessionId);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/voting/sessions/:sessionId/live",
+    { schema: { params: SessionParams } },
+    async (request) => {
+      const { id, sessionId } = request.params as { id: string; sessionId: string };
+      const session = await getVoteSession(db, sessionId);
+      if (session === null || session.activityId !== id) throw new DomainError("NOT_FOUND", "The voting session was not found.");
+      return (await getLiveState(db, id, "vote_session", sessionId)) ?? {
+        activityId: id,
+        aggregateType: "vote_session",
+        aggregateId: sessionId,
+        lastSequence: 0,
+        state: null,
+        status: "running",
+        stale: true,
+      };
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/tickets",
+    { schema: { params: ActivityParams } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const outcome = await issueTicket(db, await requestDeps(request), { commandId, activityId: id });
+      reply.header("cache-control", "no-store");
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/tickets/:ticketId/rotate",
+    { schema: { params: TicketParams } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, ticketId } = request.params as { id: string; ticketId: string };
+      const outcome = await rotateTicketCredential(db, await requestDeps(request), { commandId, activityId: id, ticketId });
+      reply.header("cache-control", "no-store");
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/tickets/:ticketId/revoke",
+    { schema: { params: TicketParams, body: ReasonBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, ticketId } = request.params as { id: string; ticketId: string };
+      const body = request.body as { reason: string };
+      const outcome = await revokeTicket(db, await requestDeps(request), { commandId, activityId: id, ticketId, reason: body.reason });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/ticket-sessions/:sessionId/revoke",
+    { schema: { params: TicketSessionParams, body: ReasonBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, sessionId } = request.params as { id: string; sessionId: string };
+      const body = request.body as { reason: string };
+      const outcome = await revokeTicketAccessSession(db, await requestDeps(request), { commandId, activityId: id, sessionId, reason: body.reason });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/tickets/redeem",
+    { schema: { body: TicketCredentialBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const body = request.body as { credential: string };
+      await requirePublicRateLimit(request, "ticket-redeem", 20);
+      const outcome = await redeemTicketCredential(db, publicDeps(), { commandId, credential: body.credential });
+      reply.header("cache-control", "no-store");
+      if (outcome.body.accessToken !== undefined) {
+        setSessionCookie(reply, "artflow_ticket_session", outcome.body.accessToken, outcome.body.expiresAt);
+      }
+      return reply.status(outcome.status).send({ ...outcome.body, accessToken: null });
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/judge-entry/reissue",
+    { schema: { params: ActivityParams, body: ReasonBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { reason: string };
+      const outcome = await reissueJudgeCapability(db, await requestDeps(request), { commandId, activityId: id, reason: body.reason });
+      reply.header("cache-control", "no-store");
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/judge-entry/close",
+    { schema: { params: ActivityParams, body: ReasonBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { reason: string };
+      const outcome = await closeJudgeEntry(db, await requestDeps(request), { commandId, activityId: id, reason: body.reason });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/judge-entry/claim",
+    { schema: { body: JudgeEntryBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const body = request.body as { publicCode: string; capability: string | null };
+      await requirePublicRateLimit(request, `judge-entry:${body.publicCode}`, 20);
+      const outcome = await claimJudgeSeat(db, publicDeps(), { commandId, publicCode: body.publicCode, capability: body.capability ?? "" });
+      reply.header("cache-control", "no-store");
+      if (outcome.body.sessionToken !== undefined) {
+        setSessionCookie(reply, "artflow_judge_session", outcome.body.sessionToken, outcome.body.expiresAt);
+      }
+      return reply.status(outcome.status).send({ ...outcome.body, sessionToken: null });
     },
   );
 

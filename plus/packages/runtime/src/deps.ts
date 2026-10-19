@@ -7,6 +7,8 @@ import type { ActorContext } from "@artflow-plus/domain";
 export interface RuntimeDeps {
   readonly now: () => string;
   readonly newEventId: () => string;
+  /** HMAC key for capability signatures; never persisted or returned. */
+  readonly credentialSecret?: string;
   /**
    * The authenticated actor. M3 has no login; the API passes an explicit
    * system actor and tests inject a fixed one. Never read this from a body.
@@ -19,9 +21,13 @@ export function runtimeActor(deps: RuntimeDeps): ActorContext {
 }
 
 export function defaultRuntimeDeps(): RuntimeDeps {
+  const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
   return {
     now: () => new Date().toISOString(),
     newEventId: () => randomUUID(),
+    credentialSecret:
+      process.env.ARTFLOW_PLUS_CREDENTIAL_SECRET ??
+      (isProduction ? undefined : "artflow-plus-development-secret"),
     actor: SYSTEM_ACTOR,
   };
 }
