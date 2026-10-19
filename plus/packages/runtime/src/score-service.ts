@@ -10,6 +10,7 @@ import {
   getCurrentPanelForUpdate,
   getCorrectionForUpdate,
   getJudgeSeatForUpdate,
+  getJudgeSessionForUpdate,
   getOpenCorrectionForUpdate,
   getPerformanceForUpdate,
   getPerformanceScoreStateForUpdate,
@@ -85,6 +86,7 @@ interface LoadedScoreContext {
   readonly performanceId: string;
   readonly contestantId: string;
   readonly judgeId: string;
+  readonly judgeSessionSeatId?: string;
   readonly contextVersion: number;
   readonly performanceState: "not_opened" | "open" | "locked";
   readonly mode: "test" | "rehearsal" | "formal";
@@ -121,10 +123,18 @@ async function loadScoreContext(
   trx: Kysely<Database>,
   input: ScoreContextInput,
   allowLockedPerformance: boolean,
+  judgeSessionToken?: string,
+  now?: string,
 ): Promise<LoadedScoreContext> {
   const activity = await getActivityForUpdate(trx, input.activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
   requireActive(activity);
+  const judgeSession = judgeSessionToken === undefined
+    ? null
+    : await getJudgeSessionForUpdate(trx, stableHash(judgeSessionToken));
+  if (judgeSessionToken !== undefined && (judgeSession === null || judgeSession.activityId !== activity.id || judgeSession.revokedAt !== undefined || Date.parse(judgeSession.expiresAt) <= Date.parse(now ?? new Date().toISOString()))) {
+    throw new DomainError("UNAUTHENTICATED", "The judge session is invalid.");
+  }
   const round = await getRoundForUpdate(trx, input.roundId);
   if (round === null) throw new DomainError("NOT_FOUND", "The competition round was not found.");
   if (round.activityId !== activity.id) throw new DomainError("CROSS_ACTIVITY", "The round belongs to another activity.");
@@ -156,6 +166,9 @@ async function loadScoreContext(
   if (seat === null || seat.panelId !== panel.id || seat.state !== "assigned") {
     throw new DomainError("STALE_CONTEXT", "The submitted seat is not assigned to the current panel.");
   }
+  if (judgeSession !== null && judgeSession.seatId !== seat.id) {
+    throw new DomainError("FORBIDDEN", "The judge session does not own this seat.");
+  }
   const release = await getRelease(trx, activity.id, round.releaseVersion);
   if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The round release is no longer available.");
   const plan = release.capabilities.competition;
@@ -170,6 +183,7 @@ async function loadScoreContext(
     performanceId: performance.id,
     contestantId: performance.contestantId,
     judgeId: seat.judgeId,
+    ...(judgeSession === null ? {} : { judgeSessionSeatId: judgeSession.seatId }),
     contextVersion: performance.contextVersion,
     performanceState: performance.state,
     mode: session.mode,
@@ -216,8 +230,8 @@ async function submitScore(
       reason: reason ?? null,
     },
   }, async (trx) => {
-    const context = await loadScoreContext(trx, input, false);
-    if (source === "direct_judge" && actor.actorId !== context.judgeId) {
+    const context = await loadScoreContext(trx, input, false, source === "direct_judge" ? deps.judgeSessionToken : undefined, deps.now());
+    if (source === "direct_judge" && context.judgeSessionSeatId === undefined && actor.actorId !== context.judgeId) {
       throw new DomainError("FORBIDDEN", "The judge actor does not own this seat.");
     }
     const normalized = normalizeScoreSubmission({ criteria: input.criteria, notes: input.notes ?? "" }, context.rubric);

@@ -10,7 +10,7 @@ export const OpenVoteSessionBodySchema = Type.Object(
 );
 
 const TicketIdentitySchema = Type.Object(
-  { type: Type.Literal("ticket"), credential: Type.String({ minLength: 1, maxLength: 300 }) },
+  { type: Type.Literal("ticket") },
   { additionalProperties: false },
 );
 const BrowserIdentitySchema = Type.Object(

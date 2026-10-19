@@ -148,6 +148,30 @@ function judgeSeat(row: Selectable<JudgeSeatGrantRow>): StoredJudgeEntrySeat {
   };
 }
 
+export interface StoredJudgeSession {
+  readonly id: string;
+  readonly activityId: string;
+  readonly seatId: string;
+  readonly actorId: string;
+  readonly tokenDigest: string;
+  readonly expiresAt: string;
+  readonly revokedAt?: string;
+}
+
+function judgeSession(row: Selectable<JudgeSessionRow>): StoredJudgeSession {
+  const expiresAt = iso(row.expires_at) ?? "";
+  const revokedAt = iso(row.revoked_at);
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    seatId: row.seat_id,
+    actorId: row.actor_id,
+    tokenDigest: row.token_digest,
+    expiresAt,
+    ...(revokedAt === null ? {} : { revokedAt }),
+  };
+}
+
 export async function getVoteSession(
   db: Kysely<Database>,
   id: string,
@@ -376,6 +400,22 @@ export async function insertJudgeSession(
     expires_at: input.expires_at,
     revoked_at: input.revoked_at,
   }).execute();
+}
+
+export async function getJudgeSessionForUpdate(
+  trx: Kysely<Database>,
+  tokenDigest: string,
+): Promise<StoredJudgeSession | null> {
+  const row = await trx.selectFrom("judge_session").selectAll().where("token_digest", "=", tokenDigest).forUpdate().executeTakeFirst();
+  return row === undefined ? null : judgeSession(row);
+}
+
+export async function findJudgeSession(
+  db: Kysely<Database>,
+  tokenDigest: string,
+): Promise<StoredJudgeSession | null> {
+  const row = await db.selectFrom("judge_session").selectAll().where("token_digest", "=", tokenDigest).executeTakeFirst();
+  return row === undefined ? null : judgeSession(row);
 }
 
 export async function getJudgeEntryForUpdate(

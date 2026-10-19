@@ -472,6 +472,39 @@ dbIt("keeps the pack instantiation body contract in sync with the API", () => {
     optionIds: ["option-1"],
     identity: { type: "browser", fingerprint: "raw-client-id" },
   })).toBe(false);
+  expect(Value.Check(SubmitBallotBodySchema, {
+    scope: "voting",
+    optionIds: ["option-1"],
+    identity: { type: "ticket" },
+  })).toBe(true);
+  expect(Value.Check(SubmitBallotBodySchema, {
+    scope: "voting",
+    optionIds: ["option-1"],
+    identity: { type: "ticket", credential: "raw-ticket" },
+  })).toBe(false);
+});
+
+dbIt("uses an IP-global judge-entry rate-limit bucket", async () => {
+  const keys: string[] = [];
+  const limited = await buildApp({
+    db,
+    deps,
+    rateLimiter: { allow: ({ key }) => { keys.push(key); return true; } },
+  });
+  try {
+    for (const [index, publicCode] of ["guess-a", "guess-b"].entries()) {
+      const response = await limited.inject({
+        method: "POST",
+        url: "/api/judge-entry/claim",
+        headers: headers(`judge-rate-${index}`),
+        payload: { publicCode, capability: null },
+      });
+      expect(response.statusCode).toBeLessThan(500);
+    }
+    expect(keys).toEqual(["judge-entry:127.0.0.1", "judge-entry:127.0.0.1"]);
+  } finally {
+    await limited.close();
+  }
 });
 
 dbIt("starts parallel scopes, lists them and closes with OCC", async () => {

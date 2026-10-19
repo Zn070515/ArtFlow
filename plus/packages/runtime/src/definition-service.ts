@@ -6,6 +6,7 @@ import {
   insertCompiled,
   insertDraft,
   insertRelease,
+  listRunningSessions,
   updateActivity,
   updateDraft,
 } from "@artflow-plus/db";
@@ -199,6 +200,9 @@ export async function releaseDefinitionCommand(
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) {
         throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+      }
+      if ((await listRunningSessions(trx, input.activityId)).length > 0) {
+        throw new DomainError("ACTIVITY_HAS_RUNNING_SESSIONS", "A definition release cannot change while an execution session is running.");
       }
       const stored = await getDraft(trx, input.activityId);
       if (stored === null) {

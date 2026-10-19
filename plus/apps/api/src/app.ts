@@ -461,6 +461,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return { ...deps, actor: SYSTEM_ACTOR };
   }
 
+  async function judgeScoreDeps(request: FastifyRequest): Promise<RuntimeDeps> {
+    const sessionToken = cookieValue(request, "artflow_judge_session");
+    if (sessionToken !== undefined) return { ...publicDeps(), judgeSessionToken: sessionToken };
+    return requestDeps(request);
+  }
+
   async function requirePublicRateLimit(request: FastifyRequest, key: string, limit: number): Promise<void> {
     try {
       const allowed = await rateLimiter.allow({ key: `${key}:${request.ip}`, limit, windowMs: 60_000 });
@@ -975,6 +981,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         sourceReference?: string;
         reason?: string;
       };
+      if (body.source === "direct_judge" && cookieValue(request, "artflow_judge_session") !== undefined) {
+        await requirePublicRateLimit(request, "judge-score", 60);
+      }
       const round = await routeRound(id, roundKey);
       const base = {
         commandId,
@@ -989,7 +998,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         scope: body.scope,
       };
       const outcome = body.source === "direct_judge"
-        ? await submitJudgeScore(db, await requestDeps(request), base)
+        ? await submitJudgeScore(db, await judgeScoreDeps(request), base)
         : body.source === "staff_rapid"
           ? await submitRapidScore(db, await requestDeps(request), base)
           : body.source === "staff_proxy"
@@ -1406,12 +1415,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         scope: string;
         optionIds: string[];
         identity:
-          | { type: "ticket"; credential: string }
+          | { type: "ticket" }
           | { type: "browser" }
           | { type: "anonymous" };
       };
       await requirePublicRateLimit(request, `ballot:${id}:${sessionId}`, 30);
-      const identity = body.identity.type === "browser"
+      const identity = body.identity.type === "ticket"
+        ? { type: "ticket" as const, sessionToken: cookieValue(request, "artflow_ticket_session") ?? "" }
+        : body.identity.type === "browser"
         ? (() => {
             const fingerprint = cookieValue(request, "artflow_browser_id");
             if (fingerprint === undefined || fingerprint.length < 32) {
@@ -1577,7 +1588,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     async (request, reply) => {
       const commandId = requireIdempotency(request);
       const body = request.body as { publicCode: string; capability: string | null };
-      await requirePublicRateLimit(request, `judge-entry:${body.publicCode}`, 20);
+      await requirePublicRateLimit(request, "judge-entry", 20);
       const outcome = await claimJudgeSeat(db, publicDeps(), { commandId, publicCode: body.publicCode, capability: body.capability ?? "" });
       reply.header("cache-control", "no-store");
       if (outcome.body.sessionToken !== undefined) {

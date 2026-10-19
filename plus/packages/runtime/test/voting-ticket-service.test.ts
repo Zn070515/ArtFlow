@@ -21,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   capabilityCredential,
   authenticateTicketSession,
+  authenticateJudgeSession,
   claimJudgeSeat,
   closeJudgeEntry,
   closeVoteSession,
@@ -31,12 +32,17 @@ import {
   rebuildVotingLiveProjection,
   reissueJudgeCapability,
   redeemTicketCredential,
+  revokeTicket,
+  rotateTicketCredential,
   submitJudgeScore,
   submitBallot,
 } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
+if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
+  throw new Error("REQUIRE_DB=1 but ARTFLOW_PLUS_DATABASE_URL is unset.");
+}
 const schema = `artflow_m6_voting_ticketing_${Date.now()}_${process.pid}`;
 const secret = "m6-test-credential-secret";
 const capabilityFixture = JSON.parse(
@@ -48,6 +54,8 @@ const capabilityFixture = JSON.parse(
 };
 
 let db: Kysely<Database>;
+let dbA: Kysely<Database>;
+let dbB: Kysely<Database>;
 let admin: Client;
 let tick = 0;
 
@@ -148,10 +156,10 @@ async function seedActivity(activityId = `activity-${randomUUID()}`, includeJudg
   return activityId;
 }
 
-async function seedJudgeScoreContext(activityId: string) {
+async function seedJudgeScoreContext(activityId: string, assignedSeatId = `m6-seat-${activityId}`) {
   const roundId = `m6-round-${activityId}`;
   const panelId = `m6-panel-${activityId}`;
-  const seatId = `m6-seat-${activityId}`;
+  const seatId = assignedSeatId;
   const performanceId = `m6-performance-${activityId}`;
   await insertSession(db, {
     id: `m6-judging-session-${activityId}`,
@@ -225,13 +233,16 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     admin = new Client({ connectionString });
     await admin.connect();
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    db = createDb({ connectionString, schema });
+    dbA = createDb({ connectionString, schema });
+    dbB = createDb({ connectionString, schema });
+    db = dbA;
     await migrate(db);
   });
 
   afterAll(async () => {
     if (!connectionString) return;
-    await closeDb(db);
+    await closeDb(dbA);
+    await closeDb(dbB);
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
     await admin.end();
   });
@@ -240,15 +251,14 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const activityId = await seedActivity();
     const ticket = await issueTicket(db, deps(staff), { commandId: "m6-ticket-1", activityId });
     expect(ticket.body.credential).toEqual(expect.any(String));
-    const redeemable = await issueTicket(db, deps(staff), { commandId: "m6-ticket-redeem", activityId });
-    const redeemed = await redeemTicketCredential(db, deps(judgeA), { commandId: "m6-redeem", credential: redeemable.body.credential ?? "" });
+    const redeemed = await redeemTicketCredential(db, deps(judgeA), { commandId: "m6-redeem", credential: ticket.body.credential ?? "" });
     expect(redeemed.body.accessToken).toEqual(expect.any(String));
     const receipt = await db.selectFrom("command_receipt").select("result").where("command_id", "=", "m6-redeem").executeTakeFirstOrThrow();
     expect(JSON.stringify(receipt.result)).not.toContain(redeemed.body.accessToken ?? "");
-    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "")).resolves.toMatchObject({ ticketId: redeemable.body.ticket.id });
+    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "")).resolves.toMatchObject({ ticketId: ticket.body.ticket.id });
     await expect(redeemTicketCredential(db, deps(judgeA), {
       commandId: "m6-redeem-replay",
-      credential: redeemable.body.credential ?? "",
+      credential: ticket.body.credential ?? "",
     })).rejects.toMatchObject({ code: "TICKET_REPLAYED" });
     const opened = await openVoteSession(db, deps(staff), {
       commandId: "m6-vote-open-1",
@@ -265,7 +275,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       sessionId: "vote-1",
       scope: "voting",
       optionIds: [option?.id ?? ""],
-      identity: { type: "ticket", credential: ticket.body.credential ?? "" },
+      identity: { type: "ticket", sessionToken: redeemed.body.accessToken ?? "" },
     });
     expect(submitted.body.ballot.identityType).toBe("ticket");
     await expect(submitBallot(db, deps(judgeA), {
@@ -274,7 +284,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       sessionId: "vote-1",
       scope: "voting",
       optionIds: [option?.id ?? ""],
-      identity: { type: "ticket", credential: ticket.body.credential ?? "" },
+      identity: { type: "ticket", sessionToken: redeemed.body.accessToken ?? "" },
     })).rejects.toMatchObject({ code: "DUPLICATE_BALLOT" });
     const closed = await closeVoteSession(db, deps(staff), {
       commandId: "m6-vote-close-1",
@@ -290,7 +300,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       sessionId: "vote-1",
       scope: "voting",
       optionIds: [option?.id ?? ""],
-      identity: { type: "ticket", credential: ticket.body.credential ?? "" },
+      identity: { type: "ticket", sessionToken: redeemed.body.accessToken ?? "" },
     })).rejects.toMatchObject({ code: "VOTE_SESSION_CLOSED" });
     await expect(getClosedVoteScores(db, "vote-1")).resolves.toMatchObject({
       totalBallots: 1,
@@ -310,6 +320,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const first = await seedActivity();
     const second = await seedActivity();
     const ticket = await issueTicket(db, deps(staff), { commandId: "m6-cross-ticket", activityId: second });
+    const redeemed = await redeemTicketCredential(db, deps(judgeA), { commandId: "m6-cross-redeem", credential: ticket.body.credential ?? "" });
     const opened = await openVoteSession(db, deps(staff), {
       commandId: "m6-cross-open",
       activityId: first,
@@ -323,7 +334,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       sessionId: "vote-cross",
       scope: "voting",
       optionIds: [opened.body.options[0]?.id ?? ""],
-      identity: { type: "ticket", credential: ticket.body.credential ?? "" },
+      identity: { type: "ticket", sessionToken: redeemed.body.accessToken ?? "" },
     })).rejects.toMatchObject({ code: "INVALID_TICKET" });
   });
 
@@ -336,6 +347,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const v1 = capabilityCredential("J", "ABC123", 1, secret);
     const first = await claimJudgeSeat(db, deps(judgeA), { commandId: "m6-judge-claim-a", publicCode: "ABC123", capability: v1 });
     expect(first.body.seatKey).toBe("seat-1");
+    await expect(authenticateJudgeSession(db, first.body.sessionToken ?? "")).resolves.toMatchObject({ activityId, seatId: first.body.seatId });
     expect(capabilityFixture.steps[0]?.expect.outcome).toBe("accepted");
     await expect(claimJudgeSeat(db, deps({ ...judgeA, actorId: "judge:unsigned" }), {
       commandId: "m6-judge-unsigned",
@@ -356,11 +368,11 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const events = await readEventsSince(db, { activityId, after: 0, limit: 100 });
     expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(["JudgeSeatClaimed", "JudgeCapabilityReissued", "JudgeEntryClosed"]));
 
-    const scoreContext = await seedJudgeScoreContext(activityId);
+    const scoreContext = await seedJudgeScoreContext(activityId, first.body.seatId);
     const scoreStep = capabilityFixture.steps[7];
     if (scoreStep === undefined) throw new Error("Golden capability fixture is missing the post-close score step.");
     const score = Number(scoreStep.input.score);
-    const scored = await submitJudgeScore(db, deps(judgeA), {
+    const scored = await submitJudgeScore(db, { ...deps(judgeA), judgeSessionToken: first.body.sessionToken }, {
       commandId: String(scoreStep.input.command_id),
       activityId,
       roundId: scoreContext.roundId,
@@ -375,5 +387,179 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     expect(scoreStep.expect.outcome).toBe("accepted");
     expect(scored.body.total).toBe(score);
     expect((await readEventsSince(db, { activityId, after: 0, limit: 500 })).map((event) => event.type)).toContain("ScoreFactRecorded");
+  });
+
+  it("rejects repeated terminal transitions and keeps ticket sessions authoritative", async () => {
+    const activityId = await seedActivity();
+    const ticket = await issueTicket(db, deps(staff), { commandId: "m6-transition-ticket", activityId });
+    const redeemed = await redeemTicketCredential(db, deps(judgeA), {
+      commandId: "m6-transition-redeem",
+      credential: ticket.body.credential ?? "",
+    });
+    await expect(rotateTicketCredential(db, deps(staff), {
+      commandId: "m6-transition-rotate-redeemed",
+      activityId,
+      ticketId: ticket.body.ticket.id,
+    })).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(revokeTicket(db, deps(staff), {
+      commandId: "m6-transition-revoke",
+      activityId,
+      ticketId: ticket.body.ticket.id,
+      reason: "test",
+    })).resolves.toMatchObject({ body: { state: "revoked" } });
+    await expect(revokeTicket(db, deps(staff), {
+      commandId: "m6-transition-revoke-again",
+      activityId,
+      ticketId: ticket.body.ticket.id,
+      reason: "test again",
+    })).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "")).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+  });
+
+  it("does not close a judge entry twice", async () => {
+    const activityId = await seedActivity("act-close-twice", true);
+    await insertJudgeEntrySeat(db, { id: "close-twice-seat", activityId, seatKey: "seat-1", state: "available", revision: 0 });
+    await closeJudgeEntry(db, deps(staff), { commandId: "m6-close-once", activityId, reason: "done" });
+    await expect(closeJudgeEntry(db, deps(staff), { commandId: "m6-close-twice", activityId, reason: "done again" })).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+  });
+
+  it("uses the execution session release when opening a vote", async () => {
+    const activityId = await seedActivity("act-frozen-vote");
+    await insertRelease(db, {
+      activityId,
+      version: 2,
+      contentHash: "m6-release-2",
+      capabilities: {
+        voting: {
+          ok: true,
+          capabilityKey: "voting",
+          contentHash: "voting-2",
+          artifact: {
+            version: 1,
+            schemaVersion: 1,
+            purpose: "popularity",
+            selectionType: "multi",
+            maxSelections: 2,
+            requiresTicket: false,
+            allowBrowserIdentity: true,
+            scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+          },
+        },
+      },
+      executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1 },
+      capabilityVersions: { voting: "1" },
+      bindings: [],
+      releasedAt: "2026-10-19T17:30:00Z",
+      sourceDraftRevision: 2,
+    });
+    await db.updateTable("activity").set({ active_definition_version: 2 }).where("id", "=", activityId).execute();
+    const opened = await openVoteSession(db, deps(staff), {
+      commandId: "m6-frozen-vote-open",
+      activityId,
+      sessionId: "m6-frozen-vote-session",
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+    expect(opened.body.session.definitionVersion).toBe(1);
+    expect(opened.body.session.requiresTicket).toBe(true);
+  });
+
+  it("rejects vote commands when the running execution release no longer matches", async () => {
+    const activityId = await seedActivity("act-stale-vote");
+    const ticket = await issueTicket(db, deps(staff), { commandId: "m6-stale-ticket", activityId });
+    const redeemed = await redeemTicketCredential(db, deps(judgeA), { commandId: "m6-stale-redeem", credential: ticket.body.credential ?? "" });
+    const opened = await openVoteSession(db, deps(staff), {
+      commandId: "m6-stale-open",
+      activityId,
+      sessionId: "m6-stale-session",
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+    await insertRelease(db, {
+      activityId,
+      version: 2,
+      contentHash: "m6-stale-release-2",
+      capabilities: {
+        voting: {
+          ok: true,
+          capabilityKey: "voting",
+          contentHash: "voting-stale-2",
+          artifact: {
+            version: 1,
+            schemaVersion: 1,
+            purpose: "score_component",
+            selectionType: "single",
+            maxSelections: 1,
+            requiresTicket: true,
+            allowBrowserIdentity: false,
+            scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+          },
+        },
+      },
+      executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1 },
+      capabilityVersions: { voting: "1" },
+      bindings: [],
+      releasedAt: "2026-10-19T17:30:00Z",
+      sourceDraftRevision: 2,
+    });
+    await db.updateTable("execution_session").set({ definition_version: 2 }).where("activity_id", "=", activityId).where("scope", "=", "voting").execute();
+    await expect(submitBallot(db, deps(judgeA), {
+      commandId: "m6-stale-submit",
+      activityId,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [opened.body.options[0]?.id ?? ""],
+      identity: { type: "ticket", sessionToken: redeemed.body.accessToken ?? "" },
+    })).rejects.toMatchObject({ code: "STALE_CONTEXT" });
+    await expect(closeVoteSession(db, deps(staff), {
+      commandId: "m6-stale-close",
+      activityId,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      expectedRevision: 0,
+    })).rejects.toMatchObject({ code: "STALE_CONTEXT" });
+  });
+
+  it("proves ticket redemption, ballot uniqueness, and judge-seat claims with two PostgreSQL connections", async () => {
+    const activityId = await seedActivity("act-m6-concurrency");
+    const ticket = await issueTicket(dbA, deps(staff), { commandId: "m6-concurrent-ticket", activityId });
+    const redemptions = await Promise.allSettled([
+      redeemTicketCredential(dbA, deps(judgeA), { commandId: "m6-concurrent-redeem-a", credential: ticket.body.credential ?? "" }),
+      redeemTicketCredential(dbB, deps(judgeB), { commandId: "m6-concurrent-redeem-b", credential: ticket.body.credential ?? "" }),
+    ]);
+    expect(redemptions.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(redemptions.filter((result) => result.status === "rejected").map((result) => (result as PromiseRejectedResult).reason.code)).toContain("TICKET_REPLAYED");
+    const redeemed = await db.selectFrom("ticket_access_session").selectAll().where("ticket_id", "=", ticket.body.ticket.id).executeTakeFirstOrThrow();
+    const redeemedResult = redemptions.find((result) => result.status === "fulfilled");
+    if (redeemedResult === undefined || redeemedResult.status !== "fulfilled") throw new Error("The concurrent redemption did not succeed.");
+    const accessToken = redeemedResult.value.body.accessToken;
+    expect(accessToken).toEqual(expect.any(String));
+
+    const opened = await openVoteSession(dbA, deps(staff), {
+      commandId: "m6-concurrent-vote-open",
+      activityId,
+      sessionId: "m6-concurrent-vote-session",
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+    const ballots = await Promise.allSettled([
+      submitBallot(dbA, deps(judgeA), { commandId: "m6-concurrent-ballot-a", activityId, sessionId: opened.body.session.id, scope: "voting", optionIds: [opened.body.options[0]?.id ?? ""], identity: { type: "ticket", sessionToken: accessToken ?? "" } }),
+      submitBallot(dbB, deps(judgeB), { commandId: "m6-concurrent-ballot-b", activityId, sessionId: opened.body.session.id, scope: "voting", optionIds: [opened.body.options[0]?.id ?? ""], identity: { type: "ticket", sessionToken: accessToken ?? "" } }),
+    ]);
+    expect(ballots.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(ballots.filter((result) => result.status === "rejected").map((result) => (result as PromiseRejectedResult).reason.code)).toContain("DUPLICATE_BALLOT");
+    expect(Number((await db.selectFrom("ballot").select(({ fn }) => fn.countAll<number>().as("count")).where("session_id", "=", opened.body.session.id).executeTakeFirstOrThrow()).count)).toBe(1);
+    expect(redeemed.revoked_at).toBeNull();
+
+    const judgeActivity = await seedActivity("act-m6-judge-concurrency", true);
+    await insertJudgeEntrySeat(dbA, { id: "m6-concurrent-seat", activityId: judgeActivity, seatKey: "seat-1", state: "available", revision: 0 });
+    const capability = capabilityCredential("J", judgeActivity, 1, secret);
+    const claims = await Promise.allSettled([
+      claimJudgeSeat(dbA, deps(judgeA), { commandId: "m6-concurrent-claim-a", publicCode: judgeActivity, capability }),
+      claimJudgeSeat(dbB, deps(judgeB), { commandId: "m6-concurrent-claim-b", publicCode: judgeActivity, capability }),
+    ]);
+    expect(claims.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(claims.filter((result) => result.status === "rejected").map((result) => (result as PromiseRejectedResult).reason.code)).toContain("SEAT_UNAVAILABLE");
+    expect(Number((await db.selectFrom("judge_session").select(({ fn }) => fn.countAll<number>().as("count")).where("activity_id", "=", judgeActivity).executeTakeFirstOrThrow()).count)).toBe(1);
   });
 });

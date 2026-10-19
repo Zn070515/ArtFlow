@@ -211,6 +211,27 @@ describe.skipIf(!connectionString)("execution runtime on PostgreSQL", () => {
     ).rejects.toMatchObject({ code: "DEFINITION_NOT_COMPILED" });
   });
 
+  it("does not release a new definition while an execution session is running", async () => {
+    const activityId = await createReleasedActivity();
+    await start(activityId, "stage", "formal");
+    const compiled = await compileDefinition(db, registry, deps, {
+      commandId: `compile-running-${randomUUID()}`,
+      activityId,
+      expectedDraftRevision: 1,
+      package: {
+        schemaVersion: 1,
+        manifest: { key: "pkg-running", title: "running" },
+        capabilities: { competition: createEmptyCompetitionDefinition() },
+        bindings: [],
+      },
+    });
+    await expect(releaseDefinitionCommand(db, registry, deps, {
+      commandId: `release-running-${randomUUID()}`,
+      activityId,
+      expectedDraftRevision: compiled.body.draftRevision,
+    })).rejects.toMatchObject({ code: "ACTIVITY_HAS_RUNNING_SESSIONS" });
+  });
+
   it("starts non-conflicting scopes in parallel and closes with OCC", async () => {
     const activityId = await createReleasedActivity();
     const formal = await start(activityId, "checkin", "formal");

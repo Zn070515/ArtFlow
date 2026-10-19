@@ -11,6 +11,7 @@ import {
   countBallots,
   countVotesByOption,
   findActivityByPublicCodeAndVersion,
+  findJudgeSession,
   findTicketAccessSession,
   findTicketByCredential,
   findRunningSessionByScope,
@@ -19,6 +20,7 @@ import {
   getRelease,
   getTicketForUpdate,
   getTicket,
+  getTicketAccessSessionForUpdate,
   getTicketAccessSessionByIdForUpdate,
   getVoteSession,
   getVoteSessionForUpdate,
@@ -133,10 +135,10 @@ function isUniqueViolation(error: unknown): boolean {
 
 async function votingArtifact(
   trx: Kysely<Database>,
-  activity: { readonly id: string; readonly activeDefinitionVersion: number; readonly enabledCapabilities: readonly string[] },
+  activity: { readonly id: string },
+  definitionVersion: number,
 ): Promise<CompiledVotingArtifact> {
-  if (!activity.enabledCapabilities.includes("voting")) throw new DomainError("CAPABILITY_NOT_ENABLED", "Voting is not enabled on this activity.");
-  const release = await getRelease(trx, activity.id, activity.activeDefinitionVersion);
+  const release = await getRelease(trx, activity.id, definitionVersion);
   if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The activity has no active released definition.");
   const plan = release.capabilities.voting;
   if (plan === undefined || plan.ok !== true) throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The release has no voting snapshot.");
@@ -178,14 +180,14 @@ export async function openVoteSession(
     requireActive(activity, "Voting");
     const session = await findRunningSessionByScope(trx, input.activityId, input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
-    const artifact = await votingArtifact(trx, activity);
+    const artifact = await votingArtifact(trx, activity, session.definitionVersion);
     const candidateIds = [...new Set(input.candidateIds.map((candidate) => candidate.trim()).filter(Boolean))];
     if (candidateIds.length === 0) throw new DomainError("INVALID_INPUT", "A voting session needs at least one candidate.");
     if (candidateIds.length !== input.candidateIds.length) throw new DomainError("INVALID_INPUT", "Candidate ids must be non-empty and unique.");
     const voteSession: StoredVoteSession = {
       id: input.sessionId,
       activityId: input.activityId,
-      definitionVersion: activity.activeDefinitionVersion,
+      definitionVersion: session.definitionVersion,
       purpose: artifact.purpose,
       selectionType: artifact.selectionType,
       maxSelections: artifact.maxSelections,
@@ -222,7 +224,7 @@ export async function openVoteSession(
 }
 
 export type BallotIdentity =
-  | { readonly type: "ticket"; readonly credential: string }
+  | { readonly type: "ticket"; readonly sessionToken: string }
   | { readonly type: "browser"; readonly fingerprint: string }
   | { readonly type: "anonymous" };
 
@@ -248,11 +250,9 @@ export async function submitBallot(
   const actor = runtimeActor(deps);
   const optionIds = [...new Set(input.optionIds)].sort();
   if (optionIds.length !== input.optionIds.length || optionIds.length === 0) throw new DomainError("INVALID_INPUT", "Ballot selections must be non-empty and unique.");
-  const ticketCredential = input.identity.type === "ticket" ? parseCredential(input.identity.credential, "T", secret(deps)) : null;
-  const ticketCandidate = ticketCredential === null ? null : await findTicketByCredential(db, ticketCredential.publicCode, ticketCredential.version);
-  if (input.identity.type === "ticket" && (ticketCredential === null || ticketCandidate === null)) throw new DomainError("INVALID_TICKET", "The ticket credential is invalid.");
+  const ticketSessionDigest = input.identity.type === "ticket" ? stableHash(input.identity.sessionToken) : null;
   const identityPayload = input.identity.type === "ticket"
-    ? { type: "ticket", publicCode: ticketCredential?.publicCode ?? null, version: ticketCredential?.version ?? null }
+    ? { type: "ticket", sessionDigest: ticketSessionDigest }
     : input.identity.type === "browser"
       ? { type: "browser", digest: stableHash(input.identity.fingerprint) }
       : { type: "anonymous" };
@@ -274,16 +274,23 @@ export async function submitBallot(
     if (voteSession.status !== "open") throw new DomainError("VOTE_SESSION_CLOSED", "The voting session is closed.");
     const execution = await findRunningSessionByScope(trx, input.activityId, input.scope);
     if (execution === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
+    if (execution.definitionVersion !== voteSession.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
+    let ticketId: string | undefined;
     if (input.identity.type === "ticket") {
       if (!voteSession.requiresTicket) {
         // Ticket-backed identity remains valid for a public session; the session
         // policy only requires a ticket when it says so.
       }
-      if (ticketCandidate === null || ticketCredential === null) throw new DomainError("INVALID_TICKET", "The ticket credential is invalid.");
-      const lockedTicket = await getTicketForUpdate(trx, ticketCandidate.id);
-      if (lockedTicket === null || lockedTicket.activityId !== input.activityId || lockedTicket.state === "revoked" || lockedTicket.state === "expired" || !validCredentialForRow(input.identity.credential, "T", lockedTicket.publicCode, lockedTicket.credentialVersion, secret(deps))) {
+      const accessSession = ticketSessionDigest === null ? null : await getTicketAccessSessionForUpdate(trx, ticketSessionDigest);
+      const accessExpiresAt = accessSession === null ? Number.NaN : Date.parse(String(accessSession.expires_at));
+      if (accessSession === null || accessSession.activity_id !== input.activityId || accessSession.revoked_at !== null || accessExpiresAt <= Date.parse(deps.now())) {
         throw new DomainError("INVALID_TICKET", "The ticket credential is invalid.");
       }
+      const lockedTicket = await getTicketForUpdate(trx, accessSession.ticket_id);
+      if (lockedTicket === null || lockedTicket.activityId !== input.activityId || lockedTicket.state !== "redeemed") {
+        throw new DomainError("INVALID_TICKET", "The ticket access session is invalid.");
+      }
+      ticketId = lockedTicket.id;
     } else if (voteSession.requiresTicket) {
       throw new DomainError("TICKET_REQUIRED", "This voting session requires a ticket.");
     } else if (input.identity.type === "browser" && (!voteSession.allowBrowserIdentity || !input.identity.fingerprint.trim())) {
@@ -296,7 +303,7 @@ export async function submitBallot(
     const identityType = input.identity.type;
     const identityDigest = identityType === "browser" ? stableHash(input.identity.fingerprint) : undefined;
     let duplicateQuery = trx.selectFrom("ballot").select("id").where("session_id", "=", input.sessionId);
-    if (identityType === "ticket") duplicateQuery = duplicateQuery.where("ticket_id", "=", ticketCandidate?.id ?? "");
+    if (identityType === "ticket") duplicateQuery = duplicateQuery.where("ticket_id", "=", ticketId ?? "");
     if (identityType === "browser") duplicateQuery = duplicateQuery.where("identity_digest", "=", identityDigest ?? "");
     if (identityType !== "anonymous" && await duplicateQuery.executeTakeFirst() !== undefined) throw new DomainError("DUPLICATE_BALLOT", "This identity has already submitted a ballot.");
     const ballot: StoredBallot = {
@@ -305,7 +312,7 @@ export async function submitBallot(
       sessionId: input.sessionId,
       identityType,
       ...(identityDigest === undefined ? {} : { identityDigest }),
-      ...(ticketCandidate === null ? {} : { ticketId: ticketCandidate.id }),
+      ...(ticketId === undefined ? {} : { ticketId }),
       submittedAt: deps.now(),
     };
     try {
@@ -370,6 +377,7 @@ export async function closeVoteSession(
     if (session.status !== "open") throw new DomainError("VOTE_SESSION_CLOSED", "The voting session is already closed.");
     const execution = await findRunningSessionByScope(trx, input.activityId, input.scope);
     if (execution === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
+    if (execution.definitionVersion !== session.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
     const closed: StoredVoteSession = { ...session, status: "closed", revision: session.revision + 1, closedAt: deps.now() };
     await updateVoteSessionStatus(trx, closed, input.expectedRevision, deps.now());
     await appendEngineEvent(trx, deps, {
@@ -490,6 +498,7 @@ export async function rotateTicketCredential(
     const current = await getTicketForUpdate(trx, input.ticketId);
     if (current === null) throw new DomainError("NOT_FOUND", "The ticket was not found.");
     if (current.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The ticket belongs to another activity.");
+    if (current.state !== "issued") throw new DomainError("INVALID_TRANSITION", "Only an issued ticket credential can be rotated.");
     const nextVersion = current.credentialVersion + 1;
     const rawCredential = credential("T", current.publicCode, nextVersion, signingSecret);
     const next: StoredTicket = { ...current, credentialVersion: nextVersion, credentialDigest: stableHash(rawCredential) };
@@ -530,6 +539,7 @@ export async function revokeTicket(
     const ticket = await getTicketForUpdate(trx, input.ticketId);
     if (ticket === null) throw new DomainError("NOT_FOUND", "The ticket was not found.");
     if (ticket.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The ticket belongs to another activity.");
+    if (ticket.state === "revoked" || ticket.state === "expired") throw new DomainError("INVALID_TRANSITION", "The ticket is already in a terminal state.");
     const revoked: StoredTicket = { ...ticket, state: "revoked", revokedAt: deps.now() };
     await updateTicket(trx, revoked);
     await appendEngineEvent(trx, deps, {
@@ -640,6 +650,26 @@ export async function authenticateTicketSession(
   return { sessionId: session.id, activityId: session.activityId, ticketId: session.ticketId, expiresAt: session.expiresAt };
 }
 
+export interface AuthenticatedJudgeSession {
+  readonly sessionId: string;
+  readonly activityId: string;
+  readonly seatId: string;
+  readonly expiresAt: string;
+}
+
+/** Read-only judge-session authentication; scoring still rechecks the locked row. */
+export async function authenticateJudgeSession(
+  db: Kysely<Database>,
+  rawToken: string,
+  now = new Date(),
+): Promise<AuthenticatedJudgeSession> {
+  if (!rawToken.trim()) throw new DomainError("UNAUTHENTICATED", "A judge session is required.");
+  const session = await findJudgeSession(db, stableHash(rawToken));
+  if (session === null || session.revokedAt !== undefined) throw new DomainError("UNAUTHENTICATED", "The judge session is invalid.");
+  if (Date.parse(session.expiresAt) <= now.getTime()) throw new DomainError("UNAUTHENTICATED", "The judge session has expired.");
+  return { sessionId: session.id, activityId: session.activityId, seatId: session.seatId, expiresAt: session.expiresAt };
+}
+
 export async function revokeTicketAccessSession(
   db: Kysely<Database>,
   deps: RuntimeDeps,
@@ -661,6 +691,7 @@ export async function revokeTicketAccessSession(
     requireCapability(activity, "ticketing");
     const session = await getTicketAccessSessionByIdForUpdate(trx, input.sessionId);
     if (session === null || session.activity_id !== input.activityId) throw new DomainError("NOT_FOUND", "The ticket access session was not found.");
+    if (session.revoked_at !== null) throw new DomainError("INVALID_TRANSITION", "The ticket access session is already revoked.");
     await revokeTicketAccessSessionRow(trx, input.sessionId, deps.now());
     await appendEngineEvent(trx, deps, {
       type: "TicketAccessSessionRevoked",
@@ -736,6 +767,7 @@ export async function closeJudgeEntry(
     requireCapability(activity, "ticketing");
     const entry = await getJudgeEntryForUpdate(trx, input.activityId);
     if (entry === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+    if (!entry.open) throw new DomainError("INVALID_TRANSITION", "The judge entry is already closed.");
     await updateJudgeEntry(trx, input.activityId, { open: false, version: entry.version });
     await appendEngineEvent(trx, deps, {
       type: "JudgeEntryClosed",

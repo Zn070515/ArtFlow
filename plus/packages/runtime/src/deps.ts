@@ -14,6 +14,8 @@ export interface RuntimeDeps {
    * system actor and tests inject a fixed one. Never read this from a body.
    */
   readonly actor?: ActorContext;
+  /** Transport-injected HttpOnly judge session; never accepted from a body. */
+  readonly judgeSessionToken?: string;
 }
 
 export function runtimeActor(deps: RuntimeDeps): ActorContext {
