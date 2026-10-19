@@ -3,37 +3,37 @@ import { createHash } from "node:crypto";
 import type {
   ActivityDefinitionPackage,
   CapabilityBinding,
-  CapabilityCompileResult,
+  CapabilityCompiler,
   CapabilityDefinition,
   CompileIssue,
   CompiledActivityDefinition,
   CompiledCapabilityPlan,
-  DefinitionEdge,
-  DefinitionNode,
-  NodeType,
   PackageCompileResult,
 } from "./model.js";
 import { deepFreeze } from "./model.js";
 
-const NODE_TYPES: ReadonlySet<NodeType> = new Set([
-  "roster",
-  "round",
-  "aggregate",
-  "output",
-]);
-
-function byKey(left: DefinitionNode, right: DefinitionNode): number {
-  if (left.key < right.key) return -1;
-  if (left.key > right.key) return 1;
-  return 0;
-}
-
-function byEdge(left: DefinitionEdge, right: DefinitionEdge): number {
-  const from = left.from < right.from ? -1 : left.from > right.from ? 1 : 0;
-  if (from !== 0) return from;
-  if (left.to < right.to) return -1;
-  if (left.to > right.to) return 1;
-  return 0;
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error("Capability definitions must contain finite numbers.");
+    }
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record)
+      .sort()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  throw new Error("Capability definitions must be JSON-serializable.");
 }
 
 function byBinding(left: CapabilityBinding, right: CapabilityBinding): number {
@@ -49,131 +49,14 @@ function issue(code: string, message: string, path: string): CompileIssue {
 }
 
 /**
- * Stable canonical form: node and edge order never changes the hash, so two
- * capability definitions that mean the same thing are the same definition.
+ * The Activity compiler hashes what the capability produced, without knowing
+ * what it means. Capability order never changes the hash.
  */
-export function canonicalCapabilityDefinition(definition: CapabilityDefinition): string {
-  const nodes = [...definition.nodes]
-    .sort(byKey)
-    .map((node) => ({
-      key: node.key,
-      type: node.type,
-      ...(node.label === undefined ? {} : { label: node.label }),
-    }));
-  const edges = [...definition.edges].sort(byEdge).map((edge) => ({
-    from: edge.from,
-    to: edge.to,
-  }));
-  return JSON.stringify({ schemaVersion: definition.schemaVersion, nodes, edges });
-}
-
 export function capabilityDefinitionHash(definition: CapabilityDefinition): string {
-  return createHash("sha256").update(canonicalCapabilityDefinition(definition)).digest("hex");
+  return createHash("sha256").update(canonicalJson(definition)).digest("hex");
 }
 
-export function compileCapabilityDefinition(
-  capabilityKey: string,
-  definition: CapabilityDefinition,
-): CapabilityCompileResult {
-  const issues: CompileIssue[] = [];
-  if (definition.schemaVersion !== 1) {
-    issues.push(issue("SCHEMA_VERSION", "Only schemaVersion 1 is supported.", "schemaVersion"));
-  }
-  if (definition.nodes.length === 0) {
-    issues.push(issue("EMPTY_DEFINITION", "A definition needs at least one node.", "nodes"));
-  }
-
-  const keys = new Set<string>();
-  const incoming = new Map<string, number>();
-  const outgoing = new Map<string, string[]>();
-  for (const node of definition.nodes) {
-    if (!node.key.trim()) {
-      issues.push(issue("EMPTY_KEY", "A node key cannot be empty.", "nodes"));
-      continue;
-    }
-    if (keys.has(node.key)) {
-      issues.push(issue("DUPLICATE_NODE", `Duplicate node key: ${node.key}.`, node.key));
-      continue;
-    }
-    if (!NODE_TYPES.has(node.type)) {
-      issues.push(issue("UNKNOWN_NODE_TYPE", `Unknown node type: ${node.type}.`, node.key));
-      continue;
-    }
-    keys.add(node.key);
-    incoming.set(node.key, 0);
-    outgoing.set(node.key, []);
-  }
-
-  const edgeKeys = new Set<string>();
-  for (const edge of definition.edges) {
-    if (!keys.has(edge.from) || !keys.has(edge.to)) {
-      issues.push(
-        issue("EDGE_UNKNOWN_NODE", `Edge ${edge.from} -> ${edge.to} names an unknown node.`, "edges"),
-      );
-      continue;
-    }
-    const edgeKey = `${edge.from}->${edge.to}`;
-    if (edgeKeys.has(edgeKey)) {
-      issues.push(issue("DUPLICATE_EDGE", `Duplicate edge: ${edgeKey}.`, edgeKey));
-      continue;
-    }
-    edgeKeys.add(edgeKey);
-    incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
-    const next = outgoing.get(edge.from);
-    if (next === undefined) {
-      issues.push(issue("EDGE_UNKNOWN_NODE", `Edge ${edgeKey} names an unknown node.`, "edges"));
-      continue;
-    }
-    next.push(edge.to);
-  }
-
-  let outputCount = 0;
-  for (const node of definition.nodes) {
-    if (!keys.has(node.key)) continue;
-    if (node.type === "output") outputCount += 1;
-    if (node.type !== "roster" && (incoming.get(node.key) ?? 0) === 0) {
-      issues.push(issue("ORPHAN_NODE", `Node ${node.key} has no incoming edge.`, node.key));
-    }
-  }
-  if (outputCount === 0) {
-    issues.push(issue("NO_OUTPUT", "A definition needs at least one output node.", "nodes"));
-  }
-
-  const queue = [...keys].filter((key) => (incoming.get(key) ?? 0) === 0).sort();
-  const order: string[] = [];
-  while (queue.length > 0) {
-    const key = queue.shift();
-    if (key === undefined) break;
-    order.push(key);
-    for (const next of outgoing.get(key) ?? []) {
-      const remaining = (incoming.get(next) ?? 0) - 1;
-      incoming.set(next, remaining);
-      if (remaining === 0) {
-        queue.push(next);
-        queue.sort();
-      }
-    }
-  }
-  if (order.length !== keys.size) {
-    issues.push(issue("CYCLE", "The definition graph contains a cycle.", "edges"));
-  }
-
-  if (issues.length > 0) {
-    return deepFreeze({ ok: false, issues });
-  }
-
-  const plan: CompiledCapabilityPlan = {
-    ok: true,
-    capabilityKey,
-    order,
-    contentHash: capabilityDefinitionHash(definition),
-    nodes: [...definition.nodes].sort(byKey).map((node) => ({ ...node })),
-    edges: [...definition.edges].sort(byEdge).map((edge) => ({ ...edge })),
-  };
-  return deepFreeze(plan);
-}
-
-function canonicalPackage(pkg: ActivityDefinitionPackage): string {
+export function canonicalActivityDefinitionPackage(pkg: ActivityDefinitionPackage): string {
   const capabilities = Object.keys(pkg.capabilities)
     .sort()
     .map((key) => {
@@ -197,15 +80,16 @@ function canonicalPackage(pkg: ActivityDefinitionPackage): string {
 }
 
 export function activityDefinitionPackageHash(pkg: ActivityDefinitionPackage): string {
-  return createHash("sha256").update(canonicalPackage(pkg)).digest("hex");
+  return createHash("sha256").update(canonicalActivityDefinitionPackage(pkg)).digest("hex");
 }
 
 /**
- * The Activity compiler coordinates capability compilers and validates the
- * cross-capability bindings. It does not own any capability's language.
+ * The Activity compiler coordinates capability compilers and validates
+ * cross-capability bindings. It never inspects a capability's internal nodes.
  */
 export function compileActivityDefinitionPackage(
   pkg: ActivityDefinitionPackage,
+  compilers: readonly CapabilityCompiler[],
 ): PackageCompileResult {
   const issues: CompileIssue[] = [];
   if (pkg.schemaVersion !== 1) {
@@ -225,6 +109,11 @@ export function compileActivityDefinitionPackage(
     );
   }
 
+  const registry = new Map<string, CapabilityCompiler>();
+  for (const compiler of compilers) {
+    registry.set(compiler.capabilityKey, compiler);
+  }
+
   const compiled: Record<string, CompiledCapabilityPlan> = {};
   for (const key of capabilityKeys.sort()) {
     if (!key.trim()) {
@@ -233,7 +122,18 @@ export function compileActivityDefinitionPackage(
     }
     const definition = pkg.capabilities[key];
     if (definition === undefined) continue;
-    const result = compileCapabilityDefinition(key, definition);
+    const compiler = registry.get(key);
+    if (compiler === undefined) {
+      issues.push(
+        issue(
+          "CAPABILITY_COMPILER_MISSING",
+          `No compiler is registered for capability ${key}.`,
+          `capabilities.${key}`,
+        ),
+      );
+      continue;
+    }
+    const result = compiler.compile(definition);
     if (!result.ok) {
       for (const item of result.issues) {
         issues.push(
@@ -244,6 +144,16 @@ export function compileActivityDefinitionPackage(
           ),
         );
       }
+      continue;
+    }
+    if (result.capabilityKey !== key) {
+      issues.push(
+        issue(
+          "CAPABILITY_KEY_MISMATCH",
+          `Compiler for ${key} reported capabilityKey ${result.capabilityKey}.`,
+          `capabilities.${key}`,
+        ),
+      );
       continue;
     }
     compiled[key] = result;

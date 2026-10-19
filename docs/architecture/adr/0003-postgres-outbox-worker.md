@@ -1,6 +1,6 @@
 # ADR-0003: PostgreSQL 是事实源；事务 outbox + pg-boss
 
-状态：proposed（2026-10-19）
+状态：accepted（2026-10-19）
 
 ## 背景
 
@@ -12,7 +12,9 @@ v2 需要异步任务（投影、导出、归档、通知、清理），同时�
 
 - **PostgreSQL 是唯一事实源**；所有命令在单事务内写业务表与 outbox 事件。
 - 异步 worker 使用 **pg-boss**（Postgres-backed job queue）消费 outbox/任务；
-  Redis 仅用于实时广播等可降级能力。
+  Redis 仅用于实时广播等可降级能力。pg-boss 要求 Node 22.12+/PostgreSQL 13+；
+  baseline（Node 24 LTS + PostgreSQL）完全覆盖。
+- DB access 统一走 Kysely（ADR-0002），outbox 与业务事实在同一事务内写入。
 - 投影（read model）由 outbox 事件驱动，允许最终一致；权威读走写模型/快照。
 - 任务幂等：每个命令/任务有稳定 id；重复投递返回同一结果。
 - 失败重试有上限与死信；死信可审计、可重放。

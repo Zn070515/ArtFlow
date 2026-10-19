@@ -1,6 +1,6 @@
 # ADR-0008: 单来源、不可变镜像、web/media/realtime 分层
 
-状态：proposed（2026-10-19）
+状态：accepted（2026-10-19）
 
 ## 背景
 

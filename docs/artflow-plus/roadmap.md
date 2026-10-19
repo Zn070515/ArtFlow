@@ -21,6 +21,8 @@
 - Definition Draft → Activity Definition Package（manifest + capability
   definitions + bindings）→ 每个 capability 自己的 compiler → Activity
   compiler 协调 → 不可变 Release。
+- `CapabilityDefinition` 对 Activity 编译器不透明（ADR-0010）：payload +
+  注册的 capability compiler；比赛 DAG 已移入 `capabilities/competition.ts`。
 - Execution Session：activity + release + scope + mode；一个 activity 可并行
   多个 scope；冲突策略由组合提供；TEST/REHEARSAL 与 FORMAL 在冲突 scope 上
   不能重叠。
@@ -31,6 +33,9 @@
 
 ## M2 — Capability Composition 与 Activity Packs
 
+- 工具链收敛：pnpm workspaces、Vitest + fast-check、`apps/api`（Fastify 5 +
+  TypeBox/OpenAPI）、`packages/db`（Kysely + module-owned migrations）；M1 的
+  `node:test`/npm bootstrap 退出。
 - Capability 注册表：identity/version/dependencies/conflicts/definition contract/
   commands/queries/events/permissions/surfaces。
 - Activity Pack：Registration+Questionnaire+Materials+Competition+Evaluation+

@@ -13,13 +13,27 @@ import type {
 } from "./model.js";
 import { deepFreeze } from "./model.js";
 
+function cloneJson<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneJson(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === "object") {
+    const cloned: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      cloned[key] = cloneJson(item);
+    }
+    return cloned as T;
+  }
+  return value;
+}
+
 function clonePackage(pkg: ActivityDefinitionPackage): ActivityDefinitionPackage {
   const capabilities: Record<string, ActivityDefinitionPackage["capabilities"][string]> = {};
   for (const [key, definition] of Object.entries(pkg.capabilities)) {
+    // The Activity layer does not know what the payload means; it only copies it.
     capabilities[key] = {
       schemaVersion: definition.schemaVersion,
-      nodes: definition.nodes.map((node) => ({ ...node })),
-      edges: definition.edges.map((edge) => ({ ...edge })),
+      payload: cloneJson(definition.payload),
     };
   }
   return {

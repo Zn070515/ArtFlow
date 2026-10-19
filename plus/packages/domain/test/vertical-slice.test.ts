@@ -5,11 +5,13 @@ import {
   activateActivity,
   activityDefinitionPackageHash,
   archiveActivity,
+  capabilityDefinitionHash,
   closeActivity,
   closeExecutionSession,
+  competitionCompiler,
   compileActivityDefinitionPackage,
-  compileCapabilityDefinition,
   createActivity,
+  createCompetitionDefinition,
   createDefinitionDraft,
   DomainError,
   releaseDefinition,
@@ -19,6 +21,7 @@ import {
 import type {
   Activity,
   ActivityDefinitionPackage,
+  CapabilityCompiler,
   CapabilityDefinition,
   CompiledActivityDefinition,
   DefinitionDraft,
@@ -30,19 +33,36 @@ import type {
 } from "../src/index.js";
 
 function capabilityDefinition(): CapabilityDefinition {
-  return {
-    schemaVersion: 1,
-    nodes: [
+  return createCompetitionDefinition(
+    [
       { key: "roster", type: "roster" },
       { key: "round1", type: "round", label: "第一轮" },
       { key: "result", type: "output", label: "结果" },
     ],
-    edges: [
+    [
       { from: "roster", to: "round1" },
       { from: "round1", to: "result" },
     ],
+  );
+}
+
+function passthroughCompiler(capabilityKey: string): CapabilityCompiler {
+  return {
+    capabilityKey,
+    compile: (definition) => ({
+      ok: true,
+      capabilityKey,
+      contentHash: capabilityDefinitionHash(definition),
+      artifact: definition.payload,
+    }),
   };
 }
+
+const COMPILERS: readonly CapabilityCompiler[] = [
+  competitionCompiler,
+  passthroughCompiler("registration"),
+  passthroughCompiler("voting"),
+];
 
 function definitionPackage(
   capabilityKeys: readonly string[] = ["registration", "competition"],
@@ -70,7 +90,7 @@ function activeActivity(
 }
 
 function compiledPackage(pkg: ActivityDefinitionPackage): CompiledActivityDefinition {
-  const result = compileActivityDefinitionPackage(pkg);
+  const result = compileActivityDefinitionPackage(pkg, COMPILERS);
   if (!result.ok) {
     assert.fail(`expected a valid package, got ${JSON.stringify(result.issues)}`);
   }
@@ -234,33 +254,51 @@ test("closing an activity requires every execution session to be closed", () => 
 });
 
 test("the package compiler refuses a capability with a cycle", () => {
-  const broken: CapabilityDefinition = {
-    schemaVersion: 1,
-    nodes: [
+  const broken = createCompetitionDefinition(
+    [
       { key: "roster", type: "roster" },
       { key: "a", type: "round" },
       { key: "b", type: "round" },
       { key: "out", type: "output" },
     ],
-    edges: [
+    [
       { from: "roster", to: "a" },
       { from: "a", to: "b" },
       { from: "b", to: "a" },
       { from: "b", to: "out" },
     ],
-  };
-  const result = compileActivityDefinitionPackage({
-    ...definitionPackage(["competition"]),
-    capabilities: { competition: broken },
-  });
+  );
+  const result = compileActivityDefinitionPackage(
+    {
+      ...definitionPackage(["competition"], []),
+      capabilities: { competition: broken },
+    },
+    COMPILERS,
+  );
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.ok(result.issues.some((item) => item.code === "CAPABILITY_CYCLE"));
   assert.ok(result.issues.some((item) => item.path.startsWith("capabilities.competition.")));
 });
 
+test("a capability without a registered compiler is refused", () => {
+  const result = compileActivityDefinitionPackage(
+    definitionPackage(["competition", "scheduling"], []),
+    COMPILERS,
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.ok(
+    result.issues.some(
+      (item) =>
+        item.code === "CAPABILITY_COMPILER_MISSING" &&
+        item.path === "capabilities.scheduling",
+    ),
+  );
+});
+
 test("the package compiler requires at least one capability", () => {
-  const result = compileActivityDefinitionPackage(definitionPackage([]));
+  const result = compileActivityDefinitionPackage(definitionPackage([]), COMPILERS);
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.ok(result.issues.some((item) => item.code === "NO_CAPABILITIES"));
@@ -269,6 +307,7 @@ test("the package compiler requires at least one capability", () => {
 test("a binding must name an existing capability", () => {
   const result = compileActivityDefinitionPackage(
     definitionPackage(["competition"], [{ from: "registration", to: "competition", kind: "roster" }]),
+    COMPILERS,
   );
   assert.equal(result.ok, false);
   if (result.ok) return;
@@ -288,11 +327,13 @@ test("the package hash ignores capability and binding input order", () => {
   assert.equal(activityDefinitionPackageHash(forward), activityDefinitionPackageHash(reverse));
 });
 
-test("the compiler is usable per capability", () => {
-  const result = compileCapabilityDefinition("competition", capabilityDefinition());
+test("the competition compiler owns its language", () => {
+  const result = competitionCompiler.compile(capabilityDefinition());
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.capabilityKey, "competition");
+  const artifact = result.artifact as { order: readonly string[] };
+  assert.deepEqual(artifact.order, ["roster", "round1", "result"]);
 });
 
 test("a stale draft revision is refused", () => {

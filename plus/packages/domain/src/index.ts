@@ -1,3 +1,4 @@
+export * from "./capabilities/competition.js";
 export * from "./commands.js";
 export * from "./compiler.js";
 export * from "./errors.js";

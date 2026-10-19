@@ -1,6 +1,6 @@
 # ADR-0004: Command / domain event / read model 分层
 
-状态：proposed（2026-10-19）
+状态：accepted（2026-10-19）
 
 ## 背景
 

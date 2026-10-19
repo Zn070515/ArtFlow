@@ -55,12 +55,17 @@ plus/
 │   ├── worker/       # outbox/projections/exports (pg-boss)
 │   └── web/          # React + Vite workbench and audience pages
 ├── packages/
-│   ├── domain/       # pure commands, state machines, compiler
-│   ├── contracts/    # command/query/event schemas, error codes
-│   ├── db/           # Drizzle schema and migrations
+│   ├── domain/       # pure commands, state machines, capability compilers
+│   ├── contracts/    # TypeBox/JSON Schema, command/query/event contracts
+│   ├── db/           # Kysely schema access and module-owned migrations
 │   └── ui/           # shared React components and design tokens
 └── README.md
 ```
+
+Tooling baseline (ADR-0002): Node 24 LTS, TypeScript 7 strict, pnpm workspaces,
+Fastify 5 + TypeBox, Kysely, pg-boss, React 19 + Vite 8, Vitest + fast-check,
+Playwright. M1 still runs through the root npm scripts and `node:test`; the
+pnpm/Vitest move lands with `apps/` in M2.
 
 Modules stay separate inside `packages/domain` (activity, definition,
 registration, evaluation, voting, ticketing, results, archive) and may not

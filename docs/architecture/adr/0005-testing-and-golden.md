@@ -1,6 +1,6 @@
 # ADR-0005: 测试金字塔 + golden fixtures + property tests
 
-状态：proposed（2026-10-19）
+状态：accepted（2026-10-19）
 
 ## 背景
 

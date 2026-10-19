@@ -1,6 +1,6 @@
 # ADR-0007: 本地会话 + capability token；公开码不是凭证
 
-状态：proposed（2026-10-19）
+状态：accepted（2026-10-19）
 
 ## 背景
 

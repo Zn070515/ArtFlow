@@ -17,24 +17,19 @@ export interface Activity {
   readonly activeDefinitionVersion: number;
 }
 
-export type NodeType = "roster" | "round" | "aggregate" | "output";
-
-export interface DefinitionNode {
-  readonly key: string;
-  readonly type: NodeType;
-  readonly label?: string;
-}
-
-export interface DefinitionEdge {
-  readonly from: string;
-  readonly to: string;
-}
-
-/** A capability owns its own definition language/compiler. */
+/**
+ * A capability owns its own definition language. The Activity compiler only
+ * sees an opaque, versioned payload; it must never understand competition
+ * nodes such as `round` or `roster`.
+ */
 export interface CapabilityDefinition {
   readonly schemaVersion: 1;
-  readonly nodes: readonly DefinitionNode[];
-  readonly edges: readonly DefinitionEdge[];
+  readonly payload: unknown;
+}
+
+export interface CapabilityCompiler {
+  readonly capabilityKey: string;
+  compile(definition: CapabilityDefinition): CapabilityCompileResult;
 }
 
 export interface CapabilityBinding {
@@ -68,10 +63,9 @@ export interface DefinitionDraft {
 export interface CompiledCapabilityPlan {
   readonly ok: true;
   readonly capabilityKey: string;
-  readonly order: readonly string[];
   readonly contentHash: string;
-  readonly nodes: readonly DefinitionNode[];
-  readonly edges: readonly DefinitionEdge[];
+  /** Capability-owned compiled artifact; opaque to the Activity compiler. */
+  readonly artifact: unknown;
 }
 
 export interface CompileIssue {

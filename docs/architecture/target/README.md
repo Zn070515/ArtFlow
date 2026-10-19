@@ -144,6 +144,13 @@ HTTP → 认证/限流 → command envelope（actor, activity, capability,
 | Live | 当前表演/评分/投票/签到/节奏/异常/HOLD/恢复 | 成为事实源 |
 | Portal | 参与者/评委/观众/志愿者/公众的角色化入口 | 泄漏越权信息 |
 
+## 技术 Baseline
+
+Node 24 LTS、TypeScript 7 strict、pnpm workspaces、Fastify 5 + TypeBox/OpenAPI、
+PostgreSQL + Kysely + pg-boss（outbox）、React 19 + Vite 8 + TanStack Router/
+Query、Vitest + fast-check、Playwright。决策与理由见 ADR-0002/0003；换库走新
+ADR，不重开基础方向。
+
 ## 部署与可靠性
 
 - 模块化单体优先；一个应用镜像，web/media/realtime 三个进程角色。

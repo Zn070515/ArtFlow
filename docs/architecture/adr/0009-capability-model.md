@@ -1,6 +1,6 @@
 # ADR-0009: Capability 是模块边界，Activity 是薄容器
 
-状态：proposed（2026-10-19）
+状态：accepted（2026-10-19）
 
 ## 背景
 
