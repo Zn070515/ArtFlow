@@ -47,7 +47,9 @@ staff 签发票据/评委入口
 - **TIC-02** 重新签发递增版本，旧凭证立即失效；关闭入口只拒绝新 claim，不驱逐
   已领取的会话（TICK-02）。
 - **TIC-03** claim 必须“解析 → 锁 → 重验 → 领取”，不能信任解析阶段（TICK-03）。
-- **TIC-04** 票据身份决定投票唯一性；无票投票才使用浏览器身份（TICK-04）。
+- **TIC-04** 投票 session 显式声明 `ticket`、`browser` 或 `anonymous` 身份策略；
+  ticket 身份决定票据投票唯一性，browser 只用于显式允许的无票场景，anonymous 不
+  得由客户端从其他身份降级而来。
 - **TIC-05** 原始 token 不落库、不进日志/URL/导出；使用 HttpOnly cookie 或
   fragment（TICK-05）。
 - **TIC-06** 未授权请求不泄漏活动/席位是否存在（TICK-06）。

@@ -85,7 +85,8 @@ instantiateActivityPack(SINGER_COMPETITION_PACK, registry, { answers })
 ```
 
 The default registry exposes the capabilities implemented today
-(`competition`, `materials`, `questionnaire`, and `registration`). A Pack that
+(`competition`, `materials`, `questionnaire`, `registration`, `ticketing`, and
+`voting`). A Pack that
 references a capability scheduled for M5-M7 still fails with
 `CAPABILITY_UNKNOWN` diagnostics rather than producing placeholders.
 
@@ -153,8 +154,9 @@ POST  /api/activities/:id/competition/podium/recompute
 ```
 
 Questionnaire and material slots are read from the active released definition.
-Material reads return controlled metadata only and are owner/staff-permission
-checked; no public or static media URL is produced. The `registration`, `roster`,
+Material writes currently record controlled metadata, ownership, and review facts;
+the actual media-byte backend and range gateway are a later slice. Material reads
+are owner/staff-permission checked; no public or static media URL is produced. The `registration`, `roster`,
 and `material` tables are current-state projections while the outbox remains the
 immutable event log.
 
@@ -244,13 +246,16 @@ new architecture.
 ## Next slice
 
 1. M7 Publishing / Results / Archive: release snapshots, public selectors and the
-   permanent archive. M6 voting/ticketing authority is now available as a frozen input.
+   permanent archive. M6/M6.5 voting/ticketing authority is now available as a frozen input.
 
-## M6 implementation complete
+## M6 feature slice and M6.5 authority hardening complete
 
-- Migration `0010_m6_voting_ticketing` owns frozen vote sessions/options, ballot
+- Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot
   identity constraints, same-activity foreign keys, ticket/access-session digests,
   judge entry versions and rebuildable live state.
+- Voting stores an explicit `identityPolicy`; it never accepts client-side identity
+  downgrades. Formal counts use one valid-ballot selector and exclude revoked/expired
+  ticket ballots. Zero valid ballots is `HOLD/NO_VALID_BALLOTS`.
 - Runtime tests cover ticket-backed duplicate rejection through a redeemed
   HttpOnly session, closed-session refusal, cross-activity ticket rejection,
   credential reissue/close semantics, replay rejection, one-time response

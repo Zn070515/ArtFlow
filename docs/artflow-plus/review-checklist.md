@@ -58,6 +58,9 @@
 
 ### M6 Voting / Ticketing
 
+- [x] VoteSession 冻结显式 `identityPolicy`（ticket/browser/anonymous）；提交时身份必须
+  与策略一致，客户端不能把 ticket/browser 降级成 anonymous；anonymous 只在规则显式
+  选择时开放。
 - [x] ballot 的 ticket identity 只接受服务端注入的 redeemed ticket session；同活动、
   expiry、revoke、ticket state 与数据库唯一约束均在锁内复核，原始 token 不进入
   command payload/receipt/audit。
@@ -65,7 +68,14 @@
   revoke 状态，staff bearer 仍保留独立路径。
 - [x] vote open/submit/close 使用 execution session 的 frozen definition version；
   运行 session 存在时禁止 release，漂移返回 `STALE_CONTEXT`。
-- [x] ticket/judge 状态迁移拒绝重复终态副作用；judge claim 使用 IP-global 限流桶。
+- [x] ticket/judge 状态迁移拒绝重复终态副作用；judge claim 使用单进程 IP bucket，
+  多实例共享限流器明确列为生产部署要求。
+- [x] 正式计票统一走 valid-ballot selector；revoked/expired ticket ballot 保留审计但
+  不计入结果；零有效 ballot 返回 `HOLD/NO_VALID_BALLOTS`，不伪造 0 分。
+- [x] voting 不再静态依赖 ticketing；只有 ticket identity policy 的组合要求 ticketing，
+  compiler 在 release 前执行 cross-capability 校验。
+- [x] 评委分数、加权总分、平均、排名比较、票数百分比使用 Decimal.js 与
+  PostgreSQL numeric 的 `ROUND_HALF_UP` 语义；不使用 `Number(row.total)` authority 读回。
 - [x] ticket redeem、ticket ballot、judge seat claim 使用真实 PostgreSQL 双连接并发
   回归；runtime/API focused gates 已通过，root Django 全量 test 按 Plus 重构约束未运行。
 

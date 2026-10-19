@@ -11,10 +11,10 @@ capability（命令、事件、投影、定义语言），由 Registry/Pack 组�
 | 活动创建/生命周期/锁定 | `core/`、`common/business_rules` | Engine（thin Activity） | M1/M3（已完成） | durable command + OCC + outbox |
 | 报名 DRAFT→OPEN→REVIEW→FINAL | `singer_contest/` 报名 | Registration | M4 | 自有聚合 + 事件 + 投影 |
 | 问卷版本与文件槽位 | `questionnaire/` | Questionnaire | M4 | 自有定义语言 + compiler |
-| 材料上传/审核 | `files/` | Materials | M4 | 受控媒体 + 自有事实 |
+| 材料上传/审核 | `files/` | Materials | M4 | 材料 metadata/所有权/审核事实；字节存储与网关后置 |
 | 名单 FINAL/UNKNOWN | `singer_contest` roster | Registration | M4 | UNKNOWN ≠ 零；执行边界 fail closed |
 | 赛制/轮次/席位 | `ruleset/`、`singer_contest` | Competition | M5 | capability DSL（不是通用 DAG） |
-| 评委评分/快速录分/代录/纠错 | `singer_contest`、`judge_*` | Evaluation | M5 | score fact 唯一键 + command receipt |
+| 评委评分/快速录分/代录/纠错 | `singer_contest`、`judge_*` | Competition（含 Evaluation 领域） | M5 | score fact 唯一键 + command receipt |
 | 观众投票 | `voting/` | Voting | M6 | ballot 唯一性 + ticket 凭证 |
 | 票据/入场/签到 | `tickets/`、`entry_access/` | Ticketing / Check-in | M6 | capability token、受控入口 |
 | 结果候选/核定/发布/撤销 | `public_portal/services.py` | Publishing / Results | M7 | snapshot + release selector |

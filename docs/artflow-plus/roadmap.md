@@ -52,7 +52,7 @@ fast-check 已迁移，属性测试覆盖 hash 稳定性、陈旧 revision、clo
   半启用的占位 Pack。
 
 **出口**：Singer Pack 在完整注册表上生成可编译的空定义；依赖/冲突诊断正确；
-Gate 检查 capability 边界。真实 Registration/Evaluation 等 capability 仍按
+Gate 检查 capability 边界。真实 Registration 等 capability 仍按
 M4-M7 分片实现；M2 当时的默认注册表只暴露 `competition`，已在 M4 更新为暴露当前
 四个已实现 capability。
 
@@ -102,7 +102,8 @@ Evaluation/Voting 等 capability 仍由 M5-M7 实现。
 
 - **前置**：第一个真实 capability command 落地前，必须把本地会话派生的 ActorContext 与
   命令级权限检查接上（M3.5 只固定了 actor/audit 数据模型，ADR-0012）。
-- 报名 DRAFT→OPEN→REVIEW→FINAL；问卷版本与文件槽位；受控媒体。
+- 报名 DRAFT→OPEN→REVIEW→FINAL；问卷版本与文件槽位；材料 metadata、所有权与审核
+  权威已完成，实际字节存储/受控媒体网关留给后续媒体 slice。
 - 名单 FINAL/UNKNOWN；执行边界 fail closed。
 - 从 v1 导入历史报名（可重放）。
 
@@ -118,6 +119,9 @@ Evaluation/Voting 等 capability 仍由 M5-M7 实现。
 
 ## M5 — Competition / Evaluation / Podium（已完成，2026-10-19）
 
+`Evaluation` 是领域语义，不是单独 registry capability；当前由 `competition`
+capability 统一拥有评委、评分、排名与 podium 的事实和命令。
+
 - 轮次、评委组、席位、表演评分门和锁定状态均由 Competition capability 自有
   projection 管理；round/panel/performance 使用 PostgreSQL 锁顺序与 CAS。
 - direct judge、staff rapid、staff proxy、paper recovery 共用一个 score fact 唯一键；
@@ -132,13 +136,19 @@ Evaluation/Voting 等 capability 仍由 M5-M7 实现。
 真实 PostgreSQL 双连接并发；纠错链 E2E；resolution fingerprint / tie HOLD / podium
 candidate 定向测试。
 
-## M6 — Voting / Ticketing（已完成，2026-10-19）
+## M6 — Voting / Ticketing（功能完成；M6.5 authority hardening 已完成，2026-10-19）
 
 - 投票场次、ballot 唯一性、成绩组成规则快照均绑定 execution session 的
   frozen definition release；运行中禁止换版，ballot/close 会拒绝 stale release。
 - 票据使用 redeemed ticket access session，judge scoring 使用 HttpOnly judge
-  session；原始 token 不进入 ballot payload、receipt 或 audit；claim 入口使用
-  IP-global 限流桶。
+  session；原始 token 不进入 ballot payload、receipt 或 audit。投票 session 冻结
+  `identityPolicy`，正式计票排除 revoked/expired ticket ballot；无有效票据时
+  `score_component` 保持 HOLD。
+- voting capability 不静态依赖 ticketing；仅 `identityPolicy = ticket` 的组合要求
+  ticketing。评委分数、平均值、排名比较与投票百分比使用 Decimal.js + PostgreSQL
+  numeric 的 `ROUND_HALF_UP` 语义。
+- 默认 `MemoryRateLimiter` 是单进程 IP bucket，不是多 worker 全局限流；生产多实例
+  必须接共享 Redis/PostgreSQL/gateway 限流器。
 - Live 投影与降级保留；ticket/judge 终态迁移显式拒绝重复副作用。
 
 **出口**：`capability-reissue-close` golden；重复投票/重放/跨活动拒绝；

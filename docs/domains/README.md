@@ -14,6 +14,10 @@ capability 拥有自己的业务语义与更丰富的生命周期。
 | Results / Publishing / Correction | [results.md](results.md) | RES-01…08、LIFE-03/04 |
 | Archive / Retention / Export | [archive.md](archive.md) | RES-07、DEPL-06、AUTH-05 |
 
+`Evaluation` 是业务领域名称；当前 Plus registry 由 `competition` capability 负责
+评委席位、评分事实、排名与 podium。没有独立的 `evaluation` registry capability，
+后续拆分必须先更新 capability ownership 与 release contract。
+
 阅读顺序建议：activity → registration → evaluation → results → archive；
 voting/tickets 作为交叉 capability。Activity Pack 是这些 capability 的
 opinionated 组合，不是新的 Activity 子类。
