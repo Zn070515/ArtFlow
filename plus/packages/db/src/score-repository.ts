@@ -1,5 +1,4 @@
-import { Decimal } from "decimal.js";
-import type { ScoreSource } from "@artflow-plus/domain";
+import { decimalValue, type DecimalValue, type ScoreSource } from "@artflow-plus/domain";
 import { sql, type Kysely, type Selectable } from "kysely";
 
 import { StaleRevisionError } from "./activity-repository.js";
@@ -28,7 +27,7 @@ export interface StoredScoreFact {
   readonly panelSnapshotId: string;
   readonly seatId: string;
   readonly source: ScoreSource;
-  readonly total: number;
+  readonly total: DecimalValue;
   readonly criteria: Readonly<Record<string, number>>;
   readonly notes: string;
   readonly version: number;
@@ -41,7 +40,7 @@ export interface StoredScoreRevision {
   readonly scoreFactId: string;
   readonly version: number;
   readonly source: ScoreSource;
-  readonly total: number;
+  readonly total: DecimalValue;
   readonly criteria: Readonly<Record<string, number>>;
   readonly reason: string;
   readonly commandId: string;
@@ -130,7 +129,7 @@ function scoreFact(row: Selectable<ScoreFactRow>): StoredScoreFact {
     panelSnapshotId: row.panel_snapshot_id,
     seatId: row.seat_id,
     source: row.source as ScoreSource,
-    total: new Decimal(String(row.total)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
+    total: decimalValue(String(row.total)),
     criteria: objectValue(row.criteria) as Readonly<Record<string, number>>,
     notes: row.notes,
     version: row.version,
@@ -145,7 +144,7 @@ function scoreRevision(row: Selectable<ScoreRevisionRow>): StoredScoreRevision {
     scoreFactId: row.score_fact_id,
     version: row.version,
     source: row.source as ScoreSource,
-    total: new Decimal(String(row.total)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
+    total: decimalValue(String(row.total)),
     criteria: objectValue(row.criteria) as Readonly<Record<string, number>>,
     reason: row.reason,
     commandId: row.command_id,

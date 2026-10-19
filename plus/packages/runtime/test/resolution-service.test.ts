@@ -218,7 +218,7 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
       scope: "judging",
     });
     expect(ranking.body.status).toBe("hold");
-    expect(ranking.body.tieGroups).toMatchObject([{ total: 90, contestants: ["singer-a", "singer-b"], id: expect.any(String) }]);
+    expect(ranking.body.tieGroups).toMatchObject([{ total: "90.00", contestants: ["singer-a", "singer-b"], id: expect.any(String) }]);
     const tieId = (ranking.body.tieGroups[0] as { id: string }).id;
     const held = await finalizeAdvancement(db, deps(staff), {
       commandId: "advance-held",
@@ -270,8 +270,8 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
       requiredRoundIds: [context.roundId],
       rounds: [{ roundId: context.roundId, sourceScoreVersion: 3, locked: true, ranking: {
         status: decided.body.status,
-        rows: decided.body.rows as { contestantId: string; total: number; judgeCount: number }[],
-        tieGroups: decided.body.tieGroups as { total: number; contestants: string[] }[],
+        rows: decided.body.rows as { contestantId: string; total: string; judgeCount: number }[],
+        tieGroups: decided.body.tieGroups as { total: string; contestants: string[] }[],
         inputFingerprint: decided.body.inputFingerprint,
       } }],
     });
@@ -319,14 +319,14 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
         locked: true,
         ranking: {
           status: "ready",
-          rows: [{ contestantId: "singer-a", total: 91, judgeCount: 3 }],
+          rows: [{ contestantId: "singer-a", total: "91.00", judgeCount: 3 }],
           tieGroups: [],
           inputFingerprint: "x",
         },
       }],
     });
     expect(candidate.status).toBe("candidate");
-    expect(candidate.placements).toEqual([{ place: 1, contestantId: "singer-a", total: 91 }]);
+    expect(candidate.placements).toEqual([{ place: 1, contestantId: "singer-a", total: "91.00" }]);
   });
 
   it("holds a podium candidate when a required round is missing", () => {
@@ -338,7 +338,7 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
         locked: true,
         ranking: {
           status: "ready",
-          rows: [{ contestantId: "singer-a", total: 91, judgeCount: 3 }],
+          rows: [{ contestantId: "singer-a", total: "91.00", judgeCount: 3 }],
           tieGroups: [],
           inputFingerprint: "final-fingerprint",
         },

@@ -6,6 +6,8 @@ import { deepFreeze } from "./model.js";
 
 export type ScoreSource = "direct_judge" | "staff_rapid" | "staff_proxy" | "paper_dr";
 export type ScoreFactKey = string;
+export type DecimalValue = string;
+export type DecimalInput = DecimalValue | number;
 
 export interface ScoringCriterion {
   readonly key: string;
@@ -25,19 +27,25 @@ export interface ScoreSubmissionInput {
 
 export interface NormalizedScoreSubmission {
   readonly criteria: Readonly<Record<string, number>>;
-  readonly total: number;
+  readonly total: DecimalValue;
   readonly notes: string;
   readonly canonicalPayload: Readonly<{ criteria: Readonly<Record<string, number>>; notes: string }>;
 }
 
 export interface ScoreRow {
   readonly contestantId: string;
-  readonly total: number;
+  readonly total: DecimalValue;
+  readonly judgeCount: number;
+}
+
+export interface ScoreRowInput {
+  readonly contestantId: string;
+  readonly total: DecimalInput;
   readonly judgeCount: number;
 }
 
 export interface TieGroup {
-  readonly total: number;
+  readonly total: DecimalValue;
   readonly contestants: readonly string[];
 }
 
@@ -54,18 +62,22 @@ export interface TieDecision {
   readonly reason: string;
 }
 
-export function roundScore(value: number, decimals = 2): number {
-  return new Decimal(value).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toNumber();
+export function decimalValue(value: DecimalInput, decimals = 2): DecimalValue {
+  return new Decimal(value).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toFixed(decimals);
 }
 
-export function compareScores(left: number, right: number): number {
+export function roundScore(value: DecimalInput, decimals = 2): DecimalValue {
+  return decimalValue(value, decimals);
+}
+
+export function compareScores(left: DecimalInput, right: DecimalInput): number {
   return new Decimal(left).comparedTo(new Decimal(right));
 }
 
-export function averageScore(values: readonly number[], decimals = 2): number {
+export function averageScore(values: readonly DecimalInput[], decimals = 2): DecimalValue {
   if (values.length === 0) throw new Error("Cannot average an empty score set.");
   const total = values.reduce((sum, value) => sum.plus(new Decimal(value)), new Decimal(0));
-  return total.dividedBy(values.length).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toNumber();
+  return total.dividedBy(values.length).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toFixed(decimals);
 }
 
 function canonicalJson(value: unknown): string {
@@ -115,16 +127,18 @@ export function normalizeScoreSubmission(
     normalized[key] = value;
     total = total.plus(new Decimal(value).times(criterion.weight));
   }
-  const roundedTotal = total.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+  const roundedTotal = total.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2);
   const canonicalPayload = { criteria: normalized, notes: input.notes.trim() };
   return deepFreeze({ criteria: normalized, total: roundedTotal, notes: canonicalPayload.notes, canonicalPayload });
 }
 
 export function computeRanking(input: {
-  readonly rows: readonly ScoreRow[];
+  readonly rows: readonly ScoreRowInput[];
   readonly tiePolicy: "review";
 }): RankingResult {
-  const rows = [...input.rows].sort((left, right) => compareScores(right.total, left.total));
+  const rows: ScoreRow[] = input.rows
+    .map((row) => ({ ...row, total: decimalValue(row.total) }))
+    .sort((left, right) => compareScores(right.total, left.total));
   const tieGroups: TieGroup[] = [];
   for (let index = 0; index < rows.length;) {
     const current = rows[index];

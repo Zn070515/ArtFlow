@@ -314,7 +314,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       totalBallots: 1,
       scoreStatus: "ready",
       rawCounts: { [option?.id ?? ""]: 1, [opened.body.options[1]?.id ?? ""]: 0 },
-      scoreInputs: { [option?.id ?? ""]: 100, [opened.body.options[1]?.id ?? ""]: 0 },
+      scoreInputs: { [option?.id ?? ""]: "100.00", [opened.body.options[1]?.id ?? ""]: "0.00" },
     });
     await expect(revokeTicket(db, deps(staff), {
       commandId: "m6-ballot-revoke-after-close",
@@ -454,7 +454,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       scope: "judging",
     });
     expect(scoreStep.expect.outcome).toBe("accepted");
-    expect(scored.body.total).toBe(score);
+    expect(scored.body.total).toBe(score.toFixed(2));
     expect((await readEventsSince(db, { activityId, after: 0, limit: 500 })).map((event) => event.type)).toContain("ScoreFactRecorded");
   });
 

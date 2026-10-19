@@ -263,7 +263,7 @@ export interface ScoreFactRow {
   panel_snapshot_id: string;
   seat_id: string;
   source: string;
-  total: number;
+  total: ColumnType<string, string, string>;
   criteria: ColumnType<unknown, string, string>;
   notes: string;
   version: number;
@@ -278,7 +278,7 @@ export interface ScoreRevisionRow {
   score_fact_id: string;
   version: number;
   source: string;
-  total: number;
+  total: ColumnType<string, string, string>;
   criteria: ColumnType<unknown, string, string>;
   reason: string;
   command_id: string;

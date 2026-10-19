@@ -216,7 +216,7 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
     expect(result.body).toMatchObject({
       key: `${context.roundId}|singer-a|judge-1`,
       source: "direct_judge",
-      total: 91,
+      total: "91.00",
       version: 1,
     });
   });
@@ -280,7 +280,7 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
       reason: "评委要求更正分项",
       scope: "judging",
     });
-    expect(edited.body).toMatchObject({ version: 2, total: 93 });
+    expect(edited.body).toMatchObject({ version: 2, total: "93.00" });
     expect(created.body.id).toBe(edited.body.id);
     await expect(submitJudgeScore(db, deps({ ...judge, actorId: "judge-2" }), {
       commandId: "cmd-score-stale",
@@ -406,7 +406,7 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
       correctionId: correction.body.id,
       scope: "judging",
     });
-    expect(revised.body).toMatchObject({ version: 2, total: 93 });
+    expect(revised.body).toMatchObject({ version: 2, total: "93.00" });
     await expect(closeScoreCorrection(db, deps(staff), {
       commandId: "cmd-close-correction-without-session",
       activityId: context.activityId,
@@ -452,6 +452,6 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
       scope: "judging",
     });
     expect(ranking.body.sourceScoreVersion).toBe(3);
-    expect(ranking.body.rows).toContainEqual(expect.objectContaining({ contestantId: "singer-a", total: 92 }));
+    expect(ranking.body.rows).toContainEqual(expect.objectContaining({ contestantId: "singer-a", total: "92.00" }));
   });
 });

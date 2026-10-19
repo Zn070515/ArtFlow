@@ -68,7 +68,7 @@ it("computes ballot-share scores with explicit empty-session hold semantics", ()
       totalBallots: 3,
       rule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
     }),
-  ).toEqual({ status: "ready", scores: { singerA: 66.67, singerB: 33.33 } });
+  ).toEqual({ status: "ready", scores: { singerA: "66.67", singerB: "33.33" } });
 
   expect(
     computeVoteScores({

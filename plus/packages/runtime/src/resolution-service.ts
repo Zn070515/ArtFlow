@@ -26,6 +26,7 @@ import {
 } from "@artflow-plus/db";
 import type {
   ActorContext,
+  DecimalValue,
   RankingResult,
   ScoreRow,
 } from "@artflow-plus/domain";
@@ -77,7 +78,7 @@ async function rankingInput(
   const facts = await listCurrentScoreFacts(trx, round.id);
   const performancesById = new Map(performances.map((performance) => [performance.id, performance]));
   const factsByPerformance = new Map<string, number>();
-  const byContestant = new Map<string, number[]>();
+  const byContestant = new Map<string, DecimalValue[]>();
   for (const fact of facts) {
     const performance = performancesById.get(fact.performanceId);
     if (performance === undefined || fact.contestantId !== performance.contestantId ||
@@ -120,11 +121,11 @@ function rankingFromSnapshot(snapshot: StoredRankingSnapshot): RankingResult {
   };
 }
 
-function tieGroupId(group: { readonly total: number; readonly contestants: readonly string[] }): string {
+function tieGroupId(group: { readonly total: DecimalValue; readonly contestants: readonly string[] }): string {
   return `tie-${stableHash({ total: group.total, contestants: group.contestants })}`;
 }
 
-function decorateTieGroups(groups: readonly { readonly total: number; readonly contestants: readonly string[] }[]): readonly unknown[] {
+function decorateTieGroups(groups: readonly { readonly total: DecimalValue; readonly contestants: readonly string[] }[]): readonly unknown[] {
   return groups.map((group) => ({ ...group, id: tieGroupId(group) }));
 }
 
@@ -353,7 +354,7 @@ export interface PodiumRoundInput {
 
 export interface PodiumCandidateResult {
   readonly status: "candidate" | "hold";
-  readonly placements: readonly { readonly place: number; readonly contestantId: string; readonly total: number }[];
+  readonly placements: readonly { readonly place: number; readonly contestantId: string; readonly total: DecimalValue }[];
   readonly sourceRoundIds: readonly string[];
   readonly sourceScoreVersions: readonly { readonly roundId: string; readonly sourceScoreVersion: number }[];
   readonly inputFingerprint: string;

@@ -45,7 +45,7 @@ import {
   DomainError,
   requirePermission,
 } from "@artflow-plus/domain";
-import type { CompiledVotingArtifact, ExecutionMode } from "@artflow-plus/domain";
+import type { CompiledVotingArtifact, DecimalValue, ExecutionMode } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
@@ -404,7 +404,7 @@ export interface VoteScoreReadModel {
   readonly rawCounts: Readonly<Record<string, number>>;
   readonly scoreStatus: "ready" | "hold";
   readonly holdReason?: "NO_VALID_BALLOTS";
-  readonly scoreInputs?: Readonly<Record<string, number>>;
+  readonly scoreInputs?: Readonly<Record<string, DecimalValue>>;
 }
 
 export async function getClosedVoteScores(

@@ -9,6 +9,7 @@ import type {
   CompiledCapabilityPlan,
 } from "../model.js";
 import { deepFreeze } from "../model.js";
+import type { DecimalValue } from "../scoring.js";
 import type { CapabilityRegistration } from "../registry.js";
 
 export type VotingPurpose = "popularity" | "score_component";
@@ -208,7 +209,7 @@ export interface VoteScoreInput {
 }
 
 export type VoteScoreResult =
-  | { readonly status: "ready"; readonly scores: Readonly<Record<string, number>> }
+  | { readonly status: "ready"; readonly scores: Readonly<Record<string, DecimalValue>> }
   | { readonly status: "hold"; readonly reason: "NO_VALID_BALLOTS" };
 
 /** Converts raw ballot counts to score-component inputs; it never creates judge facts. */
@@ -223,7 +224,7 @@ export function computeVoteScores(input: VoteScoreInput): VoteScoreResult {
     fail("INVALID_INPUT", "The voting score decimals are invalid.");
   }
   if (input.totalBallots === 0) return deepFreeze({ status: "hold", reason: "NO_VALID_BALLOTS" });
-  const result: Record<string, number> = {};
+  const result: Record<string, DecimalValue> = {};
   for (const optionId of Object.keys(input.counts).sort()) {
     const count = input.counts[optionId];
     if (count === undefined || !Number.isInteger(count) || count < 0) {
@@ -233,7 +234,7 @@ export function computeVoteScores(input: VoteScoreInput): VoteScoreResult {
       .dividedBy(input.totalBallots)
       .times(input.rule.scale)
       .toDecimalPlaces(input.rule.decimals, Decimal.ROUND_HALF_UP);
-    result[optionId] = value.toNumber();
+    result[optionId] = value.toFixed(input.rule.decimals);
   }
   return deepFreeze({ status: "ready", scores: result });
 }

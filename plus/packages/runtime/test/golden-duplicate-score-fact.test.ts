@@ -233,7 +233,7 @@ describe.skipIf(!connectionString)("duplicate-score-fact golden", () => {
       notes: "",
       scope: "judging",
     });
-    expect(accepted.body).toMatchObject({ source: "direct_judge", total: 91, version: 1 });
+    expect(accepted.body).toMatchObject({ source: "direct_judge", total: "91.00", version: 1 });
     expect(accepted.body.key).toBe(`${round.body.id}|singer-a|judge-j1`);
     expect((await readEventsSince(db, { activityId: created.body.id, after: 0, limit: 500 })).some((event) => event.type === "ScoreFactRecorded")).toBe(true);
 
@@ -267,7 +267,7 @@ describe.skipIf(!connectionString)("duplicate-score-fact golden", () => {
       reason: String(editStep.input.reason),
       scope: "judging",
     });
-    expect(edited.body).toMatchObject({ version: 2, total: 93 });
+    expect(edited.body).toMatchObject({ version: 2, total: "93.00" });
     expect((await db.selectFrom("score_fact").selectAll().where("round_id", "=", round.body.id).execute())).toHaveLength(1);
 
     await expect(submitJudgeScore(db, deps({ ...judge, actorId: "judge-j2" }), {

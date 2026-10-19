@@ -75,7 +75,7 @@ async function seedScoreFact(): Promise<StoredScoreFact> {
     panelSnapshotId: panelId,
     seatId,
     source: "direct_judge",
-    total: 91,
+    total: "91.00",
     criteria: { technique: 36, stage: 27, emotion: 28 },
     notes: "",
     version: 1,
@@ -148,8 +148,8 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
       revision: 0,
     }).execute();
     await insertScoreFact(db, fact);
-    const updated = await updateScoreFact(db, { ...fact, total: 93, version: 2 }, 1);
-    expect(updated).toMatchObject({ total: 93, version: 2 });
+    const updated = await updateScoreFact(db, { ...fact, total: "93.00", version: 2 }, 1);
+    expect(updated).toMatchObject({ total: "93.00", version: 2 });
     await insertScoreRevision(db, {
       id: `revision-${fact.id}`,
       scoreFactId: fact.id,
@@ -162,7 +162,7 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
       actorId: "staff-1",
       createdAt: "2026-10-19T12:00:00Z",
     });
-    await expect(updateScoreFact(db, { ...updated, total: 90, version: 3 }, 1)).rejects.toMatchObject({ code: "STALE_REVISION" });
+    await expect(updateScoreFact(db, { ...updated, total: "90.00", version: 3 }, 1)).rejects.toMatchObject({ code: "STALE_REVISION" });
     await expect(db.selectFrom("score_revision").selectAll().where("score_fact_id", "=", fact.id).execute()).resolves.toHaveLength(1);
   });
 });
