@@ -29,6 +29,21 @@ test 都消费同一份输入/期望。这样“旧实现”和“新实现”�
 uv run python tests/golden/validate_fixtures.py
 ```
 
+## v1 适配器
+
+[`v1_adapter.py`](v1_adapter.py) 把 `result-release-lifecycle` 的稳定事实映射到
+v1 的 Django 对象，调用真实的 `release_result_post` / `revoke_result_release` /
+`unlock_stage_result`，再按 fixture 的期望比较。拒绝步骤用 `GoldenRejected`
+返回原因码，并断言读模型没有变化。
+
+[`test_v1_fixtures.py`](test_v1_fixtures.py) 运行已适配的 fixture；尚无适配器的
+fixture 在 `V1_COVERAGE` 里记录对应的 v1 套件，保证“还没适配”是可见状态，而
+不是被跳过。
+
+```powershell
+uv run python manage.py test tests.golden
+```
+
 ## 规则
 
 1. 每个真实事故在 v1 修复后，追加一个 fixture；失败输入和期望拒绝原因都要
