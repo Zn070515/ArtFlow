@@ -19,11 +19,10 @@ The rules the gate enforces, from the Questionnaire workflow spec:
 """
 
 import json
+from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
-
-from types import SimpleNamespace
 
 from questionnaire.compiler import compile_questionnaire
 from questionnaire.registration import questionnaire_plan

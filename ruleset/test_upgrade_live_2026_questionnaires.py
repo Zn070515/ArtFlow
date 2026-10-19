@@ -9,11 +9,12 @@ from common.test_characterization import _CharacterizationBase
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from questionnaire.models import QuestionnaireResponse
+from singer_contest.models import SingerRegistration
+
 from ruleset.live_format import LIVE_CHALLENGE_FORMAT_KEY
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.schema import ENTRY_KEY
 from ruleset.templates import live_2026_questionnaire
-from singer_contest.models import SingerRegistration
 
 
 def _old_participant_questionnaire() -> dict:

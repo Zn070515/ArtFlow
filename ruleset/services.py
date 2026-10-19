@@ -42,7 +42,7 @@ from questionnaire.cross_domain import (
     validate_questionnaire_context_keys,
     validate_questionnaire_rounds,
 )
-from questionnaire.schema import QUESTIONNAIRE_ROOT_KEYS, parse_questionnaire
+from questionnaire.schema import QUESTIONNAIRE_ROOT_KEYS
 from singer_contest.scoring import scoring_standard_snapshot
 
 from .business_editor import business_definition_from_stages, infer_business_stages

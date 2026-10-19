@@ -18,6 +18,7 @@ import json
 from accounts.models import User
 from core.models import Activity
 from django.core.management.base import BaseCommand, CommandError
+
 from ruleset.live_format import LIVE_CHALLENGE_FORMAT_KEY
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import newer_ruleset_version, update_ruleset_definition_sections
