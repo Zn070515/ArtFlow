@@ -17,6 +17,8 @@ export interface CommandReceiptRow {
   command_type: string;
   payload_hash: string;
   scope: string | null;
+  actor_id: string | null;
+  actor_type: string | null;
   result: ColumnType<unknown | null, string | null, string | null>;
   http_status: number | null;
   created_at: ColumnType<Date, Date | undefined, never>;
@@ -34,6 +36,8 @@ export interface OutboxRow {
   revision: number | null;
   mode: string | null;
   scope: string | null;
+  actor_id: string | null;
+  actor_type: string | null;
   payload: ColumnType<unknown, string, string>;
   created_at: ColumnType<Date, Date | undefined, never>;
   published_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
@@ -62,6 +66,9 @@ export interface DefinitionReleaseRow {
   version: number;
   content_hash: string;
   capabilities: ColumnType<unknown, string, string>;
+  execution_policy: ColumnType<unknown, string, string>;
+  capability_versions: ColumnType<unknown, string, string>;
+  bindings: ColumnType<unknown, string, string>;
   released_at: ColumnType<Date, Date | string, never>;
   source_draft_revision: number;
 }
@@ -84,7 +91,22 @@ export interface ExecutionProjectionRow {
   mode: string;
   last_sequence: ColumnType<string, string | number, string | number>;
   state: ColumnType<unknown, string, string>;
+  status: string;
+  blocked_sequence: ColumnType<string | null, string | number | null, string | number | null>;
+  blocked_reason: string | null;
   updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface AuditEntryRow {
+  id: Generated<string>;
+  command_id: string;
+  activity_id: string | null;
+  capability: string;
+  command_type: string;
+  actor_id: string;
+  actor_type: string;
+  detail: ColumnType<unknown, string, string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
 }
 
 export interface Database {
@@ -96,4 +118,5 @@ export interface Database {
   definition_release: DefinitionReleaseRow;
   execution_session: ExecutionSessionRow;
   execution_projection: ExecutionProjectionRow;
+  audit_entry: AuditEntryRow;
 }

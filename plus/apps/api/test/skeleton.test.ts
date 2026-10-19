@@ -38,7 +38,7 @@ let registry: ReturnType<typeof skeletonRegistry>;
 let clock = 0;
 
 const deps: RuntimeDeps = {
-  now: () => `2026-10-19T12:00:${String(clock++).padStart(2, "0")}Z`,
+  now: () => new Date(Date.UTC(2026, 9, 19, 12, 0, 0) + clock++ * 1000).toISOString(),
   newEventId: () => randomUUID(),
 };
 
@@ -73,8 +73,10 @@ function stubCapability(identity: string): CapabilityRegistration {
 }
 
 function probeCapability(): CapabilityRegistration {
+  const base = stubCapability("probe");
   return {
-    ...stubCapability("probe"),
+    ...base,
+    manifest: { ...base.manifest, scopes: ["stage", "rehearsal"] },
     scopeConflicts: { stage: ["rehearsal"] },
   };
 }

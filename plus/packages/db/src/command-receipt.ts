@@ -1,3 +1,4 @@
+import type { ActorContext } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
 import type { Database } from "./types.js";
@@ -9,6 +10,7 @@ export interface CommandClaimInput {
   readonly commandType: string;
   readonly payloadHash: string;
   readonly scope: string | null;
+  readonly actor: ActorContext;
 }
 
 export type CommandClaim =
@@ -52,6 +54,8 @@ export async function claimCommand(
       command_type: input.commandType,
       payload_hash: input.payloadHash,
       scope: input.scope,
+      actor_id: input.actor.actorId,
+      actor_type: input.actor.actorType,
       result: null,
       http_status: null,
     })
@@ -81,6 +85,34 @@ export async function claimCommand(
     result: existing.result,
     httpStatus: existing.http_status ?? 200,
   };
+}
+
+export interface AuditEntryInput {
+  readonly commandId: string;
+  readonly activityId: string | null;
+  readonly capability: string;
+  readonly commandType: string;
+  readonly actor: ActorContext;
+  readonly detail: unknown;
+}
+
+/** Written in the command transaction; a replay never writes a second entry. */
+export async function insertAudit(
+  trx: Kysely<Database>,
+  input: AuditEntryInput,
+): Promise<void> {
+  await trx
+    .insertInto("audit_entry")
+    .values({
+      command_id: input.commandId,
+      activity_id: input.activityId,
+      capability: input.capability,
+      command_type: input.commandType,
+      actor_id: input.actor.actorId,
+      actor_type: input.actor.actorType,
+      detail: JSON.stringify(input.detail),
+    })
+    .execute();
 }
 
 export async function completeCommand(

@@ -16,6 +16,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0009](0009-capability-model.md) | Capability 是模块边界，Activity 是薄容器 | accepted |
 | [0010](0010-opaque-capability-definitions.md) | Capability 定义对 Activity 编译器不透明 | accepted |
 | [0011](0011-execution-runtime.md) | durable command、outbox 投影/重放、SSE + HTTP 恢复 | accepted |
+| [0012](0012-actor-and-audit.md) | ActorContext 与审计是 command 的标准副产物 | accepted |
 
 新增 ADR 的规则：
 

@@ -181,6 +181,21 @@ it("validates an execution session and projection snapshot", () => {
       lastSequence: 4,
       headSequence: 4,
       stale: false,
+      status: "running",
+    }),
+  ).toBe(true);
+  expect(
+    Value.Check(ExecutionProjectionSchema, {
+      activityId: "act-1",
+      mode: "formal",
+      sessions: {},
+      runningScopes: [],
+      lastSequence: 2,
+      headSequence: 4,
+      stale: true,
+      status: "blocked",
+      blockedSequence: 3,
+      blockedReason: "malformed event",
     }),
   ).toBe(true);
 });
@@ -212,6 +227,15 @@ it("validates a capability manifest and its surfaces", () => {
     surfaces: ["studio", "ops", "live"],
   };
   expect(Value.Check(CapabilityManifestSchema, manifest)).toBe(true);
+  expect(
+    Value.Check(CapabilityManifestSchema, {
+      ...manifest,
+      scopes: ["stage", "rehearsal"],
+    }),
+  ).toBe(true);
+  expect(
+    Value.Check(CapabilityManifestSchema, { ...manifest, scopes: ["Not A Scope"] }),
+  ).toBe(false);
   expect(
     Value.Check(CapabilityManifestSchema, { ...manifest, surfaces: ["unknown"] }),
   ).toBe(false);

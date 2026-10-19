@@ -1,11 +1,13 @@
 import type {
   ActivityDefinitionPackage,
+  CapabilityBinding,
   CompiledCapabilityPlan,
+  ExecutionPolicy,
 } from "@artflow-plus/domain";
-import type { Kysely } from "kysely";
+import type { Kysely, Selectable } from "kysely";
 
 import { StaleRevisionError } from "./activity-repository.js";
-import type { Database } from "./types.js";
+import type { Database, DefinitionReleaseRow } from "./types.js";
 
 export interface StoredDraft {
   readonly activityId: string;
@@ -25,6 +27,9 @@ export interface StoredRelease {
   readonly version: number;
   readonly contentHash: string;
   readonly capabilities: Readonly<Record<string, CompiledCapabilityPlan>>;
+  readonly executionPolicy: ExecutionPolicy;
+  readonly capabilityVersions: Readonly<Record<string, string>>;
+  readonly bindings: readonly CapabilityBinding[];
   readonly releasedAt: string;
   readonly sourceDraftRevision: number;
 }
@@ -141,6 +146,20 @@ export async function getCompiled(
   };
 }
 
+function rowToRelease(row: Selectable<DefinitionReleaseRow>): StoredRelease {
+  return {
+    activityId: row.activity_id,
+    version: row.version,
+    contentHash: row.content_hash,
+    capabilities: parseCapabilities(row.capabilities),
+    executionPolicy: row.execution_policy as ExecutionPolicy,
+    capabilityVersions: row.capability_versions as Readonly<Record<string, string>>,
+    bindings: row.bindings as readonly CapabilityBinding[],
+    releasedAt: toIso(row.released_at),
+    sourceDraftRevision: row.source_draft_revision,
+  };
+}
+
 export async function insertRelease(
   trx: Kysely<Database>,
   release: StoredRelease,
@@ -152,6 +171,9 @@ export async function insertRelease(
       version: release.version,
       content_hash: release.contentHash,
       capabilities: JSON.stringify(release.capabilities),
+      execution_policy: JSON.stringify(release.executionPolicy),
+      capability_versions: JSON.stringify(release.capabilityVersions),
+      bindings: JSON.stringify(release.bindings),
       released_at: release.releasedAt,
       source_draft_revision: release.sourceDraftRevision,
     })
@@ -169,15 +191,7 @@ export async function getRelease(
     .where("activity_id", "=", activityId)
     .where("version", "=", version)
     .executeTakeFirst();
-  if (row === undefined) return null;
-  return {
-    activityId: row.activity_id,
-    version: row.version,
-    contentHash: row.content_hash,
-    capabilities: parseCapabilities(row.capabilities),
-    releasedAt: toIso(row.released_at),
-    sourceDraftRevision: row.source_draft_revision,
-  };
+  return row === undefined ? null : rowToRelease(row);
 }
 
 export async function getLatestRelease(
@@ -191,13 +205,5 @@ export async function getLatestRelease(
     .orderBy("version", "desc")
     .limit(1)
     .executeTakeFirst();
-  if (row === undefined) return null;
-  return {
-    activityId: row.activity_id,
-    version: row.version,
-    contentHash: row.content_hash,
-    capabilities: parseCapabilities(row.capabilities),
-    releasedAt: toIso(row.released_at),
-    sourceDraftRevision: row.source_draft_revision,
-  };
+  return row === undefined ? null : rowToRelease(row);
 }

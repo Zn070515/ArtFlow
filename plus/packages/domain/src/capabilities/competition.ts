@@ -220,6 +220,7 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
     events: ["CompetitionConfigured"],
     permissions: ["competition.manage"],
     surfaces: ["studio", "ops", "live"],
+    scopes: ["stage", "judging", "checkin", "voting"],
   },
   compiler: competitionCompiler,
   emptyDefinition: createEmptyCompetitionDefinition,

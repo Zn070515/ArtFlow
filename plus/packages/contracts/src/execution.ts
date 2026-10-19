@@ -42,6 +42,9 @@ export const ExecutionProjectionSchema = Type.Object(
     lastSequence: Type.Integer({ minimum: 0 }),
     headSequence: Type.Integer({ minimum: 0 }),
     stale: Type.Boolean(),
+    status: Type.Union([Type.Literal("running"), Type.Literal("blocked")]),
+    blockedSequence: Type.Optional(Type.Integer({ minimum: 0 })),
+    blockedReason: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );

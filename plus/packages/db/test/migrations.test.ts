@@ -39,16 +39,46 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
        where table_schema = current_schema()
          and table_name in (
            'definition_draft', 'definition_compiled', 'definition_release',
-           'execution_session', 'execution_projection'
+           'execution_session', 'execution_projection', 'audit_entry'
          )
        order by table_name
     `.execute(db);
     expect(result.rows.map((row) => row.table_name)).toEqual([
+      "audit_entry",
       "definition_compiled",
       "definition_draft",
       "definition_release",
       "execution_projection",
       "execution_session",
+    ]);
+  });
+
+  it("adds the hardening columns", async () => {
+    const result = await sql<{ table_name: string; column_name: string }>`
+      select table_name, column_name
+        from information_schema.columns
+       where table_schema = current_schema()
+         and (
+           (table_name = 'definition_release'
+            and column_name in ('execution_policy', 'capability_versions', 'bindings'))
+           or (table_name = 'execution_projection'
+               and column_name in ('status', 'blocked_sequence', 'blocked_reason'))
+           or (table_name in ('outbox', 'command_receipt')
+               and column_name in ('actor_id', 'actor_type'))
+         )
+       order by table_name, column_name
+    `.execute(db);
+    expect(result.rows.map((row) => `${row.table_name}.${row.column_name}`)).toEqual([
+      "command_receipt.actor_id",
+      "command_receipt.actor_type",
+      "definition_release.bindings",
+      "definition_release.capability_versions",
+      "definition_release.execution_policy",
+      "execution_projection.blocked_reason",
+      "execution_projection.blocked_sequence",
+      "execution_projection.status",
+      "outbox.actor_id",
+      "outbox.actor_type",
     ]);
   });
 
@@ -77,6 +107,13 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
         version: 1,
         content_hash: "hash",
         capabilities: JSON.stringify({}),
+        execution_policy: JSON.stringify({
+          declaredScopes: [],
+          conflicts: {},
+          runtimeContractVersion: 1,
+        }),
+        capability_versions: JSON.stringify({}),
+        bindings: JSON.stringify([]),
         released_at: new Date().toISOString(),
         source_draft_revision: 1,
       })

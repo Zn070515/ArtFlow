@@ -9,8 +9,8 @@ import {
   getActivity,
   insertActivity,
   migrate,
-  saveActivityWithRevision,
   StaleRevisionError,
+  updateActivity,
 } from "../src/index.js";
 import type { Database } from "../src/index.js";
 
@@ -22,14 +22,6 @@ const schema = `artflow_test_${Date.now()}_${process.pid}`;
 
 let db: Kysely<Database>;
 let admin: Client;
-
-async function count(table: "command_receipt" | "outbox"): Promise<number> {
-  const row = await db
-    .selectFrom(table)
-    .select((expression) => expression.fn.countAll<string>().as("count"))
-    .executeTakeFirstOrThrow();
-  return Number(row.count);
-}
 
 describe.skipIf(!connectionString)("activity repository on PostgreSQL", () => {
   beforeAll(async () => {
@@ -48,42 +40,26 @@ describe.skipIf(!connectionString)("activity repository on PostgreSQL", () => {
     await admin.end();
   });
 
-  it("persists an activity and records the receipt and outbox event", async () => {
-    const draft = createActivity({ id: "act-crud", title: "CRUD", capabilities: ["competition"] });
+  it("persists and reads an activity", async () => {
+    const draft = createActivity({
+      id: "act-crud",
+      title: "CRUD",
+      capabilities: ["competition"],
+    });
     await insertActivity(db, draft);
     expect(await getActivity(db, "act-crud")).toEqual(draft);
-
-    const active = activateActivity(draft, draft.revision);
-    const saved = await saveActivityWithRevision(db, active, {
-      expectedRevision: draft.revision,
-      commandId: "cmd-activate-crud",
-      eventType: "ActivityActivated",
-    });
-    expect(saved.status).toBe("active");
-    expect(saved.revision).toBe(1);
-    expect(await count("command_receipt")).toBe(1);
-    expect(await count("outbox")).toBe(1);
   });
 
-  it("refuses a stale revision without writing a receipt or event", async () => {
-    const draft = createActivity({ id: "act-stale", title: "Stale" });
+  it("compare-and-swap on the activity revision", async () => {
+    const draft = createActivity({ id: "act-cas", title: "CAS" });
     await insertActivity(db, draft);
     const active = activateActivity(draft, draft.revision);
-    await saveActivityWithRevision(db, active, {
-      expectedRevision: 0,
-      commandId: "cmd-activate-stale",
-      eventType: "ActivityActivated",
-    });
-
-    await expect(
-      saveActivityWithRevision(db, { ...active, revision: 2 }, {
-        expectedRevision: 0,
-        commandId: "cmd-activate-stale-2",
-        eventType: "ActivityActivated",
-      }),
-    ).rejects.toBeInstanceOf(StaleRevisionError);
-    expect(await count("command_receipt")).toBe(2);
-    expect(await count("outbox")).toBe(2);
+    const saved = await updateActivity(db, active, draft.revision);
+    expect(saved.status).toBe("active");
+    expect(saved.revision).toBe(1);
+    await expect(updateActivity(db, active, draft.revision)).rejects.toBeInstanceOf(
+      StaleRevisionError,
+    );
   });
 
   it("lets exactly one of two concurrent writers win the revision", async () => {
@@ -94,16 +70,8 @@ describe.skipIf(!connectionString)("activity repository on PostgreSQL", () => {
     const second = createDb({ connectionString: connectionString ?? "", schema });
     try {
       const results = await Promise.allSettled([
-        saveActivityWithRevision(db, active, {
-          expectedRevision: 0,
-          commandId: "cmd-race-a",
-          eventType: "ActivityActivated",
-        }),
-        saveActivityWithRevision(second, active, {
-          expectedRevision: 0,
-          commandId: "cmd-race-b",
-          eventType: "ActivityActivated",
-        }),
+        updateActivity(db, active, 0),
+        updateActivity(second, active, 0),
       ]);
 
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
@@ -115,8 +83,6 @@ describe.skipIf(!connectionString)("activity repository on PostgreSQL", () => {
 
       const final = await getActivity(db, "act-race");
       expect(final?.revision).toBe(1);
-      expect(await count("command_receipt")).toBe(3);
-      expect(await count("outbox")).toBe(3);
     } finally {
       await closeDb(second);
     }

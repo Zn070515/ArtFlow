@@ -89,6 +89,19 @@ export interface CompiledActivityDefinition {
 
 export type PackageCompileResult = CompiledActivityDefinition | CompileFailure;
 
+/**
+ * The execution semantics frozen with a release. A later code deployment may
+ * not redefine what an already-released definition means: starting a session
+ * reads this snapshot, never the current registry policy.
+ */
+export interface ExecutionPolicy {
+  readonly declaredScopes: readonly string[];
+  readonly conflicts: ScopeConflictPolicy;
+  readonly runtimeContractVersion: number;
+}
+
+export const RUNTIME_CONTRACT_VERSION = 1;
+
 /** A released definition package is immutable; corrections release a new version. */
 export interface ReleasedActivityDefinition {
   readonly activityId: string;
@@ -96,6 +109,10 @@ export interface ReleasedActivityDefinition {
   readonly status: "released";
   readonly contentHash: string;
   readonly capabilities: Readonly<Record<string, CompiledCapabilityPlan>>;
+  /** Capability implementation versions captured at release time. */
+  readonly capabilityVersions: Readonly<Record<string, string>>;
+  readonly executionPolicy: ExecutionPolicy;
+  readonly bindings: readonly CapabilityBinding[];
   readonly releasedAt: string;
 }
 

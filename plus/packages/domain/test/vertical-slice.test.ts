@@ -58,6 +58,15 @@ function passthroughCompiler(capabilityKey: string): CapabilityCompiler {
   };
 }
 
+const RELEASE_SNAPSHOT = {
+  executionPolicy: {
+    declaredScopes: [] as string[],
+    conflicts: {},
+    runtimeContractVersion: 1,
+  },
+  capabilityVersions: { competition: "1", registration: "1" },
+};
+
 const COMPILERS: readonly CapabilityCompiler[] = [
   competitionCompiler,
   passthroughCompiler("registration"),
@@ -109,6 +118,7 @@ function released(
 ): { activity: Activity; version: ReleasedActivityDefinition; draft: DefinitionDraft } {
   const draft = draftWith(activity, pkg);
   const result = releaseDefinition({
+      ...RELEASE_SNAPSHOT,
     activity,
     draft,
     expectedDraftRevision: draft.revision,
@@ -169,6 +179,7 @@ it("activity → package draft → compile → release → execution session", (
   const compiled = compiledPackage(pkg);
 
   const release = releaseDefinition({
+      ...RELEASE_SNAPSHOT,
     activity,
     draft,
     expectedDraftRevision: draft.revision,
@@ -356,6 +367,7 @@ it("a compiled package from another draft cannot be released", () => {
   expectCode(
     () =>
       releaseDefinition({
+      ...RELEASE_SNAPSHOT,
         activity,
         draft: changedDraft,
         expectedDraftRevision: changedDraft.revision,
@@ -377,6 +389,7 @@ it("release requires an active activity", () => {
   expectCode(
     () =>
       releaseDefinition({
+      ...RELEASE_SNAPSHOT,
         activity: draftActivity,
         draft,
         expectedDraftRevision: draft.revision,
@@ -394,6 +407,7 @@ it("a package cannot include a capability the activity did not enable", () => {
   expectCode(
     () =>
       releaseDefinition({
+      ...RELEASE_SNAPSHOT,
         activity,
         draft,
         expectedDraftRevision: draft.revision,

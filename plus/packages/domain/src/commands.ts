@@ -3,10 +3,12 @@ import { fail } from "./errors.js";
 import type {
   Activity,
   ActivityDefinitionPackage,
+  CapabilityBinding,
   CompiledActivityDefinition,
   DefinitionDraft,
   DefinitionVersion,
   ExecutionMode,
+  ExecutionPolicy,
   ExecutionSession,
   ReleasedActivityDefinition,
   ScopeConflictPolicy,
@@ -142,6 +144,10 @@ export interface ReleaseDefinitionInput {
   readonly expectedDraftRevision: number;
   readonly compiled: CompiledActivityDefinition;
   readonly releasedAt: string;
+  /** Frozen at release from the registry composition; never re-derived later. */
+  readonly executionPolicy: ExecutionPolicy;
+  readonly capabilityVersions: Readonly<Record<string, string>>;
+  readonly bindings?: readonly CapabilityBinding[];
 }
 
 export interface ReleaseDefinitionResult {
@@ -155,7 +161,16 @@ export interface ReleaseDefinitionResult {
  * package is frozen. Corrigenda release a new version.
  */
 export function releaseDefinition(input: ReleaseDefinitionInput): ReleaseDefinitionResult {
-  const { activity, draft, expectedDraftRevision, compiled, releasedAt } = input;
+  const {
+    activity,
+    draft,
+    expectedDraftRevision,
+    compiled,
+    releasedAt,
+    executionPolicy,
+    capabilityVersions,
+    bindings,
+  } = input;
   if (activity.status !== "active") {
     fail("ACTIVITY_NOT_ACTIVE", "Only an active activity can release a definition.");
   }
@@ -183,7 +198,38 @@ export function releaseDefinition(input: ReleaseDefinitionInput): ReleaseDefinit
       `The package includes capabilities that are not enabled: ${disabled.join(", ")}.`,
     );
   }
+  const missingVersions = Object.keys(compiled.capabilities).filter(
+    (key) => capabilityVersions[key] === undefined,
+  );
+  if (missingVersions.length > 0) {
+    fail(
+      "RELEASE_SNAPSHOT_INCOMPLETE",
+      `The release snapshot has no capability version for: ${missingVersions.join(", ")}.`,
+    );
+  }
+  if (
+    !Number.isInteger(executionPolicy.runtimeContractVersion) ||
+    executionPolicy.runtimeContractVersion < 1
+  ) {
+    fail(
+      "RELEASE_SNAPSHOT_INCOMPLETE",
+      "The release snapshot needs a runtime contract version.",
+    );
+  }
 
+  const frozenPolicy: ExecutionPolicy = {
+    declaredScopes: [...executionPolicy.declaredScopes],
+    conflicts: Object.fromEntries(
+      Object.entries(executionPolicy.conflicts).map(([scope, conflicts]) => [
+        scope,
+        [...conflicts],
+      ]),
+    ),
+    runtimeContractVersion: executionPolicy.runtimeContractVersion,
+  };
+  const frozenBindings = [...(bindings ?? draft.package.bindings ?? [])].map(
+    (binding) => ({ ...binding }),
+  );
   const versionNumber = activity.activeDefinitionVersion + 1;
   const version: ReleasedActivityDefinition = deepFreeze({
     activityId: activity.id,
@@ -191,6 +237,9 @@ export function releaseDefinition(input: ReleaseDefinitionInput): ReleaseDefinit
     status: "released" as const,
     contentHash: compiled.contentHash,
     capabilities: compiled.capabilities,
+    capabilityVersions: { ...capabilityVersions },
+    executionPolicy: frozenPolicy,
+    bindings: frozenBindings,
     releasedAt,
   });
   const nextActivity = deepFreeze({

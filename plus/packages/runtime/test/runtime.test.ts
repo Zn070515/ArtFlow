@@ -16,6 +16,7 @@ import {
 import type {
   CapabilityCompiler,
   CapabilityRegistration,
+  CapabilityRegistry,
   ExecutionMode,
 } from "@artflow-plus/domain";
 
@@ -48,8 +49,14 @@ let registry: ReturnType<typeof singerRegistry>;
 let deps: RuntimeDeps;
 let clock = 0;
 
-function probeCapability(): CapabilityRegistration {
-  const compiler: CapabilityCompiler = {
+function probeCapability(
+  options: {
+    version?: string;
+    stageConflicts?: readonly string[];
+    compiler?: CapabilityCompiler;
+  } = {},
+): CapabilityRegistration {
+  const compiler: CapabilityCompiler = options.compiler ?? {
     capabilityKey: "probe",
     compile: (definition) => ({
       ok: true,
@@ -61,7 +68,7 @@ function probeCapability(): CapabilityRegistration {
   return {
     manifest: {
       identity: "probe",
-      version: "1",
+      version: options.version ?? "1",
       dependencies: [],
       conflicts: [],
       definitionSchemaVersion: 1,
@@ -70,21 +77,29 @@ function probeCapability(): CapabilityRegistration {
       events: ["ProbeRecorded"],
       permissions: ["probe.manage"],
       surfaces: ["ops"],
+      scopes: ["stage", "rehearsal"],
     },
     compiler,
     emptyDefinition: () => ({ schemaVersion: 1, payload: { schemaVersion: 1 } }),
-    scopeConflicts: { stage: ["rehearsal"] },
+    scopeConflicts: { stage: options.stageConflicts ?? ["rehearsal"] },
   };
 }
 
-function singerRegistry() {
-  const result = createCapabilityRegistry([competitionCapability, probeCapability()]);
+function singerRegistry(
+  options: Parameters<typeof probeCapability>[0] = {},
+): CapabilityRegistry {
+  const result = createCapabilityRegistry([
+    competitionCapability,
+    probeCapability(options),
+  ]);
   if (!result.ok) throw new Error(JSON.stringify(result.issues));
   return result.registry;
 }
 
-async function createReleasedActivity(): Promise<string> {
-  const created = await createActivity(db, registry, deps, {
+async function createReleasedActivity(
+  sourceRegistry: CapabilityRegistry = registry,
+): Promise<string> {
+  const created = await createActivity(db, sourceRegistry, deps, {
     commandId: `create-${randomUUID()}`,
     title: "2026 院十佳",
     capabilities: ["competition", "probe"],
@@ -95,7 +110,7 @@ async function createReleasedActivity(): Promise<string> {
     activityId,
     expectedRevision: created.body.revision,
   });
-  const compiled = await compileDefinition(db, registry, deps, {
+  const compiled = await compileDefinition(db, sourceRegistry, deps, {
     commandId: `compile-${randomUUID()}`,
     activityId,
     package: {
@@ -105,7 +120,7 @@ async function createReleasedActivity(): Promise<string> {
       bindings: [],
     },
   });
-  await releaseDefinitionCommand(db, deps, {
+  await releaseDefinitionCommand(db, sourceRegistry, deps, {
     commandId: `release-${randomUUID()}`,
     activityId,
     expectedDraftRevision: compiled.body.draftRevision,
@@ -118,8 +133,9 @@ async function start(
   scope: string,
   mode: ExecutionMode,
   commandId = `start-${randomUUID()}`,
+  sourceRegistry: CapabilityRegistry = registry,
 ) {
-  return startExecution(db, registry, deps, {
+  return startExecution(db, sourceRegistry, deps, {
     commandId,
     activityId,
     scope,
@@ -137,7 +153,8 @@ describe.skipIf(!connectionString)("execution runtime on PostgreSQL", () => {
     await migrate(db);
     registry = singerRegistry();
     deps = {
-      now: () => `2026-10-19T10:00:${String(clock++).padStart(2, "0")}Z`,
+      now: () =>
+        new Date(Date.UTC(2026, 9, 19, 10, 0, 0) + clock++ * 1000).toISOString(),
       newEventId: () => randomUUID(),
     };
   });
@@ -186,7 +203,7 @@ describe.skipIf(!connectionString)("execution runtime on PostgreSQL", () => {
       expectedRevision: 0,
     });
     await expect(
-      releaseDefinitionCommand(db, deps, {
+      releaseDefinitionCommand(db, registry, deps, {
         commandId: `release-${randomUUID()}`,
         activityId: created.body.id,
         expectedDraftRevision: 0,
@@ -321,5 +338,144 @@ describe.skipIf(!connectionString)("execution runtime on PostgreSQL", () => {
       true,
     );
     expect(resumed.headCursor).toBeGreaterThanOrEqual(firstPage.nextCursor);
+  });
+
+  it("uses the frozen release policy, not the current registry policy", async () => {
+    const activityId = await createReleasedActivity();
+    const changedPolicy = singerRegistry({ stageConflicts: ["checkin"] });
+    await start(activityId, "stage", "formal", undefined, changedPolicy);
+    // The release froze stage <-> rehearsal; the changed registry says
+    // stage <-> checkin. The frozen policy wins.
+    await expect(
+      start(activityId, "rehearsal", "formal", undefined, changedPolicy),
+    ).rejects.toMatchObject({ code: "SCOPE_CONFLICT" });
+
+    const second = await createReleasedActivity();
+    await start(second, "checkin", "formal", undefined, changedPolicy);
+    const stage = await start(second, "stage", "formal", undefined, changedPolicy);
+    expect(stage.status).toBe(201);
+  });
+
+  it("refuses a release whose capability versions do not match the runtime", async () => {
+    const activityId = await createReleasedActivity();
+    const newer = singerRegistry({ version: "2" });
+    await expect(
+      start(activityId, "stage", "formal", undefined, newer),
+    ).rejects.toMatchObject({ code: "CAPABILITY_VERSION_MISMATCH" });
+  });
+
+  it("refuses a scope the release did not declare", async () => {
+    const activityId = await createReleasedActivity();
+    await expect(start(activityId, "backstage", "formal")).rejects.toMatchObject({
+      code: "SCOPE_UNDECLARED",
+    });
+  });
+
+  it("replays an accepted create even when the registry would now reject it", async () => {
+    const commandId = `create-${randomUUID()}`;
+    const first = await createActivity(db, registry, deps, {
+      commandId,
+      title: "Replay across registry change",
+      capabilities: ["competition", "probe"],
+    });
+    const withoutCompetition = createCapabilityRegistry([probeCapability()]);
+    if (!withoutCompetition.ok) throw new Error("registry rejected");
+    const replay = await createActivity(db, withoutCompetition.registry, deps, {
+      commandId,
+      title: "Replay across registry change",
+      capabilities: ["competition", "probe"],
+    });
+    expect(replay.replayed).toBe(true);
+    expect(replay.body.id).toBe(first.body.id);
+  });
+
+  it("replays an accepted compile even when the compiler now fails", async () => {
+    const created = await createActivity(db, registry, deps, {
+      commandId: `create-${randomUUID()}`,
+      title: "Compile replay",
+      capabilities: ["competition"],
+    });
+    const packageValue = {
+      schemaVersion: 1 as const,
+      manifest: { key: "pkg", title: "Compile replay" },
+      capabilities: { competition: createEmptyCompetitionDefinition() },
+      bindings: [],
+    };
+    const compileCommand = `compile-${randomUUID()}`;
+    const first = await compileDefinition(db, registry, deps, {
+      commandId: compileCommand,
+      activityId: created.body.id,
+      package: packageValue,
+    });
+    const failingCompiler: CapabilityCompiler = {
+      capabilityKey: "competition",
+      compile: () => ({
+        ok: false,
+        issues: [{ code: "BROKEN", message: "compiler unavailable", path: "payload" }],
+      }),
+    };
+    const failingRegistry = createCapabilityRegistry([
+      { ...competitionCapability, compiler: failingCompiler },
+    ]);
+    if (!failingRegistry.ok) throw new Error("registry rejected");
+    const replay = await compileDefinition(db, failingRegistry.registry, deps, {
+      commandId: compileCommand,
+      activityId: created.body.id,
+      package: packageValue,
+    });
+    expect(replay.replayed).toBe(true);
+    expect(replay.body.contentHash).toBe(first.body.contentHash);
+  });
+
+  it("records the actor in the receipt, audit and event log", async () => {
+    const actorDeps: RuntimeDeps = {
+      ...deps,
+      actor: {
+        actorId: "alice",
+        actorType: "user",
+        roles: ["staff"],
+        permissions: ["*"],
+      },
+    };
+    const commandId = `create-${randomUUID()}`;
+    const created = await createActivity(db, registry, actorDeps, {
+      commandId,
+      title: "Audited",
+      capabilities: ["competition"],
+    });
+    const receipt = await db
+      .selectFrom("command_receipt")
+      .selectAll()
+      .where("command_id", "=", commandId)
+      .executeTakeFirstOrThrow();
+    expect(receipt).toMatchObject({ actor_id: "alice", actor_type: "user" });
+
+    const audits = await db
+      .selectFrom("audit_entry")
+      .selectAll()
+      .where("command_id", "=", commandId)
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actor_id: "alice", capability: "engine" });
+
+    const event = await db
+      .selectFrom("outbox")
+      .selectAll()
+      .where("activity_id", "=", created.body.id)
+      .where("event_type", "=", "ActivityCreated")
+      .executeTakeFirstOrThrow();
+    expect(event).toMatchObject({ actor_id: "alice", actor_type: "user" });
+
+    await createActivity(db, registry, actorDeps, {
+      commandId,
+      title: "Audited",
+      capabilities: ["competition"],
+    });
+    const auditsAfter = await db
+      .selectFrom("audit_entry")
+      .selectAll()
+      .where("command_id", "=", commandId)
+      .execute();
+    expect(auditsAfter).toHaveLength(1);
   });
 });

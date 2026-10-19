@@ -24,6 +24,29 @@ ENGINE_IMPORTS = {
 }
 PERSISTENCE_MODULES = ("@artflow-plus/db", "kysely", "pg")
 ENGINE_ASSEMBLY_FILES = ("registry.ts", "packs.ts")
+NAMED_IMPORT_PATTERN = re.compile(
+    r"""import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']@artflow-plus/db["']""",
+    re.DOTALL,
+)
+# Application processes may only use lifecycle helpers; every fact goes through
+# the runtime command service (AUTH-01 / the M3 review's single write path).
+FORBIDDEN_APP_MUTATORS = {
+    "insertActivity",
+    "updateActivity",
+    "insertSession",
+    "updateSession",
+    "appendEvent",
+    "claimCommand",
+    "completeCommand",
+    "insertAudit",
+    "insertDraft",
+    "updateDraft",
+    "insertCompiled",
+    "insertRelease",
+    "upsertExecutionProjection",
+    "blockExecutionProjection",
+    "retryEvent",
+}
 
 
 def _imports(path: Path) -> list[str]:
@@ -110,6 +133,31 @@ def app_layer_violations(plus_root: Path) -> list[str]:
     return violations
 
 
+def app_persistence_violations(plus_root: Path) -> list[str]:
+    """API/worker must not import DB mutators; writes go through the runtime."""
+    violations: list[str] = []
+    bases = (
+        plus_root / "apps" / "api" / "src",
+        plus_root / "apps" / "worker" / "src",
+    )
+    for base in bases:
+        for path in sorted(base.rglob("*.ts")):
+            text = path.read_text(encoding="utf-8")
+            for match in NAMED_IMPORT_PATTERN.finditer(text):
+                names = {
+                    item.strip().removeprefix("type ").split(" as ")[0].strip()
+                    for item in match.group(1).split(",")
+                    if item.strip()
+                }
+                forbidden = sorted(names & FORBIDDEN_APP_MUTATORS)
+                if forbidden:
+                    violations.append(
+                        f"{path.relative_to(plus_root).as_posix()}: "
+                        f"application imports DB mutator(s) {', '.join(forbidden)}"
+                    )
+    return violations
+
+
 def test_capabilities_do_not_import_each_other() -> None:
     violations = capability_violations(
         ROOT / "plus" / "packages" / "domain" / "src"
@@ -133,6 +181,13 @@ def test_engine_assembly_does_not_hard_code_capabilities() -> None:
         ROOT / "plus" / "packages" / "domain" / "src"
     )
     assert not violations, "the engine must not hard-code capabilities:\n" + "\n".join(
+        violations
+    )
+
+
+def test_application_does_not_import_db_mutators() -> None:
+    violations = app_persistence_violations(ROOT / "plus")
+    assert not violations, "application writes must go through the runtime:\n" + "\n".join(
         violations
     )
 
@@ -186,4 +241,14 @@ def test_gate_detects_synthetic_violations(tmp_path: Path) -> None:
     assert any(
         "apps/api/src/app.ts" in item and "capabilities/alpha.js" in item
         for item in app_failures
+    )
+
+    (api_src / "writer.ts").write_text(
+        'import { insertActivity, getActivity } from "@artflow-plus/db";\n',
+        encoding="utf-8",
+    )
+    persistence_failures = app_persistence_violations(plus_root)
+    assert any(
+        "apps/api/src/writer.ts" in item and "insertActivity" in item
+        for item in persistence_failures
     )

@@ -36,7 +36,8 @@ capability（命令、事件、投影、定义语言），由 Registry/Pack 组�
 - M4-M7 的真实 capability 命令、投影与 golden fixtures。
 - 现场旅程（报名→评审→投票→发布→归档）的端到端验证。
 - 第三个结构不同的活动在不改内核的情况下运行。
-- 认证/授权（actor）与审计事件（M8 前统一加入，不伪造身份）。
+- 认证 provider（本地会话/SSO）与具体授权策略：Actor/Audit 数据模型已在 M3.5 固定，
+  M4 由本地会话派生 actor，SSO 仍在 M8；不伪造身份。
 
 ## 约束
 

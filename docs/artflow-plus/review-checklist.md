@@ -11,6 +11,10 @@
 - [ ] Activity 仍保持薄容器（身份/粗生命周期/enabled capabilities/active release）。
 - [ ] Definition 改动走 Package + 对应 capability compiler + cross-capability
       binding 校验；没有把 package 当成一个通用 workflow 图。
+- [ ] Release 冻结 execution policy / capability versions / bindings；启动只读 release
+      快照，不从当前 registry 重新推导语义。
+- [ ] 每个被接受的 command 在同一事务内写 receipt、outbox 与 audit；actor 由 transport
+      注入，不从请求 body 读取。
 - [ ] Execution Session 带 scope 与 mode；并行/冲突策略由组合声明；TEST/REHEARSAL
       与 FORMAL 不在冲突 scope 上重叠。
 - [ ] Studio/Ops/Live/Portal 消费同一 authority；没有哪个面自行解释事实。
@@ -24,6 +28,8 @@
 - [ ] 锁顺序固定；锁后重新读取；没有 `.get()` 假设行仍存在。
 - [ ] 幂等键/receipt 与事实同一事务。
 - [ ] 依赖锁的路径有真实 PostgreSQL 双线程测试（如适用）。
+- [ ] Outbox 消费按 projection partition 串行；投影更新有 sequence CAS；死信把分区
+      置为 BLOCKED，后续事件不得越过。
 
 ## 公开出口
 

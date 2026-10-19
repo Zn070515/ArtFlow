@@ -14,6 +14,10 @@ export const DomainEventEnvelopeSchema = Type.Object(
     revision: Type.Integer({ minimum: 0 }),
     mode: Type.Optional(ExecutionModeSchema),
     scope: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    actorId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    actorType: Type.Optional(
+      Type.Union([Type.Literal("system"), Type.Literal("user"), Type.Literal("service")]),
+    ),
     payload: Type.Unknown(),
   },
   { additionalProperties: false },

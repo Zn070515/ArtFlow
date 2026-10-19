@@ -1,7 +1,7 @@
 import type { RuntimeEvent } from "@artflow-plus/domain";
 import { appendEvent, type AppendEventInput } from "@artflow-plus/db";
 
-import type { RuntimeDeps } from "./deps.js";
+import { runtimeActor, type RuntimeDeps } from "./deps.js";
 
 export type { RuntimeEvent };
 
@@ -23,6 +23,7 @@ export async function appendEngineEvent(
   deps: RuntimeDeps,
   input: EngineEventInput,
 ): Promise<number> {
+  const actor = runtimeActor(deps);
   return appendEvent(trx, {
     eventId: input.eventId ?? deps.newEventId(),
     type: input.type,
@@ -32,6 +33,8 @@ export async function appendEngineEvent(
     aggregateId: input.aggregateId,
     capability: input.capability ?? "engine",
     revision: input.revision,
+    actorId: actor.actorId,
+    actorType: actor.actorType,
     ...(input.mode === undefined ? {} : { mode: input.mode }),
     ...(input.scope === undefined ? {} : { scope: input.scope }),
     payload: input.payload,

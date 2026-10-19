@@ -105,11 +105,24 @@ GET  /api/activities/:id/stream              SSE (enhancement only)
 GET  /api/activities/:id/execution-state     projection + stale watermark
 ```
 
-The outbox is the event log. `apps/worker` applies it to
-`execution_projection(activity_id, mode)` with `FOR UPDATE SKIP LOCKED`, retries
-failures, dead-letters after a limit, and can rebuild a projection from the
-full log. pg-boss only schedules the relay as a backstop; the outbox remains the
-source of truth. Formal, rehearsal and test events and projections never mix.
+Every release freezes its execution semantics: capability versions, declared
+scopes, merged scope conflicts and the runtime contract version. Starting a
+session reads that snapshot; the current registry may only confirm that a
+compatible implementation exists.
+
+The outbox is the event log. `apps/worker` applies it per
+`(activity_id, mode)` partition: an advisory transaction lock serializes a
+partition, the projection update is a `last_sequence` CAS, and a permanently
+failing event sets the partition to `blocked` instead of letting later events
+overtake it. Operators can retry the blocked event or rebuild the projection
+from the log. pg-boss only schedules the relay as a backstop; the outbox remains
+the source of truth. Formal, rehearsal and test events and projections never mix.
+
+Every accepted command writes an `audit_entry` with the injected `ActorContext`
+in the same transaction as the receipt and the outbox event. M3 has no login, so
+the API uses an explicit system actor and tests inject one; actors are never read
+from a request body. `/readyz` checks PostgreSQL and the required migrations;
+`/healthz` only reports process liveness.
 
 ## Current layout
 

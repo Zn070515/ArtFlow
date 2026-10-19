@@ -5,7 +5,7 @@ import {
   PackInstantiateBodySchema,
   StartExecutionBodySchema,
 } from "@artflow-plus/contracts";
-import type { Database } from "@artflow-plus/db";
+import { checkReady, type Database } from "@artflow-plus/db";
 import {
   defaultCapabilityRegistry,
   DomainError,
@@ -15,6 +15,7 @@ import {
 import type {
   ActivityDefinitionPackage,
   ActivityPack,
+  ActorContext,
   CapabilityRegistry,
   ExecutionMode,
 } from "@artflow-plus/domain";
@@ -43,6 +44,8 @@ export interface AppOptions {
   readonly registry?: CapabilityRegistry;
   readonly packs?: readonly ActivityPack[];
   readonly deps?: RuntimeDeps;
+  /** M3 has no login; the actor is injected, never read from a request body. */
+  readonly actor?: ActorContext;
   /** Exposes the generic capability fact seam for the M3 skeleton proof. */
   readonly enableRuntimeFacts?: boolean;
 }
@@ -59,6 +62,9 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   COMPOSITION_INVALID: 422,
   ACTIVITY_NOT_ACTIVE: 409,
   CAPABILITY_NOT_ENABLED: 409,
+  CAPABILITY_VERSION_MISMATCH: 409,
+  RUNTIME_CONTRACT_MISMATCH: 409,
+  SCOPE_UNDECLARED: 422,
   VERSION_NOT_RELEASED: 409,
   SESSION_NOT_RUNNING: 409,
   DEFINITION_NOT_COMPILED: 409,
@@ -68,6 +74,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   ACTIVITY_HAS_RUNNING_SESSIONS: 409,
   DEFINITION_HASH_MISMATCH: 422,
   DEFINITION_INVALID: 422,
+  RELEASE_SNAPSHOT_INCOMPLETE: 422,
 };
 
 const CreateActivityBody = Type.Object(
@@ -191,7 +198,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { db } = options;
   const registry = options.registry ?? defaultCapabilityRegistry;
   const packs = options.packs ?? [SINGER_COMPETITION_PACK];
-  const deps = options.deps ?? defaultRuntimeDeps();
+  const baseDeps = options.deps ?? defaultRuntimeDeps();
+  const deps =
+    options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
   await app.register(swagger, {
     openapi: {
@@ -200,7 +209,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   app.get("/healthz", async () => ({ status: "ok" }));
-  app.get("/readyz", async () => ({ status: "ok" }));
+  app.get("/readyz", async (_request, reply) => {
+    try {
+      await checkReady(db);
+      return { status: "ok" };
+    } catch {
+      // The generic status deliberately does not leak the failure detail.
+      return reply.status(503).send({ status: "unavailable" });
+    }
+  });
   app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
 
   app.get("/api/capabilities", async () => ({
@@ -344,7 +361,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const commandId = requireIdempotency(request);
       const { id } = request.params as { id: string };
       const body = request.body as { expectedDraftRevision: number };
-      const outcome = await releaseDefinitionCommand(db, deps, {
+      const outcome = await releaseDefinitionCommand(db, registry, deps, {
         commandId,
         activityId: id,
         expectedDraftRevision: body.expectedDraftRevision,
@@ -475,6 +492,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       raw.flushHeaders();
       let cursor = query.after ?? parsedHeader;
       let closed = false;
+      let polling = false;
       const close = (): void => {
         if (closed) return;
         closed = true;
@@ -483,7 +501,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         raw.end();
       };
       const poll = setInterval(() => {
-        if (closed) return;
+        // Never overlap two reads: a slow query must not emit duplicate frames.
+        if (closed || polling) return;
+        polling = true;
         void listEvents(db, {
           activityId: id,
           after: cursor,
@@ -500,6 +520,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           .catch(() => {
             // Realtime is an enhancement; close and let the client poll.
             close();
+          })
+          .finally(() => {
+            polling = false;
           });
       }, 500);
       const heartbeat = setInterval(() => {

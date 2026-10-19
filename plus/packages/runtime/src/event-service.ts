@@ -56,6 +56,9 @@ export interface ExecutionState extends ExecutionProjectionState {
   readonly lastSequence: number;
   readonly headSequence: number;
   readonly stale: boolean;
+  readonly status: "running" | "blocked";
+  readonly blockedSequence?: number;
+  readonly blockedReason?: string;
 }
 
 export async function getExecutionState(
@@ -77,5 +80,12 @@ export async function getExecutionState(
     lastSequence,
     headSequence: head,
     stale: head > lastSequence,
+    status: projection?.status ?? "running",
+    ...(projection?.blockedSequence === undefined
+      ? {}
+      : { blockedSequence: projection.blockedSequence }),
+    ...(projection?.blockedReason === undefined
+      ? {}
+      : { blockedReason: projection.blockedReason }),
   };
 }

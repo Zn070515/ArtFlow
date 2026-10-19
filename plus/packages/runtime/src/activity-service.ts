@@ -19,7 +19,7 @@ import {
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
-import type { RuntimeDeps } from "./deps.js";
+import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { CompositionError } from "./errors.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand } from "./hash.js";
@@ -38,25 +38,16 @@ export async function createActivity(
   deps: RuntimeDeps,
   input: CreateActivityInput,
 ): Promise<CommandOutcome<Activity>> {
-  const composition = registry.validateComposition({
-    enable: input.capabilities ?? [],
-  });
-  if (!composition.ok) {
-    throw new CompositionError(composition.issues);
-  }
-  const activity = createActivityDomain({
-    id: idFromCommand("act", input.commandId),
-    title: input.title,
-    capabilities: composition.plan.enabledCapabilities,
-  });
+  const activityId = idFromCommand("act", input.commandId);
 
   return executeCommand(
     db,
     {
       commandId: input.commandId,
-      activityId: activity.id,
+      activityId,
       capability: "engine",
       commandType: "activity.create",
+      actor: runtimeActor(deps),
       payload: {
         title: input.title,
         capabilities: input.capabilities ?? [],
@@ -64,6 +55,19 @@ export async function createActivity(
       },
     },
     async (trx) => {
+      // Validation runs after the receipt claim, so a retry of an accepted
+      // command replays even if the current registry would reject it.
+      const composition = registry.validateComposition({
+        enable: input.capabilities ?? [],
+      });
+      if (!composition.ok) {
+        throw new CompositionError(composition.issues);
+      }
+      const activity = createActivityDomain({
+        id: activityId,
+        title: input.title,
+        capabilities: composition.plan.enabledCapabilities,
+      });
       await insertActivity(trx, activity);
       if (input.initialDefinition !== undefined) {
         await insertDraft(trx, {
@@ -107,6 +111,7 @@ export async function activateActivity(
       activityId: input.activityId,
       capability: "engine",
       commandType: "activity.activate",
+      actor: runtimeActor(deps),
       payload: { expectedRevision: input.expectedRevision },
     },
     async (trx) => {

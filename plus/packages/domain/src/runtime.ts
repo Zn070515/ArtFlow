@@ -18,6 +18,8 @@ export interface RuntimeEvent {
   readonly revision: number;
   readonly mode?: ExecutionMode;
   readonly scope?: string;
+  readonly actorId?: string;
+  readonly actorType?: string;
   readonly payload: unknown;
 }
 

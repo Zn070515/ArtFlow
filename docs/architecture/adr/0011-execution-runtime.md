@@ -82,6 +82,31 @@ M1/M2 交付了纯领域内核、Capability Registry、Activity Pack 和 HTTP/DB
   “已注册 capability 在运行 session 上追加事实”的最小 seam；真实命令在 M4-M7 实现。
 - 没有为未实现 capability 注册占位实现；缺 capability 继续返回可诊断的拒绝。
 
+## 硬化（M3 review，2026-10-19）
+
+- **Release 冻结执行语义**：`definition_release` 增加 `execution_policy`
+  （declaredScopes + merged conflicts + runtimeContractVersion）、`capability_versions`、
+  `bindings`。`startExecution` 只读 release 快照，不再从当前 registry 重新推导 policy；
+  registry 只回答“是否有兼容版本的实现”，版本不匹配返回 `CAPABILITY_VERSION_MISMATCH`，
+  未声明的 scope 返回 `SCOPE_UNDECLARED`。
+- **分区顺序**：relay 以 `(activity_id, mode)` 为分区，先用
+  `pg_try_advisory_xact_lock` 锁住分区，再按 id 领取事件；`ORDER BY id + SKIP LOCKED`
+  不再是全局顺序保证。不同分区仍可并发。
+- **投影 CAS**：`upsertExecutionProjection` 只在 `excluded.last_sequence >
+  execution_projection.last_sequence` 时更新，旧状态不能覆盖新状态。
+- **死信阻塞分区**：永久失败的事件把投影置为 `status='blocked'` +
+  `blocked_sequence/blocked_reason`，后续事件不再越过；operator 用
+  `retryBlockedProjection` 重试该事件并解除阻塞，或 `rebuildExecutionProjection`
+  从事件日志重建。`getExecutionState` 返回 blocked 状态。
+- **严格幂等**：registry/compiler/domain 校验全部移到 receipt claim 之后；同 command id +
+  同 payload 的重试在任何当前实现变化之前就 replay。
+- **单一写路径**：删除 `saveActivityWithRevision`；所有事实只经 runtime command service。
+  结构门禁禁止 API/worker import DB mutator。
+- **真实并发证据**：runtime 测试覆盖同 scope 并发、冲突 scope 并发、同 command id 并发
+  retry、两个 relay 并发；DB 测试覆盖迁移、CAS、分区锁、死信阻塞/恢复。
+- **readiness**：`/readyz` 执行 `select 1` 并检查 0002/0003 迁移；`/healthz` 仍是进程存活。
+- **SSE**：轮询加 running flag，慢查询不会产生重复 frame。
+
 ## 后果
 
 - API 需要 PostgreSQL；测试通过 schema 隔离并行运行。

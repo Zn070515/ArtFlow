@@ -5,5 +5,6 @@ export * from "./definition-repository.js";
 export * from "./migrations.js";
 export * from "./outbox.js";
 export * from "./projection-repository.js";
+export * from "./readiness.js";
 export * from "./session-repository.js";
 export * from "./types.js";

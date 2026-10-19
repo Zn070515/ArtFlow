@@ -25,6 +25,12 @@ export interface CapabilityManifest {
   readonly events: readonly string[];
   readonly permissions: readonly string[];
   readonly surfaces: readonly CapabilitySurface[];
+  /**
+   * Execution scopes this capability owns. A release freezes their union; a
+   * session may only use a declared scope when at least one capability
+   * declared scopes. Empty means "not specified yet" during migration.
+   */
+  readonly scopes?: readonly string[];
 }
 
 /**
@@ -56,6 +62,8 @@ export interface CompositionPlan {
   readonly enabledCapabilities: readonly string[];
   /** The merged scope conflict policy of the enabled capabilities. */
   readonly scopeConflicts: ScopeConflictPolicy;
+  /** The sorted union of scopes declared by the enabled capabilities. */
+  readonly declaredScopes: readonly string[];
 }
 
 export type CompositionResult =
@@ -332,15 +340,16 @@ function validateComposition(
     return deepFreeze({ ok: false as const, issues: Object.freeze(issues) });
   }
 
+  const enabledRegistrations = enabledList
+    .map((identity) => byIdentity.get(identity))
+    .filter((item): item is CapabilityRegistration => item !== undefined);
+  const declaredScopes = [
+    ...new Set(enabledRegistrations.flatMap((item) => item.manifest.scopes ?? [])),
+  ].sort();
   const plan: CompositionPlan = {
     enabledCapabilities: Object.freeze(enabledList),
-    scopeConflicts: deepFreeze(
-      mergeScopeConflicts(
-        enabledList
-          .map((identity) => byIdentity.get(identity))
-          .filter((item): item is CapabilityRegistration => item !== undefined),
-      ),
-    ),
+    scopeConflicts: deepFreeze(mergeScopeConflicts(enabledRegistrations)),
+    declaredScopes: Object.freeze(declaredScopes),
   };
   return deepFreeze({ ok: true as const, plan });
 }

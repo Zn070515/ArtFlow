@@ -21,7 +21,7 @@
 | GATE-RELEASE-01 | DEPL-01/07 | publish 只由 `v*` tag 触发；bake `github.sha`；带 provenance；生产不发布 `latest` | `tests/gates/test_release_artifacts.py` |
 | GATE-DEPLOY-01 | DEPL-02/03/04 | 只有 proxy 发布端口；media/realtime 只读挂载 static；`collectstatic --clear`；每个 manifest 变量都有文档 | 同上 |
 | GATE-ARTIFACT-01 | AUTH-04/DEPL-06 | Git 不得跟踪 `.env`、SQLite、media/staticfiles/backups/logs、zip/log/密钥 | `tests/gates/test_no_tracked_artifacts.py` |
-| GATE-PLUS-BOUNDARY-01 | ADR-0009/0010 | Plus capability 只能导入 engine 模块与自身；domain 不导入 persistence；engine assembly 不硬编码具体 capability；runtime/API/worker 不直接 import 具体 capability | `tests/gates/test_plus_capability_boundaries.py` |
+| GATE-PLUS-BOUNDARY-01 | ADR-0009/0010/0011 | Plus capability 只能导入 engine 模块与自身；domain 不导入 persistence；engine assembly 不硬编码具体 capability；runtime/API/worker 不直接 import 具体 capability；API/worker 不得 import DB mutator | `tests/gates/test_plus_capability_boundaries.py` |
 
 运行：
 

@@ -73,8 +73,29 @@ M4-M7 实现，默认注册表只暴露已实现的 `competition`。
 - **门禁**：GATE-PLUS-BOUNDARY-01 扩展到 runtime/API/worker 不得直接 import 具体
   capability；CI `REQUIRE_DB=1` 使数据库测试不能静默跳过。
 
+**M3 硬化（review 后补齐，2026-10-19）**
+
+- Definition Release 冻结 execution policy / capability versions / bindings；启动只读
+  release 快照，版本或 scope 不匹配即拒绝。
+- relay 按 `(activity_id, mode)` 分区 + advisory lock；投影 CAS；死信把分区置为
+  BLOCKED，后续事件不得越过，operator 可 retry/rebuild。
+- 所有 registry/compiler/domain 校验移到 receipt claim 之后，严格 replay。
+- 删除 `saveActivityWithRevision` 第二写路径；结构门禁禁止 API/worker import DB mutator。
+- 真实双连接测试：同 scope、冲突 scope、同 command id retry、并发 relay。
+- `/readyz` 检查 PostgreSQL 与迁移；SSE 轮询不重叠。
+
 **出口**：多个 scope 并行；冲突策略生效；恢复后状态一致；事件可重放。真实
 Registration/Evaluation/Voting 等 capability 仍由 M4-M7 实现。
+
+## M3.5 — Actor / Audit Foundation（已完成，2026-10-19）
+
+- `ActorContext`（actorId/actorType/roles/permissions/authContext）由 transport 注入，
+  绝不从请求 body 读取；M3 默认显式 system actor，测试可注入。
+- 每个被接受的 command 在同一事务内写 `audit_entry`；receipt 与 outbox 记录
+  actor_id/actor_type；replay 不重复审计。
+- 认证 provider（本地会话/SSO）仍可后置，但 M4-M7 的命令从第一天起就带 actor。
+
+**出口**：ADR-0012；M4 的 Registration 命令不需要再横向补 actor/audit。
 
 ## M4 — Registration / Questionnaire / Materials
 

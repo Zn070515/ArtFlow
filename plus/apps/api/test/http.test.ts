@@ -41,7 +41,7 @@ let clock = 0;
 const dbIt = connectionString ? it : it.skip;
 
 const deps: RuntimeDeps = {
-  now: () => `2026-10-19T10:00:${String(clock++).padStart(2, "0")}Z`,
+  now: () => new Date(Date.UTC(2026, 9, 19, 10, 0, 0) + clock++ * 1000).toISOString(),
   newEventId: () => randomUUID(),
 };
 
@@ -498,6 +498,60 @@ dbIt("accepts capability facts through the runtime seam", async () => {
   expect(
     feed.json().events.some((event: { type: string }) => event.type === "ProbeRecorded"),
   ).toBe(true);
+});
+
+dbIt("reports not-ready when PostgreSQL is unreachable", async () => {
+  const broken = createDb({
+    connectionString: "postgresql://artflow:artflow_dev@127.0.0.1:5499/artflow_plus",
+    connectionTimeoutMillis: 500,
+  });
+  const brokenApp = await buildApp({ db: broken });
+  try {
+    const response = await brokenApp.inject({ method: "GET", url: "/readyz" });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ status: "unavailable" });
+  } finally {
+    await brokenApp.close();
+    await closeDb(broken);
+  }
+});
+
+dbIt("records the injected actor in the receipt and audit log", async () => {
+  const audited = await buildApp({
+    db,
+    deps,
+    actor: {
+      actorId: "alice",
+      actorType: "user",
+      roles: ["staff"],
+      permissions: ["*"],
+    },
+  });
+  try {
+    const commandId = `cmd-${randomUUID()}`;
+    const response = await audited.inject({
+      method: "POST",
+      url: "/api/activities",
+      headers: headers(commandId),
+      payload: { title: "Audited", capabilities: ["competition"] },
+    });
+    expect(response.statusCode).toBe(201);
+    const receipt = await db
+      .selectFrom("command_receipt")
+      .selectAll()
+      .where("command_id", "=", commandId)
+      .executeTakeFirstOrThrow();
+    expect(receipt).toMatchObject({ actor_id: "alice", actor_type: "user" });
+    const audit = await db
+      .selectFrom("audit_entry")
+      .selectAll()
+      .where("command_id", "=", commandId)
+      .execute();
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ actor_id: "alice", capability: "engine" });
+  } finally {
+    await audited.close();
+  }
 });
 
 dbIt("publishes the OpenAPI document", async () => {

@@ -14,6 +14,8 @@ export interface AppendEventInput {
   readonly revision: number;
   readonly mode?: ExecutionMode;
   readonly scope?: string;
+  readonly actorId?: string;
+  readonly actorType?: string;
   readonly payload: unknown;
 }
 
@@ -37,6 +39,8 @@ function toRuntimeEvent(row: Selectable<OutboxRow>): RuntimeEvent {
     revision: row.revision ?? 0,
     ...(row.mode === null ? {} : { mode: row.mode as ExecutionMode }),
     ...(row.scope === null ? {} : { scope: row.scope }),
+    ...(row.actor_id === null ? {} : { actorId: row.actor_id }),
+    ...(row.actor_type === null ? {} : { actorType: row.actor_type }),
     payload: parseJson(row.payload),
   };
 }
@@ -59,6 +63,8 @@ export async function appendEvent(
       revision: event.revision,
       mode: event.mode ?? null,
       scope: event.scope ?? null,
+      actor_id: event.actorId ?? null,
+      actor_type: event.actorType ?? null,
       payload: JSON.stringify(event.payload),
       attempts: 0,
       last_error: null,
@@ -130,22 +136,93 @@ export async function headSequence(
   return row?.head === null || row?.head === undefined ? 0 : Number(row.head);
 }
 
-/** Claims a batch with SKIP LOCKED; duplicate workers never process one row. */
-export async function claimPendingEvents(
+export interface PendingPartition {
+  readonly activityId: string | null;
+  readonly mode: string | null;
+  readonly firstSequence: number;
+}
+
+/**
+ * A projection partition is (activity, mode). The relay locks a partition
+ * before claiming its events, so two relays can never apply event N+1 before
+ * event N. Different partitions may still run concurrently.
+ */
+export async function listPendingPartitions(
+  db: Kysely<Database>,
+  limit: number,
+): Promise<readonly PendingPartition[]> {
+  const result = await sql<{
+    activity_id: string | null;
+    mode: string | null;
+    first_sequence: string;
+  }>`
+    select activity_id, mode, min(id) as first_sequence
+      from outbox
+     where published_at is null
+       and dead_lettered_at is null
+     group by activity_id, mode
+     order by min(id)
+     limit ${limit}
+  `.execute(db);
+  return result.rows.map((row) => ({
+    activityId: row.activity_id,
+    mode: row.mode,
+    firstSequence: Number(row.first_sequence),
+  }));
+}
+
+/** Transaction-scoped advisory lock; released on commit or rollback. */
+export async function tryLockPartition(
   trx: Kysely<Database>,
+  key: string,
+): Promise<boolean> {
+  const result = await sql<{ locked: boolean }>`
+    select pg_try_advisory_xact_lock(hashtext(${key})) as locked
+  `.execute(trx);
+  return result.rows[0]?.locked === true;
+}
+
+export async function claimPendingEventsForPartition(
+  trx: Kysely<Database>,
+  activityId: string | null,
+  mode: string | null,
   limit: number,
 ): Promise<readonly RuntimeEvent[]> {
-  const rows = await trx
+  let query = trx
     .selectFrom("outbox")
     .selectAll()
     .where("published_at", "is", null)
-    .where("dead_lettered_at", "is", null)
+    .where("dead_lettered_at", "is", null);
+  query =
+    activityId === null
+      ? query.where("activity_id", "is", null)
+      : query.where("activity_id", "=", activityId);
+  query =
+    mode === null ? query.where("mode", "is", null) : query.where("mode", "=", mode);
+  const rows = await query
     .orderBy("id", "asc")
     .limit(limit)
     .forUpdate()
     .skipLocked()
     .execute();
   return rows.map(toRuntimeEvent);
+}
+
+/** Clears a dead letter so the next relay retries the exact event. */
+export async function retryEvent(
+  trx: Kysely<Database>,
+  sequence: number,
+): Promise<void> {
+  await trx
+    .updateTable("outbox")
+    .set({
+      published_at: null,
+      dead_lettered_at: null,
+      attempts: 0,
+      last_error: null,
+    })
+    .where("id", "=", String(sequence))
+    .execute();
 }
 
 export async function markPublished(

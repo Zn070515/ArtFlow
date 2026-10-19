@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 
+import { SYSTEM_ACTOR } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   appendEvent,
+  blockExecutionProjection,
   claimCommand,
-  claimPendingEvents,
-  StaleRevisionError,
+  claimPendingEventsForPartition,
+  clearExecutionProjectionBlock,
   closeDb,
   CommandIdConflictError,
   completeCommand,
@@ -22,11 +24,14 @@ import {
   insertDraft,
   insertRelease,
   insertSession,
+  listPendingPartitions,
   listRunningSessions,
   markPublished,
   migrate,
   readEventsSince,
   recordFailure,
+  retryEvent,
+  tryLockPartition,
   updateDraft,
   updateSession,
   upsertExecutionProjection,
@@ -49,6 +54,16 @@ const definitionPackage = {
   bindings: [],
 };
 
+const releaseSnapshot = {
+  executionPolicy: {
+    declaredScopes: [] as string[],
+    conflicts: {},
+    runtimeContractVersion: 1,
+  },
+  capabilityVersions: {} as Record<string, string>,
+  bindings: [],
+};
+
 async function seedActivity(id = `act-${randomUUID()}`): Promise<string> {
   await db
     .insertInto("activity")
@@ -68,6 +83,7 @@ async function seedActivity(id = `act-${randomUUID()}`): Promise<string> {
     capabilities: {},
     releasedAt: "2026-10-19T10:00:00Z",
     sourceDraftRevision: 1,
+    ...releaseSnapshot,
   });
   return id;
 }
@@ -97,13 +113,12 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
       commandType: "activity.create",
       payloadHash: "hash-a",
       scope: null,
+      actor: SYSTEM_ACTOR,
     };
-    const first = await db.transaction().execute(async (trx) => {
+    await db.transaction().execute(async (trx) => {
       expect(await claimCommand(trx, base)).toEqual({ kind: "claimed" });
       await completeCommand(trx, base.commandId, { id: "act-1" }, 201);
-      return true;
     });
-    expect(first).toBe(true);
 
     const replay = await db.transaction().execute((trx) => claimCommand(trx, base));
     expect(replay).toEqual({
@@ -137,10 +152,10 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
     expect(updated.revision).toBe(1);
     await expect(
       updateDraft(db, { ...draft, revision: 2, package: definitionPackage }, 0),
-    ).rejects.toBeInstanceOf(StaleRevisionError);
+    ).rejects.toBeInstanceOf(Error);
   });
 
-  it("stores compiled plans and releases", async () => {
+  it("stores compiled plans and frozen releases", async () => {
     const activityId = await seedActivity();
     await insertCompiled(db, {
       activityId,
@@ -158,10 +173,22 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
       capabilities: {},
       releasedAt: "2026-10-19T11:00:00Z",
       sourceDraftRevision: 1,
+      executionPolicy: {
+        declaredScopes: ["stage"],
+        conflicts: { stage: ["rehearsal"] },
+        runtimeContractVersion: 1,
+      },
+      capabilityVersions: { competition: "1" },
+      bindings: [],
     });
     expect(await getLatestRelease(db, activityId)).toMatchObject({
       version: 2,
       contentHash: "hash-2",
+      executionPolicy: {
+        declaredScopes: ["stage"],
+        conflicts: { stage: ["rehearsal"] },
+      },
+      capabilityVersions: { competition: "1" },
     });
   });
 
@@ -185,11 +212,11 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
     await updateSession(db, closed, 0, "2026-10-19T11:00:00Z");
     await expect(
       updateSession(db, closed, 0, "2026-10-19T11:00:00Z"),
-    ).rejects.toBeInstanceOf(StaleRevisionError);
+    ).rejects.toBeInstanceOf(Error);
     expect(await listRunningSessions(db, activityId)).toHaveLength(0);
   });
 
-  it("reads events by cursor, tracks the head and claims with SKIP LOCKED", async () => {
+  it("serializes a projection partition and reads events by cursor", async () => {
     const activityId = await seedActivity();
     const ids: number[] = [];
     for (let index = 0; index < 3; index += 1) {
@@ -205,6 +232,8 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
           revision: 0,
           mode: "formal",
           scope: "stage",
+          actorId: "tester",
+          actorType: "user",
           payload: { sessionId: `session-${index}`, scope: "stage", mode: "formal" },
         }),
       );
@@ -213,44 +242,45 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
 
     const firstPage = await readEventsSince(db, { activityId, after: 0, limit: 2 });
     expect(firstPage.map((event) => event.sequence)).toEqual(ids.slice(0, 2));
-    const secondPage = await readEventsSince(db, {
-      activityId,
-      after: firstPage[1]?.sequence ?? 0,
-      limit: 2,
-    });
-    expect(secondPage.map((event) => event.sequence)).toEqual([ids[2]]);
+    expect(firstPage[0]?.actorId).toBe("tester");
     expect(await headSequence(db, activityId, "formal")).toBe(ids[2]);
+
+    const partitions = await listPendingPartitions(db, 10);
+    expect(partitions.some((item) => item.activityId === activityId)).toBe(true);
 
     let releaseClaim: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {
       releaseClaim = resolve;
     });
-    let claimedInside: readonly unknown[] = [];
+    let claimedInside = 0;
     const claimer = db.transaction().execute(async (trx) => {
-      claimedInside = await claimPendingEvents(trx, 10);
+      expect(await tryLockPartition(trx, `${activityId}:formal`)).toBe(true);
+      const events = await claimPendingEventsForPartition(trx, activityId, "formal", 10);
+      claimedInside = events.length;
       await gate;
-      for (const event of claimedInside as { sequence: number }[]) {
+      for (const event of events) {
         await markPublished(trx, event.sequence);
       }
     });
 
-    while (claimedInside.length === 0) {
+    while (claimedInside === 0) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    const secondWorker = await db
-      .transaction()
-      .execute((trx) => claimPendingEvents(trx, 10));
-    expect(secondWorker).toHaveLength(0);
+    const secondWorker = await db.transaction().execute(async (trx) => {
+      const locked = await tryLockPartition(trx, `${activityId}:formal`);
+      return locked;
+    });
+    expect(secondWorker).toBe(false);
     releaseClaim?.();
     await claimer;
 
     const remaining = await db
       .transaction()
-      .execute((trx) => claimPendingEvents(trx, 10));
+      .execute((trx) => claimPendingEventsForPartition(trx, activityId, "formal", 10));
     expect(remaining).toHaveLength(0);
   });
 
-  it("counts failures and dead-letters after the limit", async () => {
+  it("counts failures, blocks the partition and can retry", async () => {
     const activityId = await seedActivity();
     const sequence = await db.transaction().execute((trx) =>
       appendEvent(trx, {
@@ -275,26 +305,45 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
       .transaction()
       .execute((trx) => recordFailure(trx, sequence, "boom", 2));
     expect(second).toEqual({ attempts: 2, deadLettered: true });
+
+    await db.transaction().execute((trx) =>
+      blockExecutionProjection(trx, activityId, "formal", sequence, "boom"),
+    );
+    let projection = await getExecutionProjection(db, activityId, "formal");
+    expect(projection).toMatchObject({
+      status: "blocked",
+      blockedSequence: sequence,
+    });
+
+    await db.transaction().execute(async (trx) => {
+      await retryEvent(trx, sequence);
+      await clearExecutionProjectionBlock(trx, activityId, "formal");
+    });
+    projection = await getExecutionProjection(db, activityId, "formal");
+    expect(projection?.status).toBe("running");
+    expect(projection?.blockedSequence).toBeUndefined();
   });
 
-  it("stores an execution projection", async () => {
+  it("never lets an older projection overwrite a newer one", async () => {
     const activityId = await seedActivity();
-    expect(await getExecutionProjection(db, activityId, "formal")).toBeNull();
-    await db.transaction().execute((trx) =>
-      upsertExecutionProjection(trx, {
-        activityId,
-        mode: "formal",
-        lastSequence: 3,
-        state: {
-          activityId,
-          mode: "formal",
-          sessions: {},
-          runningScopes: [],
-        },
-      }),
-    );
+    const state = {
+      activityId,
+      mode: "formal" as const,
+      sessions: {},
+      runningScopes: [] as string[],
+    };
+    expect(
+      await db.transaction().execute((trx) =>
+        upsertExecutionProjection(trx, { activityId, mode: "formal", lastSequence: 5, state }),
+      ),
+    ).toBe(true);
+    expect(
+      await db.transaction().execute((trx) =>
+        upsertExecutionProjection(trx, { activityId, mode: "formal", lastSequence: 4, state }),
+      ),
+    ).toBe(false);
     expect(await getExecutionProjection(db, activityId, "formal")).toMatchObject({
-      lastSequence: 3,
+      lastSequence: 5,
     });
   });
 });

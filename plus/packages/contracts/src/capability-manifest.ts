@@ -24,6 +24,11 @@ export const CapabilityManifestSchema = Type.Object(
     events: Type.Array(Type.String({ pattern: "^[A-Z][A-Za-z0-9]+$" })),
     permissions: Type.Array(Type.String({ minLength: 1 })),
     surfaces: Type.Array(CapabilitySurfaceSchema, { uniqueItems: true, minItems: 1 }),
+    scopes: Type.Optional(
+      Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]*$", maxLength: 100 }), {
+        uniqueItems: true,
+      }),
+    ),
   },
   { additionalProperties: false },
 );

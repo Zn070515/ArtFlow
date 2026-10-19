@@ -20,13 +20,14 @@ import {
   createDefinitionDraft,
   DomainError,
   releaseDefinition,
+  RUNTIME_CONTRACT_VERSION,
   updateDefinitionDraft,
 } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
-import type { RuntimeDeps } from "./deps.js";
-import { DefinitionInvalidError } from "./errors.js";
+import { runtimeActor, type RuntimeDeps } from "./deps.js";
+import { CompositionError, DefinitionInvalidError } from "./errors.js";
 import { appendEngineEvent } from "./events.js";
 
 export interface CompileDefinitionInput {
@@ -68,12 +69,6 @@ export async function compileDefinition(
   deps: RuntimeDeps,
   input: CompileDefinitionInput,
 ): Promise<CommandOutcome<CompileDefinitionResult>> {
-  const compiled = compileActivityDefinitionPackage(input.package, registry.compilers);
-  if (!compiled.ok) {
-    throw new DefinitionInvalidError(compiled.issues);
-  }
-  const capabilityKeys = Object.keys(compiled.capabilities).sort();
-
   return executeCommand(
     db,
     {
@@ -81,6 +76,7 @@ export async function compileDefinition(
       activityId: input.activityId,
       capability: "engine",
       commandType: "definition.compile",
+      actor: runtimeActor(deps),
       payload: {
         expectedDraftRevision: input.expectedDraftRevision ?? null,
         package: input.package,
@@ -91,6 +87,13 @@ export async function compileDefinition(
       if (activity === null) {
         throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       }
+      // Compilation happens after the receipt claim: a replay of an accepted
+      // compile never depends on the current compiler implementation.
+      const compiled = compileActivityDefinitionPackage(input.package, registry.compilers);
+      if (!compiled.ok) {
+        throw new DefinitionInvalidError(compiled.issues);
+      }
+      const capabilityKeys = Object.keys(compiled.capabilities).sort();
       const stored = await getDraft(trx, input.activityId);
       let next: DefinitionDraft;
       if (stored === null) {
@@ -178,6 +181,7 @@ export interface ReleaseDefinitionResult {
 
 export async function releaseDefinitionCommand(
   db: Kysely<Database>,
+  registry: CapabilityRegistry,
   deps: RuntimeDeps,
   input: ReleaseDefinitionInput,
 ): Promise<CommandOutcome<ReleaseDefinitionResult>> {
@@ -188,6 +192,7 @@ export async function releaseDefinitionCommand(
       activityId: input.activityId,
       capability: "engine",
       commandType: "definition.release",
+      actor: runtimeActor(deps),
       payload: { expectedDraftRevision: input.expectedDraftRevision },
     },
     async (trx) => {
@@ -214,18 +219,51 @@ export async function releaseDefinitionCommand(
         contentHash: compiled.contentHash,
         capabilities: compiled.capabilities,
       };
+      // Freeze the runtime meaning of this release: capability versions, the
+      // declared scopes and the merged conflict policy of the enabled set.
+      const composition = registry.validateComposition({
+        enable: activity.enabledCapabilities,
+      });
+      if (!composition.ok) {
+        throw new CompositionError(composition.issues);
+      }
+      const capabilityVersions: Record<string, string> = {};
+      for (const identity of composition.plan.enabledCapabilities) {
+        const registration = registry.get(identity);
+        if (registration === undefined) {
+          throw new CompositionError([
+            {
+              code: "CAPABILITY_UNKNOWN",
+              message: `Capability ${identity} disappeared during release.`,
+              path: `capabilities.${identity}`,
+            },
+          ]);
+        }
+        capabilityVersions[identity] = registration.manifest.version;
+      }
+      const executionPolicy = {
+        declaredScopes: composition.plan.declaredScopes,
+        conflicts: composition.plan.scopeConflicts,
+        runtimeContractVersion: RUNTIME_CONTRACT_VERSION,
+      };
       const result = releaseDefinition({
         activity,
         draft: toDomainDraft(stored),
         expectedDraftRevision: input.expectedDraftRevision,
         compiled: compiledActivity,
         releasedAt: deps.now(),
+        executionPolicy,
+        capabilityVersions,
+        bindings: stored.package.bindings ?? [],
       });
       await insertRelease(trx, {
         activityId: input.activityId,
         version: result.version.version,
         contentHash: result.version.contentHash,
         capabilities: result.version.capabilities,
+        executionPolicy: result.version.executionPolicy,
+        capabilityVersions: result.version.capabilityVersions,
+        bindings: result.version.bindings,
         releasedAt: result.version.releasedAt,
         sourceDraftRevision: stored.revision,
       });

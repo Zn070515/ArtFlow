@@ -10,16 +10,19 @@ export interface CreateDbOptions {
   /** Test isolation: every connection starts with this search_path. */
   schema?: string;
   max?: number;
+  /** Fail fast for readiness probes and broken hosts. */
+  connectionTimeoutMillis?: number;
 }
 
 export function createDb(options: CreateDbOptions): Kysely<Database> {
-  const { connectionString, schema, max = 5 } = options;
+  const { connectionString, schema, max = 5, connectionTimeoutMillis } = options;
   if (schema !== undefined && !SAFE_SCHEMA.test(schema)) {
     throw new Error(`Unsafe schema name: ${schema}`);
   }
   const pool = new pg.Pool({
     connectionString,
     max,
+    ...(connectionTimeoutMillis === undefined ? {} : { connectionTimeoutMillis }),
     options: schema === undefined ? undefined : `-c search_path=${schema}`,
   });
   return new Kysely<Database>({

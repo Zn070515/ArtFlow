@@ -18,13 +18,13 @@ import type {
 import {
   closeExecutionSession,
   DomainError,
+  RUNTIME_CONTRACT_VERSION,
   startExecutionSession,
 } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
-import type { RuntimeDeps } from "./deps.js";
-import { CompositionError } from "./errors.js";
+import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand } from "./hash.js";
 
@@ -50,6 +50,7 @@ export async function startExecution(
       capability: "engine",
       commandType: "execution.start",
       scope: input.scope,
+      actor: runtimeActor(deps),
       payload: {
         scope: input.scope,
         mode: input.mode,
@@ -85,13 +86,41 @@ export async function startExecution(
         status: "released",
         contentHash: release.contentHash,
         capabilities: release.capabilities,
+        capabilityVersions: release.capabilityVersions,
+        executionPolicy: release.executionPolicy,
+        bindings: release.bindings,
         releasedAt: release.releasedAt,
       };
-      const composition = registry.validateComposition({
-        enable: activity.enabledCapabilities,
-      });
-      if (!composition.ok) {
-        throw new CompositionError(composition.issues);
+      if (release.executionPolicy.runtimeContractVersion !== RUNTIME_CONTRACT_VERSION) {
+        throw new DomainError(
+          "RUNTIME_CONTRACT_MISMATCH",
+          `Release ${release.version} targets runtime contract ${release.executionPolicy.runtimeContractVersion}; this build implements ${RUNTIME_CONTRACT_VERSION}.`,
+        );
+      }
+      // The registry may only answer "do I have a compatible implementation?";
+      // it may not redefine what the release means.
+      for (const [identity, frozenVersion] of Object.entries(
+        release.capabilityVersions,
+      )) {
+        const registration = registry.get(identity);
+        if (
+          registration === undefined ||
+          registration.manifest.version !== frozenVersion
+        ) {
+          throw new DomainError(
+            "CAPABILITY_VERSION_MISMATCH",
+            `Release ${release.version} was frozen with ${identity}@${frozenVersion}, which is not the registered implementation.`,
+          );
+        }
+      }
+      if (
+        release.executionPolicy.declaredScopes.length > 0 &&
+        !release.executionPolicy.declaredScopes.includes(input.scope)
+      ) {
+        throw new DomainError(
+          "SCOPE_UNDECLARED",
+          `Scope ${input.scope} is not declared by release ${release.version}.`,
+        );
       }
       const existingSessions = await listRunningSessions(trx, input.activityId);
       const openedAt = deps.now();
@@ -101,7 +130,7 @@ export async function startExecution(
         scope: input.scope,
         mode: input.mode,
         existingSessions,
-        conflicts: composition.plan.scopeConflicts,
+        conflicts: release.executionPolicy.conflicts,
         sessionId: idFromCommand("sess", input.commandId),
       });
       const saved = await insertSession(trx, session, openedAt);
@@ -146,6 +175,7 @@ export async function closeExecution(
       activityId: input.activityId,
       capability: "engine",
       commandType: "execution.close",
+      actor: runtimeActor(deps),
       payload: {
         sessionId: input.sessionId,
         expectedRevision: input.expectedRevision,
@@ -225,20 +255,6 @@ export async function appendRuntimeFact(
   deps: RuntimeDeps,
   input: RuntimeFactInput,
 ): Promise<CommandOutcome<RuntimeFactResult>> {
-  if (!/^[A-Z][A-Za-z0-9]+$/.test(input.type)) {
-    throw new DomainError("INVALID_INPUT", "Fact types are CamelCase event names.");
-  }
-  if (RESERVED_EVENT_PREFIXES.some((prefix) => input.type.startsWith(prefix))) {
-    throw new DomainError("INVALID_INPUT", `Fact type ${input.type} is reserved.`);
-  }
-  const registration = registry.get(input.capability);
-  if (registration === undefined) {
-    throw new DomainError(
-      "CAPABILITY_NOT_ENABLED",
-      `Capability ${input.capability} is not registered.`,
-    );
-  }
-
   return executeCommand(
     db,
     {
@@ -247,9 +263,23 @@ export async function appendRuntimeFact(
       capability: input.capability,
       commandType: "runtime.fact",
       scope: input.scope,
+      actor: runtimeActor(deps),
       payload: { type: input.type, payload: input.payload },
     },
     async (trx) => {
+      if (!/^[A-Z][A-Za-z0-9]+$/.test(input.type)) {
+        throw new DomainError("INVALID_INPUT", "Fact types are CamelCase event names.");
+      }
+      if (RESERVED_EVENT_PREFIXES.some((prefix) => input.type.startsWith(prefix))) {
+        throw new DomainError("INVALID_INPUT", `Fact type ${input.type} is reserved.`);
+      }
+      const registration = registry.get(input.capability);
+      if (registration === undefined) {
+        throw new DomainError(
+          "CAPABILITY_NOT_ENABLED",
+          `Capability ${input.capability} is not registered.`,
+        );
+      }
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) {
         throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
