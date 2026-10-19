@@ -56,6 +56,19 @@
 - [x] duplicate-score golden、panel/score 双连接 PostgreSQL 并发、runtime/API focused
   tests 已通过；root Django 全量 test 按 Plus 重构约束未运行。
 
+### M6 Voting / Ticketing
+
+- [x] ballot 的 ticket identity 只接受服务端注入的 redeemed ticket session；同活动、
+  expiry、revoke、ticket state 与数据库唯一约束均在锁内复核，原始 token 不进入
+  command payload/receipt/audit。
+- [x] judge score 消费 HttpOnly judge session；session 绑定 activity/seat、expiry 与
+  revoke 状态，staff bearer 仍保留独立路径。
+- [x] vote open/submit/close 使用 execution session 的 frozen definition version；
+  运行 session 存在时禁止 release，漂移返回 `STALE_CONTEXT`。
+- [x] ticket/judge 状态迁移拒绝重复终态副作用；judge claim 使用 IP-global 限流桶。
+- [x] ticket redeem、ticket ballot、judge seat claim 使用真实 PostgreSQL 双连接并发
+  回归；runtime/API focused gates 已通过，root Django 全量 test 按 Plus 重构约束未运行。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

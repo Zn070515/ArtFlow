@@ -132,13 +132,18 @@ Evaluation/Voting 等 capability 仍由 M5-M7 实现。
 真实 PostgreSQL 双连接并发；纠错链 E2E；resolution fingerprint / tie HOLD / podium
 candidate 定向测试。
 
-## M6 — Voting / Ticketing
+## M6 — Voting / Ticketing（已完成，2026-10-19）
 
-- 投票场次、ballot 唯一性、成绩组成规则快照。
-- 票据、capability、领取、访问会话、限流。
-- Live 投影与降级。
+- 投票场次、ballot 唯一性、成绩组成规则快照均绑定 execution session 的
+  frozen definition release；运行中禁止换版，ballot/close 会拒绝 stale release。
+- 票据使用 redeemed ticket access session，judge scoring 使用 HttpOnly judge
+  session；原始 token 不进入 ballot payload、receipt 或 audit；claim 入口使用
+  IP-global 限流桶。
+- Live 投影与降级保留；ticket/judge 终态迁移显式拒绝重复副作用。
 
-**出口**：`capability-reissue-close` golden；重复投票/重放/跨活动拒绝。
+**出口**：`capability-reissue-close` golden；重复投票/重放/跨活动拒绝；
+ticket redemption、ballot uniqueness、judge-seat claim 的真实 PostgreSQL 双连接
+并发测试；release/session stale-context 与状态迁移回归。
 
 ## M7 — Publishing / Results / Archive
 
