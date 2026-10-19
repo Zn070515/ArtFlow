@@ -69,12 +69,6 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       default: true,
     },
     {
-      id: "judges",
-      prompt: "是否有评委？",
-      capability: "competition",
-      default: true,
-    },
-    {
       id: "audience-voting",
       prompt: "是否需要观众投票？",
       capability: "voting",

@@ -282,7 +282,7 @@ it("the default registry exposes only implemented capabilities", () => {
     "voting",
   ]);
   const result = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry, {
-    answers: { judges: false, "publish-results": false, archive: false },
+    answers: { "publish-results": false, archive: false },
   });
   expect(result.ok).toBe(true);
 });
