@@ -9,3 +9,6 @@ export * from "./events.js";
 export * from "./execution-service.js";
 export * from "./hash.js";
 export * from "./outbox-relay.js";
+export * from "./registration-service.js";
+export * from "./registration-projection.js";
+export * from "./material-service.js";

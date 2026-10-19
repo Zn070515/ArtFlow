@@ -69,6 +69,20 @@ export async function insertMaterial(db: Kysely<Database>, value: StoredMaterial
   }).execute();
 }
 
+export async function retireCurrentMaterial(
+  trx: Kysely<Database>,
+  registrationId: string,
+  questionKey: string,
+): Promise<void> {
+  await trx
+    .updateTable("material")
+    .set({ current: false, updated_at: new Date() })
+    .where("registration_id", "=", registrationId)
+    .where("question_key", "=", questionKey)
+    .where("current", "=", true)
+    .execute();
+}
+
 export async function getMaterial(
   db: Kysely<Database>,
   id: string,
