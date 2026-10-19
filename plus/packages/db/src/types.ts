@@ -340,6 +340,7 @@ export interface PodiumCandidateRow {
   status: string;
   placements: ColumnType<unknown, string, string>;
   source_round_ids: ColumnType<unknown, string, string>;
+  source_score_versions: ColumnType<unknown, string, string>;
   revision: number;
   created_at: ColumnType<Date, Date | undefined, never>;
 }

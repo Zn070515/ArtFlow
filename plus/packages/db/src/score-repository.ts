@@ -13,7 +13,7 @@ import type {
   PodiumCandidateRow,
 } from "./types.js";
 
-export type ScoreCorrectionState = "open" | "revised" | "closed" | "cancelled";
+export type ScoreCorrectionState = "open" | "revised" | "closed" | "recalculated" | "cancelled";
 export type RankingStatus = "ready" | "hold";
 export type AdvancementStatus = "auto" | "needs_review" | "finalized";
 
@@ -100,6 +100,7 @@ export interface StoredPodiumCandidate {
   readonly status: "candidate" | "hold";
   readonly placements: readonly unknown[];
   readonly sourceRoundIds: readonly string[];
+  readonly sourceScoreVersions: readonly { readonly roundId: string; readonly sourceScoreVersion: number }[];
   readonly revision: number;
 }
 
@@ -213,6 +214,10 @@ function podium(row: Selectable<PodiumCandidateRow>): StoredPodiumCandidate {
     status: row.status as StoredPodiumCandidate["status"],
     placements: arrayValue(row.placements),
     sourceRoundIds: arrayValue(row.source_round_ids).map(String),
+    sourceScoreVersions: arrayValue(row.source_score_versions).map((value) => {
+      const item = value as { roundId?: unknown; sourceScoreVersion?: unknown };
+      return { roundId: String(item.roundId), sourceScoreVersion: Number(item.sourceScoreVersion) };
+    }),
     revision: row.revision,
   };
 }
@@ -259,6 +264,34 @@ export async function countCurrentScoreFacts(
        and current = true
   `.execute(db);
   return result.rows[0]?.count ?? 0;
+}
+
+export async function countCurrentScoreFactsForContext(
+  db: Kysely<Database>,
+  input: { readonly performanceId: string; readonly panelSnapshotId: string; readonly contextVersion: number },
+): Promise<number> {
+  const result = await sql<{ count: number }>`
+    select count(*)::int as count
+      from score_fact
+     where performance_id = ${input.performanceId}
+       and panel_snapshot_id = ${input.panelSnapshotId}
+       and context_version = ${input.contextVersion}
+       and current = true
+  `.execute(db);
+  return result.rows[0]?.count ?? 0;
+}
+
+export async function retireCurrentScoreFactsForPerformance(
+  trx: Kysely<Database>,
+  performanceId: string,
+  contextVersion: number,
+): Promise<readonly string[]> {
+  const rows = await trx.updateTable("score_fact").set({
+    current: false,
+    updated_at: new Date(),
+  }).where("performance_id", "=", performanceId).where("context_version", "<", contextVersion)
+    .where("current", "=", true).returning(["id"]).execute();
+  return rows.map((row) => row.id);
 }
 
 export async function insertScoreFact(db: Kysely<Database>, value: StoredScoreFact): Promise<void> {
@@ -433,6 +466,7 @@ export async function insertPodiumCandidate(db: Kysely<Database>, value: StoredP
     status: value.status,
     placements: JSON.stringify(value.placements),
     source_round_ids: JSON.stringify(value.sourceRoundIds),
+    source_score_versions: JSON.stringify(value.sourceScoreVersions),
     revision: value.revision,
     created_at: new Date(),
   }).execute();

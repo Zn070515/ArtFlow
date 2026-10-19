@@ -1,6 +1,8 @@
 import {
   ActivateCompetitionPanelBodySchema,
   CloseExecutionBodySchema,
+  FinalizeAdvancementBodySchema,
+  LockCompetitionRoundBodySchema,
   CompetitionRoundParamsSchema,
   CompetitionScoreBodySchema,
   CompetitionScopeBodySchema,
@@ -12,6 +14,8 @@ import {
   PackInstantiateBodySchema,
   PrepareCompetitionRoundBodySchema,
   ResolveCompetitionBodySchema,
+  RecomputePodiumBodySchema,
+  ScoreCorrectionLifecycleBodySchema,
   StartExecutionBodySchema,
   TieDecisionBodySchema,
 } from "@artflow-plus/contracts";
@@ -43,12 +47,17 @@ import {
   listExecutions,
   finalizeRoster,
   activateCompetitionPanel,
+  closeScoreCorrection,
   editScoreFact,
+  finalizeAdvancement,
+  lockRound,
   lockPerformance,
   openPerformance,
   openScoreCorrection,
   prepareCompetitionRound,
   recordTieDecision,
+  recalculateAfterCorrection,
+  recomputePodiumCandidate,
   resolveRound,
   submitJudgeScore,
   submitPaperScore,
@@ -125,6 +134,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   SCORE_GATE_OPEN: 409,
   NO_PERFORMANCES: 409,
   JUDGE_ROSTER_INVALID: 422,
+  CONTESTANT_NOT_IN_ROSTER: 409,
   DUPLICATE_SCORE_FACT: 409,
   STALE_CONTEXT: 409,
   PERFORMANCE_NOT_SCORABLE: 409,
@@ -805,7 +815,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     { schema: { params: CompetitionPerformanceParams, body: OpenCompetitionPerformanceBodySchema } },
     async (request, reply) => {
       const commandId = requireIdempotency(request);
-      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const { id, roundKey, performanceId } = request.params as { id: string; roundKey: string; performanceId: string };
       const body = request.body as { scope: string; contestantId: string; sequence: number };
       const round = await routeRound(id, roundKey);
       const outcome = await openPerformance(db, await requestDeps(request), {
@@ -813,6 +823,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         activityId: id,
         roundId: round.id,
         scope: body.scope,
+        performanceId,
         contestantId: body.contestantId,
         sequence: body.sequence,
       });
@@ -833,6 +844,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         activityId: id,
         roundId: round.id,
         performanceId,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/lock",
+    { schema: { params: CompetitionRoundParamsSchema, body: LockCompetitionRoundBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string; expectedRevision: number };
+      const round = await routeRound(id, roundKey);
+      const outcome = await lockRound(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        expectedRevision: body.expectedRevision,
         scope: body.scope,
       });
       return reply.status(outcome.status).send(outcome.body);
@@ -917,9 +947,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         criteria: body.criteria,
         reason: body.reason,
         correctionId: body.correctionId,
+        scoreFactId,
         scope: body.scope,
       });
-      if (outcome.body.id !== scoreFactId) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
       return reply.status(outcome.status).send(outcome.body);
     },
   );
@@ -946,6 +976,57 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   );
 
+  const ScoreCorrectionParams = Type.Object({
+    id: Type.String({ minLength: 1 }),
+    roundKey: Type.String({ minLength: 1, maxLength: 100 }),
+    scoreFactId: Type.String({ minLength: 1, maxLength: 100 }),
+    correctionId: Type.String({ minLength: 1, maxLength: 100 }),
+  }, { additionalProperties: false });
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections/:correctionId/close",
+    { schema: { params: ScoreCorrectionParams, body: ScoreCorrectionLifecycleBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey, scoreFactId, correctionId } = request.params as { id: string; roundKey: string; scoreFactId: string; correctionId: string };
+      const body = request.body as { scope: string; panelSnapshotId: string; performanceId?: string };
+      const round = await routeRound(id, roundKey);
+      const outcome = await closeScoreCorrection(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        performanceId: body.performanceId,
+        scoreFactId,
+        correctionId,
+        panelSnapshotId: body.panelSnapshotId,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections/:correctionId/recalculate",
+    { schema: { params: ScoreCorrectionParams, body: ScoreCorrectionLifecycleBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey, scoreFactId, correctionId } = request.params as { id: string; roundKey: string; scoreFactId: string; correctionId: string };
+      const body = request.body as { scope: string; panelSnapshotId: string; performanceId?: string };
+      const round = await routeRound(id, roundKey);
+      const outcome = await recalculateAfterCorrection(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        performanceId: body.performanceId,
+        scoreFactId,
+        correctionId,
+        panelSnapshotId: body.panelSnapshotId,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
   app.post(
     "/api/activities/:id/competition/rounds/:roundKey/resolve",
     { schema: { params: RoundParams, body: ResolveCompetitionBodySchema } },
@@ -958,6 +1039,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         commandId,
         activityId: id,
         roundId: round.id,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/advancement/finalize",
+    { schema: { params: CompetitionRoundParamsSchema, body: FinalizeAdvancementBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string; expectedRankingRevision: number };
+      const round = await routeRound(id, roundKey);
+      const outcome = await finalizeAdvancement(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        expectedRankingRevision: body.expectedRankingRevision,
         scope: body.scope,
       });
       return reply.status(outcome.status).send(outcome.body);
@@ -982,7 +1082,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         commandId,
         activityId: id,
         roundId: round.id,
-        rankingSnapshotId: body.rankingSnapshotId || tieId,
+        rankingSnapshotId: body.rankingSnapshotId,
+        tieId,
         inputFingerprint: body.inputFingerprint,
         contestants: body.contestants,
         order: body.order,
@@ -1003,6 +1104,24 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const ranking = await getCurrentRankingSnapshot(db, round.id);
       if (ranking === null) throw new DomainError("NOT_FOUND", "The ranking was not found.");
       return ranking;
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/podium/recompute",
+    { schema: { params: ActivityParams, body: RecomputePodiumBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { scope: string; roundIds: string[]; expectedInputFingerprint: string };
+      const outcome = await recomputePodiumCandidate(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundIds: body.roundIds,
+        expectedInputFingerprint: body.expectedInputFingerprint,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
     },
   );
 

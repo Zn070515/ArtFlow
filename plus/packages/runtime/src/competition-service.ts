@@ -5,7 +5,7 @@ import type {
   StoredRound,
 } from "@artflow-plus/db";
 import {
-  countCurrentScoreFacts,
+  countCurrentScoreFactsForContext,
   findRunningSessionByScope,
   getActivityForUpdate,
   getCurrentPanelForUpdate,
@@ -16,13 +16,15 @@ import {
   getRoundByKeyForUpdate,
   getRoundForUpdate,
   getRosterForUpdate,
+  getRoster,
   insertJudgeSeat,
   insertPanelMember,
   insertPanelSnapshot,
   insertPerformance,
   insertRound,
-  listRegistrations,
+  listApprovedParticipantIds,
   listRoundPerformances,
+  retireCurrentScoreFactsForPerformance,
   updatePerformance,
   updatePerformanceScoreState,
   updateRound,
@@ -63,8 +65,14 @@ function requireActive(activity: CompetitionActivity): void {
 }
 
 function requireSetupPermission(actor: ActorContext): void {
-  if (!actor.permissions.includes("competition.manage") && !actor.permissions.includes("competition.round.prepare")) {
+  if (!actor.permissions.includes("competition.manage")) {
     throw new DomainError("FORBIDDEN", "The actor cannot manage competition operations.");
+  }
+}
+
+function requireRoundPreparePermission(actor: ActorContext): void {
+  if (!actor.permissions.includes("competition.manage") && !actor.permissions.includes("competition.round.prepare")) {
+    throw new DomainError("FORBIDDEN", "The actor cannot prepare competition rounds.");
   }
 }
 
@@ -178,7 +186,7 @@ export async function prepareCompetitionRound(
       payload: { roundKey: input.roundKey, scope: input.scope },
     },
     async (trx) => {
-      requireSetupPermission(actor);
+      requireRoundPreparePermission(actor);
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
@@ -284,10 +292,7 @@ export async function activateCompetitionPanel(
         state: "active",
         expectedJudges: round.judgeCount,
         minimumJudges: round.minimumJudges,
-        rosterDigest: stableHash((await listRegistrations(trx, input.activityId))
-          .filter((registration) => registration.status === "approved")
-          .map((registration) => registration.id)
-          .sort()),
+        rosterDigest: stableHash(await listApprovedParticipantIds(trx, input.activityId)),
         contextVersion: 1,
         current: true,
       };
@@ -329,6 +334,7 @@ export interface OpenPerformanceInput {
   readonly activityId: string;
   readonly roundId: string;
   readonly scope: string;
+  readonly performanceId?: string;
   readonly contestantId: string;
   readonly sequence: number;
 }
@@ -337,22 +343,37 @@ async function openPerformanceInTransaction(
   trx: Kysely<Database>,
   activity: CompetitionActivity,
   round: StoredRound,
-  input: Pick<OpenPerformanceInput, "contestantId" | "sequence">,
+  input: Pick<OpenPerformanceInput, "contestantId" | "sequence" | "performanceId">,
 ): Promise<StoredPerformance> {
-  const panel = requireActivePanel(await getCurrentPanelForUpdate(trx, round.id));
-  if (!Number.isInteger(input.sequence) || input.sequence < 1 || !input.contestantId.trim()) {
+  requireActivePanel(await getCurrentPanelForUpdate(trx, round.id));
+  if (!Number.isInteger(input.sequence) || input.sequence < 1 || !input.contestantId.trim() ||
+      (input.performanceId !== undefined && !input.performanceId.trim())) {
     throw new DomainError("INVALID_INPUT", "A performance needs a positive sequence and contestant.");
+  }
+  const roster = requireFinalRoster(await getRoster(trx, activity.id));
+  const approvedParticipants = await listApprovedParticipantIds(trx, activity.id);
+  if (approvedParticipants.length !== roster.approvedCount || !approvedParticipants.includes(input.contestantId)) {
+    throw new DomainError("CONTESTANT_NOT_IN_ROSTER", "The contestant is not in the final approved roster.");
   }
   const performances = await listRoundPerformances(trx, round.id);
   const open = performances.find((performance) => performance.state === "open");
   if (open !== undefined && open.contestantId !== input.contestantId) {
     throw new DomainError("PERFORMANCE_ALREADY_OPEN", "Another performance is already open.");
   }
-  const existing = performances.find((performance) => performance.contestantId === input.contestantId);
+  const existingSummary = performances.find((performance) => performance.contestantId === input.contestantId);
+  const existing = existingSummary === undefined ? undefined : await getPerformanceForUpdate(trx, existingSummary.id);
+  if (existing === null) throw new DomainError("NOT_FOUND", "The performance was not found.");
+  if (existing === undefined && input.performanceId !== undefined) {
+    const requested = await getPerformanceForUpdate(trx, input.performanceId);
+    if (requested !== null) throw new DomainError("NOT_FOUND", "The requested performance does not match the contestant.");
+  }
+  if (existing !== undefined && existing !== null && input.performanceId !== undefined && existing.id !== input.performanceId) {
+    throw new DomainError("NOT_FOUND", "The requested performance does not match the contestant.");
+  }
   if (existing?.state === "locked") throw new DomainError("PERFORMANCE_LOCKED", "The performance is already locked.");
   if (existing === undefined) {
     const performance: StoredPerformance = {
-      id: idFromCommand("performance", `${round.id}:${input.contestantId}`),
+      id: input.performanceId ?? idFromCommand("performance", `${round.id}:${input.contestantId}`),
       activityId: activity.id,
       roundId: round.id,
       contestantId: input.contestantId,
@@ -366,6 +387,7 @@ async function openPerformanceInTransaction(
   const state = await getPerformanceScoreStateForUpdate(trx, existing.id);
   if (state === null) throw new DomainError("NOT_FOUND", "The performance score state was not found.");
   const next: StoredPerformance = { ...existing, state: "open", contextVersion: existing.contextVersion + 1 };
+  await retireCurrentScoreFactsForPerformance(trx, existing.id, next.contextVersion);
   await updatePerformance(trx, next, existing.contextVersion);
   await updatePerformanceScoreState(trx, {
     ...state,
@@ -375,7 +397,6 @@ async function openPerformanceInTransaction(
     openedAt: new Date().toISOString(),
     lockedAt: null,
   }, state.revision);
-  void panel;
   return next;
 }
 
@@ -392,7 +413,7 @@ export async function openPerformance(
     commandType: "competition.performance.open",
     scope: input.scope,
     actor,
-    payload: { roundId: input.roundId, scope: input.scope, contestantId: input.contestantId, sequence: input.sequence },
+    payload: { roundId: input.roundId, scope: input.scope, performanceId: input.performanceId ?? null, contestantId: input.contestantId, sequence: input.sequence },
   }, async (trx) => {
     requireSetupPermission(actor);
     const activity = await getActivityForUpdate(trx, input.activityId);
@@ -456,7 +477,11 @@ export async function lockPerformance(
     const scoreState = await getPerformanceScoreStateForUpdate(trx, performance.id);
     if (scoreState === null) throw new DomainError("NOT_FOUND", "The performance score state was not found.");
     if (scoreState.contextVersion !== performance.contextVersion) throw new DomainError("STALE_REVISION", "The performance context changed.");
-    requireGateClosed(round, await countCurrentScoreFacts(trx, performance.id));
+    requireGateClosed(round, await countCurrentScoreFactsForContext(trx, {
+      performanceId: performance.id,
+      panelSnapshotId: panel.id,
+      contextVersion: performance.contextVersion,
+    }));
     const nextPerformance: StoredPerformance = { ...performance, state: "locked" };
     await updatePerformance(trx, nextPerformance, performance.contextVersion);
     await updatePerformanceScoreState(trx, {
@@ -526,7 +551,11 @@ export async function advancePerformance(
     if (current.state !== "open") throw new DomainError("PERFORMANCE_NOT_OPEN", "Only an open performance can advance.");
     const currentScoreState = await getPerformanceScoreStateForUpdate(trx, current.id);
     if (currentScoreState === null) throw new DomainError("NOT_FOUND", "The performance score state was not found.");
-    requireGateClosed(round, await countCurrentScoreFacts(trx, current.id));
+    requireGateClosed(round, await countCurrentScoreFactsForContext(trx, {
+      performanceId: current.id,
+      panelSnapshotId: panel.id,
+      contextVersion: current.contextVersion,
+    }));
     const lockedCurrent: StoredPerformance = { ...current, state: "locked" };
     await updatePerformance(trx, lockedCurrent, current.contextVersion);
     await updatePerformanceScoreState(trx, {
@@ -538,6 +567,7 @@ export async function advancePerformance(
     const next = await openPerformanceInTransaction(trx, activity, round, {
       contestantId: input.nextContestantId,
       sequence: input.nextSequence,
+      performanceId: undefined,
     });
     const savedRound = await updateRound(trx, { ...round, revision: round.revision + 1 }, round.revision);
     await appendEngineEvent(trx, deps, {

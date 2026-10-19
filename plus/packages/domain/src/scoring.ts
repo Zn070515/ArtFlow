@@ -143,5 +143,11 @@ export function applyTieDecision(ranking: RankingResult, decision: TieDecision):
     if (left.total !== right.total) return right.total - left.total;
     return (order.get(left.contestantId) ?? 0) - (order.get(right.contestantId) ?? 0);
   });
-  return deepFreeze({ ...ranking, status: "ready", rows, tieGroups: [] });
+  const remainingTieGroups = ranking.tieGroups.filter((group) => group !== target);
+  return deepFreeze({
+    ...ranking,
+    status: remainingTieGroups.length > 0 ? "hold" : "ready",
+    rows,
+    tieGroups: remainingTieGroups,
+  });
 }

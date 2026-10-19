@@ -75,6 +75,28 @@ export const OpenScoreCorrectionBodySchema = Type.Object({
 
 export const ResolveCompetitionBodySchema = CompetitionScopeBodySchema;
 
+export const LockCompetitionRoundBodySchema = Type.Object({
+  scope: ScopeSchema,
+  expectedRevision: Type.Integer({ minimum: 0 }),
+}, { additionalProperties: false });
+
+export const FinalizeAdvancementBodySchema = Type.Object({
+  scope: ScopeSchema,
+  expectedRankingRevision: Type.Integer({ minimum: 0 }),
+}, { additionalProperties: false });
+
+export const RecomputePodiumBodySchema = Type.Object({
+  scope: ScopeSchema,
+  roundIds: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), { minItems: 1 }),
+  expectedInputFingerprint: Type.String({ minLength: 1, maxLength: 64 }),
+}, { additionalProperties: false });
+
+export const ScoreCorrectionLifecycleBodySchema = Type.Object({
+  scope: ScopeSchema,
+  panelSnapshotId: Type.String({ minLength: 1, maxLength: 100 }),
+  performanceId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+}, { additionalProperties: false });
+
 export const TieDecisionBodySchema = Type.Object({
   scope: ScopeSchema,
   rankingSnapshotId: Type.String({ minLength: 1, maxLength: 100 }),

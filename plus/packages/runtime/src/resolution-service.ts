@@ -12,7 +12,9 @@ import {
   getLatestAdvancementDecision,
   getLatestPodiumCandidate,
   getPerformanceScoreStateForUpdate,
+  getRelease,
   getRoundForUpdate,
+  getRoundByKeyForUpdate,
   getCurrentRankingSnapshot,
   insertAdvancementDecision,
   insertPodiumCandidate,
@@ -71,14 +73,23 @@ async function rankingInput(
     throw new DomainError("PERFORMANCE_SCORE_OPEN", "Every performance must be locked before resolution.");
   }
   const facts = await listCurrentScoreFacts(trx, round.id);
+  const performancesById = new Map(performances.map((performance) => [performance.id, performance]));
+  const factsByPerformance = new Map<string, number>();
   const byContestant = new Map<string, number[]>();
   for (const fact of facts) {
-    if (fact.panelSnapshotId !== panel.id || fact.contextVersion < 1) throw new DomainError("STALE_CONTEXT", "A score fact is not bound to the current panel context.");
-    const values = byContestant.get(fact.contestantId) ?? [];
+    const performance = performancesById.get(fact.performanceId);
+    if (performance === undefined || fact.contestantId !== performance.contestantId ||
+        fact.panelSnapshotId !== panel.id || fact.contextVersion !== performance.contextVersion) {
+      throw new DomainError("STALE_CONTEXT", "A score fact is not bound to the current performance context.");
+    }
+    factsByPerformance.set(fact.performanceId, (factsByPerformance.get(fact.performanceId) ?? 0) + 1);
+    const values = byContestant.get(performance.contestantId) ?? [];
     values.push(fact.total);
-    byContestant.set(fact.contestantId, values);
+    byContestant.set(performance.contestantId, values);
   }
-  if (byContestant.size !== performances.length) throw new DomainError("SCORE_GATE_OPEN", "Every locked performance needs current score facts.");
+  if (factsByPerformance.size !== performances.length || performances.some((performance) => !factsByPerformance.has(performance.id))) {
+    throw new DomainError("SCORE_GATE_OPEN", "Every locked performance needs current score facts.");
+  }
   const rows: ScoreRow[] = [];
   for (const [contestantId, values] of byContestant) {
     const sorted = [...values].sort((left, right) => left - right);
@@ -106,6 +117,14 @@ function rankingFromSnapshot(snapshot: StoredRankingSnapshot): RankingResult {
     tieGroups: snapshot.tieGroups as RankingResult["tieGroups"],
     inputFingerprint: snapshot.inputFingerprint,
   };
+}
+
+function tieGroupId(group: { readonly total: number; readonly contestants: readonly string[] }): string {
+  return `tie-${stableHash({ total: group.total, contestants: group.contestants })}`;
+}
+
+function decorateTieGroups(groups: readonly { readonly total: number; readonly contestants: readonly string[] }[]): readonly unknown[] {
+  return groups.map((group) => ({ ...group, id: tieGroupId(group) }));
 }
 
 export interface ResolveRoundInput {
@@ -147,7 +166,7 @@ export async function resolveRound(
       inputFingerprint: resolved.inputFingerprint,
       status: ranking.status,
       rows: ranking.rows,
-      tieGroups: ranking.tieGroups,
+      tieGroups: decorateTieGroups(ranking.tieGroups),
       revision: (current?.revision ?? 0) + 1,
     };
     await insertRankingSnapshot(trx, snapshot);
@@ -242,6 +261,7 @@ export interface RecordTieDecisionInput {
   readonly activityId: string;
   readonly roundId: string;
   readonly rankingSnapshotId: string;
+  readonly tieId?: string;
   readonly inputFingerprint: string;
   readonly contestants: readonly string[];
   readonly order: readonly string[];
@@ -274,6 +294,12 @@ export async function recordTieDecision(
       throw new DomainError("STALE_RESOLUTION_INPUT", "The ranking snapshot is stale.");
     }
     const ranking = rankingFromSnapshot(current);
+    const target = ranking.tieGroups.find((group) =>
+      group.contestants.length === input.contestants.length &&
+      group.contestants.every((contestant) => input.contestants.includes(contestant)));
+    if (input.tieId !== undefined && (target === undefined || tieGroupId(target) !== input.tieId)) {
+      throw new DomainError("TIE_DECISION_INVALID", "The tie decision does not target the requested current tie group.");
+    }
     const decided = applyTieDecision(ranking, {
       contestants: input.contestants,
       order: input.order,
@@ -296,7 +322,7 @@ export async function recordTieDecision(
       id: idFromCommand("ranking", input.commandId),
       status: decided.status,
       rows: decided.rows,
-      tieGroups: decided.tieGroups,
+      tieGroups: decorateTieGroups(decided.tieGroups),
       revision: current.revision + 1,
     };
     await insertRankingSnapshot(trx, snapshot);
@@ -319,6 +345,7 @@ export async function recordTieDecision(
 
 export interface PodiumRoundInput {
   readonly roundId: string;
+  readonly sourceScoreVersion: number;
   readonly locked: boolean;
   readonly ranking: RankingResult;
 }
@@ -327,19 +354,32 @@ export interface PodiumCandidateResult {
   readonly status: "candidate" | "hold";
   readonly placements: readonly { readonly place: number; readonly contestantId: string; readonly total: number }[];
   readonly sourceRoundIds: readonly string[];
+  readonly sourceScoreVersions: readonly { readonly roundId: string; readonly sourceScoreVersion: number }[];
   readonly inputFingerprint: string;
 }
 
-export function buildPodiumCandidate(input: { readonly rounds: readonly PodiumRoundInput[] }): PodiumCandidateResult {
-  const inputFingerprint = stableHash(input.rounds.map((round) => ({ roundId: round.roundId, locked: round.locked, ranking: round.ranking })));
-  if (input.rounds.length === 0 || input.rounds.some((round) => !round.locked || round.ranking.status !== "ready" || round.ranking.tieGroups.length > 0)) {
-    return { status: "hold", placements: [], sourceRoundIds: input.rounds.map((round) => round.roundId), inputFingerprint };
+export function buildPodiumCandidate(input: { readonly requiredRoundIds: readonly string[]; readonly rounds: readonly PodiumRoundInput[] }): PodiumCandidateResult {
+  const sourceRoundIds = input.rounds.map((round) => round.roundId);
+  const sourceScoreVersions = input.rounds.map((round) => ({ roundId: round.roundId, sourceScoreVersion: round.sourceScoreVersion }));
+  const inputFingerprint = stableHash({
+    requiredRoundIds: input.requiredRoundIds,
+    rounds: input.rounds.map((round) => ({ roundId: round.roundId, sourceScoreVersion: round.sourceScoreVersion, locked: round.locked, ranking: round.ranking })),
+  });
+  const required = new Set(input.requiredRoundIds);
+  const complete = required.size === input.requiredRoundIds.length &&
+    input.rounds.length === input.requiredRoundIds.length &&
+    sourceRoundIds.every((roundId) => required.has(roundId)) &&
+    input.requiredRoundIds.every((roundId) => sourceRoundIds.includes(roundId));
+  if (!complete || input.rounds.some((round) => !round.locked || round.ranking.status !== "ready" || round.ranking.tieGroups.length > 0)) {
+    return { status: "hold", placements: [], sourceRoundIds, sourceScoreVersions, inputFingerprint };
   }
-  const rows = input.rounds[0]?.ranking.rows ?? [];
+  const finalRoundId = input.requiredRoundIds[input.requiredRoundIds.length - 1];
+  const rows = input.rounds.find((round) => round.roundId === finalRoundId)?.ranking.rows ?? [];
   return {
     status: "candidate",
     placements: rows.slice(0, 3).map((row, index) => ({ place: index + 1, contestantId: row.contestantId, total: row.total })),
-    sourceRoundIds: input.rounds.map((round) => round.roundId),
+    sourceRoundIds,
+    sourceScoreVersions,
     inputFingerprint,
   };
 }
@@ -370,14 +410,39 @@ export async function recomputePodiumCandidate(
     requireResolutionPermission(actor);
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
+    if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+    const anchorRoundId = input.roundIds[0];
+    if (anchorRoundId === undefined) throw new DomainError("INVALID_INPUT", "Podium recomputation needs a frozen competition round.");
+    const anchorRound = requireRound(await getRoundForUpdate(trx, anchorRoundId), activity.id);
+    const release = await getRelease(trx, activity.id, anchorRound.releaseVersion);
+    const plan = release?.capabilities.competition;
+    if (plan === undefined || plan.ok !== true) throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The frozen release has no competition snapshot.");
+    const artifact = plan.artifact as { readonly rounds: readonly { readonly key: string }[] };
+    const requiredRoundKeys = artifact.rounds.map((round) => round.key);
+    const requiredRoundIds = requiredRoundKeys.map((roundKey) => idFromCommand("round", `${activity.id}:${roundKey}`));
     const rounds: PodiumRoundInput[] = [];
-    for (const roundId of input.roundIds) {
-      const round = requireRound(await getRoundForUpdate(trx, roundId), activity.id);
+    for (const [index, roundKey] of requiredRoundKeys.entries()) {
+      const round = await getRoundByKeyForUpdate(trx, activity.id, roundKey);
+      const roundId = requiredRoundIds[index] ?? idFromCommand("round", `${activity.id}:${roundKey}`);
+      if (round === null) {
+        rounds.push({ roundId, sourceScoreVersion: 0, locked: false, ranking: { status: "hold", rows: [], tieGroups: [], inputFingerprint: "missing" } });
+        continue;
+      }
+      if (round.releaseVersion !== anchorRound.releaseVersion) {
+        rounds.push({ roundId: round.id, sourceScoreVersion: round.scoreVersion, locked: false, ranking: { status: "hold", rows: [], tieGroups: [], inputFingerprint: "wrong-release" } });
+        continue;
+      }
       const ranking = await getCurrentRankingSnapshot(trx, round.id);
-      if (ranking === null) throw new DomainError("NOT_FOUND", "A required round has no ranking snapshot.");
-      rounds.push({ roundId: round.id, locked: round.state === "locked", ranking: rankingFromSnapshot(ranking) });
+      const rankingReady = ranking !== null && ranking.sourceScoreVersion === round.scoreVersion;
+      rounds.push({
+        roundId: round.id,
+        sourceScoreVersion: ranking?.sourceScoreVersion ?? round.scoreVersion,
+        locked: round.state === "locked" && rankingReady,
+        ranking: !rankingReady ? { status: "hold", rows: [], tieGroups: [], inputFingerprint: ranking === null ? "missing" : "source-version-mismatch" } : rankingFromSnapshot(ranking),
+      });
     }
-    const candidate = buildPodiumCandidate({ rounds });
+    const candidate = buildPodiumCandidate({ requiredRoundIds, rounds });
     if (candidate.inputFingerprint !== input.expectedInputFingerprint) throw new DomainError("STALE_RESOLUTION_INPUT", "The podium input fingerprint is stale.");
     const previous = await getLatestPodiumCandidate(trx, activity.id);
     const stored: StoredPodiumCandidate = {
@@ -387,6 +452,7 @@ export async function recomputePodiumCandidate(
       status: candidate.status,
       placements: candidate.placements,
       sourceRoundIds: candidate.sourceRoundIds,
+      sourceScoreVersions: candidate.sourceScoreVersions,
       revision: (previous?.revision ?? 0) + 1,
     };
     await insertPodiumCandidate(trx, stored);
@@ -397,6 +463,8 @@ export async function recomputePodiumCandidate(
       aggregateId: stored.id,
       revision: stored.revision,
       capability: "competition",
+      mode: session.mode,
+      scope: session.scope,
       payload: stored,
     });
     return { body: stored, status: 201 };

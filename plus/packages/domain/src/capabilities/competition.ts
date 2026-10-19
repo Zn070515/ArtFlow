@@ -344,6 +344,7 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
       "ScoreFactRecorded",
       "ScoreFactRevised",
       "ScoreCorrectionOpened",
+      "ScoreCorrectionClosed",
       "ScoresRecalculated",
       "RankingComputed",
       "AdvancementFinalized",

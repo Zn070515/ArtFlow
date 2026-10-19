@@ -157,6 +157,16 @@ export async function listApprovedRegistrationCount(
   return result.rows[0]?.count ?? 0;
 }
 
+export async function listApprovedParticipantIds(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly string[]> {
+  const rows = await db.selectFrom("registration").select("participant_id")
+    .where("activity_id", "=", activityId).where("status", "=", "approved")
+    .orderBy("participant_id").execute();
+  return rows.map((row) => row.participant_id);
+}
+
 export async function getRoster(
   db: Kysely<Database>,
   activityId: string,

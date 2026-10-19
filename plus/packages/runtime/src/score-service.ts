@@ -92,6 +92,16 @@ interface LoadedScoreContext {
   readonly rubric: CompiledCompetitionArtifact["rubric"];
 }
 
+function correctionFingerprint(input: {
+  readonly scoreFactId: string;
+  readonly baseVersion: number;
+  readonly panelSnapshotId: string;
+  readonly contextVersion: number;
+  readonly reason: string;
+}): string {
+  return stableHash(input);
+}
+
 function requireActive(activity: ScoreActivity): void {
   if (activity.status !== "active") throw new DomainError("ACTIVITY_NOT_ACTIVE", "Scoring requires an active activity.");
 }
@@ -224,7 +234,7 @@ async function submitScore(
       throw new DomainError("DUPLICATE_SCORE_FACT", "This judge already has a score fact for the performance.");
     }
     const fact: StoredScoreFact = {
-      id: idFromCommand("score", scoreFactKey(context.round.id, context.contestantId, context.judgeId)),
+      id: idFromCommand("score", `${scoreFactKey(context.round.id, context.contestantId, context.judgeId)}:${context.contextVersion}`),
       activityId: context.activity.id,
       roundId: context.round.id,
       performanceId: context.performanceId,
@@ -282,6 +292,7 @@ export interface EditScoreFactInput {
   readonly activityId: string;
   readonly roundId: string;
   readonly performanceId: string;
+  readonly scoreFactId?: string;
   readonly panelSnapshotId: string;
   readonly seatId: string;
   readonly contextVersion: number;
@@ -312,6 +323,9 @@ export async function editScoreFact(
     const context = await loadScoreContext(trx, input, true);
     const fact = await getScoreFactForUpdate(trx, context.round.id, context.contestantId, context.judgeId);
     if (fact === null) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
+    if (input.scoreFactId !== undefined && fact.id !== input.scoreFactId) {
+      throw new DomainError("SCORE_FACT_NOT_FOUND", "The requested score fact does not match the scoring context.");
+    }
     if (fact.contextVersion !== context.contextVersion || fact.panelSnapshotId !== context.panelId) {
       throw new DomainError("STALE_CONTEXT", "The score fact belongs to a stale performance context.");
     }
@@ -386,10 +400,28 @@ export interface OpenScoreCorrectionInput {
   readonly reason: string;
 }
 
+interface CorrectionContextInput {
+  readonly activityId: string;
+  readonly roundId: string;
+  readonly performanceId?: string;
+  readonly scoreFactId: string;
+  readonly panelSnapshotId: string;
+  readonly scope: string;
+}
+
 async function correctionContext(
   trx: Kysely<Database>,
-  input: OpenScoreCorrectionInput,
-): Promise<{ readonly activity: ScoreActivity; readonly round: StoredRound; readonly fact: StoredScoreFact; readonly mode: "test" | "rehearsal" | "formal"; readonly scope: string }> {
+  input: CorrectionContextInput,
+): Promise<{
+  readonly activity: ScoreActivity;
+  readonly round: StoredRound;
+  readonly fact: StoredScoreFact;
+  readonly performanceId: string;
+  readonly panelSnapshotId: string;
+  readonly contextVersion: number;
+  readonly mode: "test" | "rehearsal" | "formal";
+  readonly scope: string;
+}> {
   const activity = await getActivityForUpdate(trx, input.activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
   requireActive(activity);
@@ -398,18 +430,33 @@ async function correctionContext(
   if (round.state === "locked") throw new DomainError("ROUND_LOCKED", "The round is locked.");
   const panel = await getCurrentPanelForUpdate(trx, round.id);
   if (panel === null || panel.id !== input.panelSnapshotId || panel.state !== "active" || !panel.current) throw new DomainError("PANEL_NOT_ACTIVE", "The panel is not active.");
-  const performance = await getPerformanceForUpdate(trx, input.performanceId);
-  if (performance === null || performance.roundId !== round.id) throw new DomainError("SCORE_FACT_NOT_FOUND", "The performance was not found.");
+  const fact = await getScoreFactByIdForUpdate(trx, input.scoreFactId);
+  if (fact === null || fact.activityId !== activity.id || fact.roundId !== round.id) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
+  if (input.performanceId !== undefined && input.performanceId !== fact.performanceId) {
+    throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact does not belong to the requested performance.");
+  }
+  const performance = await getPerformanceForUpdate(trx, fact.performanceId);
+  if (performance === null || performance.roundId !== round.id || performance.activityId !== activity.id) throw new DomainError("SCORE_FACT_NOT_FOUND", "The performance was not found.");
   const performanceScoreState = await getPerformanceScoreStateForUpdate(trx, performance.id);
   if (performance.state !== "locked" || performanceScoreState?.state !== "locked") {
     throw new DomainError("CORRECTION_REQUIRED", "A correction must target a locked performance.");
   }
-  const fact = await getScoreFactByIdForUpdate(trx, input.scoreFactId);
-  if (fact === null || fact.roundId !== round.id || fact.performanceId !== performance.id) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
+  if (performanceScoreState.contextVersion !== performance.contextVersion || fact.contextVersion !== performance.contextVersion) {
+    throw new DomainError("STALE_CONTEXT", "The score fact belongs to a stale performance context.");
+  }
   if (fact.panelSnapshotId !== panel.id) throw new DomainError("STALE_CONTEXT", "The score fact belongs to a superseded panel.");
   const session = await findRunningSessionByScope(trx, activity.id, input.scope);
   if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
-  return { activity, round, fact, mode: session.mode, scope: session.scope };
+  return {
+    activity,
+    round,
+    fact,
+    performanceId: performance.id,
+    panelSnapshotId: panel.id,
+    contextVersion: performance.contextVersion,
+    mode: session.mode,
+    scope: session.scope,
+  };
 }
 
 export async function openScoreCorrection(db: Kysely<Database>, deps: RuntimeDeps, input: OpenScoreCorrectionInput): Promise<CommandOutcome<StoredScoreCorrection>> {
@@ -430,10 +477,11 @@ export async function openScoreCorrection(db: Kysely<Database>, deps: RuntimeDep
     const correction: StoredScoreCorrection = {
       id: idFromCommand("correction", input.commandId),
       scoreFactId: context.fact.id,
-      inputFingerprint: stableHash({
+      inputFingerprint: correctionFingerprint({
         scoreFactId: context.fact.id,
         baseVersion: context.fact.version,
-        panelSnapshotId: input.panelSnapshotId,
+        panelSnapshotId: context.panelSnapshotId,
+        contextVersion: context.contextVersion,
         reason,
       }),
       state: "open",
@@ -461,6 +509,7 @@ export interface CloseScoreCorrectionInput {
   readonly commandId: string;
   readonly activityId: string;
   readonly roundId: string;
+  readonly performanceId?: string;
   readonly scoreFactId: string;
   readonly correctionId: string;
   readonly panelSnapshotId: string;
@@ -479,18 +528,31 @@ export async function closeScoreCorrection(db: Kysely<Database>, deps: RuntimeDe
     actor,
     payload: input,
   }, async (trx) => {
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    const round = await getRoundForUpdate(trx, input.roundId);
-    if (round === null || round.activityId !== activity.id) throw new DomainError("NOT_FOUND", "The competition round was not found.");
-    const fact = await getScoreFactByIdForUpdate(trx, input.scoreFactId);
-    if (fact === null) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
-    const panel = await getCurrentPanelForUpdate(trx, input.roundId);
-    if (panel === null || panel.id !== input.panelSnapshotId || panel.state !== "active" || !panel.current) throw new DomainError("PANEL_NOT_ACTIVE", "The panel is not active.");
+    const context = await correctionContext(trx, input);
     const correction = await getCorrectionForUpdate(trx, input.correctionId);
-    if (correction === null || correction.scoreFactId !== fact.id) throw new DomainError("CORRECTION_NOT_FOUND", "The correction was not found.");
-    if (correction.state !== "revised" || fact.version <= correction.baseVersion) throw new DomainError("CORRECTION_REQUIRED", "The correction must revise the fact before closing.");
+    if (correction === null || correction.scoreFactId !== context.fact.id) throw new DomainError("CORRECTION_NOT_FOUND", "The correction was not found.");
+    const expectedFingerprint = correctionFingerprint({
+      scoreFactId: context.fact.id,
+      baseVersion: correction.baseVersion,
+      panelSnapshotId: context.panelSnapshotId,
+      contextVersion: context.contextVersion,
+      reason: correction.reason,
+    });
+    if (correction.inputFingerprint !== expectedFingerprint || correction.state !== "revised" || context.fact.version <= correction.baseVersion) {
+      throw new DomainError("CORRECTION_REQUIRED", "The correction must revise the fact in its original context before closing.");
+    }
     const saved = await updateCorrection(trx, { ...correction, state: "closed", revision: correction.revision + 1 }, correction.revision);
+    await appendEngineEvent(trx, deps, {
+      type: "ScoreCorrectionClosed",
+      activityId: context.activity.id,
+      aggregateType: "score_correction",
+      aggregateId: saved.id,
+      revision: saved.revision,
+      capability: "competition",
+      mode: context.mode,
+      scope: context.scope,
+      payload: { correction: saved, scoreFactId: context.fact.id, sourceScoreVersion: context.round.scoreVersion },
+    });
     return { body: saved };
   });
 }
@@ -509,24 +571,32 @@ export async function recalculateAfterCorrection(db: Kysely<Database>, deps: Run
     actor,
     payload: input,
   }, async (trx) => {
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    const round = await getRoundForUpdate(trx, input.roundId);
-    if (round === null || round.activityId !== activity.id) throw new DomainError("NOT_FOUND", "The competition round was not found.");
-    const fact = await getScoreFactByIdForUpdate(trx, input.scoreFactId);
-    if (fact === null) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
+    const context = await correctionContext(trx, input);
     const correction = await getCorrectionForUpdate(trx, input.correctionId);
-    if (correction === null || correction.scoreFactId !== fact.id) throw new DomainError("CORRECTION_NOT_FOUND", "The correction was not found.");
+    if (correction === null || correction.scoreFactId !== context.fact.id) throw new DomainError("CORRECTION_NOT_FOUND", "The correction was not found.");
     if (correction.state !== "closed") throw new DomainError("CORRECTION_REQUIRED", "The correction must be closed before recalculation.");
+    const expectedFingerprint = correctionFingerprint({
+      scoreFactId: context.fact.id,
+      baseVersion: correction.baseVersion,
+      panelSnapshotId: context.panelSnapshotId,
+      contextVersion: context.contextVersion,
+      reason: correction.reason,
+    });
+    if (correction.inputFingerprint !== expectedFingerprint || context.fact.version <= correction.baseVersion) {
+      throw new DomainError("CORRECTION_REQUIRED", "The correction context is stale and cannot be recalculated.");
+    }
+    const saved = await updateCorrection(trx, { ...correction, state: "recalculated", revision: correction.revision + 1 }, correction.revision);
     await appendEngineEvent(trx, deps, {
       type: "ScoresRecalculated",
-      activityId: activity.id,
+      activityId: context.activity.id,
       aggregateType: "score_correction",
-      aggregateId: correction.id,
-      revision: correction.revision,
+      aggregateId: saved.id,
+      revision: saved.revision,
       capability: "competition",
-      payload: { correctionId: correction.id, scoreFactId: fact.id, version: fact.version },
+      mode: context.mode,
+      scope: context.scope,
+      payload: { correction: saved, scoreFactId: context.fact.id, version: context.fact.version, sourceScoreVersion: context.round.scoreVersion, inputFingerprint: correction.inputFingerprint },
     });
-    return { body: correction };
+    return { body: saved };
   });
 }
