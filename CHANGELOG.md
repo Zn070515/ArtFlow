@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-19 (v1.0.2)
+
+### Formatting and release-gate hardening
+
+- Applied `ruff format` to 11 files; no behavior change. This clears the red Linux quality gate
+  that made v1.0.1 unpublishable.
+- `publish.yml` now requires a successful `CI`, `Security`, `Workflow lint`, and
+  `PostgreSQL integration` run on `main` for the exact tag commit before building; a tag can no
+  longer outrun CI.
+- The publish workflow creates the GitHub Release after the image push.
+- **v1.0.1 is withdrawn**: it was tagged and pushed to GHCR while CI was red; do not deploy it.
+  Use v1.0.2.
+
 ## 2026-10-19
 
 ### The 2026 ruleset can carry participant and group questionnaires
