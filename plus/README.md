@@ -245,3 +245,16 @@ new architecture.
 
 1. M6 Voting / Ticketing: ballot uniqueness, capability entry, ticket sessions and
    live projections. M5 score/ranking authority is now available as a frozen input.
+
+## M6 implementation in progress
+
+- Migration `0010_m6_voting_ticketing` owns frozen vote sessions/options, ballot
+  identity constraints, same-activity foreign keys, ticket/access-session digests,
+  judge entry versions and rebuildable live state.
+- Runtime tests cover ticket-backed duplicate rejection, closed-session refusal,
+  cross-activity ticket rejection, credential reissue/close semantics, replay
+  rejection, one-time response redaction, HttpOnly session cookies, and live
+  projection recovery. The capability-reissue-close golden also verifies that a
+  judge session can submit a score after entry close.
+- Configure `ARTFLOW_PLUS_CREDENTIAL_SECRET` outside development; production has
+  no signing-secret fallback.
