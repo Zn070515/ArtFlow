@@ -439,6 +439,44 @@ export async function findJudgeSeatGrantBySeatKey(
   return row === undefined ? null : judgeSeat(row);
 }
 
+export async function findJudgeSeatGrantBySeatKeyForUpdate(
+  trx: Kysely<Database>,
+  activityId: string,
+  seatKey: string,
+): Promise<StoredJudgeEntrySeat | null> {
+  const row = await trx.selectFrom("judge_seat_grant").selectAll()
+    .where("activity_id", "=", activityId)
+    .where("seat_key", "=", seatKey)
+    .forUpdate()
+    .executeTakeFirst();
+  return row === undefined ? null : judgeSeat(row);
+}
+
+/** Recycles a claimed entry seat for the next panel using the same seat key. */
+export async function reopenJudgeEntrySeat(
+  trx: Kysely<Database>,
+  seat: StoredJudgeEntrySeat,
+): Promise<void> {
+  await trx.updateTable("judge_seat_grant").set({
+    judge_id: null,
+    state: "available",
+    session_id: null,
+    revision: seat.revision + 1,
+    updated_at: new Date(),
+  }).where("id", "=", seat.id).executeTakeFirstOrThrow();
+}
+
+export async function revokeJudgeSessionsForSeat(
+  trx: Kysely<Database>,
+  seatId: string,
+  revokedAt: string,
+): Promise<void> {
+  await trx.updateTable("judge_session").set({ revoked_at: revokedAt })
+    .where("seat_id", "=", seatId)
+    .where("revoked_at", "is", null)
+    .execute();
+}
+
 export async function insertJudgeEntrySeat(
   trx: Kysely<Database>,
   input: StoredJudgeEntrySeat,

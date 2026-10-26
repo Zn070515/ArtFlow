@@ -50,7 +50,7 @@ const staff: ActorContext = {
   actorId: "fixture-admin",
   actorType: "user",
   roles: ["admin"],
-  permissions: ["archive.manage"],
+  permissions: ["archive.manage", "studio.manage"],
 };
 
 function deps(): RuntimeDeps {

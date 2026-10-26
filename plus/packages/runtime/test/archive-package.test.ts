@@ -220,4 +220,40 @@ describe("archive package", () => {
     expect(allText).not.toContain("fp-1");
     expect(allText).not.toContain("fp-legacy");
   });
+
+  it("neutralizes spreadsheet formulas in CSV exports", () => {
+    const dangerous: StoredResultRelease = {
+      ...releases[1]!,
+      snapshot: {
+        ...snapshot,
+        awards: [
+          { award: '=HYPERLINK("http://evil","x")', contestantId: "+singer" },
+          { award: "-1+1", contestantId: "@singer" },
+        ],
+      },
+    };
+    const output = buildArchivePackage({
+      packageId: "archive-formula",
+      version: 1,
+      activity: {
+        id: "act-1",
+        publicCode: "ABC123",
+        title: "2026 院十佳",
+        enabledCapabilities: ["publishing", "archive"],
+        activeDefinitionVersion: 1,
+      },
+      releases: [dangerous],
+      stageResults: [],
+      sessions: [],
+      events: [],
+      archivedAt: "2026-10-21T00:00:00.000Z",
+      archivedBy: "staff",
+    });
+    const csvText = strFromU8(unzipSync(output.bytes)["awards.csv"] ?? new Uint8Array());
+    expect(csvText).toContain(`"'=HYPERLINK(""http://evil"",""x"")"`);
+    expect(csvText).toContain("'+singer");
+    expect(csvText).toContain("'-1+1");
+    expect(csvText).toContain("'@singer");
+    expect(csvText).not.toMatch(/,=/);
+  });
 });

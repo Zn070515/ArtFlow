@@ -7,6 +7,7 @@ import type {
 import {
   countCurrentScoreFactsForContext,
   ensureJudgeEntrySeat,
+  findJudgeSeatGrantBySeatKeyForUpdate,
   findRunningSessionByScope,
   getActivityForUpdate,
   getCurrentPanelForUpdate,
@@ -25,7 +26,9 @@ import {
   insertRound,
   listApprovedParticipantIds,
   listRoundPerformances,
+  reopenJudgeEntrySeat,
   retireCurrentScoreFactsForPerformance,
+  revokeJudgeSessionsForSeat,
   updatePerformance,
   updatePerformanceScoreState,
   updateRound,
@@ -310,14 +313,26 @@ export async function activateCompetitionPanel(
         if (activity.enabledCapabilities.includes("ticketing")) {
           // With ticketing enabled, each panel seat becomes a claimable judge-entry
           // seat. The judge session binds to the entry seat; the seat key maps it
-          // back to the current panel member for scoring.
-          await ensureJudgeEntrySeat(trx, {
-            id: idFromCommand("judge-entry-seat", `${input.activityId}:${judge.seatKey}`),
-            activityId: input.activityId,
-            seatKey: judge.seatKey,
-            state: "available",
-            revision: 0,
-          });
+          // back to the current panel member for scoring. A seat key reused by the
+          // next panel must release its previous claim: revoke the old session so
+          // it cannot score the new panel, then reopen the seat.
+          const existingGrant = await findJudgeSeatGrantBySeatKeyForUpdate(
+            trx,
+            input.activityId,
+            judge.seatKey,
+          );
+          if (existingGrant === null) {
+            await ensureJudgeEntrySeat(trx, {
+              id: idFromCommand("judge-entry-seat", `${input.activityId}:${judge.seatKey}`),
+              activityId: input.activityId,
+              seatKey: judge.seatKey,
+              state: "available",
+              revision: 0,
+            });
+          } else if (existingGrant.state === "claimed") {
+            await revokeJudgeSessionsForSeat(trx, existingGrant.id, deps.now());
+            await reopenJudgeEntrySeat(trx, existingGrant);
+          }
         }
       }
       const savedRound = await updateRound(trx, {

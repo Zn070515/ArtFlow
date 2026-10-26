@@ -250,7 +250,7 @@ export function fetchRanking(activityId: string, roundKey: string): Promise<Live
 
 export function reissueJudgeEntry(
   activityId: string,
-): Promise<{ readonly version: number; readonly capability?: string }> {
+): Promise<{ readonly version: number; readonly capability: string | null }> {
   return apiFetch(`/api/activities/${activityId}/judge-entry/reissue`, {
     method: "POST",
     headers: commandHeaders(crypto.randomUUID()),
@@ -265,5 +265,6 @@ export function judgeEntryUrl(publicCode: string, capability: string): string {
 
 export function describeLiveError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message;
+  if (error instanceof Error && error.message !== "") return error.message;
   return fallback;
 }

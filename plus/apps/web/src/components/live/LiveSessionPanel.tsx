@@ -55,7 +55,9 @@ export function LiveSessionPanel({
   function generateLink(): Promise<void> {
     return run(async () => {
       const result = await reissueJudgeEntry(state.activity.id);
-      if (result.capability === undefined) throw new Error("missing capability");
+      if (result.capability === null || result.capability === "") {
+        throw new Error("该入口链接已生成过，请重新点击生成。");
+      }
       setEntry({
         version: result.version,
         url: judgeEntryUrl(state.activity.publicCode, result.capability),

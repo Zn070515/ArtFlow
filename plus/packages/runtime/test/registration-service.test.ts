@@ -5,6 +5,7 @@ import {
   createDb,
   insertRelease,
   insertSession,
+  listApprovedParticipantIds,
   migrate,
   readEventsSince,
 } from "@artflow-plus/db";
@@ -244,6 +245,70 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       "RegistrationReviewed",
       "RosterFinalized",
     ]));
+  });
+
+  it("refuses to review registrations after the roster is final", async () => {
+    const activityId = await seedActivity();
+    const submitFor = async (actor: ActorContext, suffix: string): Promise<string> => {
+      const started = await startRegistration(db, deps(actor), {
+        commandId: `start-${suffix}`,
+        activityId,
+        participantId: actor.actorId,
+      });
+      const answered = await saveRegistrationAnswer(db, deps(actor), {
+        commandId: `answer-${suffix}`,
+        activityId,
+        registrationId: started.body.id,
+        expectedRevision: 0,
+        questionKey: "name",
+        value: `name-${suffix}`,
+      });
+      await uploadMaterial(db, deps(actor), {
+        commandId: `upload-${suffix}`,
+        activityId,
+        registrationId: started.body.id,
+        questionKey: "audio",
+        originalName: "song.mp3",
+        contentType: "audio/mpeg",
+        byteLength: 100,
+      });
+      return (await submitRegistration(db, deps(actor), {
+        commandId: `submit-${suffix}`,
+        activityId,
+        registrationId: started.body.id,
+        expectedRevision: answered.body.revision,
+      })).body.id;
+    };
+
+    const firstRegistration = await submitFor(participant, "roster-first");
+    await reviewRegistration(db, deps(staff), {
+      commandId: "review-roster-first",
+      activityId,
+      registrationId: firstRegistration,
+      expectedRevision: 2,
+      status: "approved",
+      note: "ok",
+    });
+    const roster = await finalizeRoster(db, deps(staff), {
+      commandId: "finalize-roster-lock",
+      activityId,
+      expectedRevision: 0,
+    });
+    expect(roster.body).toMatchObject({ status: "final", approvedCount: 1 });
+
+    const second: ActorContext = { ...participant, actorId: "student-2" };
+    const secondRegistration = await submitFor(second, "roster-second");
+    const before = await readEventsSince(db, { activityId, after: 0, limit: 100 });
+    await expect(reviewRegistration(db, deps(staff), {
+      commandId: "review-after-final",
+      activityId,
+      registrationId: secondRegistration,
+      expectedRevision: 2,
+      status: "approved",
+      note: "late",
+    })).rejects.toMatchObject({ code: "ROSTER_FINAL" });
+    expect(await readEventsSince(db, { activityId, after: 0, limit: 100 })).toEqual(before);
+    expect(await listApprovedParticipantIds(db, activityId)).toEqual([participant.actorId]);
   });
 
   it("requires every required released question before submission", async () => {

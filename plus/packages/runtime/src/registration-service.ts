@@ -333,6 +333,12 @@ export async function reviewRegistration(
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
+      // A final roster freezes the approved participant set; reviewing a later
+      // submission would desynchronize it from roster.approvedCount.
+      const roster = await getRosterForUpdate(trx, input.activityId);
+      if (roster.status === "final") {
+        throw new DomainError("ROSTER_FINAL", "The roster is final; reviews are frozen.");
+      }
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");

@@ -10,6 +10,7 @@ import {
   getActivityByPublicCode,
   getActivitySummary,
   getRegistration,
+  getRelease,
   getRegistrationByParticipant,
   getRoster,
   listActivities,
@@ -80,12 +81,23 @@ export async function getPublicActivity(
 ): Promise<PublicActivity | null> {
   const activity = await getActivityByPublicCode(db, publicCode);
   if (activity === null) return null;
+  const release = activity.status === "active"
+    ? await getRelease(db, activity.id, activity.activeDefinitionVersion)
+    : null;
+  // Mirror the start-registration gate: the command needs the registration,
+  // questionnaire, and materials capabilities plus both released snapshots.
+  const registrationOpen = activity.status === "active" &&
+    ["registration", "questionnaire", "materials"].every((capability) =>
+      activity.enabledCapabilities.includes(capability)) &&
+    release !== null &&
+    release.capabilities.questionnaire?.ok === true &&
+    release.capabilities.materials?.ok === true;
   return {
     id: activity.id,
     publicCode: activity.publicCode,
     title: activity.title,
     status: activity.status,
-    registrationOpen: activity.status === "active",
+    registrationOpen,
   };
 }
 

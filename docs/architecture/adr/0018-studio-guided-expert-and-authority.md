@@ -37,7 +37,9 @@ frozen `declaredScopes`. Live's on-site operation remains M8d.
 
 ## Consequences
 
-- Local accounts that use Studio must be granted `studio.manage`.
+- Local accounts that use Studio must be granted `studio.manage`. Activity
+  close and rename are engine lifecycle mutations and require it as well
+  (amended 2026-10-26 after the M7/M8 review).
 - API clients that previously created activities without authentication now need
   a session with `studio.manage`.
 - The Studio state endpoint is read-only; no new tables or migrations.

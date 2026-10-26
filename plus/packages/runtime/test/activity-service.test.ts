@@ -24,12 +24,18 @@ const staff: ActorContext = {
   actorId: "activity-staff",
   actorType: "user",
   roles: ["staff"],
-  permissions: ["archive.manage"],
+  permissions: ["archive.manage", "studio.manage"],
+};
+const participant: ActorContext = {
+  actorId: "activity-participant",
+  actorType: "user",
+  roles: ["participant"],
+  permissions: [],
 };
 
-function deps(): RuntimeDeps {
+function deps(actor: ActorContext = staff): RuntimeDeps {
   return {
-    actor: staff,
+    actor,
     now: () => new Date(Date.UTC(2026, 9, 20, 10, 0, tick++)).toISOString(),
     newEventId: () => `activity-${randomUUID()}`,
   };
@@ -128,6 +134,22 @@ describe.skipIf(!connectionString)("activity lifecycle commands", () => {
       title: "改名",
       expectedRevision: 1,
     })).rejects.toMatchObject({ code: "ACTIVITY_ARCHIVED" });
+  });
+
+  it("requires studio.manage to close or rename an activity", async () => {
+    const activityId = await seed();
+    await expect(closeActivity(db, deps(participant), {
+      commandId: "activity-close-forbidden",
+      activityId,
+      expectedRevision: 1,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(renameActivity(db, deps(participant), {
+      commandId: "activity-rename-forbidden",
+      activityId,
+      title: "越权改名",
+      expectedRevision: 1,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await readEventsSince(db, { activityId, after: 0, limit: 20 })).toEqual([]);
   });
 
   it("writes audit entries for lifecycle commands", async () => {

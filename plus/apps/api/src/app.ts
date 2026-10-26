@@ -142,6 +142,8 @@ import { Type } from "@sinclair/typebox";
 import type { Kysely } from "kysely";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
+import { isProductionEnvironment, sessionCookie } from "./cookies.js";
+
 export interface AppOptions {
   readonly db: Kysely<Database>;
   readonly registry?: CapabilityRegistry;
@@ -163,6 +165,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   QUESTION_UNKNOWN: 422,
   MATERIAL_NOT_ALLOWED: 422,
   ROSTER_UNKNOWN: 409,
+  ROSTER_FINAL: 409,
   NOT_FOUND: 404,
   CROSS_ACTIVITY: 404,
   STALE_REVISION: 409,
@@ -453,12 +456,15 @@ function cookieValue(request: FastifyRequest, name: string): string | undefined 
   return undefined;
 }
 
+/** Replays persist redacted one-time fields as null; never cookie those. */
+function sessionTokenValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function setSessionCookie(reply: { header(name: string, value: string): unknown }, name: string, value: string, expiresAt: string): void {
-  const maxAge = Math.max(0, Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000));
-  const secure = process.env.APP_ENV === "production" ? "; Secure" : "";
   reply.header(
     "set-cookie",
-    `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`,
+    sessionCookie(name, value, expiresAt, isProductionEnvironment()),
   );
 }
 
@@ -504,8 +510,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const deps =
     options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
-  const isProduction =
-    process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+  const isProduction = isProductionEnvironment();
   const sessionSecret =
     deps.credentialSecret ??
     process.env.ARTFLOW_PLUS_CREDENTIAL_SECRET ??
@@ -585,14 +590,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return requestDeps(request);
   }
 
-  async function requirePublicRateLimit(request: FastifyRequest, key: string, limit: number): Promise<void> {
+  async function requireRateLimit(key: string, limit: number): Promise<void> {
     try {
-      const allowed = await rateLimiter.allow({ key: `${key}:${request.ip}`, limit, windowMs: 60_000 });
+      const allowed = await rateLimiter.allow({ key, limit, windowMs: 60_000 });
       if (!allowed) throw new DomainError("RATE_LIMITED", "The public action is rate limited.");
     } catch (error) {
       if (error instanceof DomainError) throw error;
       throw new DomainError("RATE_LIMITED", "The public action is temporarily unavailable.");
     }
+  }
+
+  async function requirePublicRateLimit(request: FastifyRequest, key: string, limit: number): Promise<void> {
+    await requireRateLimit(`${key}:${request.ip}`, limit);
   }
 
   async function routeRound(activityId: string, roundKey: string) {
@@ -646,6 +655,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     { schema: { body: LoginBody } },
     async (request, reply) => {
       const body = request.body as { username: string; password: string };
+      await requirePublicRateLimit(request, "auth-login", 10);
+      await requireRateLimit(`auth-login-user:${body.username.trim().toLowerCase()}`, 20);
       const result = await authenticateLocalAccount(db, body);
       const csrf = csrfTokenFor(result.token, sessionSecret);
       setSessionCookies(reply, result.token, csrf);
@@ -2053,8 +2064,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       await requirePublicRateLimit(request, "ticket-redeem", 20);
       const outcome = await redeemTicketCredential(db, publicDeps(), { commandId, credential: body.credential });
       reply.header("cache-control", "no-store");
-      if (outcome.body.accessToken !== undefined) {
-        setSessionCookie(reply, "artflow_ticket_session", outcome.body.accessToken, outcome.body.expiresAt);
+      const accessToken = sessionTokenValue(outcome.body.accessToken);
+      if (accessToken !== undefined) {
+        setSessionCookie(reply, "artflow_ticket_session", accessToken, outcome.body.expiresAt);
       }
       return reply.status(outcome.status).send({ ...outcome.body, accessToken: null });
     },
@@ -2094,8 +2106,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       await requirePublicRateLimit(request, "judge-entry", 20);
       const outcome = await claimJudgeSeat(db, publicDeps(), { commandId, publicCode: body.publicCode, capability: body.capability ?? "" });
       reply.header("cache-control", "no-store");
-      if (outcome.body.sessionToken !== undefined) {
-        setSessionCookie(reply, "artflow_judge_session", outcome.body.sessionToken, outcome.body.expiresAt);
+      const judgeToken = sessionTokenValue(outcome.body.sessionToken);
+      if (judgeToken !== undefined) {
+        setSessionCookie(reply, "artflow_judge_session", judgeToken, outcome.body.expiresAt);
       }
       return reply.status(outcome.status).send({ ...outcome.body, sessionToken: null });
     },
