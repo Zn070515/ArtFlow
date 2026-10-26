@@ -32,6 +32,12 @@ const db = createDb({
 await migrate(db);
 
 const adminUsername = "e2e-ops";
+const adminPermissions = [
+  "registration.review",
+  "registration.manage",
+  "registration.roster.finalize",
+  "studio.manage",
+];
 if ((await getLocalAccount(db, adminUsername)) === null) {
   await createLocalAccount(db, {
     username: adminUsername,
@@ -40,14 +46,15 @@ if ((await getLocalAccount(db, adminUsername)) === null) {
       actorId: "e2e-ops",
       actorType: "user",
       roles: ["admin"],
-      permissions: [
-        "registration.review",
-        "registration.manage",
-        "registration.roster.finalize",
-        "studio.manage",
-      ],
+      permissions: adminPermissions,
     },
   });
+} else {
+  await db
+    .updateTable("local_account")
+    .set({ permissions: JSON.stringify(adminPermissions) })
+    .where("username", "=", adminUsername)
+    .execute();
 }
 
 const activityId = "act-e2e-registration";

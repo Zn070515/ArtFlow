@@ -9,6 +9,9 @@ import { OpsActivityPage } from "./routes/opsActivity.js";
 import { OpsRegistrationPage } from "./routes/opsRegistration.js";
 import { ResultsRoute } from "./routes/results.js";
 import { RootLayout } from "./routes/__root.js";
+import { StudioPage } from "./routes/studio.js";
+import { StudioActivityPage } from "./routes/studioActivity.js";
+import { StudioNewPage } from "./routes/studioNew.js";
 
 const rootRoute = createRootRoute({ component: RootLayout });
 
@@ -63,6 +66,24 @@ const opsRegistrationRoute = createRoute({
   component: OpsRegistrationPage,
 });
 
+const studioRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/studio",
+  component: StudioPage,
+});
+
+const studioNewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/studio/new",
+  component: StudioNewPage,
+});
+
+const studioActivityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/studio/$activityId",
+  component: StudioActivityPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   resultsRoute,
@@ -72,6 +93,9 @@ const routeTree = rootRoute.addChildren([
   opsRoute,
   opsActivityRoute,
   opsRegistrationRoute,
+  studioRoute,
+  studioNewRoute,
+  studioActivityRoute,
 ]);
 
 export const router = createRouter({
