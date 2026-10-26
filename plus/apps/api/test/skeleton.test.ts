@@ -292,6 +292,12 @@ dbIt("runs the full skeleton journey on the new architecture", async () => {
     registry,
     deps,
     enableRuntimeFacts: true,
+    actor: {
+      actorId: "skeleton-studio",
+      actorType: "user",
+      roles: ["staff"],
+      permissions: ["studio.manage"],
+    },
   });
   try {
     const sessions = (

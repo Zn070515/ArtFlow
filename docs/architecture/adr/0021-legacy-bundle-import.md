@@ -42,6 +42,9 @@ are anonymous; materials keep metadata only with `storage_key = legacy:<id>`.
 
 - Import is two commands and one intermediate file; the report is the cutover
   evidence.
+- v1 result snapshots are normalized to v2's camelCase shape (and contestant
+  ids to the imported participant keys); v1 vote purposes `selection` and
+  `repechage` map to `popularity` with an `unsupported` note.
 - An unrepresentable activity fails closed instead of importing a half-model.
 - Imported historical activities are `closed`; their public results are served
   from the frozen snapshot. Imported current activities remain operable, subject
