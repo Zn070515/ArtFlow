@@ -24,8 +24,17 @@ import {
   ReasonBodySchema,
   SubmitBallotBodySchema,
   TicketCredentialBodySchema,
+  ConfirmStageResultBodySchema,
+  EditPublicationBodySchema,
+  PublicResultsParamsSchema,
+  PublicResultsQuerySchema,
+  PublishingReleaseParamsSchema,
+  PublishingStageParamsSchema,
+  ReleaseResultBodySchema,
+  RevokeResultReleaseBodySchema,
+  UnlockStageResultBodySchema,
 } from "@artflow-plus/contracts";
-import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, getVoteSession, type Database } from "@artflow-plus/db";
+import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, getVoteSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
   defaultCapabilityRegistry,
   DomainError,
@@ -92,6 +101,12 @@ import {
   revokeTicket,
   revokeTicketAccessSession,
   submitBallot,
+  confirmStageResult,
+  editPublication,
+  getPublishingState,
+  releaseResult,
+  revokeResultRelease,
+  unlockStageResult,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -184,6 +199,12 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   SEAT_UNAVAILABLE: 409,
   TICKET_SESSION_EXPIRED: 401,
   TICKET_SESSION_REVOKED: 401,
+  RESULT_POST_FROZEN: 409,
+  RESULT_ALREADY_RELEASED: 409,
+  RESULT_RELEASE_NOT_ACTIVE: 409,
+  RESULT_NOT_CONFIRMED: 409,
+  RESULT_CANDIDATE_HOLD: 409,
+  AWARD_INVALID: 422,
   RATE_LIMITED: 429,
 };
 
@@ -1490,6 +1511,144 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         status: "running",
         stale: true,
       };
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/publishing/stage-results/:stageKey/confirm",
+    { schema: { params: PublishingStageParamsSchema, body: ConfirmStageResultBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageKey } = request.params as { id: string; stageKey: string };
+      const body = request.body as {
+        scope: string;
+        expectedSourceRevision: number;
+        expectedInputFingerprint: string;
+        awards: { award: string; contestantId: string }[];
+        note?: string;
+      };
+      const outcome = await confirmStageResult(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageKey,
+        scope: body.scope,
+        expectedSourceRevision: body.expectedSourceRevision,
+        expectedInputFingerprint: body.expectedInputFingerprint,
+        awards: body.awards,
+        ...(body.note === undefined ? {} : { note: body.note }),
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/publishing/stage-results/:stageKey/unlock",
+    { schema: { params: PublishingStageParamsSchema, body: UnlockStageResultBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageKey } = request.params as { id: string; stageKey: string };
+      const body = request.body as { scope: string; expectedCandidateRevision: number; note: string };
+      const outcome = await unlockStageResult(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageKey,
+        scope: body.scope,
+        expectedCandidateRevision: body.expectedCandidateRevision,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/publishing/releases",
+    { schema: { params: ActivityParams, body: ReleaseResultBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        stageKey: string;
+        scope: string;
+        expectedCandidateRevision: number;
+        note: string;
+      };
+      const outcome = await releaseResult(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageKey: body.stageKey,
+        scope: body.scope,
+        expectedCandidateRevision: body.expectedCandidateRevision,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/publishing/releases/:releaseId/revoke",
+    { schema: { params: PublishingReleaseParamsSchema, body: RevokeResultReleaseBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, releaseId } = request.params as { id: string; releaseId: string };
+      const body = request.body as { scope: string; note: string };
+      const outcome = await revokeResultRelease(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        releaseId,
+        scope: body.scope,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.patch(
+    "/api/activities/:id/publishing/publications/:stageKey",
+    { schema: { params: PublishingStageParamsSchema, body: EditPublicationBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageKey } = request.params as { id: string; stageKey: string };
+      const body = request.body as {
+        scope: string;
+        expectedVersion: number;
+        title: string;
+        content: string;
+      };
+      const outcome = await editPublication(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageKey,
+        scope: body.scope,
+        expectedVersion: body.expectedVersion,
+        title: body.title,
+        content: body.content,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/publishing/state",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return getPublishingState(db, await requestDeps(request), { activityId: id });
+    },
+  );
+
+  app.get(
+    "/api/public/results/:publicCode",
+    { schema: { params: PublicResultsParamsSchema, querystring: PublicResultsQuerySchema } },
+    async (request, reply) => {
+      const { publicCode } = request.params as { publicCode: string };
+      const query = request.query as { stage?: string };
+      await requirePublicRateLimit(request, `public-results:${publicCode}`, 120);
+      const results = await selectPublicResults(db, publicCode, query.stage);
+      reply.header("cache-control", "no-store");
+      if (results === null) {
+        return reply.status(404).send({ code: "NOT_FOUND", message: "The public results were not found." });
+      }
+      return results;
     },
   );
 
