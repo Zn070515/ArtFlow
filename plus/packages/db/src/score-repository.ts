@@ -378,6 +378,9 @@ export async function listUnsettledCorrectionsForActivity(
     .innerJoin("score_fact", "score_fact.id", "score_correction.score_fact_id")
     .selectAll("score_correction")
     .where("score_fact.activity_id", "=", activityId)
+    // "closed" is not terminal: recalculateAfterCorrection requires a closed
+    // correction and only then sets "recalculated". A closed-but-not-recalculated
+    // correction leaves the round result stale, so it must block archiving.
     .where("score_correction.state", "in", ["open", "revised", "closed"])
     .execute();
   return rows.map(correction);

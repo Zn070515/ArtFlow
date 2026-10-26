@@ -1,3 +1,4 @@
+import { isResultSnapshot } from "@artflow-plus/domain";
 import type {
   ResultAward,
   ResultDecision,
@@ -363,16 +364,6 @@ export interface PublicResults {
   readonly results: readonly PublicResult[];
 }
 
-function validSnapshot(value: unknown): value is ResultSnapshot {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { publicTitle?: unknown }).publicTitle === "string" &&
-    Array.isArray((value as { decisions?: unknown }).decisions) &&
-    Array.isArray((value as { awards?: unknown }).awards)
-  );
-}
-
 /** The single public selector: active snapshots only, never internal fields. */
 export async function selectPublicResults(
   db: Kysely<Database>,
@@ -390,7 +381,7 @@ export async function selectPublicResults(
     .orderBy("stage_key", "asc")
     .orderBy("released_at", "desc")
     .execute();
-  const validRows = rows.filter((row) => validSnapshot(json(row.snapshot)));
+  const validRows = rows.filter((row) => isResultSnapshot(json(row.snapshot)));
   const newest = [...validRows].sort((left, right) => {
     const leftAt = iso(left.released_at) ?? "";
     const rightAt = iso(right.released_at) ?? "";

@@ -5,12 +5,12 @@ import type {
   StoredResultRelease,
   StoredStageResult,
 } from "@artflow-plus/db";
+import { isResultSnapshot } from "@artflow-plus/domain";
 import type {
   ArchiveManifest,
   ArchiveManifestArtifact,
   ArchiveReleaseRow,
   ArchiveSummary,
-  ResultSnapshot,
   RuntimeEvent,
 } from "@artflow-plus/domain";
 import { zipSync } from "fflate";
@@ -50,17 +50,6 @@ export interface ArchivePackageOutput {
   readonly summary: ArchiveSummary;
 }
 
-function validSnapshot(value: unknown): value is ResultSnapshot {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { publicTitle?: unknown }).publicTitle === "string" &&
-    typeof (value as { activityTitle?: unknown }).activityTitle === "string" &&
-    Array.isArray((value as { decisions?: unknown }).decisions) &&
-    Array.isArray((value as { awards?: unknown }).awards)
-  );
-}
-
 function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const text = String(value);
@@ -77,7 +66,7 @@ function sha256(bytes: Uint8Array): string {
 }
 
 function releaseRecord(release: StoredResultRelease) {
-  const snapshot = validSnapshot(release.snapshot) ? release.snapshot : null;
+  const snapshot = isResultSnapshot(release.snapshot) ? release.snapshot : null;
   return {
     releaseId: release.id,
     stageKey: release.stageKey,
@@ -175,7 +164,7 @@ export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageO
   ];
   for (const release of releases) {
     const snapshot = release.snapshot;
-    if (!validSnapshot(snapshot)) continue;
+    if (!isResultSnapshot(snapshot)) continue;
     for (const decision of snapshot.decisions) {
       resultRows.push([
         release.stageKey,
@@ -265,7 +254,7 @@ export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageO
   entries["manifest.json"] = encoder.encode(JSON.stringify(manifest, null, 2));
 
   const releaseRows: ArchiveReleaseRow[] = releases.map((release) => {
-    const snapshot = validSnapshot(release.snapshot) ? release.snapshot : null;
+    const snapshot = isResultSnapshot(release.snapshot) ? release.snapshot : null;
     return {
       release: release.id,
       snapshotAvailable: snapshot !== null,

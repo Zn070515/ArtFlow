@@ -147,6 +147,18 @@ export function validateAwards(
   }
 }
 
+/** The one snapshot-shape guard shared by public reads and archive packaging. */
+export function isResultSnapshot(value: unknown): value is ResultSnapshot {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { activityTitle?: unknown }).activityTitle === "string" &&
+    typeof (value as { publicTitle?: unknown }).publicTitle === "string" &&
+    Array.isArray((value as { decisions?: unknown }).decisions) &&
+    Array.isArray((value as { awards?: unknown }).awards)
+  );
+}
+
 export function buildResultSnapshot(input: {
   readonly activityTitle: string;
   readonly stageKey: string;

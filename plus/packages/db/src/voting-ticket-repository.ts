@@ -1,6 +1,6 @@
 import type { CompiledVotingArtifact } from "@artflow-plus/domain";
 import { sql } from "kysely";
-import type { Kysely, Selectable } from "kysely";
+import type { Kysely, Selectable, SqlBool } from "kysely";
 
 import type {
   BallotRow,
@@ -278,7 +278,14 @@ export async function insertVoteRecords(
   await trx.insertInto("vote_record").values(records.map((record) => ({ ...record }))).execute();
 }
 
-/** The single authoritative ballot selector used by closed-session tallies. */
+/**
+ * The single authoritative ballot-validity predicate: a ballot counts unless it
+ * names a ticket that has not been redeemed. Shared by the Kysely selector and
+ * the raw tally query so the two can never disagree.
+ */
+const validBallotPredicate = sql<SqlBool>`(ballot.identity_type <> 'ticket' or ticket.state = 'redeemed')`;
+
+/** The authoritative ballot selector used by closed-session tallies. */
 function validBallots(
   db: Kysely<Database>,
   sessionId: string,
@@ -286,10 +293,7 @@ function validBallots(
   return db.selectFrom("ballot")
     .leftJoin("ticket", "ticket.id", "ballot.ticket_id")
     .where("ballot.session_id", "=", sessionId)
-    .where((expression) => expression.or([
-      expression("ballot.identity_type", "!=", "ticket"),
-      expression("ticket.state", "=", "redeemed"),
-    ]));
+    .where(validBallotPredicate);
 }
 
 export interface ValidVoteTally {
@@ -311,7 +315,7 @@ export async function readValidVoteTally(
         from ballot
         left join ticket on ticket.id = ballot.ticket_id
        where ballot.session_id = ${sessionId}
-         and (ballot.identity_type <> 'ticket' or ticket.state = 'redeemed')
+         and ${validBallotPredicate}
     ), option_counts as (
       select vote_option.id as option_id,
              count(valid_ballots.id) as count
