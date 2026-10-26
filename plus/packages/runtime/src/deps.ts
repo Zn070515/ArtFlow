@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 
 import { SYSTEM_ACTOR } from "@artflow-plus/domain";
 import type { ActorContext } from "@artflow-plus/domain";
+
+import { createLocalArchiveStorage, type ArchiveStorage } from "./archive-storage.js";
 
 /** Injected clocks/ids keep tests deterministic without global state. */
 export interface RuntimeDeps {
@@ -16,6 +19,8 @@ export interface RuntimeDeps {
   readonly actor?: ActorContext;
   /** Transport-injected HttpOnly judge session; never accepted from a body. */
   readonly judgeSessionToken?: string;
+  /** Sealed archive package storage; tests inject a temp root. */
+  readonly archiveStorage?: ArchiveStorage;
 }
 
 export function runtimeActor(deps: RuntimeDeps): ActorContext {
@@ -31,5 +36,8 @@ export function defaultRuntimeDeps(): RuntimeDeps {
       process.env.ARTFLOW_PLUS_CREDENTIAL_SECRET ??
       (isProduction ? undefined : "artflow-plus-development-secret"),
     actor: SYSTEM_ACTOR,
+    archiveStorage: createLocalArchiveStorage(
+      process.env.ARTFLOW_PLUS_ARCHIVE_DIR ?? resolve(process.cwd(), "var/archives"),
+    ),
   };
 }

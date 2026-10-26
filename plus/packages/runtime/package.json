@@ -19,6 +19,7 @@
   "dependencies": {
     "@artflow-plus/db": "workspace:*",
     "@artflow-plus/domain": "workspace:*",
+    "fflate": "^0.8.3",
     "kysely": "0.29.7"
   },
   "devDependencies": {
