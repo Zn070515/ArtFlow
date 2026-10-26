@@ -10,6 +10,7 @@
     "start": "tsx src/main.ts",
     "seed:e2e": "tsx scripts/seed-public-result.ts && tsx scripts/seed-registration.ts && tsx scripts/seed-live.ts && tsx scripts/seed-legacy.ts",
     "import:legacy": "tsx scripts/import-legacy.ts",
+    "create-account": "tsx scripts/create-account.ts",
     "test": "vitest run"
   },
   "dependencies": {
