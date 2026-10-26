@@ -107,6 +107,34 @@ export function archiveActivity(activity: Activity, expectedRevision: number): A
   return deepFreeze({ ...activity, status: "archived" as const, revision: activity.revision + 1 });
 }
 
+export function unarchiveActivity(activity: Activity, expectedRevision: number): Activity {
+  if (activity.revision !== expectedRevision) {
+    fail("STALE_REVISION", "The activity changed since it was read.");
+  }
+  if (activity.status !== "archived") {
+    fail("INVALID_TRANSITION", "Only an archived activity can be unarchived.");
+  }
+  return deepFreeze({ ...activity, status: "closed" as const, revision: activity.revision + 1 });
+}
+
+export function renameActivity(
+  activity: Activity,
+  title: string,
+  expectedRevision: number,
+): Activity {
+  if (activity.revision !== expectedRevision) {
+    fail("STALE_REVISION", "The activity changed since it was read.");
+  }
+  if (activity.status === "archived") {
+    fail("ACTIVITY_ARCHIVED", "An archived activity cannot be modified.");
+  }
+  const nextTitle = title.trim();
+  if (!nextTitle || nextTitle.length > 200) {
+    fail("INVALID_INPUT", "An activity title is required.");
+  }
+  return deepFreeze({ ...activity, title: nextTitle, revision: activity.revision + 1 });
+}
+
 export function createDefinitionDraft(activity: Activity): DefinitionDraft {
   if (activity.status !== "draft" && activity.status !== "active") {
     fail("ACTIVITY_NOT_ACTIVE", "A definition can only be drafted while the activity is editable.");

@@ -33,6 +33,11 @@ import {
   ReleaseResultBodySchema,
   RevokeResultReleaseBodySchema,
   UnlockStageResultBodySchema,
+  ArchiveActivityBodySchema,
+  ArchiveFileQuerySchema,
+  CloseActivityBodySchema,
+  RenameActivityBodySchema,
+  UnarchiveActivityBodySchema,
 } from "@artflow-plus/contracts";
 import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, getVoteSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
@@ -107,6 +112,12 @@ import {
   releaseResult,
   revokeResultRelease,
   unlockStageResult,
+  archiveActivity,
+  closeActivity,
+  getArchiveState,
+  readArchiveFile,
+  renameActivity,
+  unarchiveActivity,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -206,6 +217,14 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   RESULT_NOT_CONFIRMED: 409,
   RESULT_CANDIDATE_HOLD: 409,
   AWARD_INVALID: 422,
+  FORMAL_MODE_REQUIRED: 409,
+  ACTIVITY_ARCHIVED: 409,
+  ARCHIVE_RESULT_NOT_RELEASED: 409,
+  ARCHIVE_ROUND_NOT_LOCKED: 409,
+  ARCHIVE_CORRECTION_OPEN: 409,
+  ARCHIVE_VOTE_SESSION_OPEN: 409,
+  ARCHIVE_INTEGRITY_FAILED: 409,
+  ARCHIVE_NOT_FOUND: 404,
   RATE_LIMITED: 429,
 };
 
@@ -1512,6 +1531,101 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         status: "running",
         stale: true,
       };
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/close",
+    { schema: { params: ActivityParams, body: CloseActivityBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { expectedRevision: number };
+      const outcome = await closeActivity(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.patch(
+    "/api/activities/:id/title",
+    { schema: { params: ActivityParams, body: RenameActivityBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { title: string; expectedRevision: number };
+      const outcome = await renameActivity(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        title: body.title,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/archive",
+    { schema: { params: ActivityParams, body: ArchiveActivityBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { expectedRevision: number; note: string };
+      const outcome = await archiveActivity(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        expectedRevision: body.expectedRevision,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/unarchive",
+    { schema: { params: ActivityParams, body: UnarchiveActivityBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { expectedRevision: number; note: string };
+      const outcome = await unarchiveActivity(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        expectedRevision: body.expectedRevision,
+        note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/archive",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return getArchiveState(db, await requestDeps(request), { activityId: id });
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/archive/file",
+    { schema: { params: ActivityParams, querystring: ArchiveFileQuerySchema } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as { version?: number };
+      const file = await readArchiveFile(db, await requestDeps(request), {
+        activityId: id,
+        ...(query.version === undefined ? {} : { version: query.version }),
+      });
+      return reply
+        .type("application/zip")
+        .header("content-disposition", `attachment; filename="${file.filename}"`)
+        .header("content-length", String(file.bytes.byteLength))
+        .header("cache-control", "no-store")
+        .send(Buffer.from(file.bytes));
     },
   );
 

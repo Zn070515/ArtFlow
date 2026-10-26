@@ -187,6 +187,17 @@ export async function getVoteSessionForUpdate(
   return row === undefined ? null : voteSession(row);
 }
 
+export async function listVoteSessionsForActivity(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredVoteSession[]> {
+  const rows = await db.selectFrom("vote_session").selectAll()
+    .where("activity_id", "=", activityId)
+    .orderBy("id", "asc")
+    .execute();
+  return rows.map(voteSession);
+}
+
 export async function listVoteOptions(
   db: Kysely<Database>,
   sessionId: string,

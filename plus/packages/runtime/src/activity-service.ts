@@ -4,6 +4,7 @@ import {
   getActivityForUpdate,
   insertActivity,
   insertDraft,
+  listSessionRecords,
   updateActivity,
 } from "@artflow-plus/db";
 import type {
@@ -13,8 +14,10 @@ import type {
 } from "@artflow-plus/domain";
 import {
   activateActivity as activateActivityDomain,
+  closeActivity as closeActivityDomain,
   createActivity as createActivityDomain,
   DomainError,
+  renameActivity as renameActivityDomain,
 } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
@@ -132,6 +135,90 @@ export async function activateActivity(
           status: saved.status,
           revision: saved.revision,
         },
+      });
+      return { body: saved };
+    },
+  );
+}
+
+export interface CloseActivityInput {
+  readonly commandId: string;
+  readonly activityId: string;
+  readonly expectedRevision: number;
+}
+
+export async function closeActivity(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: CloseActivityInput,
+): Promise<CommandOutcome<Activity>> {
+  return executeCommand(
+    db,
+    {
+      commandId: input.commandId,
+      activityId: input.activityId,
+      capability: "engine",
+      commandType: "activity.close",
+      actor: runtimeActor(deps),
+      payload: { expectedRevision: input.expectedRevision },
+    },
+    async (trx) => {
+      const current = await getActivityForUpdate(trx, input.activityId);
+      if (current === null) {
+        throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+      }
+      const sessions = await listSessionRecords(trx, input.activityId);
+      const next = closeActivityDomain(current, input.expectedRevision, sessions);
+      const saved = await updateActivity(trx, next, current.revision);
+      await appendEngineEvent(trx, deps, {
+        type: "ActivityClosed",
+        activityId: saved.id,
+        aggregateType: "activity",
+        aggregateId: saved.id,
+        revision: saved.revision,
+        payload: { activityId: saved.id, status: saved.status, revision: saved.revision },
+      });
+      return { body: saved };
+    },
+  );
+}
+
+export interface RenameActivityInput {
+  readonly commandId: string;
+  readonly activityId: string;
+  readonly title: string;
+  readonly expectedRevision: number;
+}
+
+export async function renameActivity(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: RenameActivityInput,
+): Promise<CommandOutcome<Activity>> {
+  return executeCommand(
+    db,
+    {
+      commandId: input.commandId,
+      activityId: input.activityId,
+      capability: "engine",
+      commandType: "activity.rename",
+      actor: runtimeActor(deps),
+      payload: { title: input.title, expectedRevision: input.expectedRevision },
+    },
+    async (trx) => {
+      const current = await getActivityForUpdate(trx, input.activityId);
+      if (current === null) {
+        throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+      }
+      const next = renameActivityDomain(current, input.title, input.expectedRevision);
+      const saved = await updateActivity(trx, next, current.revision);
+      await appendEngineEvent(trx, deps, {
+        type: "ActivityRenamed",
+        activityId: saved.id,
+        aggregateType: "activity",
+        aggregateId: saved.id,
+        revision: saved.revision,
+        payload: { activityId: saved.id, title: saved.title, revision: saved.revision },
       });
       return { body: saved };
     },

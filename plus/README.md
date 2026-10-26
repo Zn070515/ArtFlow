@@ -270,6 +270,26 @@ Every stage has at most one ACTIVE release (`result_release_active_key` partial
 unique index). Revoke and unlock make the old URL immediately invisible; unlock
 supersedes the active release in the same transaction.
 
+## M7b archive
+
+A closed activity can be sealed into a versioned ZIP package:
+
+```text
+POST  /api/activities/:id/close
+PATCH /api/activities/:id/title
+POST  /api/activities/:id/archive
+POST  /api/activities/:id/unarchive
+GET   /api/activities/:id/archive
+GET   /api/activities/:id/archive/file?version=
+```
+
+Archive and unarchive require `archive.manage`. The download verifies size and
+SHA-256 before streaming and never exposes a static path. Set
+`ARTFLOW_PLUS_ARCHIVE_DIR` to a persistent volume; production backups must include
+it. The package contains activity identity, publishing releases/stage results,
+formal sessions, and an event summary. Registration/material/vote/score detail is
+not included until those facts carry a mode column.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot

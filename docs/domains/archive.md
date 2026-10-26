@@ -63,3 +63,15 @@ DRAFT → PACKAGING → SEALED
   以便非技术人员查看，同时提供机器可读 JSON。
 - 媒体是否进包？v1 只记录路径与清单，不复制大文件；v2 需要明确“包是否自包含
   字节”的边界。
+
+## Plus 实现状态（M7b，2026-10-26）
+
+- `archive` capability 拥有 `archive_package`、archive/unarchive 命令与受控下载；
+  包为本地卷 ZIP（JSON + CSV + README），版本不可变，SHA-256 校验。
+- 归档闭环：closed、无 running session、轮次 locked、无未完成 correction、票场
+  closed、启用 publishing 时至少一条 ACTIVE release。
+- ARCHIVED 为终态；unarchive 是独立命令，保留包文件与历史。归档后 rename 返回
+  `ACTIVITY_ARCHIVED`。
+- 已知缺口：registration/material/vote/score 事实表没有 mode 列，因此不进入包；
+  等后续 hardening 再扩展归档内容。媒体字节仍不复制。
+- DEPL-06 的恢复演练留给部署 slice；下载只验证当前包的存在/可读/哈希一致。

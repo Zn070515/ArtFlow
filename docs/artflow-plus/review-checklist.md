@@ -98,6 +98,17 @@
 - [x] unlock 在同一事务写 StageResultUnlocked 与 ResultReleaseSuperseded。
 - [x] 核定只接受 runtime 读取的 podium candidate；HTTP 不能自带名次。
 
+### M7b Archive
+
+- [x] 归档包只含白名单字段；fingerprint/hash/token/问卷答案/ballot 身份/存储路径
+      没有进入 ZIP。
+- [x] 归档闭环 fail-closed：running session、未锁轮次、未完成 correction、未关闭
+      票场、缺失 ACTIVE release 都拒绝且无副作用。
+- [x] 文件写入有反向补偿；下载前校验 size/SHA-256；不一致返回
+      `ARCHIVE_INTEGRITY_FAILED`。
+- [x] ARCHIVED 是终态；unarchive 是独立命令并保留包历史。
+- [x] legacy 无 snapshot 的 release 在归档中保持空白，不伪造。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

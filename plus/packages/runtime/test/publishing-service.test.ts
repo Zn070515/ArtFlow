@@ -219,6 +219,21 @@ describe.skipIf(!connectionString)("publishing service", () => {
     })).rejects.toMatchObject({ code: "RESULT_CANDIDATE_HOLD" });
   });
 
+  it("rejects test and rehearsal publishing sessions", async () => {
+    const activityId = await seedActivity("act-rehearsal", "REHEARSAL");
+    await db.updateTable("execution_session").set({ mode: "rehearsal" }).where("activity_id", "=", activityId).execute();
+    await expect(confirmStageResult(db, deps(staff), {
+      commandId: "m7-rehearsal-confirm",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: 3,
+      expectedInputFingerprint: "fp-1",
+      awards: [],
+      note: "rehearsal",
+    })).rejects.toMatchObject({ code: "FORMAL_MODE_REQUIRED" });
+  });
+
   it("rejects a second confirm without an unlock", async () => {
     const activityId = await seedActivity();
     const input = {
