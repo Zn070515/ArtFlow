@@ -28,34 +28,43 @@ export function SessionProvider({ children }: { readonly children: ReactNode }) 
     retry: false,
   });
 
+  const clearOtherQueries = useCallback((): void => {
+    queryClient.removeQueries({
+      predicate: (candidate) => candidate.queryKey[0] !== "me",
+    });
+  }, [queryClient]);
+
   const login = useCallback(
     async (username: string, password: string): Promise<SessionResponse> => {
       const session = await loginRequest(username, password);
-      queryClient.clear();
+      await queryClient.cancelQueries({ queryKey: ["me"] });
       queryClient.setQueryData(["me"], session);
+      clearOtherQueries();
       return session;
     },
-    [queryClient],
+    [queryClient, clearOtherQueries],
   );
 
   const register = useCallback(
     async (username: string, password: string): Promise<SessionResponse> => {
       const session = await registerParticipant(username, password);
-      queryClient.clear();
+      await queryClient.cancelQueries({ queryKey: ["me"] });
       queryClient.setQueryData(["me"], session);
+      clearOtherQueries();
       return session;
     },
-    [queryClient],
+    [queryClient, clearOtherQueries],
   );
 
   const logout = useCallback(async (): Promise<void> => {
     try {
       await logoutRequest();
     } finally {
-      queryClient.clear();
+      await queryClient.cancelQueries({ queryKey: ["me"] });
       queryClient.setQueryData(["me"], null);
+      clearOtherQueries();
     }
-  }, [queryClient]);
+  }, [queryClient, clearOtherQueries]);
 
   const value = useMemo<SessionContextValue>(
     () => ({
