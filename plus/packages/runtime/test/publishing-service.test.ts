@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-import { closeDb, createDb, insertPodiumCandidate, insertRelease, insertSession, migrate } from "@artflow-plus/db";
+import {
+  closeDb,
+  createDb,
+  insertPodiumCandidate,
+  insertRelease,
+  insertSession,
+  migrate,
+  readEventsSince,
+} from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import type { ActorContext, ExecutionSession } from "@artflow-plus/domain";
 import { Client } from "pg";
@@ -338,5 +346,85 @@ describe.skipIf(!connectionString)("publishing service", () => {
       expectedCandidateRevision: 3,
       note: "again",
     })).rejects.toMatchObject({ code: "RESULT_ALREADY_RELEASED" });
+  });
+
+  it("serializes two concurrent releases on the same stage through the Activity lock", async () => {
+    const activityId = await seedActivity("act-release-race", "RACE");
+    await confirmStageResult(db, deps(staff), {
+      commandId: "m7-race-confirm",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: 3,
+      expectedInputFingerprint: "fp-1",
+      awards: [],
+      note: "confirm",
+    });
+    const other = createDb({ connectionString: connectionString ?? "", schema });
+    try {
+      const results = await Promise.allSettled([
+        releaseResult(db, deps(staff), {
+          commandId: "m7-race-a",
+          activityId,
+          stageKey: "final_podium",
+          scope: "publishing",
+          expectedCandidateRevision: 3,
+          note: "a",
+        }),
+        releaseResult(other, deps({ ...staff, actorId: "m7-staff-b" }), {
+          commandId: "m7-race-b",
+          activityId,
+          stageKey: "final_podium",
+          scope: "publishing",
+          expectedCandidateRevision: 3,
+          note: "b",
+        }),
+      ]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(
+        results
+          .filter((result) => result.status === "rejected")
+          .map((result) => (result as PromiseRejectedResult).reason.code),
+      ).toContain("RESULT_ALREADY_RELEASED");
+    } finally {
+      await closeDb(other);
+    }
+  });
+
+  it("writes audit and outbox facts for every accepted lifecycle command", async () => {
+    const activityId = await seedActivity("act-audit", "AUDIT");
+    await confirmStageResult(db, deps(staff), {
+      commandId: "m7-audit-confirm",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: 3,
+      expectedInputFingerprint: "fp-1",
+      awards: [],
+      note: "confirm",
+    });
+    const released = await releaseResult(db, deps(staff), {
+      commandId: "m7-audit-release",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: 3,
+      note: "release",
+    });
+    await revokeResultRelease(db, deps(staff), {
+      commandId: "m7-audit-revoke",
+      activityId,
+      releaseId: released.body.id,
+      scope: "publishing",
+      note: "revoke",
+    });
+    const audits = await db.selectFrom("audit_entry").select(["command_id"]).where("activity_id", "=", activityId).execute();
+    expect(audits.map((row) => row.command_id)).toEqual(
+      expect.arrayContaining(["m7-audit-confirm", "m7-audit-release", "m7-audit-revoke"]),
+    );
+    const events = await readEventsSince(db, { activityId, after: 0, limit: 100 });
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["StageResultConfirmed", "ResultReleased", "ResultReleaseRevoked"]),
+    );
   });
 });
