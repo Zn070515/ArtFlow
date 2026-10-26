@@ -1,6 +1,5 @@
 import { capabilityDefinitionHash } from "../compiler.js";
 import { fail } from "../errors.js";
-import { Decimal } from "decimal.js";
 import type {
   CapabilityCompileResult,
   CapabilityCompiler,
@@ -9,7 +8,7 @@ import type {
   CompiledCapabilityPlan,
 } from "../model.js";
 import { deepFreeze } from "../model.js";
-import type { DecimalValue } from "../scoring.js";
+import { shareOfTotal, type DecimalValue } from "../scoring.js";
 import type { CapabilityRegistration } from "../registry.js";
 
 export type VotingPurpose = "popularity" | "score_component";
@@ -230,11 +229,7 @@ export function computeVoteScores(input: VoteScoreInput): VoteScoreResult {
     if (count === undefined || !Number.isInteger(count) || count < 0) {
       fail("INVALID_INPUT", `Vote count for ${optionId} is invalid.`);
     }
-    const value = new Decimal(count)
-      .dividedBy(input.totalBallots)
-      .times(input.rule.scale)
-      .toDecimalPlaces(input.rule.decimals, Decimal.ROUND_HALF_UP);
-    result[optionId] = value.toFixed(input.rule.decimals);
+    result[optionId] = shareOfTotal(count, input.totalBallots, input.rule.scale, input.rule.decimals);
   }
   return deepFreeze({ status: "ready", scores: result });
 }
