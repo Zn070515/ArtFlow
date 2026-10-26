@@ -1,0 +1,20 @@
+:root {
+  color-scheme: dark;
+  --ink: #07070a;
+  --ink-soft: #0d0d13;
+  --bone: #f5efe6;
+  --bone-dim: rgba(245, 239, 230, 0.64);
+  --gold: #e8b45a;
+  --gold-bright: #ffe3a3;
+  --gold-soft: rgba(232, 180, 90, 0.16);
+  --ember: #c2410c;
+  --ember-soft: rgba(194, 65, 12, 0.24);
+  --cool: #7dd3fc;
+  --line: rgba(245, 239, 230, 0.12);
+  --glass: rgba(18, 18, 24, 0.52);
+  --glass-strong: rgba(12, 12, 17, 0.78);
+  --display: "Fraunces Variable", "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --sans: "Space Grotesk Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --radius: 18px;
+  --shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+}
