@@ -44,6 +44,7 @@ import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, get
 import {
   defaultCapabilityRegistry,
   DomainError,
+  hasPermission,
   instantiateActivityPack,
   requirePermission,
   SINGER_COMPETITION_PACK,
@@ -561,6 +562,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   async function requireStudio(request: FastifyRequest): Promise<RuntimeDeps> {
     const requestContext = await requestDeps(request);
     requirePermission(requestContext.actor ?? SYSTEM_ACTOR, "studio.manage");
+    return requestContext;
+  }
+
+  // The Live console opens and closes scoring sessions without Studio access.
+  async function requireSessionManager(request: FastifyRequest): Promise<RuntimeDeps> {
+    const requestContext = await requestDeps(request);
+    const actor = requestContext.actor ?? SYSTEM_ACTOR;
+    if (!hasPermission(actor, "studio.manage") && !hasPermission(actor, "competition.manage")) {
+      throw new DomainError("FORBIDDEN", "One of studio.manage or competition.manage is required.");
+    }
     return requestContext;
   }
 
@@ -1546,7 +1557,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         mode: ExecutionMode;
         expectedRevision?: number;
       };
-      const outcome = await startExecution(db, registry, await requireStudio(request), {
+      const outcome = await startExecution(db, registry, await requireSessionManager(request), {
         commandId,
         activityId: id,
         scope: body.scope,
@@ -1566,7 +1577,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const commandId = requireIdempotency(request);
       const { id, sessionId } = request.params as { id: string; sessionId: string };
       const body = request.body as { expectedRevision: number };
-      const outcome = await closeExecution(db, await requireStudio(request), {
+      const outcome = await closeExecution(db, await requireSessionManager(request), {
         commandId,
         activityId: id,
         sessionId,

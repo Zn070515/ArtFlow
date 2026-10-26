@@ -2,13 +2,6 @@ import { Type, type Static } from "@sinclair/typebox";
 
 const ScopeSchema = Type.String({ minLength: 1, maxLength: 100 });
 const RoundKeySchema = Type.String({ minLength: 1, maxLength: 100 });
-const ContextSchema = Type.Object({
-  performanceId: Type.String({ minLength: 1, maxLength: 100 }),
-  panelSnapshotId: Type.String({ minLength: 1, maxLength: 100 }),
-  seatId: Type.String({ minLength: 1, maxLength: 100 }),
-  contextVersion: Type.Integer({ minimum: 0 }),
-}, { additionalProperties: false });
-
 export const CompetitionRoundParamsSchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   roundKey: RoundKeySchema,
@@ -37,22 +30,25 @@ export const CompetitionScopeBodySchema = Type.Object({
   scope: ScopeSchema,
 }, { additionalProperties: false });
 
-export const CompetitionScoreBodySchema = Type.Intersect([
-  ContextSchema,
-  Type.Object({
-    scope: ScopeSchema,
-    source: Type.Union([
-      Type.Literal("direct_judge"),
-      Type.Literal("staff_rapid"),
-      Type.Literal("staff_proxy"),
-      Type.Literal("paper_dr"),
-    ]),
-    criteria: Type.Record(Type.String({ minLength: 1, maxLength: 100 }), Type.Number()),
-    notes: Type.Optional(Type.String({ maxLength: 2000 })),
-    sourceReference: Type.Optional(Type.String({ maxLength: 200 })),
-    reason: Type.Optional(Type.String({ maxLength: 2000 })),
-  }, { additionalProperties: false }),
-]);
+// One flat object: Fastify's AJV runs with removeAdditional, so an Intersect of
+// two closed objects would strip each other's properties before validation.
+export const CompetitionScoreBodySchema = Type.Object({
+  performanceId: Type.String({ minLength: 1, maxLength: 100 }),
+  panelSnapshotId: Type.String({ minLength: 1, maxLength: 100 }),
+  seatId: Type.String({ minLength: 1, maxLength: 100 }),
+  contextVersion: Type.Integer({ minimum: 0 }),
+  scope: ScopeSchema,
+  source: Type.Union([
+    Type.Literal("direct_judge"),
+    Type.Literal("staff_rapid"),
+    Type.Literal("staff_proxy"),
+    Type.Literal("paper_dr"),
+  ]),
+  criteria: Type.Record(Type.String({ minLength: 1, maxLength: 100 }), Type.Number()),
+  notes: Type.Optional(Type.String({ maxLength: 2000 })),
+  sourceReference: Type.Optional(Type.String({ maxLength: 200 })),
+  reason: Type.Optional(Type.String({ maxLength: 2000 })),
+}, { additionalProperties: false });
 
 export const EditCompetitionScoreBodySchema = Type.Object({
   scope: ScopeSchema,

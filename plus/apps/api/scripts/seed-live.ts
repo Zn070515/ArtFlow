@@ -75,7 +75,7 @@ await db.transaction().execute(async (trx) => {
     title,
     status: "active",
     revision: 1,
-    enabled_capabilities: JSON.stringify(["competition"]),
+    enabled_capabilities: JSON.stringify(["competition", "ticketing"]),
     active_definition_version: 1,
   }).execute();
   await insertRelease(trx, {
@@ -89,9 +89,15 @@ await db.transaction().execute(async (trx) => {
         contentHash: `e2e-live-${stamp}`,
         artifact: competition,
       },
+      ticketing: {
+        ok: true,
+        capabilityKey: "ticketing",
+        contentHash: `e2e-live-ticketing-${stamp}`,
+        artifact: { schemaVersion: 1 },
+      },
     },
     executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
-    capabilityVersions: { competition: "1" },
+    capabilityVersions: { competition: "1", ticketing: "1" },
     bindings: [],
     releasedAt: new Date().toISOString(),
     sourceDraftRevision: 1,

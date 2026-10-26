@@ -5,6 +5,7 @@ import {
   createDb,
   insertRegistration,
   insertRelease,
+  insertSession,
   migrate,
   upsertRoster,
 } from "@artflow-plus/db";
@@ -29,6 +30,9 @@ let db: Kysely<Database>;
 let admin: Client;
 let app: FastifyInstance;
 let activityId: string;
+let panelId: string;
+let seatId: string;
+let performanceId: string;
 const judgeToken = `judge-token-${randomUUID()}`;
 
 const staff: ActorContext = {
@@ -86,11 +90,11 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
 
     activityId = `act-${randomUUID()}`;
     const roundId = `round-${randomUUID()}`;
-    const panelId = `panel-${randomUUID()}`;
-    const seatId = `seat-${randomUUID()}`;
+    panelId = `panel-${randomUUID()}`;
+    seatId = `seat-${randomUUID()}`;
     const grantId = `grant-${randomUUID()}`;
     const judgeSessionId = `judge-session-${randomUUID()}`;
-    const performanceId = `performance-${randomUUID()}`;
+    performanceId = `performance-${randomUUID()}`;
     await db.insertInto("activity").values({
       id: activityId,
       public_code: activityId,
@@ -202,6 +206,16 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
       session_id: judgeSessionId,
       revision: 1,
     }).execute();
+    await insertSession(db, {
+      id: `judging-session-${randomUUID()}`,
+      activityId,
+      definitionVersion: 1,
+      contentHash: "live-release",
+      scope: "judging",
+      mode: "formal",
+      status: "running",
+      revision: 0,
+    }, "2026-10-26T10:00:00Z");
     await db.insertInto("judge_session").values({
       id: judgeSessionId,
       activity_id: activityId,
@@ -261,5 +275,34 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
       existingScore: null,
       rubric: { criteria: expect.arrayContaining([expect.objectContaining({ key: "演唱技巧" })]) },
     });
+  });
+
+  it("records a direct judge score through the API and reflects it in Live state", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/competition/rounds/round-1/scores`,
+      headers: {
+        cookie: `artflow_judge_session=${judgeToken}`,
+        "idempotency-key": `score-${randomUUID()}`,
+      },
+      payload: {
+        scope: "judging",
+        source: "direct_judge",
+        performanceId,
+        panelSnapshotId: panelId,
+        seatId,
+        contextVersion: 1,
+        criteria: { "演唱技巧": 90, "舞台表现": 92, "情感表达": 91 },
+        notes: "",
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ source: "direct_judge", total: "273.00" });
+
+    const live = await app.inject({ method: "GET", url: `/api/activities/${activityId}/live` });
+    const body = live.json() as {
+      rounds: { performances: { scoreCount: number; expectedJudges: number }[] }[];
+    };
+    expect(body.rounds[0]?.performances[0]).toMatchObject({ scoreCount: 1, expectedJudges: 1 });
   });
 });

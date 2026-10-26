@@ -17,6 +17,7 @@ import {
   getJudgeSeatByPanelAndJudge,
   getJudgeSeatGrant,
   getPanel,
+  getPanelMember,
   getRelease,
   getRound,
   listApprovedParticipantIds,
@@ -42,11 +43,15 @@ export interface LivePerformance extends StoredPerformance {
   readonly expectedJudges: number;
 }
 
+export interface LiveSeat extends StoredJudgeSeat {
+  readonly seatKey: string;
+}
+
 export interface LiveRoundState {
   readonly config: CompetitionRoundDefinition;
   readonly round: StoredRound | null;
   readonly panel: StoredPanelSnapshot | null;
-  readonly seats: readonly StoredJudgeSeat[];
+  readonly seats: readonly LiveSeat[];
   readonly performances: readonly LivePerformance[];
   readonly ranking: StoredRankingSnapshot | null;
 }
@@ -98,7 +103,13 @@ export async function getLiveState(
     const panel = round?.currentPanelId === null || round === null
       ? null
       : await getPanel(db, round.currentPanelId);
-    const seats = panel === null ? [] : await listJudgeSeatsForPanel(db, panel.id);
+    const seatRows = panel === null ? [] : await listJudgeSeatsForPanel(db, panel.id);
+    const seats: LiveSeat[] = await Promise.all(
+      seatRows.map(async (seat) => {
+        const member = panel === null ? null : await getPanelMember(db, panel.id, seat.judgeId);
+        return { ...seat, seatKey: member?.seatKey ?? "" };
+      }),
+    );
     const performances = round === null ? [] : await listRoundPerformances(db, round.id);
     const livePerformances: LivePerformance[] = [];
     for (const performance of performances) {
