@@ -220,6 +220,18 @@
 - [x] 同一 round 多个 panel 只有最后一个 current，版本号递增。
 - [x] MemoryRateLimiter 定期清扫过期窗口，避免 key 无限增长。
 
+### M8e-3 Cutover
+
+- [x] Plus API 以 esbuild 单文件 bundle 运行；不在运行时加载 workspace TS 包。
+- [x] api/web 镜像分离，但同一 Dockerfile 多 target；nginx 负责 SPA、`/api`
+      反代与 SSE buffering off。
+- [x] Plus 使用独立 DB/卷/credential secret；`--profile plus` 默认不启动。
+- [x] 主域名切换只改 Caddy site profile + 重建 proxy；不按活动/路径混跑。
+- [x] 回滚边界是首次 v2 正式写入前；v1 切后只读并保留一个活动周期。
+- [x] 首个 cutover 在报名截止后，参与者只读；不迁移参与者账号。
+- [x] cutover smoke 只读，且失败退出码非 0；runbook 包含预检、commit point、
+      回滚与演练。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

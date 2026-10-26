@@ -1,0 +1,4 @@
+# Selects the active site profile. The proxy container always has
+# ARTFLOW_SITE_PROFILE set (default v1); changing it and recreating the proxy is
+# the whole cutover/rollback.
+import /etc/caddy/sites/{$ARTFLOW_SITE_PROFILE}.caddy

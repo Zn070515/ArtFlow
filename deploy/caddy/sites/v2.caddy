@@ -1,0 +1,20 @@
+# ArtFlow-Plus site profile. v2 has no websocket or media gateway; media bytes
+# remain in v1 and are not exposed through the public v2 host.
+http://127.0.0.1:8081 {
+	@health path /healthz /healthz/ /readyz /readyz/
+	reverse_proxy @health plus-web:8080 {
+		header_up Host {$CADDY_SITE_ADDRESS}
+		header_up X-Forwarded-Proto https
+	}
+}
+
+https://{$CADDY_SITE_ADDRESS} {
+	request_body {
+		max_size 20MB
+	}
+	header -Server
+	reverse_proxy plus-web:8080 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+}

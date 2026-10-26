@@ -27,6 +27,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0020](0020-mode-hardening.md) | 执行模式隔离：分数/选票/排名按 mode 归集 | accepted |
 | [0021](0021-legacy-bundle-import.md) | v1 两段式 bundle 导入与对账 | accepted |
 | [0022](0022-event-feed-authorization.md) | 运营事件流需要运营权限 | accepted |
+| [0023](0023-cutover-topology-and-rollback.md) | 主域名整体替换与首次写入前的回滚边界 | accepted |
 
 新增 ADR 的规则：
 
