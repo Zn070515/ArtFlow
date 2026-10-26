@@ -1,4 +1,7 @@
 export * from "./activity-service.js";
+export * from "./archive-package.js";
+export * from "./archive-service.js";
+export * from "./archive-storage.js";
 export * from "./auth-service.js";
 export * from "./competition-service.js";
 export * from "./command.js";
