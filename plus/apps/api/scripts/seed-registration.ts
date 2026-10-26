@@ -44,6 +44,7 @@ if ((await getLocalAccount(db, adminUsername)) === null) {
         "registration.review",
         "registration.manage",
         "registration.roster.finalize",
+        "studio.manage",
       ],
     },
   });

@@ -51,6 +51,7 @@ export interface StoredActivitySummary {
   readonly status: ActivityStatus;
   readonly revision: number;
   readonly enabledCapabilities: readonly string[];
+  readonly activeDefinitionVersion: number;
 }
 
 function summary(row: ActivitySelectRow): StoredActivitySummary {
@@ -64,6 +65,7 @@ function summary(row: ActivitySelectRow): StoredActivitySummary {
       typeof row.enabled_capabilities === "string"
         ? (JSON.parse(row.enabled_capabilities) as string[])
         : row.enabled_capabilities,
+    activeDefinitionVersion: row.active_definition_version,
   };
 }
 

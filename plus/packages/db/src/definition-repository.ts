@@ -180,6 +180,19 @@ export async function insertRelease(
     .execute();
 }
 
+export async function listReleases(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredRelease[]> {
+  const rows = await db
+    .selectFrom("definition_release")
+    .selectAll()
+    .where("activity_id", "=", activityId)
+    .orderBy("version", "desc")
+    .execute();
+  return rows.map(rowToRelease);
+}
+
 export async function getRelease(
   db: Kysely<Database>,
   activityId: string,

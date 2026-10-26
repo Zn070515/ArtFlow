@@ -52,6 +52,13 @@ const headers = (id = `cmd-${randomUUID()}`) => ({
   "content-type": "application/json",
 });
 
+let studioToken = "";
+
+const studioHeaders = (id = `cmd-${randomUUID()}`) => ({
+  ...headers(id),
+  authorization: `Bearer ${studioToken}`,
+});
+
 function stubCapability(identity: string): CapabilityRegistration {
   const compiler: CapabilityCompiler = {
     capabilityKey: identity,
@@ -105,7 +112,7 @@ async function createActivity(capabilities: string[] = ["competition"]) {
   const response = await app.inject({
     method: "POST",
     url: "/api/activities",
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { title: "2026 院十佳", capabilities },
   });
   expect(response.statusCode).toBe(201);
@@ -122,7 +129,7 @@ async function createReleasedActivity(): Promise<string> {
   const activated = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/activate`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedRevision: created.revision },
   });
   expect(activated.statusCode).toBe(200);
@@ -130,7 +137,7 @@ async function createReleasedActivity(): Promise<string> {
   const compiled = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/definitions/compile`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: {
       package: {
         schemaVersion: 1,
@@ -144,7 +151,7 @@ async function createReleasedActivity(): Promise<string> {
   const released = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/definitions/release`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedDraftRevision: compiled.json().draftRevision },
   });
   expect(released.statusCode).toBe(201);
@@ -159,7 +166,7 @@ async function startSession(
   return app.inject({
     method: "POST",
     url: `/api/activities/${activityId}/executions`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { scope, mode },
   });
 }
@@ -173,6 +180,24 @@ beforeAll(async () => {
   await migrate(db);
   app = await buildApp({ db, deps, enableRuntimeFacts: true });
   await app.ready();
+  await insertLocalAccount(db, {
+    username: "http-studio",
+    passwordDigest: hashPassword("studio-password"),
+    actor: {
+      actorId: "http-studio",
+      actorType: "user",
+      roles: ["staff"],
+      permissions: ["studio.manage"],
+    },
+    active: true,
+  });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    headers: { "content-type": "application/json" },
+    payload: { username: "http-studio", password: "studio-password" },
+  });
+  studioToken = login.json().token as string;
 });
 
 afterAll(async () => {
@@ -251,7 +276,7 @@ dbIt("creates, replays and activates an activity", async () => {
   const created = await app.inject({
     method: "POST",
     url: "/api/activities",
-    headers: headers(commandId),
+    headers: studioHeaders(commandId),
     payload: { title: "Replay", capabilities: ["competition"] },
   });
   expect(created.statusCode).toBe(201);
@@ -260,7 +285,7 @@ dbIt("creates, replays and activates an activity", async () => {
   const replay = await app.inject({
     method: "POST",
     url: "/api/activities",
-    headers: headers(commandId),
+    headers: studioHeaders(commandId),
     payload: { title: "Replay", capabilities: ["competition"] },
   });
   expect(replay.statusCode).toBe(201);
@@ -269,7 +294,7 @@ dbIt("creates, replays and activates an activity", async () => {
   const conflict = await app.inject({
     method: "POST",
     url: "/api/activities",
-    headers: headers(commandId),
+    headers: studioHeaders(commandId),
     payload: { title: "Different", capabilities: ["competition"] },
   });
   expect(conflict.statusCode).toBe(409);
@@ -278,7 +303,7 @@ dbIt("creates, replays and activates an activity", async () => {
   const activated = await app.inject({
     method: "POST",
     url: `/api/activities/${created.json().id}/activate`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedRevision: created.json().revision },
   });
   expect(activated.statusCode).toBe(200);
@@ -315,7 +340,7 @@ dbIt("rejects an invalid definition package with stable diagnostics", async () =
   const response = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/definitions/compile`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { package: invalid },
   });
   expect(response.statusCode).toBe(422);
@@ -332,13 +357,13 @@ dbIt("compiles, rejects a stale release, then releases the current package", asy
   await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/activate`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedRevision: created.revision },
   });
   const compiled = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/definitions/compile`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { package: competitionPackage() },
   });
   expect(compiled.statusCode).toBe(200);
@@ -347,7 +372,7 @@ dbIt("compiles, rejects a stale release, then releases the current package", asy
   const stale = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/definitions/release`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedDraftRevision: 0 },
   });
   expect(stale.statusCode).toBe(409);
@@ -356,7 +381,7 @@ dbIt("compiles, rejects a stale release, then releases the current package", asy
   const released = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/definitions/release`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedDraftRevision: compiled.json().draftRevision },
   });
   expect(released.statusCode).toBe(201);
@@ -372,7 +397,7 @@ dbIt("refuses to release before compilation", async () => {
   const response = await app.inject({
     method: "POST",
     url: `/api/activities/${created.id}/definitions/release`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedDraftRevision: 0 },
   });
   expect(response.statusCode).toBe(409);
@@ -525,7 +550,7 @@ dbIt("starts parallel scopes, lists them and closes with OCC", async () => {
   const closed = await app.inject({
     method: "POST",
     url: `/api/activities/${activityId}/executions/${rehearsal.json().id}/close`,
-    headers: headers(),
+    headers: studioHeaders(),
     payload: { expectedRevision: 0 },
   });
   expect(closed.statusCode).toBe(200);

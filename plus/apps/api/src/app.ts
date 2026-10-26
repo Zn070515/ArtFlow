@@ -45,6 +45,7 @@ import {
   defaultCapabilityRegistry,
   DomainError,
   instantiateActivityPack,
+  requirePermission,
   SINGER_COMPETITION_PACK,
   SYSTEM_ACTOR,
 } from "@artflow-plus/domain";
@@ -128,6 +129,7 @@ import {
   getRosterForReview,
   listActivitiesForReview,
   listRegistrationsForReview,
+  getStudioState,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -554,6 +556,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return { ...deps, actor: await requestActor(request) };
   }
 
+  async function requireStudio(request: FastifyRequest): Promise<RuntimeDeps> {
+    const requestContext = await requestDeps(request);
+    requirePermission(requestContext.actor ?? SYSTEM_ACTOR, "studio.manage");
+    return requestContext;
+  }
+
   function publicDeps(): RuntimeDeps {
     return { ...deps, actor: SYSTEM_ACTOR };
   }
@@ -751,7 +759,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         capabilities = [...instantiated.instantiation.enabledCapabilities];
         initialDefinition = instantiated.instantiation.definition;
       }
-      const outcome = await createActivity(db, registry, deps, {
+      const outcome = await createActivity(db, registry, await requireStudio(request), {
         commandId,
         title: body.title,
         ...(capabilities === undefined ? {} : { capabilities }),
@@ -776,6 +784,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       }
       reply.header("cache-control", "no-store");
       return activity;
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/studio",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return getStudioState(db, await requireStudio(request), id);
     },
   );
 
@@ -1452,7 +1469,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const commandId = requireIdempotency(request);
       const { id } = request.params as { id: string };
       const body = request.body as { expectedRevision: number };
-      const outcome = await activateActivity(db, deps, {
+      const outcome = await activateActivity(db, await requireStudio(request), {
         commandId,
         activityId: id,
         expectedRevision: body.expectedRevision,
@@ -1471,7 +1488,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         package: unknown;
         expectedDraftRevision?: number;
       };
-      const outcome = await compileDefinition(db, registry, deps, {
+      const outcome = await compileDefinition(db, registry, await requireStudio(request), {
         commandId,
         activityId: id,
         package: asPackage(body.package),
@@ -1490,7 +1507,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const commandId = requireIdempotency(request);
       const { id } = request.params as { id: string };
       const body = request.body as { expectedDraftRevision: number };
-      const outcome = await releaseDefinitionCommand(db, registry, deps, {
+      const outcome = await releaseDefinitionCommand(db, registry, await requireStudio(request), {
         commandId,
         activityId: id,
         expectedDraftRevision: body.expectedDraftRevision,
@@ -1510,7 +1527,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         mode: ExecutionMode;
         expectedRevision?: number;
       };
-      const outcome = await startExecution(db, registry, deps, {
+      const outcome = await startExecution(db, registry, await requireStudio(request), {
         commandId,
         activityId: id,
         scope: body.scope,
@@ -1530,7 +1547,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const commandId = requireIdempotency(request);
       const { id, sessionId } = request.params as { id: string; sessionId: string };
       const body = request.body as { expectedRevision: number };
-      const outcome = await closeExecution(db, deps, {
+      const outcome = await closeExecution(db, await requireStudio(request), {
         commandId,
         activityId: id,
         sessionId,
