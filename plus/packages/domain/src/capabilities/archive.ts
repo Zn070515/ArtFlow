@@ -14,6 +14,45 @@ export interface CompiledArchiveArtifact {
   readonly format: "zip-json-csv";
 }
 
+export interface ArchiveManifestArtifact {
+  readonly name: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly sha256: string;
+}
+
+export interface ArchiveManifest {
+  readonly schemaVersion: 1;
+  readonly packageId: string;
+  readonly activityId: string;
+  readonly version: number;
+  readonly sealedAt: string;
+  readonly sealedBy: string;
+  readonly format: "zip-json-csv";
+  readonly artifacts: readonly ArchiveManifestArtifact[];
+  readonly excludedFields: readonly string[];
+  readonly counts: {
+    readonly releases: number;
+    readonly stageResults: number;
+    readonly sessions: number;
+    readonly events: number;
+  };
+}
+
+export interface ArchiveReleaseRow {
+  readonly release: string;
+  readonly snapshotAvailable: boolean;
+  readonly snapshotActivityTitle: string | null;
+  readonly snapshotPublicTitle: string | null;
+}
+
+export interface ArchiveSummary {
+  readonly activityPhase: "archived";
+  readonly activityInfoTitle: string;
+  readonly releaseRows: readonly ArchiveReleaseRow[];
+  readonly excludedFields: readonly string[];
+}
+
 export function createEmptyArchiveDefinition(): CapabilityDefinition {
   return {
     schemaVersion: 1,

@@ -77,6 +77,8 @@ ZIP 条目（UTF-8；CSV 带 BOM）：
   legacy 的 snapshot 为 `null`；
 - `stage-results.json`：stageKey、status、candidateRevision、sourceCandidateRevision、
   decisions、awards、confirmedAt、unlockedAt；
+- `sessions.json`：formal execution session 的 id/definitionVersion/scope/mode/status/
+  openedAt/closedAt（不含 contentHash）；
 - `results.csv`：stage_key、release_status、released_at、rank、contestant_id、score；
 - `awards.csv`：stage_key、release_status、award、contestant_id；
 - `events-summary.csv`：occurred_at、type、capability、aggregate_type、aggregate_id、
