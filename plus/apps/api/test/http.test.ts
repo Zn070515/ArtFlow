@@ -581,6 +581,7 @@ dbIt("projects execution state and serves the event cursor", async () => {
   const feed = await app.inject({
     method: "GET",
     url: `/api/activities/${activityId}/events?mode=formal&limit=100`,
+    headers: studioHeaders(),
   });
   expect(feed.statusCode).toBe(200);
   expect(
@@ -594,6 +595,7 @@ dbIt("projects execution state and serves the event cursor", async () => {
   const resumed = await app.inject({
     method: "GET",
     url: `/api/activities/${activityId}/events?mode=formal&after=${feed.json().nextCursor}`,
+    headers: studioHeaders(),
   });
   expect(resumed.json().events).toHaveLength(0);
 });
@@ -617,6 +619,7 @@ dbIt("accepts capability facts through the runtime seam", async () => {
   const feed = await app.inject({
     method: "GET",
     url: `/api/activities/${activityId}/events?mode=formal`,
+    headers: studioHeaders(),
   });
   expect(
     feed.json().events.some((event: { type: string }) => event.type === "ProbeRecorded"),

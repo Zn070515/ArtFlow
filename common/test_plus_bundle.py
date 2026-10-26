@@ -142,5 +142,10 @@ class ExportPlusBundleTests(TestCase):
         self.assertEqual(bundle["counts"]["ballots"], 1)
         self.assertEqual(len(bundle["voting"]["sessions"]), 1)
         self.assertEqual(bundle["voting"]["sessions"][0]["status"], "open")
+        self.assertEqual(bundle["voting"]["sessions"][0]["purpose"], "popularity")
         self.assertEqual(bundle["voting"]["sessions"][0]["options"][0]["legacyId"], option.pk)
         self.assertEqual(bundle["voting"]["ballots"][0]["optionLegacyIds"], [option.pk])
+        self.assertIn(
+            "vote_purpose_mapped",
+            {entry["kind"] for entry in bundle["unsupported"]},
+        )

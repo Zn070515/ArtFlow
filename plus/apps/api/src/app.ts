@@ -577,6 +577,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return requestContext;
   }
 
+  const OPERATIONS_READ_PERMISSIONS = ["studio.manage", "competition.manage", "judge.manage"] as const;
+
+  // The event feed carries judge scores/notes and registration review notes; only
+  // the operational surfaces that already hold these facts may read it.
+  async function requireOperationsReader(request: FastifyRequest): Promise<void> {
+    const actor = await requestActor(request);
+    if (!OPERATIONS_READ_PERMISSIONS.some((permission) => hasPermission(actor, permission))) {
+      throw new DomainError("FORBIDDEN", "An operations permission is required.");
+    }
+  }
+
   // The Live console opens and closes scoring sessions without Studio access.
   async function requireSessionManager(request: FastifyRequest): Promise<RuntimeDeps> {
     const requestContext = await requestDeps(request);
@@ -1656,6 +1667,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     "/api/activities/:id/events",
     { schema: { params: ActivityParams, querystring: EventsQuery } },
     async (request) => {
+      await requireOperationsReader(request);
       const { id } = request.params as { id: string };
       const query = request.query as {
         after?: number;
@@ -2145,6 +2157,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     "/api/activities/:id/stream",
     { schema: { params: ActivityParams, querystring: EventsQuery } },
     async (request, reply) => {
+      await requireOperationsReader(request);
       const { id } = request.params as { id: string };
       const query = request.query as {
         after?: number;

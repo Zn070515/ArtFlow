@@ -111,6 +111,7 @@ export interface LegacyReleaseBundle {
   readonly stageKey: string;
   readonly status: "active" | "revoked" | "superseded";
   readonly snapshot: Readonly<Record<string, unknown>>;
+  readonly legacySnapshot?: unknown;
   readonly resultVersion: number;
   readonly postVersion: number;
   readonly note: string;

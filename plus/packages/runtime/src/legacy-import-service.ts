@@ -482,6 +482,40 @@ function stageToken(stageKey: string): string {
   return stableHash(stageKey).slice(0, 16);
 }
 
+/**
+ * v1 snapshots are snake_case (`activity_title`, `contestant_id`); v2's public
+ * selector only accepts camelCase. Normalize both shapes so hand fixtures and
+ * real exports agree.
+ */
+function normalizeResultSnapshot(
+  value: unknown,
+  stageKey: string,
+  fallbackTitle: string,
+): ResultSnapshot {
+  const raw = value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const pick = (camel: string, snake: string): unknown => raw[camel] ?? raw[snake];
+  const decisionsRaw = Array.isArray(raw.decisions) ? raw.decisions as Record<string, unknown>[] : [];
+  const awardsRaw = Array.isArray(raw.awards) ? raw.awards as Record<string, unknown>[] : [];
+  return {
+    activityTitle: String(pick("activityTitle", "activity_title") ?? fallbackTitle),
+    publicTitle: String(pick("publicTitle", "public_title") ?? `${fallbackTitle} · 正式赛果`),
+    stageKey: String(pick("stageKey", "stage_key") ?? stageKey),
+    decisions: decisionsRaw
+      .filter((decision) => decision.rank !== undefined)
+      .map((decision) => ({
+        rank: Number(decision.rank),
+        contestantId: String(decision.contestantId ?? decision.contestant_id ?? decision.contestant ?? ""),
+        score: decision.score === undefined || decision.score === null ? "0.00" : String(decision.score),
+      })),
+    awards: awardsRaw.map((award) => ({
+      award: String(award.award ?? award.name ?? ""),
+      contestantId: String(award.contestantId ?? award.contestant_id ?? award.contestant ?? ""),
+    })),
+  };
+}
+
 async function importResults(
   trx: Transaction<Database>,
   bundle: LegacyBundle,
@@ -490,7 +524,8 @@ async function importResults(
   prefix: string,
 ): Promise<void> {
   const stageIds = new Map<string, string>();
-  for (const stage of bundle.results.stageResults) {
+  const latestStageByKey = new Map(bundle.results.stageResults.map((stage) => [stage.stageKey, stage]));
+  for (const stage of latestStageByKey.values()) {
     const id = `${prefix}-stage-${stageToken(stage.stageKey)}`;
     stageIds.set(stage.stageKey, id);
     await insertStageResult(trx, {
@@ -511,7 +546,7 @@ async function importResults(
 
   const publications = new Set<string>();
   for (const [index, release] of bundle.results.releases.entries()) {
-    const snapshot = release.snapshot as unknown as ResultSnapshot;
+    const snapshot = normalizeResultSnapshot(release.snapshot, release.stageKey, bundle.activity.title);
     let stageId = stageIds.get(release.stageKey);
     if (stageId === undefined) {
       stageId = `${prefix}-stage-${stageToken(release.stageKey)}`;
@@ -758,11 +793,19 @@ async function importActivity(
   const normalizeSnapshot = (value: unknown): unknown =>
     typeof value === "string" ? JSON.parse(value) as unknown : value;
   const actualSnapshotSignature = releaseRows
-    .map((row) => stableHash(normalizeSnapshot(row.snapshot)))
+    .map((row) => stableHash(normalizeResultSnapshot(
+      normalizeSnapshot(row.snapshot),
+      "",
+      bundle.activity.title,
+    )))
     .sort()
     .join(",");
   const expectedSnapshotSignature = bundle.results.releases
-    .map((release) => stableHash(release.snapshot))
+    .map((release) => stableHash(normalizeResultSnapshot(
+      release.snapshot,
+      release.stageKey,
+      bundle.activity.title,
+    )))
     .sort()
     .join(",");
   checks.push(check("releases.snapshotHash", actualSnapshotSignature, expectedSnapshotSignature));

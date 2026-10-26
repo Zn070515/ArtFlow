@@ -152,6 +152,12 @@ class Command(BaseCommand):
 
         vote_sessions = []
         ballots = []
+        purpose_map = {
+            "popularity": "popularity",
+            "score_component": "score_component",
+            "selection": "popularity",
+            "repechage": "popularity",
+        }
         for vote_session in VoteSession.objects.filter(
             activity=activity, is_test_data=False
         ).order_by("pk"):
@@ -160,11 +166,20 @@ class Command(BaseCommand):
                 .order_by("sort_order", "pk")
             )
             option_ids = {option.pk for option in vote_options}
+            purpose = purpose_map.get(vote_session.purpose, "popularity")
+            if purpose != vote_session.purpose:
+                unsupported.append(
+                    {
+                        "kind": "vote_purpose_mapped",
+                        "legacyId": vote_session.pk,
+                        "reason": f"v1 purpose {vote_session.purpose} mapped to {purpose}.",
+                    }
+                )
             vote_sessions.append(
                 {
                     "legacyId": vote_session.pk,
                     "name": vote_session.name,
-                    "purpose": vote_session.purpose,
+                    "purpose": purpose,
                     "selectionType": vote_session.selection_type,
                     "maxSelections": vote_session.max_selections,
                     "identityPolicy": "ticket" if vote_session.requires_ticket else "anonymous",
@@ -207,9 +222,20 @@ class Command(BaseCommand):
         ).count()
 
         stage_results = []
+        seen_stage_keys: set[str] = set()
         for stage_result in StageResult.objects.filter(
             activity=activity, status=StageResult.Status.CONFIRMED, is_test_data=False
-        ).order_by("pk"):
+        ).order_by("stage_key", "-result_version", "-candidate_revision", "-pk"):
+            if stage_result.stage_key in seen_stage_keys:
+                unsupported.append(
+                    {
+                        "kind": "superseded_stage_result_version",
+                        "legacyId": stage_result.pk,
+                        "reason": "v2 keeps one stage result per stage key; only the latest version is imported.",
+                    }
+                )
+                continue
+            seen_stage_keys.add(stage_result.stage_key)
             decisions = [
                 {
                     "rank": decision.rank,
@@ -242,11 +268,50 @@ class Command(BaseCommand):
                     ).isoformat(),
                 }
             )
+        stage_results_by_key = {row["stageKey"]: row for row in stage_results}
+
+        def v2_snapshot(release) -> dict[str, Any]:
+            raw = release.result_snapshot or {}
+            stage_key = release.stage_result.stage_key
+            fallback = stage_results_by_key.get(stage_key, {})
+            raw_decisions = raw.get("decisions") if isinstance(raw.get("decisions"), list) else fallback.get("decisions", [])
+            raw_awards = raw.get("awards") if isinstance(raw.get("awards"), list) else fallback.get("awards", [])
+            decisions = [
+                {
+                    "rank": decision.get("rank"),
+                    "contestantId": participant_by_singer.get(
+                        decision.get("contestant_id", decision.get("contestant")),
+                        f"legacy-user:{decision.get('contestant_id', decision.get('contestant'))}",
+                    ),
+                    "score": str(decision["score"]) if decision.get("score") is not None else "0.00",
+                }
+                for decision in raw_decisions
+                if decision.get("rank") is not None
+            ]
+            awards = [
+                {
+                    "award": award.get("award", award.get("name", "")),
+                    "contestantId": participant_by_singer.get(
+                        award.get("contestant_id", award.get("contestant")),
+                        f"legacy-user:{award.get('contestant_id', award.get('contestant'))}",
+                    ),
+                }
+                for award in raw_awards
+            ]
+            return {
+                "activityTitle": raw.get("activity_title") or activity.title,
+                "publicTitle": raw.get("public_title") or f"{activity.title} · 正式赛果",
+                "stageKey": raw.get("stage_key") or stage_key,
+                "decisions": decisions,
+                "awards": awards,
+            }
+
         releases = [
             {
                 "stageKey": release.stage_result.stage_key,
                 "status": release.status,
-                "snapshot": release.result_snapshot,
+                "snapshot": v2_snapshot(release),
+                "legacySnapshot": release.result_snapshot or {},
                 "resultVersion": release.result_version,
                 "postVersion": release.post_version,
                 "note": release.note,
@@ -256,7 +321,6 @@ class Command(BaseCommand):
                 stage_result__activity=activity,
                 stage_result__is_test_data=False,
             ).select_related("stage_result").order_by("released_at", "pk")
-            if release.result_snapshot
         ]
 
         bundle = {

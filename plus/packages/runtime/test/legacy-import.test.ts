@@ -127,6 +127,33 @@ describe.skipIf(!connectionString)("legacy import", () => {
     ]);
   });
 
+  it("keeps only the latest stage result when v1 has several versions", async () => {
+    const results = bundle.results as {
+      stageResults: Record<string, unknown>[];
+      releases: unknown[];
+    };
+    const latest = {
+      ...results.stageResults[0],
+      decisions: [{ rank: 1, contestantId: "legacy-user:1", score: "93.00" }],
+      confirmedAt: "2025-10-08T00:00:00Z",
+    };
+    const duplicated = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-5" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-5" },
+      results: { ...results, stageResults: [...results.stageResults, latest] },
+    };
+    const result = await importLegacyBundle(db, deps, {
+      commandId: "legacy-import-duplicate-stage",
+      bundle: duplicated,
+      dryRun: false,
+    });
+    const stages = await db.selectFrom("stage_result").selectAll()
+      .where("activity_id", "=", result.report.activityId).execute();
+    expect(stages).toHaveLength(1);
+    expect(stages[0]?.decisions).toMatchObject([{ score: "93.00" }]);
+  });
+
   it("replays the same bundle without duplicating rows", async () => {
     const imported = await importLegacyBundle(db, deps, {
       commandId: "legacy-import-1",
