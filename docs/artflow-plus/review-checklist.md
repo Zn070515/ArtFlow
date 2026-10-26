@@ -109,6 +109,14 @@
 - [x] ARCHIVED 是终态；unarchive 是独立命令并保留包历史。
 - [x] legacy 无 snapshot 的 release 在归档中保持空白，不伪造。
 
+### M8a Web / Portal
+
+- [x] 公开页只消费唯一 selector；不读编辑字段、fingerprint/hash/token。
+- [x] WebGL 场景为懒加载；`prefers-reduced-motion` 不创建 context，错误边界回退
+      到静态背景。
+- [x] 结果在 DOM 语义表格/列表中；Canvas `aria-hidden`。
+- [x] E2E 用独立 schema 种子，不依赖开发者数据库内容。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

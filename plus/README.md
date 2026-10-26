@@ -245,8 +245,8 @@ new architecture.
 
 ## Next slice
 
-1. M7b Archive: the permanent archive package, retention, and `archive-identity`.
-   M7a publishing/results is complete.
+1. M8b Ops + Participant Portal: login, registration, questionnaire, materials,
+   and roster review. M8a web shell and public results are complete.
 
 ## M7a publishing / results
 
@@ -289,6 +289,26 @@ SHA-256 before streaming and never exposes a static path. Set
 it. The package contains activity identity, publishing releases/stage results,
 formal sessions, and an event summary. Registration/material/vote/score detail is
 not included until those facts carry a mode column.
+
+## M8a web shell and public portal
+
+`apps/web` is the v2 product shell (React 19 + Vite 8 + TanStack Router/Query).
+The first surface is the anonymous public results page with the Afterglow shader
+hero.
+
+```powershell
+pnpm -C plus --filter @artflow-plus/web dev       # Vite on 5173, proxies /api to 3000
+pnpm -C plus --filter @artflow-plus/web build     # static dist/
+pnpm -C plus --filter @artflow-plus/web test      # Vitest + RTL
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+pnpm -C plus --filter @artflow-plus/web test:e2e # Playwright, own API/web servers + artflow_e2e schema
+# If the bundled Chromium is not installed locally, use Edge:
+# $env:PLAYWRIGHT_CHANNEL = "msedge"
+```
+
+`VITE_API_TARGET` overrides the dev/preview proxy target. The WebGL scene is a
+lazy chunk; `prefers-reduced-motion` uses a static backdrop and never creates a
+WebGL context.
 
 ## M6 feature slice and M6.5 authority hardening complete
 

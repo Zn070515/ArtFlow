@@ -178,14 +178,26 @@ ticket redemption、ballot uniqueness、judge-seat claim 的真实 PostgreSQL �
 **出口**：归档/解归档/重归档、完整性校验、并发归档、ZIP 白名单与 legacy snapshot 全绿。
 registration/material/vote/score 的 mode 缺口留给后续 hardening。
 
-## M8 — Product Surfaces 与 Cutover
+## M8 — Product Surfaces 与 Cutover（进行中）
 
 - Studio/Ops/Live/Portal 四个产品面按 capability 贡献组装。
 - 按入口切换 v1 → v2；双环境并行验证。
 - 数据导入/对账；回滚开关；操作手册。
 - v1 只读保留窗口结束后再删除。
 
-**出口**：关键旅程 E2E；迁移报告；回滚演练；现场彩排通过；至少三个结构不同
+### M8a — Web Shell + Portal（已完成，2026-10-26）
+
+- `apps/web`：React 19 + Vite 8 + TanStack Router/Query；Afterglow shader hero。
+- 公开结果页消费唯一 selector；loading/404/空态/错误态；移动端与
+  `prefers-reduced-motion` 回退。
+- Playwright E2E 使用独立 `artflow_e2e` schema；Gates 增加 `web-e2e` job。
+
+### M8b — Ops + Participant Portal（下一 slice）
+
+- 登录、报名、问卷、材料、名单审核与参与者入口。
+- 需要先定义认证/会话在 web 层的边界，并与 M8e 的 mode hardening 对齐。
+
+**M8 出口**：关键旅程 E2E；迁移报告；回滚演练；现场彩排通过；至少三个结构不同
 的活动（judged singing competition、stage show、另一种比赛/复杂活动）证明
 内核无需重写。
 
