@@ -90,6 +90,14 @@
 - [x] `0011_voting_identity_policy` rollback 恢复旧 identity constraint；Pack 不再暴露
   与 baseline `competition` 重复的 `judges` 开关。
 
+### M7a Publishing / Results
+
+- [x] 结果发布只读 release snapshot，不读 activity/post 编辑字段。
+- [x] 公开 selector 排除 fingerprint、hash、actor、note 与编辑字段。
+- [x] 同一 stage 最多一条 ACTIVE release，部分唯一索引真实存在。
+- [x] unlock 在同一事务写 StageResultUnlocked 与 ResultReleaseSuperseded。
+- [x] 核定只接受 runtime 读取的 podium candidate；HTTP 不能自带名次。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

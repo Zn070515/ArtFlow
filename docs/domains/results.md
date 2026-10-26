@@ -73,3 +73,11 @@ resolve → candidate (revision N)
 - 一个 stage 是否允许同时存在多个“当前发布”（多篇文章）？v1 是 stage 单
   ACTIVE；若 v2 要支持，需要先定义“哪个是正式入口”。
 - 结果 PDF 是否需要与 snapshot 绑定的生成版本号？建议需要。
+
+## Plus 实现状态（M7a，2026-10-26）
+
+- `publishing` capability 同时拥有核定与发布；`StageResult`、`ResultPublication`、
+  `ResultRelease` 在迁移 `0012_m7_publishing`。
+- 公开 selector 唯一实现于 `selectPublicResults`；同一 stage 最多一条 ACTIVE release。
+- `unlock` 在同一事务写 `StageResultUnlocked` + `ResultReleaseSuperseded`。
+- Archive 仍是 M7b。
