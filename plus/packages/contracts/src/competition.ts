@@ -30,6 +30,11 @@ export const CompetitionScopeBodySchema = Type.Object({
   scope: ScopeSchema,
 }, { additionalProperties: false });
 
+export const ResetRehearsalBodySchema = Type.Object({
+  scope: ScopeSchema,
+  mode: Type.Union([Type.Literal("test"), Type.Literal("rehearsal")]),
+}, { additionalProperties: false });
+
 export const CompetitionRankingQuerySchema = Type.Object({
   scope: ScopeSchema,
   mode: Type.Optional(Type.Union([

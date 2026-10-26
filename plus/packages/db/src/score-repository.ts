@@ -329,6 +329,34 @@ export async function existsFormalScoreFactsForRound(
   return row !== undefined;
 }
 
+export async function deleteNonFormalScoreDataForRound(
+  trx: Kysely<Database>,
+  roundId: string,
+): Promise<number> {
+  const facts = await trx.selectFrom("score_fact").select("id")
+    .where("round_id", "=", roundId)
+    .where("mode", "!=", "formal")
+    .execute();
+  const ids = facts.map((row) => row.id);
+  if (ids.length === 0) return 0;
+  await trx.deleteFrom("score_correction").where("score_fact_id", "in", ids).execute();
+  await trx.deleteFrom("score_revision").where("score_fact_id", "in", ids).execute();
+  await trx.deleteFrom("score_fact").where("id", "in", ids).execute();
+  return ids.length;
+}
+
+export async function deleteNonFormalRankingsForRound(
+  trx: Kysely<Database>,
+  roundId: string,
+): Promise<number> {
+  const rows = await trx.deleteFrom("ranking_snapshot")
+    .where("round_id", "=", roundId)
+    .where("mode", "!=", "formal")
+    .returning(["id"])
+    .execute();
+  return rows.length;
+}
+
 export async function retireCurrentScoreFactsForPerformance(
   trx: Kysely<Database>,
   performanceId: string,

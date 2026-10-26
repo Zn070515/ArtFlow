@@ -378,6 +378,32 @@ export async function getPerformanceScoreState(
   return row === undefined ? null : performanceScoreState(row);
 }
 
+export async function deletePerformancesForRound(
+  trx: Kysely<Database>,
+  roundId: string,
+): Promise<number> {
+  const rows = await trx.selectFrom("performance").select("id")
+    .where("round_id", "=", roundId)
+    .execute();
+  const ids = rows.map((row) => row.id);
+  if (ids.length > 0) {
+    await trx.deleteFrom("performance_score_state").where("performance_id", "in", ids).execute();
+    await trx.deleteFrom("performance").where("id", "in", ids).execute();
+  }
+  return ids.length;
+}
+
+export async function supersedeCurrentPanelForRound(
+  trx: Kysely<Database>,
+  roundId: string,
+): Promise<void> {
+  await trx.updateTable("panel_snapshot")
+    .set({ current: false, state: "superseded" })
+    .where("round_id", "=", roundId)
+    .where("current", "=", true)
+    .execute();
+}
+
 export async function getCurrentPanelForUpdate(trx: Kysely<Database>, roundId: string): Promise<StoredPanelSnapshot | null> {
   const row = await trx.selectFrom("panel_snapshot").selectAll()
     .where("round_id", "=", roundId).where("current", "=", true).forUpdate().executeTakeFirst();

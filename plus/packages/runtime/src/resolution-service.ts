@@ -45,6 +45,7 @@ import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
+import { requireNoFormalFacts } from "./mode-guard.js";
 
 interface ResolutionActivity {
   readonly id: string;
@@ -157,9 +158,13 @@ export async function resolveRound(
     requireResolutionPermission(actor);
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    const round = requireRound(await getRoundForUpdate(trx, input.roundId), activity.id);
+    const roundRow = await getRoundForUpdate(trx, input.roundId);
     const session = await findRunningSessionByScope(trx, activity.id, input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+    if (roundRow === null) throw new DomainError("NOT_FOUND", "The competition round was not found.");
+    if (roundRow.activityId !== activity.id) throw new DomainError("CROSS_ACTIVITY", "The round belongs to another activity.");
+    await requireNoFormalFacts(trx, roundRow.id, session.mode);
+    const round = requireRound(roundRow, activity.id);
     const resolved = await rankingInput(trx, activity, round, session.mode);
     const ranking = computeRanking({ rows: resolved.rows, tiePolicy: "review" });
     const current = await getCurrentRankingSnapshot(trx, round.id, session.mode);

@@ -14,6 +14,7 @@ import {
   OpenScoreCorrectionBodySchema,
   PackInstantiateBodySchema,
   PrepareCompetitionRoundBodySchema,
+  ResetRehearsalBodySchema,
   ResolveCompetitionBodySchema,
   RecomputePodiumBodySchema,
   ScoreCorrectionLifecycleBodySchema,
@@ -83,6 +84,7 @@ import {
   recordTieDecision,
   recalculateAfterCorrection,
   recomputePodiumCandidate,
+  resetRehearsalRound,
   resolveRound,
   submitJudgeScore,
   submitPaperScore,
@@ -167,6 +169,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   MATERIAL_NOT_ALLOWED: 422,
   ROSTER_UNKNOWN: 409,
   ROSTER_FINAL: 409,
+  FORMAL_FACTS_EXIST: 409,
   NOT_FOUND: 404,
   CROSS_ACTIVITY: 404,
   STALE_REVISION: 409,
@@ -1419,6 +1422,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         activityId: id,
         roundId: round.id,
         scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/reset-rehearsal",
+    { schema: { params: CompetitionRoundParamsSchema, body: ResetRehearsalBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string; mode: "test" | "rehearsal" };
+      const round = await routeRound(id, roundKey);
+      const outcome = await resetRehearsalRound(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        scope: body.scope,
+        mode: body.mode,
       });
       return reply.status(outcome.status).send(outcome.body);
     },
