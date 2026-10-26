@@ -52,7 +52,10 @@ export interface ArchivePackageOutput {
 
 function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  // Excel/LibreOffice execute text that starts with a formula marker. Numeric
+  // cells cannot carry formulas, so only string values are neutralized.
+  const raw = String(value);
+  const text = typeof value === "string" && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

@@ -159,6 +159,23 @@
 - [x] E2E 覆盖启动会话 → 准备 → 评委组 → 开表演 → 链接 → 评分 → 锁表演/锁轮 →
       排名 → 关闭会话。
 
+### 2026-10-26 M7/M8 review fixes
+
+- [x] `activity.close` / `activity.rename` 在 runtime 内要求 `studio.manage`，
+      route 不是唯一防线。
+- [x] `POST /api/auth/login` 有 IP 与用户名双桶限流；密码校验走异步 scrypt，
+      不阻塞事件循环。
+- [x] 幂等重放的 `persistedBody` 把一次性 token 置为 null；set-cookie 只接受
+      非空字符串，绝不写 `=null`。
+- [x] roster final 后 `registration.review` 返回 `ROSTER_FINAL`，approved 集合与
+      `approvedCount` 不会漂移。
+- [x] 新 panel 复用 seat key 时撤销旧的 judge session 并 reopen 入口座位；
+      `revoked` 座位保持 fail-closed。
+- [x] judge/ticket cookie 的 Secure 判断与主会话一致（NODE_ENV 或 APP_ENV）。
+- [x] `registrationOpen` 镜像 start-registration 门槛（registration/questionnaire/
+      materials + 已发布快照）。
+- [x] 归档 CSV 对以 `= + - @` 开头的字符串加 `'` 前缀，防止公式注入。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

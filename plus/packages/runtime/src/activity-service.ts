@@ -18,6 +18,7 @@ import {
   createActivity as createActivityDomain,
   DomainError,
   renameActivity as renameActivityDomain,
+  requirePermission,
 } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
@@ -163,6 +164,7 @@ export async function closeActivity(
       payload: { expectedRevision: input.expectedRevision },
     },
     async (trx) => {
+      requirePermission(runtimeActor(deps), "studio.manage");
       const current = await getActivityForUpdate(trx, input.activityId);
       if (current === null) {
         throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
@@ -206,6 +208,7 @@ export async function renameActivity(
       payload: { title: input.title, expectedRevision: input.expectedRevision },
     },
     async (trx) => {
+      requirePermission(runtimeActor(deps), "studio.manage");
       const current = await getActivityForUpdate(trx, input.activityId);
       if (current === null) {
         throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);

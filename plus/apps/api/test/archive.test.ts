@@ -40,7 +40,7 @@ const staff: ActorContext = {
   actorId: "api-archive-staff",
   actorType: "user",
   roles: ["staff"],
-  permissions: ["archive.manage"],
+  permissions: ["archive.manage", "studio.manage"],
 };
 const participant: ActorContext = {
   actorId: "api-archive-participant",

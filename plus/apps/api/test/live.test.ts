@@ -11,7 +11,7 @@ import {
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import type { ActorContext } from "@artflow-plus/domain";
-import { stableHash } from "@artflow-plus/runtime";
+import { capabilityCredential, stableHash } from "@artflow-plus/runtime";
 import type { RuntimeDeps } from "@artflow-plus/runtime";
 import type { FastifyInstance } from "fastify";
 import { Client } from "pg";
@@ -41,9 +41,11 @@ const staff: ActorContext = {
   roles: ["staff"],
   permissions: ["competition.manage", "judge.manage"],
 };
+const credentialSecret = "live-test-credential-secret";
 const deps: RuntimeDeps = {
   now: () => new Date().toISOString(),
   newEventId: () => randomUUID(),
+  credentialSecret,
 };
 
 const competition = {
@@ -101,7 +103,7 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
       title: "Live test",
       status: "active",
       revision: 1,
-      enabled_capabilities: JSON.stringify(["competition"]),
+      enabled_capabilities: JSON.stringify(["competition", "ticketing"]),
       active_definition_version: 1,
     }).execute();
     await insertRelease(db, {
@@ -216,6 +218,15 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
       status: "running",
       revision: 0,
     }, "2026-10-26T10:00:00Z");
+    await db.insertInto("judge_seat_grant").values({
+      id: `grant-available-${randomUUID()}`,
+      activity_id: activityId,
+      seat_key: "seat-2",
+      judge_id: null,
+      state: "available",
+      session_id: null,
+      revision: 0,
+    }).execute();
     await db.insertInto("judge_session").values({
       id: judgeSessionId,
       activity_id: activityId,
@@ -304,5 +315,26 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
       rounds: { performances: { scoreCount: number; expectedJudges: number }[] }[];
     };
     expect(body.rounds[0]?.performances[0]).toMatchObject({ scoreCount: 1, expectedJudges: 1 });
+  });
+
+  it("replays a redacted judge claim without writing a null cookie", async () => {
+    const capability = capabilityCredential("J", activityId, 1, credentialSecret);
+    const commandId = `claim-${randomUUID()}`;
+    const request = {
+      method: "POST" as const,
+      url: "/api/judge-entry/claim",
+      headers: { "idempotency-key": commandId },
+      payload: { publicCode: activityId, capability },
+    };
+
+    const first = await app.inject(request);
+    expect(first.statusCode).toBe(200);
+    const cookie = String(first.headers["set-cookie"]);
+    expect(cookie).toContain("artflow_judge_session=");
+    expect(cookie).not.toContain("artflow_judge_session=null");
+
+    const replay = await app.inject(request);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.headers["set-cookie"]).toBeUndefined();
   });
 });

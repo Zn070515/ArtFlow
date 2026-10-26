@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { closeDb, createDb, insertLocalAccount, migrate } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
-import { hashPassword } from "@artflow-plus/runtime";
+import { hashPassword, MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RuntimeDeps } from "@artflow-plus/runtime";
 import type { FastifyInstance } from "fastify";
 import { Client } from "pg";
@@ -77,7 +77,7 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
         actorId: "staff-1",
         actorType: "user",
         roles: ["staff"],
-        permissions: ["registration.review"],
+        permissions: ["registration.review", "studio.manage"],
       },
       active: true,
     });
@@ -158,6 +158,76 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
       payload: { expectedRevision: 1 },
     });
     expect(bearer.statusCode).toBe(200);
+  });
+
+  it("requires a lifecycle permission to close an activity", async () => {
+    const username = `closer-${randomUUID().slice(0, 8)}`;
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      headers: headers(),
+      payload: { username, password: "participant-password" },
+    });
+    expect(registered.statusCode).toBe(201);
+    const cookies = setCookies(registered);
+    const csrf = registered.json().csrfToken as string;
+    const activityId = await seedActivity();
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/close`,
+      headers: headers({
+        "idempotency-key": `close-forbidden-${activityId}`,
+        cookie: cookies,
+        "x-csrf-token": csrf,
+      }),
+      payload: { expectedRevision: 1 },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().code).toBe("FORBIDDEN");
+  });
+
+  it("rate limits password guesses per IP and per username", async () => {
+    const limited = await buildApp({ db, deps, rateLimiter: new MemoryRateLimiter() });
+    await limited.ready();
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const response = await limited.inject({
+          method: "POST",
+          url: "/api/auth/login",
+          headers: headers(),
+          payload: { username: `guess-${attempt}`, password: "wrong-password" },
+        });
+        expect(response.statusCode).toBe(401);
+      }
+      const blockedByIp = await limited.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        headers: headers(),
+        payload: { username: "guess-10", password: "wrong-password" },
+      });
+      expect(blockedByIp.statusCode).toBe(429);
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const response = await limited.inject({
+          method: "POST",
+          url: "/api/auth/login",
+          headers: headers(),
+          remoteAddress: `10.0.1.${attempt}`,
+          payload: { username: "auth-staff", password: "wrong-password" },
+        });
+        expect(response.statusCode).toBe(401);
+      }
+      const blockedByUsername = await limited.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        headers: headers(),
+        remoteAddress: "10.0.2.1",
+        payload: { username: "auth-staff", password: "wrong-password" },
+      });
+      expect(blockedByUsername.statusCode).toBe(429);
+    } finally {
+      await limited.close();
+    }
   });
 
   it("registers participants and rejects duplicate usernames", async () => {

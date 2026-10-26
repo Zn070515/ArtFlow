@@ -170,6 +170,36 @@ describe.skipIf(!connectionString)("registration read endpoints", () => {
     expect(missing.statusCode).toBe(404);
   });
 
+  it("reports registration closed when the activity has no released questionnaire", async () => {
+    const liveOnlyId = `act-${randomUUID()}`;
+    await db.insertInto("activity").values({
+      id: liveOnlyId,
+      public_code: "LIVE-ONLY",
+      title: "仅现场",
+      status: "active",
+      revision: 1,
+      enabled_capabilities: JSON.stringify(["competition"]),
+      active_definition_version: 1,
+    }).execute();
+    await insertRelease(db, {
+      activityId: liveOnlyId,
+      version: 1,
+      contentHash: "live-only-release",
+      capabilities: {},
+      executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
+      capabilityVersions: {},
+      bindings: [],
+      releasedAt: "2026-10-26T10:00:00Z",
+      sourceDraftRevision: 1,
+    });
+    const response = await participantApp.inject({
+      method: "GET",
+      url: "/api/public/activities/LIVE-ONLY",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: "active", registrationOpen: false });
+  });
+
   it("lists activities only for reviewers", async () => {
     const staffResponse = await staffApp.inject({ method: "GET", url: "/api/activities" });
     expect(staffResponse.statusCode).toBe(200);

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 
 import {
   getLocalAccount,
@@ -21,11 +21,22 @@ export function hashPassword(password: string): string {
   return `${salt}:${digest}`;
 }
 
-export function verifyPassword(password: string, encoded: string): boolean {
+function derivePassword(password: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    // Verification runs on the async thread pool so failed logins cannot block
+    // the event loop; hashing on account creation stays sync for seed scripts.
+    scrypt(password, salt, PASSWORD_KEY_LENGTH, (error, key) => {
+      if (error !== null) reject(error);
+      else resolve(key);
+    });
+  });
+}
+
+export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
   const [salt, digest] = encoded.split(":");
   if (!salt || !digest || digest.length !== PASSWORD_KEY_LENGTH * 2) return false;
   const expected = Buffer.from(digest, "hex");
-  const actual = scryptSync(password, salt, PASSWORD_KEY_LENGTH);
+  const actual = await derivePassword(password, salt);
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
@@ -48,7 +59,7 @@ export async function authenticateLocalAccount(
   now = new Date(),
 ): Promise<{ readonly token: string; readonly actor: ActorContext; readonly expiresAt: string }> {
   const account = await getLocalAccount(db, input.username.trim());
-  if (account === null || !account.active || !verifyPassword(input.password, account.passwordDigest)) {
+  if (account === null || !account.active || !(await verifyPassword(input.password, account.passwordDigest))) {
     throw new DomainError("UNAUTHENTICATED", "Invalid local credentials.");
   }
   const token = randomBytes(32).toString("base64url");
