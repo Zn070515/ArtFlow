@@ -122,6 +122,12 @@ import {
   csrfTokenFor,
   registerParticipantAccount,
   resolveLocalSession,
+  getMyRegistration,
+  getPublicActivity,
+  getRegistrationDetail,
+  getRosterForReview,
+  listActivitiesForReview,
+  listRegistrationsForReview,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -254,6 +260,11 @@ const CreateActivityBody = Type.Object(
 
 const ActivityParams = Type.Object(
   { id: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const PublicActivityParams = Type.Object(
+  { publicCode: Type.String({ minLength: 1, maxLength: 100 }) },
   { additionalProperties: false },
 );
 
@@ -750,6 +761,24 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   );
 
+  app.get("/api/activities", async (request) => ({
+    activities: await listActivitiesForReview(db, await requestDeps(request)),
+  }));
+
+  app.get(
+    "/api/public/activities/:publicCode",
+    { schema: { params: PublicActivityParams } },
+    async (request, reply) => {
+      const { publicCode } = request.params as { publicCode: string };
+      const activity = await getPublicActivity(db, publicCode);
+      if (activity === null) {
+        throw new DomainError("NOT_FOUND", "The activity was not found.");
+      }
+      reply.header("cache-control", "no-store");
+      return activity;
+    },
+  );
+
   app.get("/api/activities/:id", { schema: { params: ActivityParams } }, async (request) => {
     const { id } = request.params as { id: string };
     const activity = await getActivity(db, id);
@@ -758,6 +787,48 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
     return activity;
   });
+
+  app.get(
+    "/api/activities/:id/registrations/mine",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const registration = await getMyRegistration(db, await requestDeps(request), id);
+      if (registration === null) {
+        throw new DomainError("NOT_FOUND", "You have no registration for this activity.");
+      }
+      return registration;
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/registrations/:registrationId",
+    { schema: { params: RegistrationParams } },
+    async (request) => {
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      return getRegistrationDetail(db, await requestDeps(request), id, registrationId);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/registrations",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return {
+        registrations: await listRegistrationsForReview(db, await requestDeps(request), id),
+      };
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/roster",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return { roster: await getRosterForReview(db, await requestDeps(request), id) };
+    },
+  );
 
   app.post(
     "/api/activities/:id/registrations",

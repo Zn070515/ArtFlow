@@ -44,6 +44,52 @@ export async function insertActivity(db: Kysely<Database>, activity: Activity): 
     .execute();
 }
 
+export interface StoredActivitySummary {
+  readonly id: string;
+  readonly publicCode: string;
+  readonly title: string;
+  readonly status: ActivityStatus;
+  readonly revision: number;
+  readonly enabledCapabilities: readonly string[];
+}
+
+function summary(row: ActivitySelectRow): StoredActivitySummary {
+  return {
+    id: row.id,
+    publicCode: row.public_code,
+    title: row.title,
+    status: row.status as ActivityStatus,
+    revision: row.revision,
+    enabledCapabilities:
+      typeof row.enabled_capabilities === "string"
+        ? (JSON.parse(row.enabled_capabilities) as string[])
+        : row.enabled_capabilities,
+  };
+}
+
+export async function listActivities(
+  db: Kysely<Database>,
+): Promise<readonly StoredActivitySummary[]> {
+  const rows = await db.selectFrom("activity").selectAll().orderBy("title").orderBy("id").execute();
+  return rows.map(summary);
+}
+
+export async function getActivitySummary(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<StoredActivitySummary | null> {
+  const row = await db.selectFrom("activity").selectAll().where("id", "=", activityId).executeTakeFirst();
+  return row === undefined ? null : summary(row);
+}
+
+export async function getActivityByPublicCode(
+  db: Kysely<Database>,
+  publicCode: string,
+): Promise<StoredActivitySummary | null> {
+  const row = await db.selectFrom("activity").selectAll().where("public_code", "=", publicCode).executeTakeFirst();
+  return row === undefined ? null : summary(row);
+}
+
 export async function getActivity(
   db: Kysely<Database>,
   activityId: string,
