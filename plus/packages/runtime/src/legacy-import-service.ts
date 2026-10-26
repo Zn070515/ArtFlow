@@ -223,26 +223,30 @@ async function importCompetition(
   const createPanel = async (
     round: StoredRound,
     roundLegacyId: number,
+    panelLegacyId: number,
     panelId: string,
     members: readonly { readonly judgeId: string; readonly seatKey: string }[],
+    version: number,
+    current: boolean,
   ): Promise<RoundPanel> => {
+    const expectedJudges = Math.max(members.length, round.minimumJudges, 1);
     await insertPanelSnapshot(trx, {
       id: panelId,
       activityId,
       roundId: round.id,
-      version: 1,
-      state: "active",
-      expectedJudges: members.length,
-      minimumJudges: round.minimumJudges,
+      version,
+      state: current ? "active" : "superseded",
+      expectedJudges,
+      minimumJudges: Math.min(round.minimumJudges, expectedJudges),
       rosterDigest: stableHash({ round: round.id, members }),
       contextVersion: 1,
-      current: true,
+      current,
     });
     const seatsByJudge = new Map<string, string>();
     for (const member of members) {
       await insertPanelMember(trx, { panelId, judgeId: member.judgeId, seatKey: member.seatKey });
-      const seatId = seatIds.get(`${roundLegacyId}:${member.judgeId}`) ??
-        `${prefix}-seat-synth-${roundLegacyId}-${member.seatKey}`;
+      const seatId = seatIds.get(`${panelLegacyId}:${member.judgeId}`) ??
+        `${prefix}-seat-${panelId}-${member.seatKey}`;
       await insertJudgeSeat(trx, {
         id: seatId,
         panelId,
@@ -252,20 +256,37 @@ async function importCompetition(
       });
       seatsByJudge.set(member.judgeId, seatId);
     }
-    const updated = await updateRound(trx, { ...round, currentPanelId: panelId }, round.revision);
-    roundsByLegacy.set(roundLegacyId, updated);
+    if (current) {
+      const updated = await updateRound(trx, { ...round, currentPanelId: panelId }, round.revision);
+      roundsByLegacy.set(roundLegacyId, updated);
+    }
     return { id: panelId, members, seatsByJudge };
   };
 
+  const panelsByLegacyRound = new Map<number, typeof bundle.competition.panels[number][]>();
   for (const panel of bundle.competition.panels) {
-    const round = roundsByLegacy.get(panel.roundLegacyId);
+    const group = panelsByLegacyRound.get(panel.roundLegacyId) ?? [];
+    group.push(panel);
+    panelsByLegacyRound.set(panel.roundLegacyId, group);
+  }
+  for (const [roundLegacyId, panels] of panelsByLegacyRound) {
+    const round = roundsByLegacy.get(roundLegacyId);
     if (round === undefined) {
       throw new DomainError("LEGACY_BUNDLE_INVALID", "A panel references an unknown round.");
     }
-    panelsByRound.set(
-      panel.roundLegacyId,
-      await createPanel(round, panel.roundLegacyId, `${prefix}-panel-${panel.legacyId}`, panel.members),
-    );
+    for (const [index, panel] of panels.entries()) {
+      const isLast = index === panels.length - 1;
+      const created = await createPanel(
+        round,
+        roundLegacyId,
+        panel.legacyId,
+        `${prefix}-panel-${panel.legacyId}`,
+        panel.members,
+        index + 1,
+        isLast,
+      );
+      if (isLast) panelsByRound.set(roundLegacyId, created);
+    }
   }
 
   for (const round of bundle.rounds) {
@@ -281,7 +302,15 @@ async function importCompetition(
     const members = judgeIds.map((judgeId, index) => ({ judgeId, seatKey: `seat-${index + 1}` }));
     panelsByRound.set(
       round.legacyId,
-      await createPanel(stored, round.legacyId, `${prefix}-panel-synth-${round.legacyId}`, members),
+      await createPanel(
+        stored,
+        round.legacyId,
+        -1,
+        `${prefix}-panel-synth-${round.legacyId}`,
+        members,
+        1,
+        true,
+      ),
     );
   }
 
@@ -384,10 +413,14 @@ async function importCompetition(
       const totals = bundle.competition.scores
         .filter((score) => score.roundLegacyId === roundLegacyId && score.contestantKey === contestantKey)
         .map((score) => Number(score.total));
-      const sum = totals.reduce((total, value) => total + value, 0);
+      const sorted = [...totals].sort((left, right) => left - right);
+      const effective = round.scoringMethod === "drop_high_low" && sorted.length >= 3
+        ? sorted.slice(1, -1)
+        : sorted;
+      const sum = effective.reduce((total, value) => total + value, 0);
       return {
         contestantId: contestantKey,
-        total: decimalValue(sum / totals.length),
+        total: decimalValue(sum / effective.length),
         judgeCount: totals.length,
       };
     });

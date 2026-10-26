@@ -15,6 +15,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
+from files.models import MaterialCheck, SubmissionFile
 from singer_contest.models import ContestRound, Judge, ScoreRecord, SingerRegistration
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
@@ -149,3 +150,37 @@ class ExportPlusBundleTests(TestCase):
             "vote_purpose_mapped",
             {entry["kind"] for entry in bundle["unsupported"]},
         )
+
+    def test_export_includes_material_metadata(self) -> None:
+        activity = self._activity()
+        singer = self._registration(activity, "Alice")
+        submission = SubmissionFile.objects.create(
+            singer_registration=singer,
+            file="submissions/2025/10/song.mp3",
+            original_name="song.mp3",
+            file_size=1234,
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            question_key="audio",
+        )
+        MaterialCheck.objects.create(
+            singer_registration=singer,
+            item_name="音频材料",
+            question_key="audio",
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            status=MaterialCheck.Status.APPROVED,
+            required=True,
+            review_note="clear",
+        )
+        output = Path(tempfile.mkdtemp()) / "bundle.json"
+
+        call_command("export_plus_bundle", activity="LEG2025", output=str(output))
+
+        bundle = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(bundle["counts"]["materials"], 1)
+        self.assertEqual(bundle["materials"][0]["legacyId"], submission.pk)
+        self.assertEqual(bundle["materials"][0]["questionKey"], "audio")
+        self.assertEqual(bundle["materials"][0]["originalName"], "song.mp3")
+        self.assertEqual(bundle["materials"][0]["contentType"], "audio/mpeg")
+        self.assertEqual(bundle["materials"][0]["byteLength"], 1234)
+        self.assertEqual(bundle["materials"][0]["status"], "approved")
+        self.assertEqual(bundle["materials"][0]["reviewNote"], "clear")

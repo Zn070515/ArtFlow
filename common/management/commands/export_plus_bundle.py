@@ -1,8 +1,10 @@
 import json
+import mimetypes
 from pathlib import Path
 from typing import Any
 
 from core.models import Activity
+from files.models import MaterialCheck, SubmissionFile
 from django.core.management.base import BaseCommand, CommandError
 from public_portal.models import ResultRelease
 from singer_contest.models import (
@@ -323,6 +325,65 @@ class Command(BaseCommand):
             ).select_related("stage_result").order_by("released_at", "pk")
         ]
 
+        checks_by_registration: dict[int, dict[str, MaterialCheck]] = {}
+        for check in MaterialCheck.objects.filter(
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=False,
+        ):
+            key = check.question_key or check.file_purpose
+            checks_by_registration.setdefault(check.singer_registration_id, {})[key] = check
+
+        materials = []
+        for submission in SubmissionFile.objects.filter(
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=False,
+            is_current=True,
+        ).select_related("singer_registration").order_by("pk"):
+            question_key = submission.question_key or submission.file_purpose
+            check = checks_by_registration.get(submission.singer_registration_id, {}).get(question_key)
+            status = check.status if check is not None and check.status in (
+                "uploaded", "approved", "needs_supplement"
+            ) else "uploaded"
+            materials.append(
+                {
+                    "legacyId": submission.pk,
+                    "registrationLegacyId": submission.singer_registration_id,
+                    "questionKey": question_key,
+                    "originalName": submission.original_name,
+                    "contentType": mimetypes.guess_type(submission.original_name)[0] or "application/octet-stream",
+                    "byteLength": submission.file_size,
+                    "status": status,
+                    "reviewNote": check.review_note if check is not None else "",
+                    "createdAt": submission.uploaded_at.isoformat(),
+                }
+            )
+        excluded_test_materials = SubmissionFile.objects.filter(
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=True,
+        ).count()
+        superseded_material_versions = SubmissionFile.objects.filter(
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=False,
+            is_current=False,
+        ).count()
+        if superseded_material_versions > 0:
+            unsupported.append(
+                {
+                    "kind": "superseded_material_versions",
+                    "reason": f"{superseded_material_versions} non-current file versions were skipped.",
+                }
+            )
+        group_files = SubmissionFile.objects.filter(
+            group__stage__activity=activity
+        ).count()
+        if group_files > 0:
+            unsupported.append(
+                {
+                    "kind": "group_material",
+                    "reason": f"{group_files} group-chorus material files have no v2 representation.",
+                }
+            )
+
         bundle = {
             "format": "artflow-plus-legacy-bundle",
             "version": 1,
@@ -383,7 +444,7 @@ class Command(BaseCommand):
                 "approvedCount": formal.filter(pre_status="approved").count() if rounds else 0,
                 "finalizedAt": activity.updated_at.isoformat() if rounds else None,
             },
-            "materials": [],
+            "materials": materials,
             "competition": {
                 "panels": [],
                 "seats": [],
@@ -396,7 +457,7 @@ class Command(BaseCommand):
             "counts": {
                 "registrations": formal.count(),
                 "approvedRegistrations": formal.filter(pre_status="approved").count(),
-                "materials": 0,
+                "materials": len(materials),
                 "rounds": len(rounds),
                 "scores": len(scores),
                 "ballots": len(ballots),
@@ -406,7 +467,7 @@ class Command(BaseCommand):
                 "testRegistrations": excluded,
                 "testScores": excluded_scores,
                 "testBallots": excluded_ballots,
-                "testMaterials": 0,
+                "testMaterials": excluded_test_materials,
             },
             "unsupported": unsupported,
         }
