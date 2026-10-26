@@ -73,6 +73,7 @@ export type DomainErrorCode =
   | "RESULT_NOT_CONFIRMED"
   | "RESULT_CANDIDATE_HOLD"
   | "AWARD_INVALID"
+  | "FORMAL_MODE_REQUIRED"
   | "RATE_LIMITED";
 
 /**

@@ -222,7 +222,7 @@ export interface StoredResultRelease {
   readonly stageResultId: string;
   readonly stageKey: string;
   readonly status: "active" | "revoked" | "superseded";
-  readonly snapshot: ResultSnapshot;
+  readonly snapshot: ResultSnapshot | null;
   readonly snapshotCandidateRevision: number;
   readonly resultVersion: number;
   readonly postVersion: number;
@@ -351,6 +351,16 @@ export interface PublicResults {
   readonly results: readonly PublicResult[];
 }
 
+function validSnapshot(value: unknown): value is ResultSnapshot {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { publicTitle?: unknown }).publicTitle === "string" &&
+    Array.isArray((value as { decisions?: unknown }).decisions) &&
+    Array.isArray((value as { awards?: unknown }).awards)
+  );
+}
+
 /** The single public selector: active snapshots only, never internal fields. */
 export async function selectPublicResults(
   db: Kysely<Database>,
@@ -368,7 +378,8 @@ export async function selectPublicResults(
     .orderBy("stage_key", "asc")
     .orderBy("released_at", "desc")
     .execute();
-  const newest = [...rows].sort((left, right) => {
+  const validRows = rows.filter((row) => validSnapshot(json(row.snapshot)));
+  const newest = [...validRows].sort((left, right) => {
     const leftAt = iso(left.released_at) ?? "";
     const rightAt = iso(right.released_at) ?? "";
     if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
@@ -377,7 +388,9 @@ export async function selectPublicResults(
   const activityTitle = newest === undefined
     ? ""
     : (json(newest.snapshot) as ResultSnapshot).activityTitle;
-  const visible = stageKey === undefined ? rows : rows.filter((row) => row.stage_key === stageKey);
+  const visible = stageKey === undefined
+    ? validRows
+    : validRows.filter((row) => row.stage_key === stageKey);
   const results = visible.map((row) => {
     const snapshot = json(row.snapshot) as ResultSnapshot;
     return {

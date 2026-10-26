@@ -184,6 +184,7 @@ describe.skipIf(!connectionString)("result-release-lifecycle golden", () => {
       note: String(releaseStep.input.note),
     });
     expect(releaseStep.expect.outcome).toBe("accepted");
+    if (released.body.snapshot === null) throw new Error("The release snapshot is missing.");
     expect(released.body.snapshot).toMatchObject({
       publicTitle: "2026 院十佳 · 正式赛果",
     });

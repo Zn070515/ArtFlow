@@ -143,6 +143,21 @@ describe.skipIf(!connectionString)("publishing repository", () => {
     expect(await selectPublicResults(db, "UNKNOWN-CODE")).toBeNull();
   });
 
+  it("keeps an ACTIVE legacy release without a snapshot invisible", async () => {
+    const activityId = `act-${randomUUID()}`;
+    const publicCode = `LEGACY${activityId.slice(-6).toUpperCase()}`;
+    await seed(activityId, publicCode);
+    await release(activityId, `release-legacy-active-${activityId}`);
+    await db.updateTable("result_release")
+      .set({ snapshot: JSON.stringify(null) })
+      .where("id", "=", `release-legacy-active-${activityId}`)
+      .execute();
+    const results = await selectPublicResults(db, publicCode);
+    expect(results).not.toBeNull();
+    expect(results?.results).toEqual([]);
+    expect(results?.activityTitle).toBe("");
+  });
+
   it("keeps activities isolated", async () => {
     const first = `act-${randomUUID()}`;
     const second = `act-${randomUUID()}`;

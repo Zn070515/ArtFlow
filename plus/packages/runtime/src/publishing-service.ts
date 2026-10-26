@@ -80,6 +80,9 @@ async function lockPublishingActivity(
   if (session === null) {
     throw new DomainError("SESSION_NOT_RUNNING", `Scope ${scope} has no running execution.`);
   }
+  if (session.mode !== "formal") {
+    throw new DomainError("FORMAL_MODE_REQUIRED", "Publishing is a formal-only capability.");
+  }
   return { activity, session };
 }
 
@@ -337,7 +340,7 @@ export async function releaseResult(
         releaseId: stored.id,
         stageKey: stored.stageKey,
         candidateRevision: stored.snapshotCandidateRevision,
-        publicTitle: stored.snapshot.publicTitle,
+        publicTitle: snapshot.publicTitle,
       },
     });
     return { body: stored, status: 201 };
