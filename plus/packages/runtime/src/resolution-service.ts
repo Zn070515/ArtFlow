@@ -35,6 +35,7 @@ import {
   averageScore,
   compareScores,
   computeRanking,
+  decimalValue,
   DomainError,
 } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
@@ -379,7 +380,13 @@ export function buildPodiumCandidate(input: { readonly requiredRoundIds: readonl
   const rows = input.rounds.find((round) => round.roundId === finalRoundId)?.ranking.rows ?? [];
   return {
     status: "candidate",
-    placements: rows.slice(0, 3).map((row, index) => ({ place: index + 1, contestantId: row.contestantId, total: row.total })),
+    placements: rows.slice(0, 3).map((row, index) => ({
+      place: index + 1,
+      contestantId: row.contestantId,
+      // Normalize totals read back from pre-decimal ranking snapshots so the
+      // persisted placement always carries the canonical decimal string.
+      total: decimalValue(row.total),
+    })),
     sourceRoundIds,
     sourceScoreVersions,
     inputFingerprint,

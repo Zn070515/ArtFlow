@@ -73,7 +73,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function decodeVotingArtifact(value: unknown): DecodedVotingArtifact {
   if (!isRecord(value)) fail("RELEASE_SNAPSHOT_INCOMPLETE", "The voting release artifact is invalid.");
-  if (value.version === 2 && value.schemaVersion === 2 && typeof value.identityPolicy === "string") {
+  if (
+    value.version === 2 &&
+    value.schemaVersion === 2 &&
+    (value.identityPolicy === "ticket" || value.identityPolicy === "browser" || value.identityPolicy === "anonymous")
+  ) {
     return { kind: "current", artifact: value as unknown as CompiledVotingArtifact };
   }
   if (
@@ -222,13 +226,18 @@ export function computeVoteScores(input: VoteScoreInput): VoteScoreResult {
   if (!Number.isInteger(input.rule.decimals) || input.rule.decimals < 0 || input.rule.decimals > 6) {
     fail("INVALID_INPUT", "The voting score decimals are invalid.");
   }
-  if (input.totalBallots === 0) return deepFreeze({ status: "hold", reason: "NO_VALID_BALLOTS" });
-  const result: Record<string, DecimalValue> = {};
-  for (const optionId of Object.keys(input.counts).sort()) {
+  // Validate every count before the empty-session short-circuit so malformed
+  // input still fails instead of being reported as a legitimate HOLD.
+  const counts = Object.keys(input.counts).sort().map((optionId) => {
     const count = input.counts[optionId];
     if (count === undefined || !Number.isInteger(count) || count < 0) {
       fail("INVALID_INPUT", `Vote count for ${optionId} is invalid.`);
     }
+    return [optionId, count] as const;
+  });
+  if (input.totalBallots === 0) return deepFreeze({ status: "hold", reason: "NO_VALID_BALLOTS" });
+  const result: Record<string, DecimalValue> = {};
+  for (const [optionId, count] of counts) {
     result[optionId] = shareOfTotal(count, input.totalBallots, input.rule.scale, input.rule.decimals);
   }
   return deepFreeze({ status: "ready", scores: result });

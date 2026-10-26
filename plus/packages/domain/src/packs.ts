@@ -160,11 +160,18 @@ export function instantiateActivityPack(
     const registration = registry.get(identity);
     if (registration === undefined) continue;
     const definition = registration.emptyDefinition();
-    if (definition.schemaVersion !== registration.manifest.definitionSchemaVersion) {
+    // The CapabilityDefinition envelope is always schemaVersion 1; the
+    // capability's own definition language is versioned on its payload.
+    const payload = definition.payload;
+    const payloadSchemaVersion =
+      typeof payload === "object" && payload !== null && "schemaVersion" in payload
+        ? (payload as { schemaVersion: unknown }).schemaVersion
+        : undefined;
+    if (payloadSchemaVersion !== registration.manifest.definitionSchemaVersion) {
       issues.push(
         issue(
           "CAPABILITY_DEFINITION_VERSION",
-          `Capability ${identity} produced schemaVersion ${definition.schemaVersion}, expected ${registration.manifest.definitionSchemaVersion}.`,
+          `Capability ${identity} produced schemaVersion ${String(payloadSchemaVersion)}, expected ${registration.manifest.definitionSchemaVersion}.`,
           `capabilities.${identity}`,
         ),
       );

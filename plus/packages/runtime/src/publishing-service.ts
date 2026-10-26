@@ -26,12 +26,14 @@ import {
 } from "@artflow-plus/db";
 import {
   buildResultSnapshot,
+  decimalValue,
   decodePublishingArtifact,
   DomainError,
   requirePermission,
   validateAwards,
 } from "@artflow-plus/domain";
 import type {
+  ActorContext,
   CompiledPublishingArtifact,
   PublishingStageDefinition,
   ResultAward,
@@ -57,6 +59,28 @@ function requireCapability(
   if (!activity.enabledCapabilities.includes(key)) {
     throw new DomainError("CAPABILITY_NOT_ENABLED", `Capability ${key} is not enabled on this activity.`);
   }
+}
+
+/**
+ * The shared write-command preamble: permission, activity lock, capability and
+ * running publishing session. Every publishing command must pass through it.
+ */
+async function lockPublishingActivity(
+  trx: Kysely<Database>,
+  actor: ActorContext,
+  activityId: string,
+  scope: string,
+) {
+  requirePermission(actor, "result.manage");
+  const activity = await getActivityForUpdate(trx, activityId);
+  if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+  requireActive(activity, "Publishing");
+  requireCapability(activity, "publishing");
+  const session = await findRunningSessionByScope(trx, activity.id, scope);
+  if (session === null) {
+    throw new DomainError("SESSION_NOT_RUNNING", `Scope ${scope} has no running execution.`);
+  }
+  return { activity, session };
 }
 
 async function publishingArtifact(
@@ -88,16 +112,25 @@ function requireStage(
 
 function decisionsFromCandidate(candidate: StoredPodiumCandidate): ResultDecision[] {
   return candidate.placements.map((placement) => {
+    // Candidates written before the decimal authority migration stored totals as
+    // JSON numbers; normalize both forms instead of refusing to confirm them.
+    const rawTotal: unknown = placement.total;
+    const score =
+      typeof rawTotal === "string"
+        ? rawTotal
+        : typeof rawTotal === "number" && Number.isFinite(rawTotal)
+          ? decimalValue(rawTotal)
+          : null;
     if (
       !Number.isInteger(placement.place) ||
       placement.place < 1 ||
       typeof placement.contestantId !== "string" ||
       !placement.contestantId.trim() ||
-      typeof placement.total !== "string"
+      score === null
     ) {
       throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The podium candidate placements are malformed.");
     }
-    return { rank: placement.place, contestantId: placement.contestantId, score: placement.total };
+    return { rank: placement.place, contestantId: placement.contestantId, score };
   });
 }
 
@@ -133,15 +166,7 @@ export async function confirmStageResult(
       note: input.note ?? "",
     },
   }, async (trx) => {
-    requirePermission(actor, "result.manage");
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    requireActive(activity, "Publishing");
-    requireCapability(activity, "publishing");
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-    if (session === null) {
-      throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
-    }
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     const candidate = await getLatestPodiumCandidate(trx, activity.id);
     if (candidate === null) throw new DomainError("NOT_FOUND", "No podium candidate is available to confirm.");
@@ -213,11 +238,13 @@ export async function getPublishingState(
   requirePermission(runtimeActor(deps), "result.manage");
   const activity = await db.selectFrom("activity").select("id").where("id", "=", input.activityId).executeTakeFirst();
   if (activity === undefined) throw new DomainError("NOT_FOUND", "The activity was not found.");
-  return {
-    stageResults: await listStageResults(db, input.activityId),
-    publications: await listResultPublications(db, input.activityId),
-    releases: await listResultReleases(db, input.activityId),
-  };
+  // The three collections are independent reads; issue them together.
+  const [stageResults, publications, releases] = await Promise.all([
+    listStageResults(db, input.activityId),
+    listResultPublications(db, input.activityId),
+    listResultReleases(db, input.activityId),
+  ]);
+  return { stageResults, publications, releases };
 }
 
 export interface ReleaseResultInput {
@@ -246,15 +273,7 @@ export async function releaseResult(
     actor,
     payload: { stageKey: input.stageKey, expectedCandidateRevision: input.expectedCandidateRevision, note },
   }, async (trx) => {
-    requirePermission(actor, "result.manage");
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    requireActive(activity, "Publishing");
-    requireCapability(activity, "publishing");
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-    if (session === null) {
-      throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
-    }
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     const stageResult = await getStageResultForUpdate(trx, activity.id, stage.key);
     if (stageResult === null) throw new DomainError("RESULT_NOT_CONFIRMED", "The stage result has not been confirmed.");
@@ -350,15 +369,7 @@ export async function revokeResultRelease(
     actor,
     payload: { releaseId: input.releaseId, note },
   }, async (trx) => {
-    requirePermission(actor, "result.manage");
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    requireActive(activity, "Publishing");
-    requireCapability(activity, "publishing");
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-    if (session === null) {
-      throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
-    }
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
     const release = await getResultReleaseByIdForUpdate(trx, input.releaseId);
     if (release === null || release.activityId !== activity.id) {
       throw new DomainError("NOT_FOUND", "The result release was not found.");
@@ -417,15 +428,7 @@ export async function unlockStageResult(
     actor,
     payload: { stageKey: input.stageKey, expectedCandidateRevision: input.expectedCandidateRevision, note },
   }, async (trx) => {
-    requirePermission(actor, "result.manage");
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    requireActive(activity, "Publishing");
-    requireCapability(activity, "publishing");
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-    if (session === null) {
-      throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
-    }
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     const stageResult = await getStageResultForUpdate(trx, activity.id, stage.key);
     if (stageResult === null) throw new DomainError("RESULT_NOT_CONFIRMED", "The stage result has not been confirmed.");
@@ -513,15 +516,7 @@ export async function editPublication(
       content: input.content,
     },
   }, async (trx) => {
-    requirePermission(actor, "result.manage");
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    requireActive(activity, "Publishing");
-    requireCapability(activity, "publishing");
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-    if (session === null) {
-      throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
-    }
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     if ((await getActiveResultRelease(trx, activity.id, stage.key)) !== null) {
       throw new DomainError("RESULT_POST_FROZEN", "An active result release freezes the publication.");
