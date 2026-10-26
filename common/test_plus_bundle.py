@@ -2,12 +2,12 @@ import json
 import tempfile
 from pathlib import Path
 
-from common.authority import ACTIVITY_STATE, authority_write
+from common.authority import ACTIVITY_STATE, CONTEST_ROUND_STATE, authority_write
 from core.models import Activity
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
-from singer_contest.models import SingerRegistration
+from singer_contest.models import ContestRound, Judge, ScoreRecord, SingerRegistration
 
 
 class ExportPlusBundleTests(TestCase):
@@ -56,3 +56,36 @@ class ExportPlusBundleTests(TestCase):
         serialized = output.read_text(encoding="utf-8")
         for forbidden in ("password", "token", "session_key", "ip_address"):
             self.assertNotIn(forbidden, serialized)
+
+    def test_export_includes_rounds_and_scores(self) -> None:
+        activity = self._activity()
+        singer = self._registration(activity, "Alice")
+        judge = Judge.objects.create(activity=activity, name="评委甲")
+        with authority_write(CONTEST_ROUND_STATE):
+            round_row = ContestRound.objects.create(
+                activity=activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                sequence=1,
+                status=ContestRound.Status.SCORING,
+                judge_count=1,
+            )
+        ScoreRecord.objects.create(
+            round=round_row,
+            singer=singer,
+            judge=judge,
+            score="91.50",
+            notes="稳定",
+        )
+        output = Path(tempfile.mkdtemp()) / "bundle.json"
+
+        call_command("export_plus_bundle", activity="LEG2025", output=str(output))
+
+        bundle = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(bundle["counts"]["rounds"], 1)
+        self.assertEqual(bundle["counts"]["scores"], 1)
+        self.assertEqual(len(bundle["rounds"]), 1)
+        self.assertEqual(bundle["rounds"][0]["key"], f"round-{round_row.pk}")
+        self.assertEqual(bundle["competition"]["scores"][0]["total"], "91.50")
+        self.assertEqual(bundle["competition"]["scores"][0]["criteria"], {"总分": 91.5})
+        self.assertEqual(bundle["roster"]["status"], "final")
+        self.assertEqual(bundle["roster"]["approvedCount"], 1)

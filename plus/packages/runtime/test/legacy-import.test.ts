@@ -61,10 +61,28 @@ describe.skipIf(!connectionString)("legacy import", () => {
       .where("public_code", "=", "LEG-1").executeTakeFirstOrThrow();
     expect(activity.status).toBe("active");
     expect(await listApprovedParticipantIds(db, activity.id)).toHaveLength(1);
-    expect(await getRoster(db, activity.id)).toMatchObject({ status: "unknown" });
+    expect(await getRoster(db, activity.id)).toMatchObject({ status: "final", approvedCount: 1 });
     const rows = await db.selectFrom("registration").selectAll()
       .where("activity_id", "=", activity.id).execute();
     expect(rows.map((row) => row.status).sort()).toEqual(["approved", "rejected"]);
+
+    const round = await db.selectFrom("competition_round").selectAll()
+      .where("activity_id", "=", activity.id).executeTakeFirstOrThrow();
+    expect(round.state).toBe("locked");
+    expect(round.current_panel_id).not.toBeNull();
+    const scores = await db.selectFrom("score_fact").selectAll()
+      .where("activity_id", "=", activity.id).execute();
+    expect(scores).toHaveLength(1);
+    expect(scores[0]).toMatchObject({
+      mode: "formal",
+      total: "91.50",
+      contestant_id: "legacy-user:1",
+      judge_id: "legacy-judge:1",
+    });
+    const rankings = await db.selectFrom("ranking_snapshot").selectAll()
+      .where("activity_id", "=", activity.id).execute();
+    expect(rankings).toHaveLength(1);
+    expect(rankings[0]).toMatchObject({ mode: "formal", status: "ready" });
   });
 
   it("replays the same bundle without duplicating rows", async () => {

@@ -1,9 +1,16 @@
-import type { Database } from "@artflow-plus/db";
+import type { Database, StoredRound } from "@artflow-plus/db";
 import {
+  insertJudgeSeat,
   insertMaterial,
+  insertPanelMember,
+  insertPanelSnapshot,
+  insertPerformance,
+  insertRankingSnapshot,
   insertRegistration,
   insertRelease,
   insertRound,
+  insertScoreFact,
+  updateRound,
   upsertRoster,
 } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
@@ -188,6 +195,179 @@ async function countImported(
   };
 }
 
+interface RoundPanel {
+  readonly id: string;
+  readonly members: readonly { readonly judgeId: string; readonly seatKey: string }[];
+  readonly seatsByJudge: ReadonlyMap<string, string>;
+}
+
+async function importCompetition(
+  trx: Transaction<Database>,
+  bundle: LegacyBundle,
+  activityId: string,
+  prefix: string,
+  roundsByLegacy: Map<number, StoredRound>,
+): Promise<void> {
+  const panelsByRound = new Map<number, RoundPanel>();
+  const seatIds = new Map<string, string>();
+  for (const seat of bundle.competition.seats) {
+    seatIds.set(`${seat.panelLegacyId}:${seat.judgeId}`, `${prefix}-seat-${seat.legacyId}`);
+  }
+
+  const createPanel = async (
+    round: StoredRound,
+    roundLegacyId: number,
+    panelId: string,
+    members: readonly { readonly judgeId: string; readonly seatKey: string }[],
+  ): Promise<RoundPanel> => {
+    await insertPanelSnapshot(trx, {
+      id: panelId,
+      activityId,
+      roundId: round.id,
+      version: 1,
+      state: "active",
+      expectedJudges: members.length,
+      minimumJudges: round.minimumJudges,
+      rosterDigest: stableHash({ round: round.id, members }),
+      contextVersion: 1,
+      current: true,
+    });
+    const seatsByJudge = new Map<string, string>();
+    for (const member of members) {
+      await insertPanelMember(trx, { panelId, judgeId: member.judgeId, seatKey: member.seatKey });
+      const seatId = seatIds.get(`${roundLegacyId}:${member.judgeId}`) ??
+        `${prefix}-seat-synth-${roundLegacyId}-${member.seatKey}`;
+      await insertJudgeSeat(trx, {
+        id: seatId,
+        panelId,
+        judgeId: member.judgeId,
+        state: "assigned",
+        revision: 0,
+      });
+      seatsByJudge.set(member.judgeId, seatId);
+    }
+    const updated = await updateRound(trx, { ...round, currentPanelId: panelId }, round.revision);
+    roundsByLegacy.set(roundLegacyId, updated);
+    return { id: panelId, members, seatsByJudge };
+  };
+
+  for (const panel of bundle.competition.panels) {
+    const round = roundsByLegacy.get(panel.roundLegacyId);
+    if (round === undefined) {
+      throw new DomainError("LEGACY_BUNDLE_INVALID", "A panel references an unknown round.");
+    }
+    panelsByRound.set(
+      panel.roundLegacyId,
+      await createPanel(round, panel.roundLegacyId, `${prefix}-panel-${panel.legacyId}`, panel.members),
+    );
+  }
+
+  for (const round of bundle.rounds) {
+    const stored = roundsByLegacy.get(round.legacyId);
+    if (stored === undefined) continue;
+    if (panelsByRound.has(round.legacyId)) continue;
+    const judgeIds = [...new Set(
+      bundle.competition.scores
+        .filter((score) => score.roundLegacyId === round.legacyId)
+        .map((score) => score.judgeId),
+    )].sort();
+    if (judgeIds.length === 0) continue;
+    const members = judgeIds.map((judgeId, index) => ({ judgeId, seatKey: `seat-${index + 1}` }));
+    panelsByRound.set(
+      round.legacyId,
+      await createPanel(stored, round.legacyId, `${prefix}-panel-synth-${round.legacyId}`, members),
+    );
+  }
+
+  const performancesByKey = new Map<string, string>();
+  for (const performance of bundle.competition.performances) {
+    const round = roundsByLegacy.get(performance.roundLegacyId);
+    if (round === undefined) throw new DomainError("LEGACY_BUNDLE_INVALID", "A performance references an unknown round.");
+    const id = `${prefix}-performance-${performance.legacyId}`;
+    await insertPerformance(trx, {
+      id,
+      activityId,
+      roundId: round.id,
+      contestantId: performance.contestantKey,
+      sequence: performance.sequence,
+      state: performance.state,
+      contextVersion: 1,
+    });
+    performancesByKey.set(`${performance.roundLegacyId}:${performance.contestantKey}`, id);
+  }
+
+  const contestantOrder = new Map<number, string[]>();
+  for (const score of bundle.competition.scores) {
+    const list = contestantOrder.get(score.roundLegacyId) ?? [];
+    if (!list.includes(score.contestantKey)) list.push(score.contestantKey);
+    contestantOrder.set(score.roundLegacyId, list);
+  }
+  for (const [roundLegacyId, contestants] of contestantOrder) {
+    const round = roundsByLegacy.get(roundLegacyId);
+    if (round === undefined) continue;
+    for (const [index, contestantKey] of contestants.entries()) {
+      const key = `${roundLegacyId}:${contestantKey}`;
+      if (performancesByKey.has(key)) continue;
+      const id = `${prefix}-performance-synth-${roundLegacyId}-${index + 1}`;
+      await insertPerformance(trx, {
+        id,
+        activityId,
+        roundId: round.id,
+        contestantId: contestantKey,
+        sequence: index + 1,
+        state: "locked",
+        contextVersion: 1,
+      });
+      performancesByKey.set(key, id);
+    }
+  }
+
+  for (const score of bundle.competition.scores) {
+    const round = roundsByLegacy.get(score.roundLegacyId);
+    const panel = panelsByRound.get(score.roundLegacyId);
+    const performanceId = performancesByKey.get(`${score.roundLegacyId}:${score.contestantKey}`);
+    const seatId = panel?.seatsByJudge.get(score.judgeId);
+    if (round === undefined || panel === undefined || performanceId === undefined || seatId === undefined) {
+      throw new DomainError("LEGACY_BUNDLE_INVALID", "A score cannot be bound to a round, panel, performance, or seat.");
+    }
+    await insertScoreFact(trx, {
+      id: `${prefix}-score-${score.legacyId}`,
+      activityId,
+      roundId: round.id,
+      performanceId,
+      contestantId: score.contestantKey,
+      judgeId: score.judgeId,
+      panelSnapshotId: panel.id,
+      seatId,
+      source: score.source,
+      mode: "formal",
+      total: score.total,
+      criteria: score.criteria,
+      notes: score.notes,
+      version: 1,
+      contextVersion: 1,
+      current: true,
+    });
+  }
+
+  for (const ranking of bundle.competition.rankings) {
+    const round = roundsByLegacy.get(ranking.roundLegacyId);
+    if (round === undefined) continue;
+    await insertRankingSnapshot(trx, {
+      id: `${prefix}-ranking-${round.id}`,
+      activityId,
+      roundId: round.id,
+      mode: "formal",
+      sourceScoreVersion: round.scoreVersion,
+      inputFingerprint: ranking.inputFingerprint,
+      status: ranking.tieGroups.length > 0 ? "hold" : "ready",
+      rows: ranking.rows,
+      tieGroups: ranking.tieGroups,
+      revision: 1,
+    });
+  }
+}
+
 async function importActivity(
   trx: Transaction<Database>,
   bundle: LegacyBundle,
@@ -315,8 +495,9 @@ async function importActivity(
     });
   }
 
+  const roundsByLegacy = new Map<number, StoredRound>();
   for (const round of bundle.rounds) {
-    await insertRound(trx, {
+    const stored: StoredRound = {
       id: `${prefix}-round-${round.legacyId}`,
       activityId,
       roundKey: round.key,
@@ -331,8 +512,12 @@ async function importActivity(
       advanceCount: round.advanceCount,
       currentPanelId: null,
       lockedAt: null,
-    });
+    };
+    await insertRound(trx, stored);
+    roundsByLegacy.set(round.legacyId, stored);
   }
+
+  await importCompetition(trx, bundle, activityId, prefix, roundsByLegacy);
 
   const imported = await countImported(trx, activityId);
   const checks: LegacyImportCheck[] = [

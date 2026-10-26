@@ -37,7 +37,7 @@
       "completion": "minimum_valid",
       "scoringMethod": "average",
       "advanceCount": 1,
-      "state": "prepared"
+      "state": "locked"
     }
   ],
   "registrations": [
@@ -76,14 +76,45 @@
       "liveStatus": "not_checked_in"
     }
   ],
-  "roster": { "status": "unknown", "approvedCount": 0, "finalizedAt": null },
+  "roster": { "status": "final", "approvedCount": 1, "finalizedAt": "2025-10-03T00:00:00Z" },
   "materials": [],
   "competition": {
-    "panels": [],
-    "seats": [],
-    "performances": [],
-    "scores": [],
-    "rankings": []
+    "panels": [
+      {
+        "legacyId": 21,
+        "roundLegacyId": 21,
+        "members": [{ "judgeId": "legacy-judge:1", "seatKey": "seat-1" }]
+      }
+    ],
+    "seats": [
+      { "legacyId": 31, "panelLegacyId": 21, "judgeId": "legacy-judge:1", "seatKey": "seat-1" }
+    ],
+    "performances": [
+      { "legacyId": 41, "roundLegacyId": 21, "contestantKey": "legacy-user:1", "sequence": 1, "state": "locked" }
+    ],
+    "scores": [
+      {
+        "legacyId": 51,
+        "roundLegacyId": 21,
+        "contestantKey": "legacy-user:1",
+        "judgeId": "legacy-judge:1",
+        "panelLegacyId": 21,
+        "total": "91.50",
+        "criteria": { "总分": 91.5 },
+        "source": "staff_rapid",
+        "notes": "",
+        "createdAt": "2025-10-05T00:00:00Z"
+      }
+    ],
+    "rankings": [
+      {
+        "roundLegacyId": 21,
+        "rows": [{ "contestantId": "legacy-user:1", "total": "91.50", "judgeCount": 1 }],
+        "tieGroups": [],
+        "inputFingerprint": "legacy-ranking",
+        "recordedAt": "2025-10-05T00:00:00Z"
+      }
+    ]
   },
   "voting": { "sessions": [], "ballots": [] },
   "results": { "stageResults": [], "releases": [] },
@@ -92,7 +123,7 @@
     "approvedRegistrations": 1,
     "materials": 0,
     "rounds": 1,
-    "scores": 0,
+    "scores": 1,
     "ballots": 0,
     "releases": 0
   },
