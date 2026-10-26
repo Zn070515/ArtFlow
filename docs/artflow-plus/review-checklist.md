@@ -128,6 +128,17 @@
 - [x] 材料只有 metadata，UI/API 不暗示字节已存储；文件题仍需登记 metadata。
 - [x] E2E seed 每次重置自己的报名活动数据，避免上一次运行污染断言。
 
+### M8c Studio
+
+- [x] Studio 的 create/activate/compile/release/execution start/close 都要求
+      `studio.manage`，且 actor 来自请求而非 base/system。
+- [x] Guided 创建与 Expert JSON 编辑都只走同一条 compile/release 命令路径。
+- [x] Studio 状态只返回 draft 包、当前编译摘要、release 元数据与会话；不返回
+      完整 compiled artifact。
+- [x] release 需要 active activity + 当前 draft 的编译；session 只能使用 release
+      冻结的 declaredScopes。
+- [x] 旧的无鉴权 engine mutation 测试已更新为 studio actor/token。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

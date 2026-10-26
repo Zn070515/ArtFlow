@@ -2,7 +2,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError } from "../api/client.js";
-import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
+import { defaultLanding, useSession } from "../auth/SessionProvider.js";
 
 type Mode = "login" | "register";
 
@@ -26,7 +26,7 @@ export function LoginPage() {
 
   useEffect(() => {
     if (session === null) return;
-    void navigate({ to: target ?? (hasOpsAccess(session) ? "/ops" : "/join") });
+    void navigate({ to: target ?? defaultLanding(session) });
   }, [session, target, navigate]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -39,7 +39,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       const session = mode === "login" ? await login(username, password) : await register(username, password);
-      await navigate({ to: target ?? (hasOpsAccess(session) ? "/ops" : "/join") });
+      await navigate({ to: target ?? defaultLanding(session) });
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(

@@ -123,7 +123,18 @@ beforeAll(async () => {
   db = createDb({ connectionString, schema });
   await migrate(db);
   registry = skeletonRegistry();
-  app = await buildApp({ db, registry, deps, enableRuntimeFacts: true });
+  app = await buildApp({
+    db,
+    registry,
+    deps,
+    actor: {
+      actorId: "skeleton-studio",
+      actorType: "user",
+      roles: ["staff"],
+      permissions: ["studio.manage"],
+    },
+    enableRuntimeFacts: true,
+  });
   await app.ready();
 });
 

@@ -97,3 +97,15 @@ export function hasOpsAccess(session: SessionResponse | null): boolean {
     roles.includes("admin")
   );
 }
+
+export function hasStudioAccess(session: SessionResponse | null): boolean {
+  if (session === null) return false;
+  const { permissions, roles } = session.actor;
+  return permissions.includes("*") || permissions.includes("studio.manage") || roles.includes("admin");
+}
+
+export function defaultLanding(session: SessionResponse): string {
+  if (hasOpsAccess(session)) return "/ops";
+  if (hasStudioAccess(session)) return "/studio";
+  return "/join";
+}

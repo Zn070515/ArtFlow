@@ -1,6 +1,6 @@
 import { Link, Outlet } from "@tanstack/react-router";
 
-import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
+import { hasOpsAccess, hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { AuroraScene } from "../components/hero/AuroraScene.js";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 
@@ -28,6 +28,11 @@ export function RootLayout() {
           {hasOpsAccess(session) ? (
             <Link to="/ops" className="nav-link">
               Ops
+            </Link>
+          ) : null}
+          {hasStudioAccess(session) ? (
+            <Link to="/studio" className="nav-link">
+              Studio
             </Link>
           ) : null}
           {session === null ? (

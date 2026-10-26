@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { closeDb, createDb, migrate } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import { createEmptyCompetitionDefinition } from "@artflow-plus/domain";
+import type { ActorContext } from "@artflow-plus/domain";
 import type { FastifyInstance } from "fastify";
 import type { Kysely } from "kysely";
 import { Client } from "pg";
@@ -20,6 +21,13 @@ let app: FastifyInstance;
 let db: Kysely<Database>;
 let admin: Client;
 let baseUrl = "";
+
+const studioActor: ActorContext = {
+  actorId: "sse-studio",
+  actorType: "user",
+  roles: ["staff"],
+  permissions: ["studio.manage"],
+};
 
 const dbIt = connectionString ? it : it.skip;
 
@@ -68,7 +76,7 @@ beforeAll(async () => {
   await admin.query(`CREATE SCHEMA "${schema}"`);
   db = createDb({ connectionString, schema });
   await migrate(db);
-  app = await buildApp({ db });
+  app = await buildApp({ db, actor: studioActor });
   const address = await app.listen({ port: 0, host: "127.0.0.1" });
   baseUrl = address.replace("127.0.0.1", "localhost");
 });
