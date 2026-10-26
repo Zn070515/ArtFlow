@@ -358,6 +358,38 @@ draft package; compile diagnostics come from the capability compilers. Release
 freezes the definition; sessions use the active release's declared scopes.
 `GET /api/activities` also accepts `studio.manage` for the Studio activity list.
 
+## M8d Live console and judge entry
+
+The Live console needs `competition.manage` or `judge.manage`; opening the
+judging session additionally accepts those permissions instead of
+`studio.manage`. The activity must enable `ticketing` to hand out judge links.
+
+```text
+GET  /api/activities/:id/live
+GET  /api/judge/context
+POST /api/activities/:id/executions                  # scope=judging
+POST /api/activities/:id/competition/rounds          # prepare a configured round
+POST /api/activities/:id/competition/rounds/:key/panel
+POST /api/activities/:id/competition/rounds/:key/performances/:performanceId/open
+POST /api/activities/:id/competition/rounds/:key/performances/:performanceId/lock
+POST /api/activities/:id/competition/rounds/:key/lock
+POST /api/activities/:id/competition/rounds/:key/resolve
+POST /api/activities/:id/judge-entry/reissue         # signed capability
+POST /api/judge-entry/claim                          # HttpOnly judge session
+```
+
+Staff start a `judging` session, prepare rounds, activate the panel, open a
+performance from the final roster, and generate `/judge/<publicCode>?capability=…`.
+The judge claims an entry seat, polls `/api/judge/context`, and submits three
+rubric scores as `direct_judge`. Staff then lock the performance, lock the round,
+and resolve the ranking. SSE only invalidates the Live query; when it fails the
+page polls every 5 seconds, and `/events` + `/execution-state` remain the
+authoritative recovery path.
+
+`apps/api/scripts/seed-live.ts` seeds `E2E-LIVE-*` (competition + ticketing,
+approved `singer-a`, final roster) and writes `.e2e-live.json` for the Playwright
+spec.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot

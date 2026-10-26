@@ -18,6 +18,12 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0011](0011-execution-runtime.md) | durable command、outbox 投影/重放、SSE + HTTP 恢复 | accepted |
 | [0012](0012-actor-and-audit.md) | ActorContext 与审计是 command 的标准副产物 | accepted |
 | [0013](0013-plus-capability-ownership.md) | Competition 拥有 Evaluation；Voting 对 Ticketing 条件依赖 | accepted |
+| [0014](0014-publishing-ownership.md) | Publishing 拥有结果确认与发布 | accepted |
+| [0015](0015-archive-package-and-storage.md) | 归档包白名单、本地卷存储、仅正式发布可归档 | accepted |
+| [0016](0016-web-shell-and-public-portal.md) | Web 壳、代理与公开结果页 | accepted |
+| [0017](0017-cookie-session-and-registration-loop.md) | Cookie 会话、CSRF 与报名闭环 | accepted |
+| [0018](0018-studio-guided-expert-and-authority.md) | Studio guided/expert 编辑与变更权限 | accepted |
+| [0019](0019-live-console-and-judge-entry.md) | Live 控制台读取模型与 capability 评委入口 | accepted |
 
 新增 ADR 的规则：
 

@@ -419,6 +419,26 @@ export async function listAvailableJudgeSeatsForUpdate(
   return rows.map(judgeSeat);
 }
 
+export async function getJudgeSeatGrant(
+  db: Kysely<Database>,
+  id: string,
+): Promise<StoredJudgeEntrySeat | null> {
+  const row = await db.selectFrom("judge_seat_grant").selectAll().where("id", "=", id).executeTakeFirst();
+  return row === undefined ? null : judgeSeat(row);
+}
+
+export async function findJudgeSeatGrantBySeatKey(
+  db: Kysely<Database>,
+  activityId: string,
+  seatKey: string,
+): Promise<StoredJudgeEntrySeat | null> {
+  const row = await db.selectFrom("judge_seat_grant").selectAll()
+    .where("activity_id", "=", activityId)
+    .where("seat_key", "=", seatKey)
+    .executeTakeFirst();
+  return row === undefined ? null : judgeSeat(row);
+}
+
 export async function insertJudgeEntrySeat(
   trx: Kysely<Database>,
   input: StoredJudgeEntrySeat,
@@ -432,6 +452,25 @@ export async function insertJudgeEntrySeat(
     session_id: input.sessionId ?? null,
     revision: input.revision,
   }).execute();
+}
+
+/**
+ * Panels reuse seat keys across rounds, so preparing entry seats must not fail
+ * when a grant for the same (activity, seat key) was already created.
+ */
+export async function ensureJudgeEntrySeat(
+  trx: Kysely<Database>,
+  input: StoredJudgeEntrySeat,
+): Promise<void> {
+  await trx.insertInto("judge_seat_grant").values({
+    id: input.id,
+    activity_id: input.activityId,
+    seat_key: input.seatKey,
+    judge_id: input.judgeId ?? null,
+    state: input.state,
+    session_id: input.sessionId ?? null,
+    revision: input.revision,
+  }).onConflict((conflict) => conflict.columns(["activity_id", "seat_key"]).doNothing()).execute();
 }
 
 export async function claimJudgeEntrySeat(

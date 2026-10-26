@@ -254,6 +254,130 @@ export async function insertPanelSnapshot(db: Kysely<Database>, value: StoredPan
   }).execute();
 }
 
+export async function getPanel(
+  db: Kysely<Database>,
+  panelId: string,
+): Promise<StoredPanelSnapshot | null> {
+  const row = await db.selectFrom("panel_snapshot").selectAll().where("id", "=", panelId).executeTakeFirst();
+  return row === undefined ? null : panel(row);
+}
+
+export async function listJudgeSeatsForPanel(
+  db: Kysely<Database>,
+  panelId: string,
+): Promise<readonly StoredJudgeSeat[]> {
+  const rows = await db.selectFrom("judge_seat").selectAll()
+    .where("panel_id", "=", panelId)
+    .orderBy("judge_id", "asc")
+    .execute();
+  return rows.map(seat);
+}
+
+export async function getPanelMember(
+  db: Kysely<Database>,
+  panelId: string,
+  judgeId: string,
+): Promise<{ readonly panelId: string; readonly judgeId: string; readonly seatKey: string } | null> {
+  const row = await db.selectFrom("panel_member").selectAll()
+    .where("panel_id", "=", panelId)
+    .where("judge_id", "=", judgeId)
+    .executeTakeFirst();
+  return row === undefined ? null : member(row);
+}
+
+export async function getPanelMemberBySeatKey(
+  db: Kysely<Database>,
+  panelId: string,
+  seatKey: string,
+): Promise<{ readonly panelId: string; readonly judgeId: string; readonly seatKey: string } | null> {
+  const row = await db.selectFrom("panel_member").selectAll()
+    .where("panel_id", "=", panelId)
+    .where("seat_key", "=", seatKey)
+    .executeTakeFirst();
+  return row === undefined ? null : member(row);
+}
+
+export async function getJudgeSeatByPanelAndJudge(
+  db: Kysely<Database>,
+  panelId: string,
+  judgeId: string,
+): Promise<StoredJudgeSeat | null> {
+  const row = await db.selectFrom("judge_seat").selectAll()
+    .where("panel_id", "=", panelId)
+    .where("judge_id", "=", judgeId)
+    .executeTakeFirst();
+  return row === undefined ? null : seat(row);
+}
+
+export interface CurrentPanelMember {
+  readonly panelId: string;
+  readonly roundId: string;
+  readonly judgeId: string;
+  readonly seatKey: string;
+}
+
+/** A seat key repeats across rounds, so every current panel that holds it is returned. */
+export async function listCurrentPanelMembersBySeatKey(
+  db: Kysely<Database>,
+  activityId: string,
+  seatKey: string,
+): Promise<readonly CurrentPanelMember[]> {
+  const rows = await db
+    .selectFrom("panel_snapshot")
+    .innerJoin("panel_member", "panel_member.panel_id", "panel_snapshot.id")
+    .select([
+      "panel_snapshot.id as panel_id",
+      "panel_snapshot.round_id as round_id",
+      "panel_member.judge_id as judge_id",
+      "panel_member.seat_key as seat_key",
+    ])
+    .where("panel_snapshot.activity_id", "=", activityId)
+    .where("panel_snapshot.current", "=", true)
+    .where("panel_member.seat_key", "=", seatKey)
+    .orderBy("panel_snapshot.round_id", "asc")
+    .execute();
+  return rows.map((row) => ({
+    panelId: row.panel_id,
+    roundId: row.round_id,
+    judgeId: row.judge_id,
+    seatKey: row.seat_key,
+  }));
+}
+
+export async function getJudgeSeat(
+  db: Kysely<Database>,
+  seatId: string,
+): Promise<StoredJudgeSeat | null> {
+  const row = await db.selectFrom("judge_seat").selectAll().where("id", "=", seatId).executeTakeFirst();
+  return row === undefined ? null : seat(row);
+}
+
+export async function getRound(
+  db: Kysely<Database>,
+  roundId: string,
+): Promise<StoredRound | null> {
+  const row = await db.selectFrom("competition_round").selectAll().where("id", "=", roundId).executeTakeFirst();
+  return row === undefined ? null : round(row);
+}
+
+export async function getPerformance(
+  db: Kysely<Database>,
+  performanceId: string,
+): Promise<StoredPerformance | null> {
+  const row = await db.selectFrom("performance").selectAll().where("id", "=", performanceId).executeTakeFirst();
+  return row === undefined ? null : performance(row);
+}
+
+export async function getPerformanceScoreState(
+  db: Kysely<Database>,
+  performanceId: string,
+): Promise<StoredPerformanceScoreState | null> {
+  const row = await db.selectFrom("performance_score_state").selectAll()
+    .where("performance_id", "=", performanceId)
+    .executeTakeFirst();
+  return row === undefined ? null : performanceScoreState(row);
+}
+
 export async function getCurrentPanelForUpdate(trx: Kysely<Database>, roundId: string): Promise<StoredPanelSnapshot | null> {
   const row = await trx.selectFrom("panel_snapshot").selectAll()
     .where("round_id", "=", roundId).where("current", "=", true).forUpdate().executeTakeFirst();

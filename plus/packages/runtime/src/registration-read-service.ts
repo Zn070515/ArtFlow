@@ -93,7 +93,13 @@ export async function listActivitiesForReview(
   db: Kysely<Database>,
   deps: RuntimeDeps,
 ): Promise<readonly StoredActivitySummary[]> {
-  requireAny(runtimeActor(deps), ["registration.review", "registration.manage", "studio.manage"]);
+  requireAny(runtimeActor(deps), [
+    "registration.review",
+    "registration.manage",
+    "studio.manage",
+    "competition.manage",
+    "judge.manage",
+  ]);
   return listActivities(db);
 }
 

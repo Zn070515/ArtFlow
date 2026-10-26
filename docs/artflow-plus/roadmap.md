@@ -206,9 +206,20 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
 - Studio 状态读取、release 历史、按 declaredScopes 启动/关闭执行会话。
 - E2E：创建 → 激活 → 编译 → 发布 → rehearsal 会话 → 关闭。
 
-### M8d — Live + 评委入口（下一 slice）
+### M8d — Live + 评委入口（已完成，2026-10-26）
 
-- 现场控制、评分、投票、SSE 降级、HOLD/恢复。
+- `GET /api/activities/:id/live` 只返回比赛所需投影：config 回合/评分表/同分策略、
+  运行中的 judging session、每回合 panel/seats/performances 评分进度、最新排名、
+  最终名单。
+- Live 控制台：启动/关闭 judging session、准备回合、激活评委组、从最终名单开表演、
+  锁表演/锁轮、生成排名、生成评委入口链接。
+- capability 评委入口：staff 重签 `J` capability → 评委认领 `judge_seat_grant` →
+  HttpOnly `artflow_judge_session`；`GET /api/judge/context` 按 seat key 解析当前
+  panel 与表演，评委直接写 `direct_judge` 分。
+- SSE 只做失效提示，失败退化为 5s 轮询；events/execution-state 仍是恢复权威。
+- E2E：启动会话 → 准备 → 激活评委组 → 开表演 → 生成链接 → 评委打分 →
+  锁表演/锁轮 → 生成排名 → 关闭会话。
+- 投票/票据 UI、现场大屏、导出、cutover 不在本 slice。
 
 ### M8e — Cutover
 

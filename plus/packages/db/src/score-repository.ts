@@ -259,6 +259,19 @@ export async function listCurrentScoreFacts(
   return rows.map(scoreFact);
 }
 
+export async function listCurrentScoreFactsForJudge(
+  db: Kysely<Database>,
+  roundId: string,
+  judgeId: string,
+): Promise<readonly StoredScoreFact[]> {
+  const rows = await db.selectFrom("score_fact").selectAll()
+    .where("round_id", "=", roundId)
+    .where("judge_id", "=", judgeId)
+    .where("current", "=", true)
+    .execute();
+  return rows.map(scoreFact);
+}
+
 export async function countCurrentScoreFacts(
   db: Kysely<Database>,
   performanceId: string,

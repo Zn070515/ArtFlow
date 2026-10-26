@@ -3,6 +3,9 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { Landing } from "./routes/index.js";
 import { JoinPage } from "./routes/join.js";
 import { JoinActivityPage } from "./routes/joinActivity.js";
+import { JudgePage } from "./routes/judge.js";
+import { LivePage } from "./routes/live.js";
+import { LiveActivityPage } from "./routes/liveActivity.js";
 import { LoginPage } from "./routes/login.js";
 import { OpsPage } from "./routes/ops.js";
 import { OpsActivityPage } from "./routes/opsActivity.js";
@@ -84,6 +87,27 @@ const studioActivityRoute = createRoute({
   component: StudioActivityPage,
 });
 
+const liveRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/live",
+  component: LivePage,
+});
+
+const liveActivityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/live/$activityId",
+  component: LiveActivityPage,
+});
+
+const judgeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/judge/$publicCode",
+  validateSearch: (search: Record<string, unknown>) => ({
+    capability: typeof search.capability === "string" ? search.capability : undefined,
+  }),
+  component: JudgePage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   resultsRoute,
@@ -96,6 +120,9 @@ const routeTree = rootRoute.addChildren([
   studioRoute,
   studioNewRoute,
   studioActivityRoute,
+  liveRoute,
+  liveActivityRoute,
+  judgeRoute,
 ]);
 
 export const router = createRouter({
