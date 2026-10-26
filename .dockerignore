@@ -14,6 +14,7 @@ __pycache__/
 db.sqlite3
 media/
 staticfiles/
+**/var/archives/
 backups/
 logs/
 test-results/

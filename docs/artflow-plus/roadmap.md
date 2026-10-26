@@ -167,10 +167,16 @@ ticket redemption、ballot uniqueness、judge-seat claim 的真实 PostgreSQL �
 
 **出口**：发布/撤销/再发布/解锁生命周期、公开 selector、并发与审计测试全绿。
 
-## M7b — Archive（下一 slice）
+## M7b — Archive（已完成，2026-10-26）
 
-- 归档包：冻结身份、历史、文件清单、保留。
-- `archive-identity` golden；媒体出口回归；归档与在线一致。
+- `archive` capability：本地卷 ZIP 包（JSON + CSV + README）、密封版本、SHA-256、
+  受控下载；strict fail-closed 归档闭环；独立 unarchive。
+- 活动补齐 `close` / `rename`；ARCHIVED 是终态，归档后修改返回 `ACTIVITY_ARCHIVED`。
+- publishing 改为 formal-only；legacy 无 snapshot 的 ACTIVE release 不出现在公开 selector。
+- `archive-identity` golden 已由 Plus adapter 消费。
+
+**出口**：归档/解归档/重归档、完整性校验、并发归档、ZIP 白名单与 legacy snapshot 全绿。
+registration/material/vote/score 的 mode 缺口留给后续 hardening。
 
 ## M8 — Product Surfaces 与 Cutover
 

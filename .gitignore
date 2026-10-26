@@ -47,6 +47,9 @@ dist/
 /pnpm-lock.yaml
 # ArtFlow-Plus build output
 plus/packages/domain/dist/
+# ArtFlow-Plus sealed archive packages (local volume)
+plus/var/
+plus/apps/api/var/
 !static/dist/
 !static/dist/rapid_score.js
 !static/dist/*.js
