@@ -88,6 +88,13 @@ function deps(actor: ActorContext): RuntimeDeps {
   };
 }
 
+// Session authentication takes the wall clock by default; pin it to the same
+// simulated clock that issued the session, otherwise the 8h TTL expires as soon
+// as the real date moves past the fixture date.
+function authNow(): Date {
+  return new Date(Date.UTC(2026, 9, 19, 18, 0, tick));
+}
+
 async function seedActivity(
   activityId = `activity-${randomUUID()}`,
   includeJudging = false,
@@ -259,7 +266,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     expect(redeemed.body.accessToken).toEqual(expect.any(String));
     const receipt = await db.selectFrom("command_receipt").select("result").where("command_id", "=", "m6-redeem").executeTakeFirstOrThrow();
     expect(JSON.stringify(receipt.result)).not.toContain(redeemed.body.accessToken ?? "");
-    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "")).resolves.toMatchObject({ ticketId: ticket.body.ticket.id });
+    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "", authNow())).resolves.toMatchObject({ ticketId: ticket.body.ticket.id });
     await expect(redeemTicketCredential(db, deps(judgeA), {
       commandId: "m6-redeem-replay",
       credential: ticket.body.credential ?? "",
@@ -416,7 +423,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const v1 = capabilityCredential("J", "ABC123", 1, secret);
     const first = await claimJudgeSeat(db, deps(judgeA), { commandId: "m6-judge-claim-a", publicCode: "ABC123", capability: v1 });
     expect(first.body.seatKey).toBe("seat-1");
-    await expect(authenticateJudgeSession(db, first.body.sessionToken ?? "")).resolves.toMatchObject({ activityId, seatId: first.body.seatId });
+    await expect(authenticateJudgeSession(db, first.body.sessionToken ?? "", authNow())).resolves.toMatchObject({ activityId, seatId: first.body.seatId });
     expect(capabilityFixture.steps[0]?.expect.outcome).toBe("accepted");
     await expect(claimJudgeSeat(db, deps({ ...judgeA, actorId: "judge:unsigned" }), {
       commandId: "m6-judge-unsigned",
@@ -482,7 +489,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       ticketId: ticket.body.ticket.id,
       reason: "test again",
     })).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
-    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "")).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "", authNow())).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
   });
 
   it("does not close a judge entry twice", async () => {

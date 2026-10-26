@@ -80,6 +80,20 @@ export function averageScore(values: readonly DecimalInput[], decimals = 2): Dec
   return total.dividedBy(values.length).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toFixed(decimals);
 }
 
+/** Canonical fixed-scale share of a whole, e.g. count/total × scale. */
+export function shareOfTotal(
+  count: DecimalInput,
+  total: DecimalInput,
+  scale: DecimalInput,
+  decimals = 2,
+): DecimalValue {
+  return new Decimal(count)
+    .dividedBy(new Decimal(total))
+    .times(new Decimal(scale))
+    .toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP)
+    .toFixed(decimals);
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
   if (typeof value === "number") return JSON.stringify(value);

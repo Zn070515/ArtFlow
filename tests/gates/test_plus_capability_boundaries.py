@@ -21,6 +21,7 @@ ENGINE_IMPORTS = {
     "../compiler.js",
     "../errors.js",
     "../registry.js",
+    "../scoring.js",
 }
 PERSISTENCE_MODULES = ("@artflow-plus/db", "kysely", "pg")
 ENGINE_ASSEMBLY_FILES = ("registry.ts", "packs.ts")
