@@ -237,12 +237,19 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   （esbuild + nginx）、Compose `plus` profile、Caddy site profile 主域名整体
   替换、只读 smoke、cutover runbook、staff 账号 provision。回滚边界为首次 v2
   正式写入前；切后参与者只读。ADR-0023。
-- **M8e-4 现场彩排与三类活动验证**：judged singing competition、stage show、
-  第三种结构不同的活动。
+- **M8e-4 现场彩排与三类活动验证（已完成，2026-10-26）**：新增 stage-show /
+  review-awards packs，Pack 可携带默认 capability definitions；三条关键旅程
+  （歌手赛、节目征集+归档、作品评审+发布）通过；现场彩排 runbook 与验证报告。
+  缺口（节目单公开页、纯投票发布、bracket、参与者账号）已明确记录。ADR-0024。
 
 **M8 出口**：关键旅程 E2E；迁移报告；回滚演练；现场彩排通过；至少三个结构不同
 的活动（judged singing competition、stage show、另一种比赛/复杂活动）证明
 内核无需重写。
+
+M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注册/Studio/Live/
+评委/导入赛果；M8e-2 导入报告与 M8e-3 runbook 提供迁移/回滚证据；三类活动
+关键旅程见 `docs/artflow-plus/shape-validation.md`；现场彩排清单见
+`docs/artflow-plus/rehearsal-runbook.md`。
 
 ## Definition of Done（每个 slice）
 

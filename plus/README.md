@@ -479,6 +479,32 @@ Rollback is allowed only before the first authoritative v2 write. See
 `docs/artflow-plus/cutover-runbook.md` for the full preflight, commit point,
 and post-cutover checklist.
 
+## M8e-4 Three activity shapes
+
+Guided packs now carry default capability definitions, and `/api/packs` exposes
+three shapes:
+
+| Pack | Composition | Runnable default |
+| --- | --- | --- |
+| `singer-competition` | competition, registration, questionnaire, materials, publishing, archive | final round (3 judges / minimum 2 / average) + three-criterion rubric |
+| `stage-show` | registration, questionnaire, materials, archive | program questionnaire + work-file slot |
+| `review-awards` | competition, publishing, archive, registration, questionnaire, materials | review round + theme/completion/expression rubric |
+
+A pack's `definitions` replace the capability's `emptyDefinition()` but still go
+through the normal compilers and create/compile/release commands. The three
+shapes share rounds, panels, performances, score facts, publishing, and archive;
+no shape-specific kernel code exists.
+
+```powershell
+pnpm -C plus --filter @artflow-plus/domain test
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+pnpm -C plus --filter @artflow-plus/api exec vitest run test/activity-shapes.test.ts
+```
+
+Known gaps (documented in `docs/artflow-plus/shape-validation.md`): no public
+program page for stage shows, no publishing path for vote-only activities, no
+bracket/composite scoring, and no participant account claim/migration.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot
