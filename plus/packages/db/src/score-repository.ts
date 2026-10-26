@@ -93,12 +93,18 @@ export interface StoredTieDecision {
   readonly revision: number;
 }
 
+export interface StoredPodiumPlacement {
+  readonly place: number;
+  readonly contestantId: string;
+  readonly total: string;
+}
+
 export interface StoredPodiumCandidate {
   readonly id: string;
   readonly activityId: string;
   readonly inputFingerprint: string;
   readonly status: "candidate" | "hold";
-  readonly placements: readonly unknown[];
+  readonly placements: readonly StoredPodiumPlacement[];
   readonly sourceRoundIds: readonly string[];
   readonly sourceScoreVersions: readonly { readonly roundId: string; readonly sourceScoreVersion: number }[];
   readonly revision: number;
@@ -212,7 +218,7 @@ function podium(row: Selectable<PodiumCandidateRow>): StoredPodiumCandidate {
     activityId: row.activity_id,
     inputFingerprint: row.input_fingerprint,
     status: row.status as StoredPodiumCandidate["status"],
-    placements: arrayValue(row.placements),
+    placements: arrayValue(row.placements) as StoredPodiumPlacement[],
     sourceRoundIds: arrayValue(row.source_round_ids).map(String),
     sourceScoreVersions: arrayValue(row.source_score_versions).map((value) => {
       const item = value as { roundId?: unknown; sourceScoreVersion?: unknown };

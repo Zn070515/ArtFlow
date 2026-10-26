@@ -198,4 +198,40 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
     await migrateTo(db, "0010_m6_voting_ticketing");
     await expect(invalidInsert("invalid-after-0011-rollback")).rejects.toThrow();
   });
+
+  it("creates the publishing tables and the single-active-release index", async () => {
+    await migrate(db);
+    const tables = await sql<{ table_name: string }>`
+      select table_name
+        from information_schema.tables
+       where table_schema = current_schema()
+         and table_name in ('stage_result', 'result_publication', 'result_release')
+       order by table_name
+    `.execute(db);
+    expect(tables.rows.map((row) => row.table_name)).toEqual([
+      "result_publication",
+      "result_release",
+      "stage_result",
+    ]);
+    const indexes = await sql<{ indexname: string }>`
+      select indexname
+        from pg_indexes
+       where schemaname = current_schema()
+         and indexname = 'result_release_active_key'
+    `.execute(db);
+    expect(indexes.rows).toHaveLength(1);
+  });
+
+  it("drops publishing tables when rolling back 0012", async () => {
+    await migrate(db);
+    await migrateTo(db, "0011_voting_identity_policy");
+    const tables = await sql<{ table_name: string }>`
+      select table_name
+        from information_schema.tables
+       where table_schema = current_schema()
+         and table_name in ('stage_result', 'result_publication', 'result_release')
+    `.execute(db);
+    expect(tables.rows).toHaveLength(0);
+    await migrate(db);
+  });
 });
