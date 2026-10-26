@@ -370,6 +370,19 @@ export async function insertCorrection(db: Kysely<Database>, value: StoredScoreC
   }).execute();
 }
 
+export async function listUnsettledCorrectionsForActivity(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredScoreCorrection[]> {
+  const rows = await db.selectFrom("score_correction")
+    .innerJoin("score_fact", "score_fact.id", "score_correction.score_fact_id")
+    .selectAll("score_correction")
+    .where("score_fact.activity_id", "=", activityId)
+    .where("score_correction.state", "in", ["open", "revised", "closed"])
+    .execute();
+  return rows.map(correction);
+}
+
 export async function getOpenCorrectionForUpdate(trx: Kysely<Database>, scoreFactId: string): Promise<StoredScoreCorrection | null> {
   const row = await trx.selectFrom("score_correction").selectAll()
     .where("score_fact_id", "=", scoreFactId).where("state", "=", "open").forUpdate().executeTakeFirst();

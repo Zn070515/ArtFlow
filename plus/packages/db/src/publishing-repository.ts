@@ -271,6 +271,18 @@ export async function getActiveResultRelease(
   return row === undefined ? null : resultRelease(row);
 }
 
+export async function listActiveResultReleases(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredResultRelease[]> {
+  const rows = await db.selectFrom("result_release").selectAll()
+    .where("activity_id", "=", activityId)
+    .where("status", "=", "active")
+    .orderBy("stage_key", "asc")
+    .execute();
+  return rows.map(resultRelease);
+}
+
 export async function getResultReleaseByIdForUpdate(
   db: Kysely<Database>,
   releaseId: string,

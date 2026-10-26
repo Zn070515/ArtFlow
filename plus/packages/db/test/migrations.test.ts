@@ -234,4 +234,29 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
     expect(tables.rows).toHaveLength(0);
     await migrate(db);
   });
+
+  it("creates the archive package table and current-package index", async () => {
+    await migrate(db);
+    const tables = await sql<{ table_name: string }>`
+      select table_name from information_schema.tables
+       where table_schema = current_schema() and table_name = 'archive_package'
+    `.execute(db);
+    expect(tables.rows).toHaveLength(1);
+    const indexes = await sql<{ indexname: string }>`
+      select indexname from pg_indexes
+       where schemaname = current_schema() and indexname = 'archive_package_current_key'
+    `.execute(db);
+    expect(indexes.rows).toHaveLength(1);
+  });
+
+  it("drops the archive package table when rolling back 0013", async () => {
+    await migrate(db);
+    await migrateTo(db, "0012_m7_publishing");
+    const tables = await sql<{ table_name: string }>`
+      select table_name from information_schema.tables
+       where table_schema = current_schema() and table_name = 'archive_package'
+    `.execute(db);
+    expect(tables.rows).toHaveLength(0);
+    await migrate(db);
+  });
 });

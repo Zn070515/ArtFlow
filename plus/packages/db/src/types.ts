@@ -500,6 +500,22 @@ export interface ResultReleaseRow {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface ArchivePackageRow {
+  id: string;
+  activity_id: string;
+  version: number;
+  key: string;
+  size_bytes: number;
+  sha256: string;
+  manifest: ColumnType<unknown, string, string>;
+  summary: ColumnType<unknown, string, string>;
+  note: string;
+  sealed_at: ColumnType<Date, Date | string, Date | string>;
+  sealed_by: string;
+  is_current: boolean;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -540,4 +556,5 @@ export interface Database {
   stage_result: StageResultRow;
   result_publication: ResultPublicationRow;
   result_release: ResultReleaseRow;
+  archive_package: ArchivePackageRow;
 }

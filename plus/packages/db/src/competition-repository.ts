@@ -171,6 +171,17 @@ export async function insertRound(db: Kysely<Database>, value: StoredRound): Pro
   }).execute();
 }
 
+export async function listRoundsForActivity(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredRound[]> {
+  const rows = await db.selectFrom("competition_round").selectAll()
+    .where("activity_id", "=", activityId)
+    .orderBy("round_key", "asc")
+    .execute();
+  return rows.map(round);
+}
+
 export async function getRoundForUpdate(trx: Kysely<Database>, id: string): Promise<StoredRound | null> {
   const row = await trx.selectFrom("competition_round").selectAll().where("id", "=", id).forUpdate().executeTakeFirst();
   return row === undefined ? null : round(row);
