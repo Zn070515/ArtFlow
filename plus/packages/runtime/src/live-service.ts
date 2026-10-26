@@ -31,6 +31,7 @@ import type {
   CompiledCompetitionArtifact,
   CompetitionRubricDefinition,
   CompetitionRoundDefinition,
+  ExecutionMode,
 } from "@artflow-plus/domain";
 import { DomainError, hasPermission } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
@@ -95,6 +96,7 @@ export async function getLiveState(
   }
   const config = plan.artifact as CompiledCompetitionArtifact;
   const session = await findRunningSessionByScope(db, activityId, "judging");
+  const mode = session?.mode ?? "formal";
   const roundRows = await listRoundsForActivity(db, activityId);
   const rounds: LiveRoundState[] = [];
 
@@ -119,6 +121,7 @@ export async function getLiveState(
             performanceId: performance.id,
             panelSnapshotId: panel.id,
             contextVersion: performance.contextVersion,
+            mode,
           });
       livePerformances.push({
         ...performance,
@@ -132,7 +135,7 @@ export async function getLiveState(
       panel,
       seats,
       performances: livePerformances,
-      ranking: round === null ? null : await getCurrentRankingSnapshot(db, round.id),
+      ranking: round === null ? null : await getCurrentRankingSnapshot(db, round.id, mode),
     });
   }
 
@@ -178,6 +181,7 @@ export interface JudgeContext {
   readonly performance: StoredPerformance | null;
   readonly scoring: JudgeScoringTarget | null;
   readonly rubric: CompetitionRubricDefinition | null;
+  readonly mode: ExecutionMode;
   readonly existingScore: StoredScoreFact | null;
 }
 
@@ -230,6 +234,8 @@ export async function getJudgeContext(
   const artifact = plan !== undefined && plan.ok === true
     ? (plan.artifact as CompiledCompetitionArtifact)
     : null;
+  const running = await findRunningSessionByScope(db, session.activityId, "judging");
+  const mode = running?.mode ?? "formal";
   const resolved = await resolveJudgePanel(db, session.activityId, grant.seatKey);
   const seat: JudgeSeatSummary = {
     seatKey: grant.seatKey,
@@ -240,13 +246,14 @@ export async function getJudgeContext(
     activity: { id: activity.id, title: activity.title, publicCode: activity.publicCode },
     seat,
     rubric: artifact?.rubric ?? null,
+    mode,
   };
   if (resolved === null) {
     return { ...base, panel: null, round: null, performance: null, scoring: null, existingScore: null };
   }
   const scoringSeat = await getJudgeSeatByPanelAndJudge(db, resolved.panel.id, resolved.judgeId);
   const performance = resolved.performance;
-  const scores = await listCurrentScoreFactsForJudge(db, resolved.round.id, resolved.judgeId);
+  const scores = await listCurrentScoreFactsForJudge(db, resolved.round.id, resolved.judgeId, mode);
   const existingScore = performance === null
     ? null
     : scores.find((score) => score.contestantId === performance.contestantId) ?? null;

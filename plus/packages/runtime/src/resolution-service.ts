@@ -27,6 +27,7 @@ import {
 import type {
   ActorContext,
   DecimalValue,
+  ExecutionMode,
   RankingResult,
   ScoreRow,
 } from "@artflow-plus/domain";
@@ -67,6 +68,7 @@ async function rankingInput(
   trx: Kysely<Database>,
   activity: ResolutionActivity,
   round: StoredRound,
+  mode: ExecutionMode,
 ): Promise<{ readonly panelId: string; readonly rows: readonly ScoreRow[]; readonly inputFingerprint: string }> {
   const panel = await getCurrentPanelForUpdate(trx, round.id);
   if (panel === null || panel.state !== "active" || !panel.current) throw new DomainError("PANEL_NOT_ACTIVE", "The round has no current active panel.");
@@ -76,7 +78,7 @@ async function rankingInput(
   if (states.some((state) => state === null || state.state !== "locked")) {
     throw new DomainError("PERFORMANCE_SCORE_OPEN", "Every performance must be locked before resolution.");
   }
-  const facts = await listCurrentScoreFacts(trx, round.id);
+  const facts = await listCurrentScoreFacts(trx, round.id, mode);
   const performancesById = new Map(performances.map((performance) => [performance.id, performance]));
   const factsByPerformance = new Map<string, number>();
   const byContestant = new Map<string, DecimalValue[]>();
@@ -158,13 +160,14 @@ export async function resolveRound(
     const round = requireRound(await getRoundForUpdate(trx, input.roundId), activity.id);
     const session = await findRunningSessionByScope(trx, activity.id, input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
-    const resolved = await rankingInput(trx, activity, round);
+    const resolved = await rankingInput(trx, activity, round, session.mode);
     const ranking = computeRanking({ rows: resolved.rows, tiePolicy: "review" });
-    const current = await getCurrentRankingSnapshot(trx, round.id);
+    const current = await getCurrentRankingSnapshot(trx, round.id, session.mode);
     const snapshot: StoredRankingSnapshot = {
       id: idFromCommand("ranking", input.commandId),
       activityId: activity.id,
       roundId: round.id,
+      mode: session.mode,
       sourceScoreVersion: round.scoreVersion,
       inputFingerprint: resolved.inputFingerprint,
       status: ranking.status,
@@ -222,7 +225,10 @@ export async function finalizeAdvancement(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     const round = requireRound(await getRoundForUpdate(trx, input.roundId), activity.id);
-    const rankingSnapshot = await getCurrentRankingSnapshot(trx, round.id);
+    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
+    if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+    if (session.mode !== "formal") throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can advance contestants.");
+    const rankingSnapshot = await getCurrentRankingSnapshot(trx, round.id, session.mode);
     if (rankingSnapshot === null) throw new DomainError("NOT_FOUND", "The round has no ranking snapshot.");
     if (rankingSnapshot.revision !== input.expectedRankingRevision) throw new DomainError("STALE_REVISION", "The ranking changed since it was read.");
     const ranking = rankingFromSnapshot(rankingSnapshot);
@@ -242,8 +248,6 @@ export async function finalizeAdvancement(
       revision: (previous?.revision ?? 0) + 1,
     };
     await insertAdvancementDecision(trx, decision);
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-    if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
     await appendEngineEvent(trx, deps, {
       type: "AdvancementFinalized",
       activityId: activity.id,
@@ -292,7 +296,10 @@ export async function recordTieDecision(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     const round = requireRound(await getRoundForUpdate(trx, input.roundId), activity.id);
-    const current = await getCurrentRankingSnapshot(trx, round.id);
+    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
+    if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+    if (session.mode !== "formal") throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can decide ties.");
+    const current = await getCurrentRankingSnapshot(trx, round.id, session.mode);
     if (current === null || current.id !== input.rankingSnapshotId || current.inputFingerprint !== input.inputFingerprint) {
       throw new DomainError("STALE_RESOLUTION_INPUT", "The ranking snapshot is stale.");
     }
@@ -329,8 +336,6 @@ export async function recordTieDecision(
       revision: current.revision + 1,
     };
     await insertRankingSnapshot(trx, snapshot);
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-    if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
     await appendEngineEvent(trx, deps, {
       type: "TieDecisionRecorded",
       activityId: activity.id,
@@ -421,6 +426,7 @@ export async function recomputePodiumCandidate(
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     const session = await findRunningSessionByScope(trx, activity.id, input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+    if (session.mode !== "formal") throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can produce podium candidates.");
     const anchorRoundId = input.roundIds[0];
     if (anchorRoundId === undefined) throw new DomainError("INVALID_INPUT", "Podium recomputation needs a frozen competition round.");
     const anchorRound = requireRound(await getRoundForUpdate(trx, anchorRoundId), activity.id);
@@ -442,7 +448,7 @@ export async function recomputePodiumCandidate(
         rounds.push({ roundId: round.id, sourceScoreVersion: round.scoreVersion, locked: false, ranking: { status: "hold", rows: [], tieGroups: [], inputFingerprint: "wrong-release" } });
         continue;
       }
-      const ranking = await getCurrentRankingSnapshot(trx, round.id);
+      const ranking = await getCurrentRankingSnapshot(trx, round.id, session.mode);
       const rankingReady = ranking !== null && ranking.sourceScoreVersion === round.scoreVersion;
       rounds.push({
         roundId: round.id,

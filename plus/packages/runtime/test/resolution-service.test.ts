@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   closeDb,
   createDb,
+  getCurrentRankingSnapshot,
   insertRelease,
   insertSession,
   migrate,
@@ -59,7 +60,9 @@ function deps(actor: ActorContext): RuntimeDeps {
   };
 }
 
-async function seedLockedRound(): Promise<{ readonly activityId: string; readonly roundId: string; readonly panelId: string; readonly seatId: string }> {
+async function seedLockedRound(
+  mode: "formal" | "rehearsal" = "formal",
+): Promise<{ readonly activityId: string; readonly roundId: string; readonly panelId: string; readonly seatId: string }> {
   const activityId = `activity-${randomUUID()}`;
   await db.insertInto("activity").values({
     id: activityId,
@@ -104,7 +107,7 @@ async function seedLockedRound(): Promise<{ readonly activityId: string; readonl
     definitionVersion: 1,
     contentHash: "resolution-release",
     scope: "judging",
-    mode: "formal",
+    mode,
     status: "running",
     revision: 0,
   }, "2026-10-19T17:30:00Z");
@@ -327,6 +330,26 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
     });
     expect(candidate.status).toBe("candidate");
     expect(candidate.placements).toEqual([{ place: 1, contestantId: "singer-a", total: "91.00" }]);
+  });
+
+  it("keeps rehearsal rankings out of formal podium candidates", async () => {
+    const context = await seedLockedRound("rehearsal");
+    const ranking = await resolveRound(db, deps(staff), {
+      commandId: "resolve-rehearsal",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      scope: "judging",
+    });
+    expect(ranking.body).toMatchObject({ mode: "rehearsal" });
+    expect(await getCurrentRankingSnapshot(db, context.roundId, "rehearsal")).not.toBeNull();
+    expect(await getCurrentRankingSnapshot(db, context.roundId, "formal")).toBeNull();
+    await expect(recomputePodiumCandidate(db, deps(staff), {
+      commandId: "rehearsal-podium",
+      activityId: context.activityId,
+      scope: "judging",
+      roundIds: [context.roundId],
+      expectedInputFingerprint: ranking.body.inputFingerprint,
+    })).rejects.toMatchObject({ code: "FORMAL_MODE_REQUIRED" });
   });
 
   it("holds a podium candidate when a required round is missing", () => {

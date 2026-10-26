@@ -4,6 +4,7 @@ import {
   FinalizeAdvancementBodySchema,
   LockCompetitionRoundBodySchema,
   CompetitionRoundParamsSchema,
+  CompetitionRankingQuerySchema,
   CompetitionScoreBodySchema,
   CompetitionScopeBodySchema,
   errorResponse,
@@ -1474,12 +1475,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/competition/rounds/:roundKey/ranking",
-    { schema: { params: RoundParams, querystring: CompetitionScopeBodySchema } },
+    { schema: { params: RoundParams, querystring: CompetitionRankingQuerySchema } },
     async (request) => {
       await requestActor(request);
       const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const query = request.query as { mode?: "test" | "rehearsal" | "formal" };
       const round = await routeRound(id, roundKey);
-      const ranking = await getCurrentRankingSnapshot(db, round.id);
+      const ranking = await getCurrentRankingSnapshot(db, round.id, query.mode ?? "formal");
       if (ranking === null) throw new DomainError("NOT_FOUND", "The ranking was not found.");
       return ranking;
     },

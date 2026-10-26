@@ -30,6 +30,15 @@ export const CompetitionScopeBodySchema = Type.Object({
   scope: ScopeSchema,
 }, { additionalProperties: false });
 
+export const CompetitionRankingQuerySchema = Type.Object({
+  scope: ScopeSchema,
+  mode: Type.Optional(Type.Union([
+    Type.Literal("test"),
+    Type.Literal("rehearsal"),
+    Type.Literal("formal"),
+  ])),
+}, { additionalProperties: false });
+
 // One flat object: Fastify's AJV runs with removeAdditional, so an Intersect of
 // two closed objects would strip each other's properties before validation.
 export const CompetitionScoreBodySchema = Type.Object({
