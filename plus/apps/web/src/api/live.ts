@@ -231,6 +231,18 @@ export function lockRound(
   );
 }
 
+export function resetRehearsal(
+  activityId: string,
+  roundKey: string,
+  mode: "test" | "rehearsal",
+): Promise<{ readonly round: LiveRoundRecord }> {
+  return apiFetch(`/api/activities/${activityId}/competition/rounds/${roundKey}/reset-rehearsal`, {
+    method: "POST",
+    headers: commandHeaders(crypto.randomUUID()),
+    body: JSON.stringify({ scope: JUDGING_SCOPE, mode }),
+  });
+}
+
 export function resolveRound(activityId: string, roundKey: string): Promise<LiveRanking> {
   return apiFetch<LiveRanking>(
     `/api/activities/${activityId}/competition/rounds/${roundKey}/resolve`,

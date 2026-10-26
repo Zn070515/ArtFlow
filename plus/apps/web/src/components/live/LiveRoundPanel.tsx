@@ -7,6 +7,7 @@ import {
   lockRound,
   openPerformance,
   prepareRound,
+  resetRehearsal,
   resolveRound,
   type LiveRound,
   type LiveState,
@@ -20,10 +21,12 @@ interface JudgeDraft {
 export function LiveRoundPanel({
   state,
   live,
+  sessionMode,
   onChanged,
 }: {
   readonly state: LiveState;
   readonly live: LiveRound;
+  readonly sessionMode?: "test" | "rehearsal" | "formal";
   readonly onChanged: () => void;
 }) {
   const config = live.config;
@@ -101,6 +104,17 @@ export function LiveRoundPanel({
 
   function resolve(): Promise<void> {
     return run(() => resolveRound(state.activity.id, config.key).then(() => undefined), "生成排名失败。");
+  }
+
+  function reset(): Promise<void> {
+    if (round === null || (sessionMode !== "test" && sessionMode !== "rehearsal")) {
+      return Promise.resolve();
+    }
+    if (!window.confirm("清空本回合排练数据并回到准备状态？")) return Promise.resolve();
+    return run(
+      () => resetRehearsal(state.activity.id, config.key, sessionMode).then(() => undefined),
+      "重置排练失败。",
+    );
   }
 
   const allLocked = live.performances.length > 0 &&
@@ -289,6 +303,14 @@ export function LiveRoundPanel({
           )}
         </div>
       )}
+
+      {round !== null && (sessionMode === "test" || sessionMode === "rehearsal") ? (
+        <div className="session-controls">
+          <button className="danger-button" type="button" disabled={busy} onClick={() => void reset()}>
+            重置排练
+          </button>
+        </div>
+      ) : null}
 
       {error === null ? null : (
         <p className="form-error" role="alert">

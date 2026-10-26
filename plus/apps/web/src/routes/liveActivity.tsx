@@ -72,7 +72,13 @@ function LiveActivityContent() {
       <div className="studio-grid">
         <div className="live-rounds">
           {state.rounds.map((live) => (
-            <LiveRoundPanel key={live.config.key} state={state} live={live} onChanged={refresh} />
+            <LiveRoundPanel
+              key={live.config.key}
+              state={state}
+              live={live}
+              sessionMode={state.session?.mode}
+              onChanged={refresh}
+            />
           ))}
         </div>
         <div className="studio-side">
