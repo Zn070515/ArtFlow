@@ -263,6 +263,7 @@ export interface ScoreFactRow {
   panel_snapshot_id: string;
   seat_id: string;
   source: string;
+  mode: string;
   total: ColumnType<string, string, string>;
   criteria: ColumnType<unknown, string, string>;
   notes: string;
@@ -302,6 +303,7 @@ export interface RankingSnapshotRow {
   id: string;
   activity_id: string;
   round_id: string;
+  mode: string;
   source_score_version: number;
   input_fingerprint: string;
   status: string;
@@ -352,6 +354,7 @@ export interface VoteSessionRow {
   id: string;
   activity_id: string;
   definition_version: number;
+  mode: string;
   purpose: string;
   selection_type: string;
   max_selections: number;

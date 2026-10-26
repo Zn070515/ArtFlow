@@ -1,4 +1,4 @@
-import { decimalValue, type DecimalValue, type ScoreSource } from "@artflow-plus/domain";
+import { decimalValue, type DecimalValue, type ExecutionMode, type ScoreSource } from "@artflow-plus/domain";
 import { sql, type Kysely, type Selectable } from "kysely";
 
 import { StaleRevisionError } from "./activity-repository.js";
@@ -27,6 +27,7 @@ export interface StoredScoreFact {
   readonly panelSnapshotId: string;
   readonly seatId: string;
   readonly source: ScoreSource;
+  readonly mode: ExecutionMode;
   readonly total: DecimalValue;
   readonly criteria: Readonly<Record<string, number>>;
   readonly notes: string;
@@ -62,6 +63,7 @@ export interface StoredRankingSnapshot {
   readonly id: string;
   readonly activityId: string;
   readonly roundId: string;
+  readonly mode: ExecutionMode;
   readonly sourceScoreVersion: number;
   readonly inputFingerprint: string;
   readonly status: RankingStatus;
@@ -135,6 +137,7 @@ function scoreFact(row: Selectable<ScoreFactRow>): StoredScoreFact {
     panelSnapshotId: row.panel_snapshot_id,
     seatId: row.seat_id,
     source: row.source as ScoreSource,
+    mode: row.mode as ExecutionMode,
     total: decimalValue(String(row.total)),
     criteria: objectValue(row.criteria) as Readonly<Record<string, number>>,
     notes: row.notes,
@@ -176,6 +179,7 @@ function ranking(row: Selectable<RankingSnapshotRow>): StoredRankingSnapshot {
     id: row.id,
     activityId: row.activity_id,
     roundId: row.round_id,
+    mode: row.mode as ExecutionMode,
     sourceScoreVersion: row.source_score_version,
     inputFingerprint: row.input_fingerprint,
     status: row.status as RankingStatus,
@@ -233,10 +237,12 @@ export async function getScoreFactForUpdate(
   roundId: string,
   contestantId: string,
   judgeId: string,
+  mode: ExecutionMode,
 ): Promise<StoredScoreFact | null> {
   const row = await trx.selectFrom("score_fact").selectAll()
     .where("round_id", "=", roundId).where("contestant_id", "=", contestantId)
-    .where("judge_id", "=", judgeId).where("current", "=", true).forUpdate().executeTakeFirst();
+    .where("judge_id", "=", judgeId).where("mode", "=", mode)
+    .where("current", "=", true).forUpdate().executeTakeFirst();
   return row === undefined ? null : scoreFact(row);
 }
 
@@ -252,9 +258,10 @@ export async function getScoreFactByIdForUpdate(
 export async function listCurrentScoreFacts(
   db: Kysely<Database>,
   roundId: string,
+  mode: ExecutionMode,
 ): Promise<readonly StoredScoreFact[]> {
   const rows = await db.selectFrom("score_fact").selectAll()
-    .where("round_id", "=", roundId).where("current", "=", true)
+    .where("round_id", "=", roundId).where("mode", "=", mode).where("current", "=", true)
     .orderBy("contestant_id", "asc").orderBy("judge_id", "asc").execute();
   return rows.map(scoreFact);
 }
@@ -263,10 +270,12 @@ export async function listCurrentScoreFactsForJudge(
   db: Kysely<Database>,
   roundId: string,
   judgeId: string,
+  mode: ExecutionMode,
 ): Promise<readonly StoredScoreFact[]> {
   const rows = await db.selectFrom("score_fact").selectAll()
     .where("round_id", "=", roundId)
     .where("judge_id", "=", judgeId)
+    .where("mode", "=", mode)
     .where("current", "=", true)
     .execute();
   return rows.map(scoreFact);
@@ -275,11 +284,13 @@ export async function listCurrentScoreFactsForJudge(
 export async function countCurrentScoreFacts(
   db: Kysely<Database>,
   performanceId: string,
+  mode: ExecutionMode,
 ): Promise<number> {
   const result = await sql<{ count: number }>`
     select count(*)::int as count
       from score_fact
      where performance_id = ${performanceId}
+       and mode = ${mode}
        and current = true
   `.execute(db);
   return result.rows[0]?.count ?? 0;
@@ -287,7 +298,12 @@ export async function countCurrentScoreFacts(
 
 export async function countCurrentScoreFactsForContext(
   db: Kysely<Database>,
-  input: { readonly performanceId: string; readonly panelSnapshotId: string; readonly contextVersion: number },
+  input: {
+    readonly performanceId: string;
+    readonly panelSnapshotId: string;
+    readonly contextVersion: number;
+    readonly mode: ExecutionMode;
+  },
 ): Promise<number> {
   const result = await sql<{ count: number }>`
     select count(*)::int as count
@@ -295,9 +311,22 @@ export async function countCurrentScoreFactsForContext(
      where performance_id = ${input.performanceId}
        and panel_snapshot_id = ${input.panelSnapshotId}
        and context_version = ${input.contextVersion}
+       and mode = ${input.mode}
        and current = true
   `.execute(db);
   return result.rows[0]?.count ?? 0;
+}
+
+/** Any formal fact, current or retired, freezes rehearsal lifecycle mutations. */
+export async function existsFormalScoreFactsForRound(
+  db: Kysely<Database>,
+  roundId: string,
+): Promise<boolean> {
+  const row = await db.selectFrom("score_fact").select("id")
+    .where("round_id", "=", roundId)
+    .where("mode", "=", "formal")
+    .executeTakeFirst();
+  return row !== undefined;
 }
 
 export async function retireCurrentScoreFactsForPerformance(
@@ -324,6 +353,7 @@ export async function insertScoreFact(db: Kysely<Database>, value: StoredScoreFa
     panel_snapshot_id: value.panelSnapshotId,
     seat_id: value.seatId,
     source: value.source,
+    mode: value.mode,
     total: value.total,
     criteria: JSON.stringify(value.criteria),
     notes: value.notes,
@@ -436,6 +466,7 @@ export async function insertRankingSnapshot(db: Kysely<Database>, value: StoredR
     id: value.id,
     activity_id: value.activityId,
     round_id: value.roundId,
+    mode: value.mode,
     source_score_version: value.sourceScoreVersion,
     input_fingerprint: value.inputFingerprint,
     status: value.status,
@@ -446,8 +477,14 @@ export async function insertRankingSnapshot(db: Kysely<Database>, value: StoredR
   }).execute();
 }
 
-export async function getCurrentRankingSnapshot(db: Kysely<Database>, roundId: string): Promise<StoredRankingSnapshot | null> {
-  const row = await db.selectFrom("ranking_snapshot").selectAll().where("round_id", "=", roundId)
+export async function getCurrentRankingSnapshot(
+  db: Kysely<Database>,
+  roundId: string,
+  mode: ExecutionMode,
+): Promise<StoredRankingSnapshot | null> {
+  const row = await db.selectFrom("ranking_snapshot").selectAll()
+    .where("round_id", "=", roundId)
+    .where("mode", "=", mode)
     .orderBy("revision", "desc").executeTakeFirst();
   return row === undefined ? null : ranking(row);
 }

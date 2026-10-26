@@ -1,4 +1,4 @@
-import type { CompiledVotingArtifact } from "@artflow-plus/domain";
+import type { CompiledVotingArtifact, ExecutionMode } from "@artflow-plus/domain";
 import { sql } from "kysely";
 import type { Kysely, Selectable, SqlBool } from "kysely";
 
@@ -27,6 +27,7 @@ export interface StoredVoteSession {
   readonly id: string;
   readonly activityId: string;
   readonly definitionVersion: number;
+  readonly mode: ExecutionMode;
   readonly purpose: "popularity" | "score_component";
   readonly selectionType: "single" | "multi";
   readonly maxSelections: number;
@@ -45,6 +46,7 @@ function voteSession(row: Selectable<VoteSessionRow>): StoredVoteSession {
     id: row.id,
     activityId: row.activity_id,
     definitionVersion: row.definition_version,
+    mode: row.mode as ExecutionMode,
     purpose: row.purpose as StoredVoteSession["purpose"],
     selectionType: row.selection_type as StoredVoteSession["selectionType"],
     maxSelections: row.max_selections,
@@ -214,6 +216,7 @@ export async function insertVoteSession(
     id: input.id,
     activity_id: input.activityId,
     definition_version: input.definitionVersion,
+    mode: input.mode,
     purpose: input.purpose,
     selection_type: input.selectionType,
     max_selections: input.maxSelections,
