@@ -442,6 +442,43 @@ recomputes counts and snapshot hashes from v2 and rolls back on any mismatch.
 Group-chorus stages and other constructs v2 cannot express are listed in the
 report's `unsupported` array; their facts stay in v1.
 
+## M8e-3 Cutover
+
+Plus ships two production images from `deploy/plus/Dockerfile`: `api` (esbuild
+single-file Node bundle) and `web` (nginx + Vite build). The API bundle is
+required because workspace packages export TypeScript sources; `tsc` output
+cannot be loaded at runtime.
+
+```powershell
+pnpm -C plus run build:prod
+docker build -f deploy/plus/Dockerfile --target api -t artflow-plus-api .
+docker build -f deploy/plus/Dockerfile --target web -t artflow-plus-web .
+```
+
+The v2 services run beside v1 as a Compose profile:
+
+```powershell
+docker compose -f deploy/compose.production.yml --env-file .env.production --profile plus up -d
+```
+
+The main domain is switched by Caddy site profile, not by path or activity
+routing:
+
+```dotenv
+# .env.production
+ARTFLOW_SITE_PROFILE=v1   # before cutover, and the rollback target
+ARTFLOW_SITE_PROFILE=v2   # after the switch
+```
+
+```powershell
+docker compose -f deploy/compose.production.yml --env-file .env.production up -d proxy
+node scripts/cutover-smoke.mjs
+```
+
+Rollback is allowed only before the first authoritative v2 write. See
+`docs/artflow-plus/cutover-runbook.md` for the full preflight, commit point,
+and post-cutover checklist.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot

@@ -233,7 +233,10 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   v2 `activity.legacy.import`；单事务 + 对账，失败回滚；test 行跳过并计数；
   媒体只迁元数据；历史快照直接导入并可在公开页展示；无法表达的结构进入
   `unsupported`。ADR-0021。
-- **M8e-3 入口切换与回滚**：域名/路由切换、回滚开关、部署拓扑、操作手册。
+- **M8e-3 入口切换与回滚（已完成，2026-10-26）**：Plus api/web 生产镜像
+  （esbuild + nginx）、Compose `plus` profile、Caddy site profile 主域名整体
+  替换、只读 smoke、cutover runbook、staff 账号 provision。回滚边界为首次 v2
+  正式写入前；切后参与者只读。ADR-0023。
 - **M8e-4 现场彩排与三类活动验证**：judged singing competition、stage show、
   第三种结构不同的活动。
 
