@@ -25,6 +25,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0018](0018-studio-guided-expert-and-authority.md) | Studio guided/expert 编辑与变更权限 | accepted |
 | [0019](0019-live-console-and-judge-entry.md) | Live 控制台读取模型与 capability 评委入口 | accepted |
 | [0020](0020-mode-hardening.md) | 执行模式隔离：分数/选票/排名按 mode 归集 | accepted |
+| [0021](0021-legacy-bundle-import.md) | v1 两段式 bundle 导入与对账 | accepted |
 
 新增 ADR 的规则：
 

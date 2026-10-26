@@ -419,6 +419,27 @@ The reset deletes the round's non-formal facts/corrections/revisions/rankings
 and performances, supersedes its panel, and returns the round to `prepared`.
 After formal facts exist, rehearse in a copied activity instead.
 
+## M8e-2 Legacy import
+
+v1 activities move through a versioned JSON bundle:
+
+```powershell
+# v1 repository
+uv run python manage.py export_plus_bundle --activity <public_code> --output bundle.json
+
+# v2 repository
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+pnpm -C plus --filter @artflow-plus/api import:legacy -- bundle.json --dry-run
+pnpm -C plus --filter @artflow-plus/api import:legacy -- bundle.json --report report.json
+```
+
+The importer runs in one transaction, skips `is_test_data` rows, keeps materials
+as metadata (`storage_key = legacy:<id>`), imports historical ballots as
+anonymous, and writes published results from the frozen snapshot. It then
+recomputes counts and snapshot hashes from v2 and rolls back on any mismatch.
+Group-chorus stages and other constructs v2 cannot express are listed in the
+report's `unsupported` array; their facts stay in v1.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot

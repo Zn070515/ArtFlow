@@ -229,8 +229,10 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   ranking_snapshot 带 mode；正式读路径按 mode 过滤；非 formal 生命周期在 formal
   事实出现后被 `FORMAL_FACTS_EXIST` 拒绝；`reset-rehearsal` 清除非 formal 数据并
   把回合还原到 prepared。正式后排练改用活动副本。
-- **M8e-2 v1 导入与对账**：当前活动 + 一个历史活动；导入报告；test 数据跳过或
-  落到独立测试活动；媒体引用策略。
+- **M8e-2 v1 导入与对账（已完成，2026-10-26）**：v1 `export_plus_bundle` →
+  v2 `activity.legacy.import`；单事务 + 对账，失败回滚；test 行跳过并计数；
+  媒体只迁元数据；历史快照直接导入并可在公开页展示；无法表达的结构进入
+  `unsupported`。ADR-0021。
 - **M8e-3 入口切换与回滚**：域名/路由切换、回滚开关、部署拓扑、操作手册。
 - **M8e-4 现场彩排与三类活动验证**：judged singing competition、stage show、
   第三种结构不同的活动。
