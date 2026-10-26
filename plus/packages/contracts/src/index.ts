@@ -6,4 +6,5 @@ export * from "./errors.js";
 export * from "./events.js";
 export * from "./execution.js";
 export * from "./voting.js";
+export * from "./publishing.js";
 export * from "./packs.js";

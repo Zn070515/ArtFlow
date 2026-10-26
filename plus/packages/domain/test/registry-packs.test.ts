@@ -276,6 +276,7 @@ it("the default registry exposes only implemented capabilities", () => {
   expect(defaultCapabilityRegistry.list().map((item) => item.manifest.identity)).toEqual([
     "competition",
     "materials",
+    "publishing",
     "questionnaire",
     "registration",
     "ticketing",

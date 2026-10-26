@@ -245,8 +245,30 @@ new architecture.
 
 ## Next slice
 
-1. M7 Publishing / Results / Archive: release snapshots, public selectors and the
-   permanent archive. M6/M6.5 voting/ticketing authority is now available as a frozen input.
+1. M7b Archive: the permanent archive package, retention, and `archive-identity`.
+   M7a publishing/results is complete.
+
+## M7a publishing / results
+
+M7a exposes one authoritative public selector and five staff commands:
+
+```text
+POST  /api/activities/:id/publishing/stage-results/:stageKey/confirm
+POST  /api/activities/:id/publishing/stage-results/:stageKey/unlock
+POST  /api/activities/:id/publishing/releases
+POST  /api/activities/:id/publishing/releases/:releaseId/revoke
+PATCH /api/activities/:id/publishing/publications/:stageKey
+GET   /api/activities/:id/publishing/state
+GET   /api/public/results/:publicCode
+```
+
+The public selector is anonymous and never returns fingerprints, hashes, actors,
+notes, or editorial fields. The in-memory public rate limiter is a single-process
+IP bucket; production multi-instance deployments need a shared limiter.
+
+Every stage has at most one ACTIVE release (`result_release_active_key` partial
+unique index). Revoke and unlock make the old URL immediately invisible; unlock
+supersedes the active release in the same transaction.
 
 ## M6 feature slice and M6.5 authority hardening complete
 

@@ -15,3 +15,4 @@ export * from "./score-repository.js";
 export * from "./types.js";
 export * from "./voting-ticket-repository.js";
 export * from "./live-state-repository.js";
+export * from "./publishing-repository.js";

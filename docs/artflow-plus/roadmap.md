@@ -159,14 +159,18 @@ string 保留；0011 回滚恢复旧 identity constraint。
 ticket redemption、ballot uniqueness、judge-seat claim 的真实 PostgreSQL 双连接
 并发测试；release/session stale-context 与状态迁移回归。
 
-## M7 — Publishing / Results / Archive
+## M7a — Publishing / Results（已完成，2026-10-26）
 
-- 候选 → 核定 → release snapshot → 撤销/再发布 → 解锁纠错。
-- 公开页面/列表/Live/媒体/PDF 共用同一 selector。
+- `publishing` capability：核定、解锁、release snapshot、撤销/替代、唯一公开 selector。
+- 公开出口 `GET /api/public/results/:publicCode`；staff 状态出口与五条写命令。
+- `result-release-lifecycle` golden 已由 Plus adapter 消费。
+
+**出口**：发布/撤销/再发布/解锁生命周期、公开 selector、并发与审计测试全绿。
+
+## M7b — Archive（下一 slice）
+
 - 归档包：冻结身份、历史、文件清单、保留。
-
-**出口**：`result-release-lifecycle` + `archive-identity` golden；媒体出口
-回归；归档与在线一致。
+- `archive-identity` golden；媒体出口回归；归档与在线一致。
 
 ## M8 — Product Surfaces 与 Cutover
 

@@ -6,6 +6,7 @@ export * from "./capabilities/questionnaire.js";
 export * from "./capabilities/registration.js";
 export * from "./capabilities/voting.js";
 export * from "./capabilities/ticketing.js";
+export * from "./capabilities/publishing.js";
 export * from "./commands.js";
 export * from "./compiler.js";
 export * from "./defaults.js";

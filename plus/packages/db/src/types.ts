@@ -451,6 +451,55 @@ export interface LiveStateRow {
   updated_at: ColumnType<Date, Date | undefined, Date>;
 }
 
+export interface StageResultRow {
+  id: string;
+  activity_id: string;
+  stage_key: string;
+  status: string;
+  candidate_revision: number;
+  source_candidate_revision: number;
+  input_fingerprint: string;
+  decisions: ColumnType<unknown, string, string>;
+  awards: ColumnType<unknown, string, string>;
+  revision: number;
+  confirmed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  unlocked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface ResultPublicationRow {
+  id: string;
+  activity_id: string;
+  stage_key: string;
+  title: string;
+  content: string;
+  version: number;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface ResultReleaseRow {
+  id: string;
+  activity_id: string;
+  publication_id: string;
+  stage_result_id: string;
+  stage_key: string;
+  status: string;
+  snapshot: ColumnType<unknown, string, string>;
+  snapshot_candidate_revision: number;
+  result_version: number;
+  post_version: number;
+  input_fingerprint: string;
+  note: string;
+  released_at: ColumnType<Date, Date | string, Date | string>;
+  revoked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  superseded_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -488,4 +537,7 @@ export interface Database {
   judge_seat_grant: JudgeSeatGrantRow;
   judge_session: JudgeSessionRow;
   live_state: LiveStateRow;
+  stage_result: StageResultRow;
+  result_publication: ResultPublicationRow;
+  result_release: ResultReleaseRow;
 }
