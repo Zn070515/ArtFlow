@@ -370,6 +370,17 @@ git commit -m "feat(legacy): import activity, release, registrations, and roster
 - Modify: `plus/packages/runtime/src/legacy-import-service.ts`
 - Modify: `plus/packages/runtime/test/fixtures/legacy-bundle.json` (add a locked round with scores)
 - Modify: `plus/packages/runtime/test/legacy-import.test.ts`
+- Modify: `common/management/commands/export_plus_bundle.py`
+- Modify: `common/test_plus_bundle.py`
+
+- [ ] **Step 0: Extend the v1 exporter**
+
+Export `ContestRound` rows (formal only), `RoundPanelSnapshot`/members/seats,
+`Performance`/`PerformanceScoreState`, `ScoreRecord` (+ `CriterionScore`),
+and `ScoreSummary`/ranking rows. Add a Django test that creates a round, judge,
+panel/seat, performance, and score, then asserts the exported `rounds`,
+`competition.scores`, and `counts.scores`. Filter `ScoreRecord.is_test_data=True`
+into `excluded.testScores`.
 
 - [ ] **Step 1: Extend the fixture and test**
 
@@ -407,6 +418,15 @@ git commit -m "feat(legacy): import competition rounds, scores, and rankings"
 **Files:**
 - Modify: `plus/packages/runtime/src/legacy-import-service.ts`
 - Modify: fixture + test; create `plus/apps/api/test/legacy-results.test.ts`
+- Modify: `common/management/commands/export_plus_bundle.py`
+- Modify: `common/test_plus_bundle.py`
+
+- [ ] **Step 0: Extend the v1 exporter**
+
+Export `VoteSession`/`VoteOption`/`VoteBallot`/`VoteRecord` (test rows to
+`excluded.testBallots`), confirmed `StageResult` decisions/awards, and every
+`ResultRelease` snapshot. Add Django assertions for sessions, ballots, and
+releases in the exporter test.
 
 - [ ] **Step 1: Extend the fixture and write failing assertions**
 
