@@ -139,6 +139,26 @@
       冻结的 declaredScopes。
 - [x] 旧的无鉴权 engine mutation 测试已更新为 studio actor/token。
 
+### M8d Live / Judge
+
+- [x] Live 读取需要 `competition.manage` 或 `judge.manage`；只返回比赛投影，
+      不返回完整 release。
+- [x] judging execution start/close 接受 `competition.manage`（或 `studio.manage`），
+      actor 仍来自请求。
+- [x] 评委页不落 token：capability 认领后换成 HttpOnly `artflow_judge_session`，
+      capability 从地址栏移除。
+- [x] judge session 绑定的入口座位按 seat key 解析到当前 panel 的 competition seat；
+      没有用跨 panel 的 seat id 猜测。
+- [x] direct_judge 写入在锁内复核 activity/round/panel/performance/seat/context 与
+      judge session 绑定；分数归属 panel member 的 judgeId。
+- [x] 面板激活只在 activity 启用 ticketing 时创建入口座位，并按
+      `(activity, seat key)` 幂等。
+- [x] competition score body schema 是单一封闭对象；没有用两个 closed object 的
+      Intersect（Fastify AJV `removeAdditional` 会互相删字段）。
+- [x] Live 页 SSE 失败退化为 5s 轮询；events/execution-state 仍是恢复权威。
+- [x] E2E 覆盖启动会话 → 准备 → 评委组 → 开表演 → 链接 → 评分 → 锁表演/锁轮 →
+      排名 → 关闭会话。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。
