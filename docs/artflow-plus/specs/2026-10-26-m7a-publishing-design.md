@@ -47,9 +47,12 @@ revision: number                // OCC
 confirmedAt / unlockedAt
 ```
 
-- confirm 时 `candidateRevision = podiumCandidate.revision`；
+- 首次 confirm 时 `candidateRevision = podiumCandidate.revision`；
 - unlock 时 `candidateRevision += 1`、status 变为 `ready_to_confirm`；
-- 再次 confirm 时 `candidateRevision += 1`，并重新绑定当前 podium candidate。
+- 再次 confirm 时 `candidateRevision = max(current.candidateRevision + 1,
+  podiumCandidate.revision)`，保证单调并重新绑定当前 podium candidate；
+- `decisions` 只从 podium candidate 的 placements 派生，`score` 保留 placement
+  的 canonical decimal string；HTTP 不接受客户端自带名次。
 
 ### ResultPublication
 
@@ -68,7 +71,8 @@ snapshot: {
   decisions, awards
 }
 snapshotCandidateRevision, resultVersion,
-postVersion, note, releasedAt, revokedAt, supersededAt, revision
+postVersion, note, releasedAt, revokedAt, supersededAt, revision,
+inputFingerprint      // 行内权威字段，不进 snapshot、不进 selector
 ```
 
 - snapshot 在 release 命令内一次性生成，之后不可变；
@@ -83,10 +87,12 @@ postVersion, note, releasedAt, revokedAt, supersededAt, revision
 
 - identity：`publishing`，version `1`；
 - depends：`competition`；
+- scopes：`["publishing"]`；surfaces：`["studio", "ops", "portal"]`；
 - definition artifact：`{ version: 1, schemaVersion: 1, stages: [{ key, label }] }`，
-  默认 stage `final_podium`；
-- commands：`confirm_stage_result`、`unlock_stage_result`、`release_result`、
-  `revoke_result_release`、`edit_result_publication`；
+  默认 stage `final_podium`；compiler 拒绝空 stages、重复 key、空 key/label；
+- commands：`publishing.stage_result.confirm`、`publishing.stage_result.unlock`、
+  `publishing.result.release`、`publishing.result.revoke`、
+  `publishing.publication.edit`；
 - queries：`publishing_state`（staff）、`public_results`（匿名 selector）；
 - events：`StageResultConfirmed`、`StageResultUnlocked`、`ResultReleased`、
   `ResultReleaseRevoked`、`ResultReleaseSuperseded`、`ResultPublicationEdited`；
@@ -103,11 +109,13 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 ### confirm_stage_result
 
-输入：`stageKey`、`expectedCandidateRevision`、`expectedInputFingerprint`、
-`awards`、`note`。
+输入：`stageKey`、`expectedSourceRevision`（podium candidate revision）、
+`expectedInputFingerprint`、`awards`、`note`。
 
-1. 锁 activity 与 stage result 行；
-2. runtime 读取该活动最新的 podium candidate（status 必须为 `candidate`）；
+1. 锁 activity，再锁 stage result 行；`recomputePodiumCandidate` 也锁 activity，
+   因此 confirm 读到的 latest candidate 不会被并发重算越过；
+2. runtime 读取该活动最新的 podium candidate（status 必须为 `candidate`，
+   `hold` → `RESULT_CANDIDATE_HOLD`）；
 3. candidate revision / fingerprint 与输入不符 → `STALE_RESOLUTION_INPUT`；
 4. awards 校验：contestant 必须出现在 decisions 中、label 非空且不重复；
    同一 contestant 可以出现在多个奖项中（例如冠军 + 最佳人气）；
@@ -115,28 +123,32 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 ### release_result
 
-输入：`stageKey`、`expectedCandidateRevision`、`note`。
+输入：`stageKey`、`expectedCandidateRevision`（stage result revision）、`note`。
 
-- stage result 必须为 `confirmed` 且 revision 匹配；
+- stage result 必须为 `confirmed` 且 revision 匹配（否则 `RESULT_NOT_CONFIRMED`
+  / `STALE_REVISION`）；
 - 已有 ACTIVE release → `RESULT_ALREADY_RELEASED`；
 - 生成不可变 snapshot，写入 ACTIVE release，事件 `ResultReleased`；
+  `resultVersion` 取 stage result 的 `candidateRevision`；
 - 保证 publication 存在（不存在则以 snapshot 标题建一个冻结容器）。
 
 ### revoke_result_release
 
-输入：`stageKey`、`note`。
+输入：`releaseId`、`note`。
 
-- 只允许 ACTIVE → `revoked`；否则 `RESULT_RELEASE_NOT_ACTIVE`；
+- 锁 release 行；必须属于该活动且为 ACTIVE，否则
+  `RESULT_RELEASE_NOT_ACTIVE`（不按 stage 猜测“当前 active”）；
 - 事件 `ResultReleaseRevoked`；公众立即不可见。
 
 ### unlock_stage_result
 
-输入：`stageKey`、`expectedCandidateRevision`、`note`。
+输入：`stageKey`、`expectedCandidateRevision`（stage result revision）、`note`。
 
 - stage result 必须为 `confirmed` 且 revision 匹配；
 - stage result → `ready_to_confirm`，revision + 1；
-- 若存在 ACTIVE release → `superseded`；
-- 同一事务写 `StageResultUnlocked` + `ResultReleaseSuperseded`。
+- 若存在 ACTIVE release → `superseded`（没有 ACTIVE 时只写解锁事件）；
+- 同一事务写 `StageResultUnlocked`，有 ACTIVE release 时再写
+  `ResultReleaseSuperseded`。
 
 ### edit_result_publication
 
@@ -163,6 +175,8 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 repository `plus/packages/db/src/publishing-repository.ts` 负责全部
 `FOR UPDATE` 读取、CAS 更新与 selector；`types.ts`/`index.ts` 同步导出。
+down migration 按 FK 反序 drop `result_release`、`result_publication`、
+`stage_result`。
 
 ## 公开 selector
 
@@ -181,8 +195,10 @@ selectPublicResults(db, publicCode): Promise<{
 ```
 
 - 只查 `status = 'active'`，按 stage key 排序；`activityTitle` 也取自
-  snapshot，不读 activity 当前标题；
-- 活动不存在或没有 ACTIVE release → `null`（HTTP 404）；
+  snapshot（按 `releasedAt desc, releaseId desc` 取最新一条），不读 activity
+  当前标题；
+- 活动不存在 → `null`（HTTP 404）；活动存在但没有 ACTIVE release（或
+  `?stage=` 过滤不中）→ 200 + 空 `results`；
 - 不返回 fingerprint、hash、actor、note、审计、编辑字段；
 - 同一函数供公开 API 与后续列表/PDF/导出复用，不复制查询。
 
@@ -199,6 +215,13 @@ selectPublicResults(db, publicCode): Promise<{
 | GET | `/api/public/results/:publicCode?stage=` | 匿名 |
 
 - 写命令必须带 `Idempotency-Key`；
+- `release` / `revoke` / `unlock` 的 `note` 必填；`confirm` 的 `note` 可选；
+- staff state 端点返回 stage result、publication 与 release 历史（含
+  revoked/superseded），供 UI 取得 expected revision/version；
+- 新增 `packages/contracts/src/publishing.ts`（TypeBox），并在 `index.ts` 导出；
+- 在 `apps/api/src/app.ts` 的 DomainError → HTTP 映射中登记新错误码
+  （409：POST_FROZEN / ALREADY_RELEASED / NOT_ACTIVE / NOT_CONFIRMED /
+  CANDIDATE_HOLD；422：AWARD_INVALID / INVALID_INPUT）；
 - 公开读成功与 404 都带 `cache-control: no-store`；
 - 公开读不需要身份；沿用现有 `MemoryRateLimiter` 做轻量限流，并在 README
   注明它只是单进程 IP bucket，生产多实例需要共享限流器。
@@ -214,7 +237,8 @@ selectPublicResults(db, publicCode): Promise<{
 
 1. domain：compiler 接受/拒绝定义；award 校验；snapshot 生成后冻结。
 2. db：`forUpdate` 行锁、ACTIVE 部分唯一索引、跨活动隔离、selector 排除
-   revoked/superseded、不泄漏 fingerprint。
+   revoked/superseded、不泄漏 fingerprint；`migrations.test.ts` 增加 0012
+   的正向表/索引断言与 `migrateTo("0011_...")` 回滚断言。
 3. runtime：
    - golden 生命周期：confirm → release → edit 拒绝 → revoke → re-release →
      unlock；
@@ -224,12 +248,18 @@ selectPublicResults(db, publicCode): Promise<{
 4. API：匿名 selector 形状与 404；staff 路由 401/403；stale 409；
    公开响应无内部字段。
 5. Golden adapter：`packages/runtime/test/golden-result-release-lifecycle.test.ts`
-   消费 `tests/golden/result-release-lifecycle.json` 五步。
-6. 门禁：`pnpm -C plus run check/test`（`REQUIRE_DB=1`）、
+   消费 `tests/golden/result-release-lifecycle.json` 五步；adapter 用
+   `insertPodiumCandidate` 以 revision 3 灌入上游候选，并用 fixture 的 awards
+   完成 confirm，再逐步断言 release/edit/revoke/re-release/unlock。
+6. 结构门禁：`publishing` 只按 manifest 依赖 competition，不导入其模块；
+   `pytest tests/gates` 必须保持 22 条全绿，不新增 allowlist 例外。
+7. 门禁：`pnpm -C plus run check/test`（`REQUIRE_DB=1`）、
    `uv run pytest tests/gates -q`、golden validate、Django golden、ruff。
 
 ## 文档与验收
 
+- `plus/packages/domain/src/defaults.ts` 注册 `publishing`，`packs.ts` 的
+  `publish-results` 默认值不变；`archive` 在 M7b 前仍是显式诊断，不伪造；
 - `docs/artflow-plus/roadmap.md` 标记 M7a 完成与 M7b 待办；
 - `plus/README.md` 增加 publishing 命令与公开出口；
 - `docs/domains/results.md` 标注 Plus 实现状态；
