@@ -129,6 +129,7 @@ async function seed(options: {
       id: `vote-${activityId}`,
       activity_id: activityId,
       definition_version: 1,
+      mode: "formal",
       purpose: "popularity",
       selection_type: "single",
       max_selections: 1,

@@ -193,6 +193,7 @@ export async function openVoteSession(
       id: input.sessionId,
       activityId: input.activityId,
       definitionVersion: session.definitionVersion,
+      mode: session.mode,
       purpose: artifact.purpose,
       selectionType: artifact.selectionType,
       maxSelections: artifact.maxSelections,
