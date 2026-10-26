@@ -265,6 +265,64 @@ services:
     networks:
       - artflow_internal
 
+  # --- ArtFlow-Plus cutover profile -----------------------------------------
+  # These services are inert unless `--profile plus` is used. v1 keeps running
+  # beside them; Caddy selects which upstream answers the public hostname.
+  plus-db:
+    profiles: ["plus"]
+    image: ${ARTFLOW_POSTGRES_IMAGE:?Set ARTFLOW_POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PLUS_POSTGRES_DB:-artflow_plus}
+      POSTGRES_USER: ${PLUS_POSTGRES_USER:?Set PLUS_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${PLUS_POSTGRES_PASSWORD:?Set PLUS_POSTGRES_PASSWORD}
+    volumes:
+      - plus_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - artflow_internal
+
+  plus-api:
+    profiles: ["plus"]
+    image: ${ARTFLOW_PLUS_API_IMAGE:?Set ARTFLOW_PLUS_API_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      plus-db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      ARTFLOW_PLUS_DATABASE_URL: postgresql://${PLUS_POSTGRES_USER}:${PLUS_POSTGRES_PASSWORD}@plus-db:5432/${PLUS_POSTGRES_DB:-artflow_plus}
+      ARTFLOW_PLUS_CREDENTIAL_SECRET: ${ARTFLOW_PLUS_CREDENTIAL_SECRET:?Set ARTFLOW_PLUS_CREDENTIAL_SECRET}
+      ARTFLOW_PLUS_ARCHIVE_DIR: /app/var/archives
+    volumes:
+      - plus_archive_data:/app/var/archives
+    networks:
+      - artflow_internal
+
+  plus-web:
+    profiles: ["plus"]
+    image: ${ARTFLOW_PLUS_WEB_IMAGE:?Set ARTFLOW_PLUS_WEB_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      plus-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - artflow_internal
+
   proxy:
     image: ${ARTFLOW_CADDY_IMAGE:?Set ARTFLOW_CADDY_IMAGE}
     restart: unless-stopped
@@ -313,6 +371,8 @@ volumes:
   backup_data:
   caddy_data:
   caddy_config:
+  plus_postgres_data:
+  plus_archive_data:
 
 networks:
   artflow_frontend:
