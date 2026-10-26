@@ -195,6 +195,17 @@
 - [x] Live 与 judge context 按运行中 session 的 mode 读取计数与已提交分。
 - [x] E2E 覆盖“排练 → reset → 正式重跑”同活动链路。
 
+### M8e-2 Legacy import
+
+- [x] v1 导出只读正式行；`is_test_data` 行进入 `excluded` 计数，不写入 v2。
+- [x] bundle 不含原始密码、token、session key、IP；历史 ballot 统一匿名。
+- [x] 导入是单事务 command；bundle hash + command receipt 保证重复导入 replay。
+- [x] 对账在提交前重算 v2 计数/名单/分数/票数与快照 hash；任何 mismatch 回滚。
+- [x] 确定性 id 带 public code 前缀，跨活动不冲突。
+- [x] 无法表达的 v1 结构写入 `unsupported`，不猜测；历史结果用冻结快照导入。
+- [x] 材料只迁元数据（`storage_key=legacy:<id>`），不复制字节。
+- [x] 导入历史活动后公开结果页可读。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

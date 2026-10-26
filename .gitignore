@@ -52,6 +52,7 @@ plus/var/
 plus/apps/api/var/
 # Generated E2E seed handoff
 plus/apps/web/.e2e-live.json
+plus/apps/web/.e2e-legacy.json
 !static/dist/
 !static/dist/rapid_score.js
 !static/dist/*.js

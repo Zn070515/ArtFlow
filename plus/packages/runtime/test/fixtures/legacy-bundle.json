@@ -1,0 +1,186 @@
+{
+  "format": "artflow-plus-legacy-bundle",
+  "version": 1,
+  "exportedAt": "2026-10-26T00:00:00Z",
+  "source": { "publicCode": "LEG-1", "activityId": 11, "v1Version": "1.0.2" },
+  "activity": {
+    "publicCode": "LEG-1",
+    "title": "2025 院十佳",
+    "subtitle": "",
+    "activityType": "singer_contest",
+    "phase": "registration_closed",
+    "createdAt": "2025-10-01T00:00:00Z"
+  },
+  "questionnaire": {
+    "version": "legacy-v1",
+    "questions": [
+      { "key": "name", "label": "姓名", "type": "text", "required": true },
+      { "key": "student_id", "label": "学号", "type": "text", "required": true },
+      { "key": "college", "label": "学院", "type": "text", "required": true },
+      { "key": "class_name", "label": "班级", "type": "text", "required": true },
+      { "key": "phone", "label": "手机", "type": "text", "required": true },
+      { "key": "song", "label": "曲目", "type": "text", "required": false }
+    ]
+  },
+  "ruleset": { "present": false, "raw": {} },
+  "rubric": {
+    "criteria": [{ "key": "总分", "weight": 1, "maximum": 100, "minimum": 0 }],
+    "tiePolicy": "review"
+  },
+  "rounds": [
+    {
+      "legacyId": 21,
+      "key": "final",
+      "sequence": 1,
+      "judgeCount": 1,
+      "minimumJudges": 1,
+      "completion": "minimum_valid",
+      "scoringMethod": "average",
+      "advanceCount": 1,
+      "state": "locked"
+    }
+  ],
+  "registrations": [
+    {
+      "legacyId": 101,
+      "participantKey": "legacy-user:1",
+      "status": "approved",
+      "answers": {
+        "name": "Alice",
+        "student_id": "20250001",
+        "college": "信息学院",
+        "class_name": "1 班",
+        "phone": "13800000001",
+        "song": "夜空中最亮的星"
+      },
+      "reviewNote": "ok",
+      "reviewedBy": "staff",
+      "createdAt": "2025-10-02T00:00:00Z",
+      "liveStatus": "not_checked_in"
+    },
+    {
+      "legacyId": 102,
+      "participantKey": "legacy-user:2",
+      "status": "rejected",
+      "answers": {
+        "name": "Bob",
+        "student_id": "20250002",
+        "college": "信息学院",
+        "class_name": "2 班",
+        "phone": "13800000002",
+        "song": "晴天"
+      },
+      "reviewNote": "资料不全",
+      "reviewedBy": "staff",
+      "createdAt": "2025-10-02T00:00:00Z",
+      "liveStatus": "not_checked_in"
+    }
+  ],
+  "roster": { "status": "final", "approvedCount": 1, "finalizedAt": "2025-10-03T00:00:00Z" },
+  "materials": [],
+  "competition": {
+    "panels": [
+      {
+        "legacyId": 21,
+        "roundLegacyId": 21,
+        "members": [{ "judgeId": "legacy-judge:1", "seatKey": "seat-1" }]
+      }
+    ],
+    "seats": [
+      { "legacyId": 31, "panelLegacyId": 21, "judgeId": "legacy-judge:1", "seatKey": "seat-1" }
+    ],
+    "performances": [
+      { "legacyId": 41, "roundLegacyId": 21, "contestantKey": "legacy-user:1", "sequence": 1, "state": "locked" }
+    ],
+    "scores": [
+      {
+        "legacyId": 51,
+        "roundLegacyId": 21,
+        "contestantKey": "legacy-user:1",
+        "judgeId": "legacy-judge:1",
+        "panelLegacyId": 21,
+        "total": "91.50",
+        "criteria": { "总分": 91.5 },
+        "source": "staff_rapid",
+        "notes": "",
+        "createdAt": "2025-10-05T00:00:00Z"
+      }
+    ],
+    "rankings": [
+      {
+        "roundLegacyId": 21,
+        "rows": [{ "contestantId": "legacy-user:1", "total": "91.50", "judgeCount": 1 }],
+        "tieGroups": [],
+        "inputFingerprint": "legacy-ranking",
+        "recordedAt": "2025-10-05T00:00:00Z"
+      }
+    ]
+  },
+  "voting": {
+    "sessions": [
+      {
+        "legacyId": 61,
+        "name": "人气投票",
+        "purpose": "popularity",
+        "selectionType": "single",
+        "maxSelections": 1,
+        "identityPolicy": "anonymous",
+        "scoringRule": { "kind": "ballot_share_percent", "scale": 100, "decimals": 2 },
+        "status": "closed",
+        "openedAt": "2025-10-05T00:00:00Z",
+        "closedAt": "2025-10-06T00:00:00Z",
+        "options": [
+          { "legacyId": 71, "candidateKey": "legacy-user:1" }
+        ]
+      }
+    ],
+    "ballots": [
+      { "legacyId": 81, "sessionLegacyId": 61, "optionLegacyIds": [71], "submittedAt": "2025-10-05T10:00:00Z" },
+      { "legacyId": 82, "sessionLegacyId": 61, "optionLegacyIds": [71], "submittedAt": "2025-10-05T11:00:00Z" }
+    ]
+  },
+  "results": {
+    "stageResults": [
+      {
+        "stageKey": "final_podium",
+        "status": "confirmed",
+        "decisions": [{ "rank": 1, "contestantId": "legacy-user:1", "score": "91.50" }],
+        "awards": [{ "award": "冠军", "contestantId": "legacy-user:1" }],
+        "confirmedAt": "2025-10-07T00:00:00Z"
+      }
+    ],
+    "releases": [
+      {
+        "stageKey": "final_podium",
+        "status": "active",
+        "snapshot": {
+          "activityTitle": "2025 院十佳",
+          "publicTitle": "2025 院十佳 · 正式赛果",
+          "stageKey": "final_podium",
+          "decisions": [{ "rank": 1, "contestantId": "legacy-user:1", "score": "91.50" }],
+          "awards": [{ "award": "冠军", "contestantId": "legacy-user:1" }]
+        },
+        "resultVersion": 1,
+        "postVersion": 1,
+        "note": "legacy",
+        "releasedAt": "2025-10-07T00:00:00Z"
+      }
+    ]
+  },
+  "counts": {
+    "registrations": 2,
+    "approvedRegistrations": 1,
+    "materials": 0,
+    "rounds": 1,
+    "scores": 1,
+    "ballots": 2,
+    "releases": 1
+  },
+  "excluded": {
+    "testRegistrations": 1,
+    "testScores": 0,
+    "testBallots": 0,
+    "testMaterials": 0
+  },
+  "unsupported": []
+}
