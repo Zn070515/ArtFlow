@@ -232,6 +232,19 @@
 - [x] cutover smoke 只读，且失败退出码非 0；runbook 包含预检、commit point、
       回滚与演练。
 
+### M8e-4 Shape validation
+
+- [x] 三个 pack 都能 instantiate + compile；默认 definitions 仍走 capability
+      compiler，不绕过 compile/release。
+- [x] stage-show 不启用 competition/publishing；归档只依赖征集/材料/名单。
+- [x] singer/review-awards 的默认 competition 至少一个 round + rubric，Guided
+      创建即可运行。
+- [x] 三条关键旅程自动通过：歌手赛评分/锁轮/排名；节目征集+归档；作品评审+
+      publish+公开赛果。
+- [x] 缺口（节目单公开页、纯投票发布、bracket、参与者账号）在验证报告中明确，
+      没有伪造 capability。
+- [x] 现场彩排 runbook 含开演前、评分、异常、回滚边界与记录表。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

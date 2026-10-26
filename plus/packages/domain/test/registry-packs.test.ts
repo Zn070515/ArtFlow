@@ -8,7 +8,9 @@ import {
   createEmptyCompetitionDefinition,
   defaultCapabilityRegistry,
   instantiateActivityPack,
+  REVIEW_AWARDS_PACK,
   SINGER_COMPETITION_PACK,
+  STAGE_SHOW_PACK,
 } from "../src/index.js";
 import type {
   CapabilityCompiler,
@@ -287,6 +289,29 @@ it("the default registry exposes only implemented capabilities", () => {
     answers: { "publish-results": false, archive: false },
   });
   expect(result.ok).toBe(true);
+});
+
+it("instantiates the three guided shapes with runnable defaults", () => {
+  for (const pack of [SINGER_COMPETITION_PACK, STAGE_SHOW_PACK, REVIEW_AWARDS_PACK]) {
+    const result = instantiateActivityPack(pack, defaultCapabilityRegistry, { title: pack.title });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    if (!result.ok) continue;
+    const compiled = compileActivityDefinitionPackage(
+      result.instantiation.definition,
+      defaultCapabilityRegistry.compilers,
+    );
+    expect(compiled.ok, JSON.stringify(compiled)).toBe(true);
+    if (pack.identity === "stage-show") {
+      expect(result.instantiation.enabledCapabilities).not.toContain("competition");
+      expect(result.instantiation.enabledCapabilities).not.toContain("publishing");
+      expect(JSON.stringify(result.instantiation.definition.capabilities.questionnaire))
+        .toContain("work_file");
+    } else {
+      const competition = result.instantiation.definition.capabilities.competition;
+      expect(JSON.stringify(competition)).toContain('"rounds"');
+      expect(JSON.stringify(competition)).toContain('"criteria"');
+    }
+  }
 });
 
 it("instantiates the Singer Pack with every default now that archive exists", () => {
