@@ -7,7 +7,14 @@ import { Client } from "pg";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { confirmStageResult, getPublishingState } from "../src/index.js";
+import {
+  confirmStageResult,
+  editPublication,
+  getPublishingState,
+  releaseResult,
+  revokeResultRelease,
+  unlockStageResult,
+} from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
@@ -219,5 +226,117 @@ describe.skipIf(!connectionString)("publishing service", () => {
     await expect(
       confirmStageResult(db, deps(staff), { ...input, commandId: "m7-twice-2" }),
     ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+  });
+
+  it("releases, freezes the publication, revokes, re-releases, and unlocks", async () => {
+    const activityId = await seedActivity("act-lifecycle", "LIFECYCLE", 3, "fp-1");
+    await confirmStageResult(db, deps(staff), {
+      commandId: "m7-life-confirm",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: 3,
+      expectedInputFingerprint: "fp-1",
+      awards: [{ award: "冠军", contestantId: "singer-a" }],
+      note: "核定",
+    });
+    const released = await releaseResult(db, deps(staff), {
+      commandId: "m7-life-release-1",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: 3,
+      note: "正式发布",
+    });
+    expect(released.body).toMatchObject({
+      status: "active",
+      stageKey: "final_podium",
+      snapshotCandidateRevision: 3,
+      resultVersion: 3,
+    });
+    await expect(editPublication(db, deps(staff), {
+      commandId: "m7-life-edit-frozen",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedVersion: 1,
+      title: "改后的标题",
+      content: "正文",
+    })).rejects.toMatchObject({ code: "RESULT_POST_FROZEN" });
+    const revoked = await revokeResultRelease(db, deps(staff), {
+      commandId: "m7-life-revoke",
+      activityId,
+      releaseId: released.body.id,
+      scope: "publishing",
+      note: "复核",
+    });
+    expect(revoked.body.status).toBe("revoked");
+    await expect(revokeResultRelease(db, deps(staff), {
+      commandId: "m7-life-revoke-again",
+      activityId,
+      releaseId: released.body.id,
+      scope: "publishing",
+      note: "again",
+    })).rejects.toMatchObject({ code: "RESULT_RELEASE_NOT_ACTIVE" });
+    expect((await getPublishingState(db, deps(staff), { activityId })).releases).toHaveLength(1);
+    const reReleased = await releaseResult(db, deps(staff), {
+      commandId: "m7-life-release-2",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: 3,
+      note: "复核后重新发布",
+    });
+    expect(reReleased.body.status).toBe("active");
+    expect((await getPublishingState(db, deps(staff), { activityId })).releases).toHaveLength(2);
+    const unlocked = await unlockStageResult(db, deps(staff), {
+      commandId: "m7-life-unlock",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: 3,
+      note: "更正名次",
+    });
+    expect(unlocked.body).toMatchObject({ status: "ready_to_confirm", candidateRevision: 4 });
+    const state = await getPublishingState(db, deps(staff), { activityId });
+    expect(state.releases.map((release) => release.status)).toEqual(["revoked", "superseded"]);
+  });
+
+  it("rejects release before confirm and a second active release", async () => {
+    const activityId = await seedActivity("act-release-guards", "GUARDS");
+    await expect(releaseResult(db, deps(staff), {
+      commandId: "m7-release-unconfirmed",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: 3,
+      note: "not confirmed",
+    })).rejects.toMatchObject({ code: "RESULT_NOT_CONFIRMED" });
+    await confirmStageResult(db, deps(staff), {
+      commandId: "m7-guard-confirm",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: 3,
+      expectedInputFingerprint: "fp-1",
+      awards: [],
+      note: "confirm",
+    });
+    await releaseResult(db, deps(staff), {
+      commandId: "m7-guard-release-1",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: 3,
+      note: "release",
+    });
+    await expect(releaseResult(db, deps(staff), {
+      commandId: "m7-guard-release-2",
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: 3,
+      note: "again",
+    })).rejects.toMatchObject({ code: "RESULT_ALREADY_RELEASED" });
   });
 });
