@@ -199,12 +199,14 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
 - 材料只登记 metadata；字节网关仍留给媒体 slice。
 - E2E：参与者报名 → Ops 审核 → 名单定稿。
 
-### M8c — Studio（下一 slice）
+### M8c — Studio（已完成，2026-10-26）
 
-- 活动/Pack/定义编译发布/执行会话配置。
-- 需要先定 Studio 的编辑模型（Guided vs Expert）与发布准备度视图。
+- Guided Pack 创建 + Expert Definition Package JSON 编辑、编译、发布。
+- `studio.manage` 权限；engine mutation 路由改为请求 actor + 权限校验。
+- Studio 状态读取、release 历史、按 declaredScopes 启动/关闭执行会话。
+- E2E：创建 → 激活 → 编译 → 发布 → rehearsal 会话 → 关闭。
 
-### M8d — Live + 评委入口
+### M8d — Live + 评委入口（下一 slice）
 
 - 现场控制、评分、投票、SSE 降级、HOLD/恢复。
 

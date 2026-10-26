@@ -337,6 +337,27 @@ content type, and size; no bytes are stored or served. The UI labels this
 explicitly. Production needs `ARTFLOW_PLUS_CREDENTIAL_SECRET` for session-bound
 CSRF.
 
+## M8c Studio
+
+Studio requires the `studio.manage` permission. Activity creation, activation,
+definition compile/release, and execution session start/close now authenticate
+the request actor and enforce that permission.
+
+```text
+GET  /api/activities/:id/studio
+POST /api/activities
+POST /api/activities/:id/activate
+POST /api/activities/:id/definitions/compile
+POST /api/activities/:id/definitions/release
+POST /api/activities/:id/executions
+POST /api/activities/:id/executions/:sessionId/close
+```
+
+The web flow is Guided Pack creation plus an Expert JSON editor for the current
+draft package; compile diagnostics come from the capability compilers. Release
+freezes the definition; sessions use the active release's declared scopes.
+`GET /api/activities` also accepts `studio.manage` for the Studio activity list.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot
