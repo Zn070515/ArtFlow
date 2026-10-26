@@ -49,7 +49,9 @@ import {
   hasPermission,
   instantiateActivityPack,
   requirePermission,
+  REVIEW_AWARDS_PACK,
   SINGER_COMPETITION_PACK,
+  STAGE_SHOW_PACK,
   SYSTEM_ACTOR,
 } from "@artflow-plus/domain";
 import type {
@@ -511,7 +513,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   const { db } = options;
   const registry = options.registry ?? defaultCapabilityRegistry;
-  const packs = options.packs ?? [SINGER_COMPETITION_PACK];
+  const packs = options.packs ?? [SINGER_COMPETITION_PACK, STAGE_SHOW_PACK, REVIEW_AWARDS_PACK];
   const baseDeps = options.deps ?? defaultRuntimeDeps();
   const rateLimiter = options.rateLimiter ?? new MemoryRateLimiter();
   const deps =
