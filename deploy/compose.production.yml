@@ -351,14 +351,16 @@ services:
       start_period: 20s
     environment:
       CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?Set CADDY_SITE_ADDRESS to the public DNS name}
+      ARTFLOW_SITE_PROFILE: ${ARTFLOW_SITE_PROFILE:-v1}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+      - ./caddy/sites:/etc/caddy/sites:ro
     configs:
-      - source: caddyfile
+      - source: caddyfile_switch
         target: /etc/caddy/Caddyfile
     networks:
       - artflow_frontend
@@ -381,5 +383,5 @@ networks:
     internal: true
 
 configs:
-  caddyfile:
-    file: ./Caddyfile
+  caddyfile_switch:
+    file: ./caddy/Caddyfile.switch
