@@ -91,6 +91,7 @@ async function seed(): Promise<string> {
     inputFingerprint: "fp-1",
     decisions: snapshot.decisions,
     awards: snapshot.awards,
+    note: "",
     revision: 1,
     confirmedAt: "2026-10-19T17:00:00.000Z",
   });

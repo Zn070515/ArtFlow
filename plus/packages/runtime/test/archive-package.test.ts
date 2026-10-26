@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { SessionRecord, StoredResultRelease, StoredStageResult } from "@artflow-plus/db";
 import type { ArchiveManifest, RuntimeEvent } from "@artflow-plus/domain";
 import { strFromU8, unzipSync } from "fflate";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createLocalArchiveStorage } from "../src/archive-storage.js";
 import { buildArchivePackage } from "../src/archive-package.js";
@@ -69,6 +69,7 @@ const stageResults: StoredStageResult[] = [
     inputFingerprint: "fp-1",
     decisions: snapshot.decisions,
     awards: snapshot.awards,
+    note: "",
     revision: 1,
     confirmedAt: "2026-10-20T17:00:00.000Z",
   },
@@ -255,5 +256,36 @@ describe("archive package", () => {
     expect(csvText).toContain("'-1+1");
     expect(csvText).toContain("'@singer");
     expect(csvText).not.toMatch(/,=/);
+  });
+
+  it("produces byte-identical ZIPs for identical content", () => {
+    const input = {
+      packageId: "archive-stable",
+      version: 1,
+      activity: {
+        id: "act-1",
+        publicCode: "ABC123",
+        title: "2026 院十佳",
+        enabledCapabilities: ["publishing", "archive"],
+        activeDefinitionVersion: 1,
+      },
+      releases,
+      stageResults,
+      sessions,
+      events,
+      archivedAt: "2026-10-21T00:00:00.000Z",
+      archivedBy: "staff",
+    };
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T00:00:00.000Z"));
+      const first = buildArchivePackage(input);
+      vi.setSystemTime(new Date("2026-10-21T00:00:03.000Z"));
+      const second = buildArchivePackage(input);
+      expect(second.bytes).toEqual(first.bytes);
+      expect(second.manifest).toEqual(first.manifest);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

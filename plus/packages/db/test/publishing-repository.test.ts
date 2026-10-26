@@ -62,6 +62,7 @@ async function seed(activityId: string, publicCode: string): Promise<void> {
     inputFingerprint: "fp-1",
     decisions,
     awards,
+    note: "核定",
     revision: 1,
     confirmedAt: "2026-10-19T17:00:00.000Z",
   });

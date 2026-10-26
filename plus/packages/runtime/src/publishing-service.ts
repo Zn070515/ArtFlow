@@ -154,6 +154,7 @@ export async function confirmStageResult(
   input: ConfirmStageResultInput,
 ): Promise<CommandOutcome<StoredStageResult>> {
   const actor = runtimeActor(deps);
+  const note = input.note?.trim() ?? "";
   return executeCommand(db, {
     commandId: input.commandId,
     activityId: input.activityId,
@@ -166,7 +167,7 @@ export async function confirmStageResult(
       expectedSourceRevision: input.expectedSourceRevision,
       expectedInputFingerprint: input.expectedInputFingerprint,
       awards: input.awards,
-      note: input.note ?? "",
+      note,
     },
   }, async (trx) => {
     const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
@@ -201,6 +202,7 @@ export async function confirmStageResult(
       inputFingerprint: candidate.inputFingerprint,
       decisions,
       awards: input.awards.map((award) => ({ award: award.award.trim(), contestantId: award.contestantId })),
+      note,
       revision: (existing?.revision ?? 0) + 1,
       confirmedAt: deps.now(),
     };
@@ -221,6 +223,7 @@ export async function confirmStageResult(
         sourceCandidateRevision: stored.sourceCandidateRevision,
         decisions: stored.decisions,
         awards: stored.awards,
+        note: stored.note,
       },
     });
     return { body: stored, status: existing === null ? 201 : 200 };

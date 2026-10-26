@@ -273,7 +273,10 @@ export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageO
   };
 
   return {
-    bytes: zipSync(entries, { level: 6 }),
+    // A fixed DOS epoch keeps the sealed bytes a pure function of the archived
+    // content; otherwise fflate stamps each entry with Date.now() and the same
+    // data produces a different sha256 on every seal.
+    bytes: zipSync(entries, { level: 6, mtime: new Date("1980-01-01T00:00:00Z") }),
     manifest,
     summary,
   };

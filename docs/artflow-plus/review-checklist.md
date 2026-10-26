@@ -175,6 +175,10 @@
 - [x] `registrationOpen` 镜像 start-registration 门槛（registration/questionnaire/
       materials + 已发布快照）。
 - [x] 归档 CSV 对以 `= + - @` 开头的字符串加 `'` 前缀，防止公式注入。
+- [x] 归档 ZIP 使用固定 mtime（1980 epoch），相同内容得到逐字节相同的包与
+      sha256。
+- [x] `confirmStageResult` 的 note 写入 `stage_result`（迁移 0014）、确认事件与
+      读取 DTO；不再只剩 payload hash。
 
 ## 数据与并发
 

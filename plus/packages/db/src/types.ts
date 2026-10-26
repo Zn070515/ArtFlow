@@ -461,6 +461,7 @@ export interface StageResultRow {
   input_fingerprint: string;
   decisions: ColumnType<unknown, string, string>;
   awards: ColumnType<unknown, string, string>;
+  note: string;
   revision: number;
   confirmed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   unlocked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;

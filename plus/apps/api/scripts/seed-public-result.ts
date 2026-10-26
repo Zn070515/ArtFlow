@@ -70,6 +70,7 @@ if (existing === null) {
       inputFingerprint: "fingerprint-not-public",
       decisions,
       awards,
+      note: "",
       revision: 1,
       confirmedAt: "2026-10-20T17:00:00.000Z",
     });

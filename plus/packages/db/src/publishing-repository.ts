@@ -32,6 +32,7 @@ export interface StoredStageResult {
   readonly inputFingerprint: string;
   readonly decisions: readonly ResultDecision[];
   readonly awards: readonly ResultAward[];
+  readonly note: string;
   readonly revision: number;
   readonly confirmedAt?: string;
   readonly unlockedAt?: string;
@@ -50,6 +51,7 @@ function stageResult(row: Selectable<StageResultRow>): StoredStageResult {
     inputFingerprint: row.input_fingerprint,
     decisions: json(row.decisions) as ResultDecision[],
     awards: json(row.awards) as ResultAward[],
+    note: row.note,
     revision: row.revision,
     ...(confirmedAt === null ? {} : { confirmedAt }),
     ...(unlockedAt === null ? {} : { unlockedAt }),
@@ -106,6 +108,7 @@ export async function insertStageResult(
     input_fingerprint: value.inputFingerprint,
     decisions: JSON.stringify(value.decisions),
     awards: JSON.stringify(value.awards),
+    note: value.note,
     revision: value.revision,
     confirmed_at: value.confirmedAt ?? null,
     unlocked_at: value.unlockedAt ?? null,
@@ -123,6 +126,7 @@ export async function updateStageResult(
     input_fingerprint: value.inputFingerprint,
     decisions: JSON.stringify(value.decisions),
     awards: JSON.stringify(value.awards),
+    note: value.note,
     revision: value.revision,
     confirmed_at: value.confirmedAt ?? null,
     unlocked_at: value.unlockedAt ?? null,

@@ -37,7 +37,7 @@ test("participant submits and Ops approves the registration", async ({ browser }
     });
     await expect(participant.getByText(/demo\.mp3/)).toBeVisible();
     await participant.getByRole("button", { name: "提交报名" }).click();
-    await expect(participant.getByText("报名已提交")).toBeVisible();
+    await expect(participant.getByText("报名已提交", { exact: true })).toBeVisible();
     await expect(participant.getByText("已提交", { exact: true })).toBeVisible();
 
     await ops.goto("/login");

@@ -95,6 +95,7 @@ async function seed(options: {
       inputFingerprint: "fp-1",
       decisions: snapshot.decisions,
       awards: snapshot.awards,
+      note: "",
       revision: 1,
       confirmedAt: "2026-10-20T11:00:00.000Z",
     });

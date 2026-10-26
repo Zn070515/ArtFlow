@@ -164,10 +164,15 @@ describe.skipIf(!connectionString)("publishing service", () => {
         { rank: 2, contestantId: "singer-b", score: "97.80" },
       ],
       awards: [{ award: "冠军", contestantId: "singer-a" }],
+      note: "核定",
     });
     const state = await getPublishingState(db, deps(staff), { activityId });
     expect(state.stageResults).toHaveLength(1);
     expect(state.stageResults[0]?.candidateRevision).toBe(3);
+    expect(state.stageResults[0]?.note).toBe("核定");
+    const confirmedEvent = (await readEventsSince(db, { activityId, after: 0, limit: 100 }))
+      .find((event) => event.type === "StageResultConfirmed");
+    expect(confirmedEvent?.payload).toMatchObject({ note: "核定" });
   });
 
   it("rejects stale candidates, bad awards, and missing permission", async () => {
