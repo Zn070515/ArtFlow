@@ -17,6 +17,7 @@ export * from "./registration-service.js";
 export * from "./registration-read-service.js";
 export * from "./registration-projection.js";
 export * from "./studio-service.js";
+export * from "./live-service.js";
 export * from "./material-service.js";
 export * from "./score-service.js";
 export * from "./resolution-service.js";

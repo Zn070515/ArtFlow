@@ -37,6 +37,10 @@ const adminPermissions = [
   "registration.manage",
   "registration.roster.finalize",
   "studio.manage",
+  "competition.manage",
+  "competition.round.prepare",
+  "competition.score.write",
+  "judge.manage",
 ];
 if ((await getLocalAccount(db, adminUsername)) === null) {
   await createLocalAccount(db, {

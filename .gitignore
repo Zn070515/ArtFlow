@@ -50,6 +50,8 @@ plus/packages/domain/dist/
 # ArtFlow-Plus sealed archive packages (local volume)
 plus/var/
 plus/apps/api/var/
+# Generated E2E seed handoff
+plus/apps/web/.e2e-live.json
 !static/dist/
 !static/dist/rapid_score.js
 !static/dist/*.js

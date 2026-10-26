@@ -10,7 +10,9 @@ import {
   getCurrentPanelForUpdate,
   getCorrectionForUpdate,
   getJudgeSeatForUpdate,
+  getJudgeSeatGrant,
   getJudgeSessionForUpdate,
+  getPanelMember,
   getOpenCorrectionForUpdate,
   getPerformanceForUpdate,
   getPerformanceScoreStateForUpdate,
@@ -166,8 +168,17 @@ async function loadScoreContext(
   if (seat === null || seat.panelId !== panel.id || seat.state !== "assigned") {
     throw new DomainError("STALE_CONTEXT", "The submitted seat is not assigned to the current panel.");
   }
-  if (judgeSession !== null && judgeSession.seatId !== seat.id) {
-    throw new DomainError("FORBIDDEN", "The judge session does not own this seat.");
+  if (judgeSession !== null) {
+    // A session holds an entry seat (judge_seat_grant). It owns the scoring
+    // seat when the ids coincide (direct pairing) or when the entry seat key
+    // maps to this panel member (the Live console flow).
+    const grant = judgeSession.seatId === seat.id
+      ? null
+      : await getJudgeSeatGrant(trx, judgeSession.seatId);
+    const member = grant === null ? null : await getPanelMember(trx, panel.id, seat.judgeId);
+    if (judgeSession.seatId !== seat.id && (grant === null || grant.activityId !== activity.id || grant.seatKey !== member?.seatKey)) {
+      throw new DomainError("FORBIDDEN", "The judge session does not own this seat.");
+    }
   }
   const release = await getRelease(trx, activity.id, round.releaseVersion);
   if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The round release is no longer available.");

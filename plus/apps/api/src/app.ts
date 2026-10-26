@@ -130,6 +130,8 @@ import {
   listActivitiesForReview,
   listRegistrationsForReview,
   getStudioState,
+  getJudgeContext,
+  getLiveState as getLiveActivityState,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -786,6 +788,23 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       return activity;
     },
   );
+
+  app.get(
+    "/api/activities/:id/live",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return getLiveActivityState(db, await requestDeps(request), id);
+    },
+  );
+
+  app.get("/api/judge/context", async (request, reply) => {
+    const token = cookieValue(request, "artflow_judge_session");
+    if (token === undefined) throw new DomainError("UNAUTHENTICATED", "A judge session is required.");
+    await requirePublicRateLimit(request, "judge-context", 120);
+    reply.header("cache-control", "no-store");
+    return getJudgeContext(db, token);
+  });
 
   app.get(
     "/api/activities/:id/studio",

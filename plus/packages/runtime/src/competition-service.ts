@@ -6,6 +6,7 @@ import type {
 } from "@artflow-plus/db";
 import {
   countCurrentScoreFactsForContext,
+  ensureJudgeEntrySeat,
   findRunningSessionByScope,
   getActivityForUpdate,
   getCurrentPanelForUpdate,
@@ -306,6 +307,18 @@ export async function activateCompetitionPanel(
           state: "assigned",
           revision: 0,
         });
+        if (activity.enabledCapabilities.includes("ticketing")) {
+          // With ticketing enabled, each panel seat becomes a claimable judge-entry
+          // seat. The judge session binds to the entry seat; the seat key maps it
+          // back to the current panel member for scoring.
+          await ensureJudgeEntrySeat(trx, {
+            id: idFromCommand("judge-entry-seat", `${input.activityId}:${judge.seatKey}`),
+            activityId: input.activityId,
+            seatKey: judge.seatKey,
+            state: "available",
+            revision: 0,
+          });
+        }
       }
       const savedRound = await updateRound(trx, {
         ...round,
