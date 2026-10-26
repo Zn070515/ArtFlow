@@ -223,8 +223,17 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
 
 ### M8e — Cutover
 
-- v1→v2 导入/对账、入口切换、回滚、彩排、三种活动验证。
-- 前置：registration/material/vote/score 事实的 mode hardening。
+拆为四个子 slice：
+
+- **M8e-1 模式加固（已完成，2026-10-26）**：score_fact / vote_session /
+  ranking_snapshot 带 mode；正式读路径按 mode 过滤；非 formal 生命周期在 formal
+  事实出现后被 `FORMAL_FACTS_EXIST` 拒绝；`reset-rehearsal` 清除非 formal 数据并
+  把回合还原到 prepared。正式后排练改用活动副本。
+- **M8e-2 v1 导入与对账**：当前活动 + 一个历史活动；导入报告；test 数据跳过或
+  落到独立测试活动；媒体引用策略。
+- **M8e-3 入口切换与回滚**：域名/路由切换、回滚开关、部署拓扑、操作手册。
+- **M8e-4 现场彩排与三类活动验证**：judged singing competition、stage show、
+  第三种结构不同的活动。
 
 **M8 出口**：关键旅程 E2E；迁移报告；回滚演练；现场彩排通过；至少三个结构不同
 的活动（judged singing competition、stage show、另一种比赛/复杂活动）证明
