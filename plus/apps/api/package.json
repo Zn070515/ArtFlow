@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:bundle": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/main.cjs --external:pg-native",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/main.ts",
     "seed:e2e": "tsx scripts/seed-public-result.ts && tsx scripts/seed-registration.ts && tsx scripts/seed-live.ts && tsx scripts/seed-legacy.ts",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@types/pg": "8.23.1",
+    "esbuild": "0.28.2",
     "pg": "8.23.1",
     "tsx": "4.23.15"
   }
