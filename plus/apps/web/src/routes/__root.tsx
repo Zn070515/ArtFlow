@@ -1,10 +1,12 @@
 import { Link, Outlet } from "@tanstack/react-router";
 
+import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { AuroraScene } from "../components/hero/AuroraScene.js";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 
 export function RootLayout() {
   const reducedMotion = useReducedMotion();
+  const { session, logout } = useSession();
 
   return (
     <div className="app-shell">
@@ -19,6 +21,31 @@ export function RootLayout() {
             <small>赛果公示</small>
           </span>
         </Link>
+        <nav className="nav-links" aria-label="主导航">
+          <Link to="/join" className="nav-link">
+            报名
+          </Link>
+          {hasOpsAccess(session) ? (
+            <Link to="/ops" className="nav-link">
+              Ops
+            </Link>
+          ) : null}
+          {session === null ? (
+            <Link to="/login" search={{ next: undefined }} className="nav-link">
+              登录
+            </Link>
+          ) : (
+            <button
+              className="nav-link"
+              type="button"
+              onClick={() => {
+                void logout();
+              }}
+            >
+              退出
+            </button>
+          )}
+        </nav>
       </header>
       <main className="site-main">
         <Outlet />

@@ -117,6 +117,17 @@
 - [x] 结果在 DOM 语义表格/列表中；Canvas `aria-hidden`。
 - [x] E2E 用独立 schema 种子，不依赖开发者数据库内容。
 
+### M8b Registration Loop
+
+- [x] 会话 cookie 是 HttpOnly/SameSite=Strict；Web 不把 token 写入 storage。
+- [x] Cookie 认证的 mutation 必须带会话绑定的 CSRF header；Bearer 客户端豁免；
+      login/register/logout 豁免。
+- [x] 参与者只能读自己的报名；Ops 读/审核需要 `registration.review`/`manage`；
+      名单定稿需要 `registration.roster.finalize`。
+- [x] 问卷详情使用报名冻结的 release hash，不跟随当前活动定义。
+- [x] 材料只有 metadata，UI/API 不暗示字节已存储；文件题仍需登记 metadata。
+- [x] E2E seed 每次重置自己的报名活动数据，避免上一次运行污染断言。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

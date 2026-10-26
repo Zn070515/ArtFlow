@@ -310,6 +310,33 @@ pnpm -C plus --filter @artflow-plus/web test:e2e # Playwright, own API/web serve
 lazy chunk; `prefers-reduced-motion` uses a static backdrop and never creates a
 WebGL context.
 
+## M8b registration loop
+
+Cookie auth uses HttpOnly `artflow_session` + readable `artflow_csrf`; mutations
+send `x-csrf-token`. Web and API must be same-origin behind the proxy.
+
+```text
+POST /api/auth/login
+POST /api/auth/register
+GET  /api/auth/me
+POST /api/auth/logout
+GET  /api/public/activities/:publicCode
+GET  /api/activities
+GET  /api/activities/:id/registrations/mine
+GET  /api/activities/:id/registrations/:registrationId
+GET  /api/activities/:id/registrations
+GET  /api/activities/:id/roster
+```
+
+Participant flow: public code → start/resume registration → frozen questionnaire
+→ save/submit. Ops flow: activity list → registration detail → approve/request
+supplement/reject → finalize roster.
+
+Materials are **metadata only** in this slice: the browser sends original name,
+content type, and size; no bytes are stored or served. The UI labels this
+explicitly. Production needs `ARTFLOW_PLUS_CREDENTIAL_SECRET` for session-bound
+CSRF.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot

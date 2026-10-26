@@ -8,6 +8,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { SessionProvider } from "./auth/SessionProvider.js";
 import { router } from "./router.js";
 
 const queryClient = new QueryClient({
@@ -25,7 +26,9 @@ if (root === null) throw new Error("Missing #root element.");
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <SessionProvider>
+        <RouterProvider router={router} />
+      </SessionProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

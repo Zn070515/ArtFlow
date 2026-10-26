@@ -14,6 +14,8 @@ const channel = process.env.PLAYWRIGHT_CHANNEL as "msedge" | "chrome" | undefine
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  workers: 1,
+  timeout: 60_000,
   forbidOnly: process.env.CI === "true",
   retries: process.env.CI === "true" ? 2 : 0,
   reporter: process.env.CI === "true" ? "github" : "list",

@@ -192,10 +192,26 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   `prefers-reduced-motion` 回退。
 - Playwright E2E 使用独立 `artflow_e2e` schema；Gates 增加 `web-e2e` job。
 
-### M8b — Ops + Participant Portal（下一 slice）
+### M8b — Ops + Participant Portal（已完成，2026-10-26）
 
-- 登录、报名、问卷、材料、名单审核与参与者入口。
-- 需要先定义认证/会话在 web 层的边界，并与 M8e 的 mode hardening 对齐。
+- Cookie + CSRF 登录、参与者自助账号、公开码入口、冻结问卷填写/保存/提交。
+- Ops 活动列表、报名列表/详情、批准/需补充/拒绝、名单定稿。
+- 材料只登记 metadata；字节网关仍留给媒体 slice。
+- E2E：参与者报名 → Ops 审核 → 名单定稿。
+
+### M8c — Studio（下一 slice）
+
+- 活动/Pack/定义编译发布/执行会话配置。
+- 需要先定 Studio 的编辑模型（Guided vs Expert）与发布准备度视图。
+
+### M8d — Live + 评委入口
+
+- 现场控制、评分、投票、SSE 降级、HOLD/恢复。
+
+### M8e — Cutover
+
+- v1→v2 导入/对账、入口切换、回滚、彩排、三种活动验证。
+- 前置：registration/material/vote/score 事实的 mode hardening。
 
 **M8 出口**：关键旅程 E2E；迁移报告；回滚演练；现场彩排通过；至少三个结构不同
 的活动（judged singing competition、stage show、另一种比赛/复杂活动）证明

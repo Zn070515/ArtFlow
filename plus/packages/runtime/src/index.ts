@@ -14,6 +14,7 @@ export * from "./execution-service.js";
 export * from "./hash.js";
 export * from "./outbox-relay.js";
 export * from "./registration-service.js";
+export * from "./registration-read-service.js";
 export * from "./registration-projection.js";
 export * from "./material-service.js";
 export * from "./score-service.js";
