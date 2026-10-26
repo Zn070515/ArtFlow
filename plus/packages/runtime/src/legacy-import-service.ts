@@ -18,7 +18,7 @@ import {
   updateRound,
   upsertRoster,
 } from "@artflow-plus/db";
-import { DomainError } from "@artflow-plus/domain";
+import { computeRanking, decimalValue, DomainError } from "@artflow-plus/domain";
 import type { ResultAward, ResultDecision, ResultSnapshot } from "@artflow-plus/domain";
 import type { Kysely, Transaction } from "kysely";
 
@@ -356,6 +356,7 @@ async function importCompetition(
     });
   }
 
+  const rankedRounds = new Set(bundle.competition.rankings.map((ranking) => ranking.roundLegacyId));
   for (const ranking of bundle.competition.rankings) {
     const round = roundsByLegacy.get(ranking.roundLegacyId);
     if (round === undefined) continue;
@@ -367,6 +368,38 @@ async function importCompetition(
       sourceScoreVersion: round.scoreVersion,
       inputFingerprint: ranking.inputFingerprint,
       status: ranking.tieGroups.length > 0 ? "hold" : "ready",
+      rows: ranking.rows,
+      tieGroups: ranking.tieGroups,
+      revision: 1,
+    });
+  }
+
+  // Bundles without a frozen v1 ranking still get one derived from the imported
+  // facts, so the historical round is explainable in v2.
+  for (const [roundLegacyId, contestants] of contestantOrder) {
+    if (rankedRounds.has(roundLegacyId)) continue;
+    const round = roundsByLegacy.get(roundLegacyId);
+    if (round === undefined) continue;
+    const rows = contestants.map((contestantKey) => {
+      const totals = bundle.competition.scores
+        .filter((score) => score.roundLegacyId === roundLegacyId && score.contestantKey === contestantKey)
+        .map((score) => Number(score.total));
+      const sum = totals.reduce((total, value) => total + value, 0);
+      return {
+        contestantId: contestantKey,
+        total: decimalValue(sum / totals.length),
+        judgeCount: totals.length,
+      };
+    });
+    const ranking = computeRanking({ rows, tiePolicy: "review" });
+    await insertRankingSnapshot(trx, {
+      id: `${prefix}-ranking-${round.id}`,
+      activityId,
+      roundId: round.id,
+      mode: "formal",
+      sourceScoreVersion: round.scoreVersion,
+      inputFingerprint: stableHash({ round: round.id, rows }),
+      status: ranking.status,
       rows: ranking.rows,
       tieGroups: ranking.tieGroups,
       revision: 1,
