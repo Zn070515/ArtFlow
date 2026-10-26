@@ -1,0 +1,106 @@
+{
+  "format": "artflow-plus-legacy-bundle",
+  "version": 1,
+  "exportedAt": "2026-10-26T00:00:00Z",
+  "source": { "publicCode": "LEG-1", "activityId": 11, "v1Version": "1.0.2" },
+  "activity": {
+    "publicCode": "LEG-1",
+    "title": "2025 院十佳",
+    "subtitle": "",
+    "activityType": "singer_contest",
+    "phase": "registration_closed",
+    "createdAt": "2025-10-01T00:00:00Z"
+  },
+  "questionnaire": {
+    "version": "legacy-v1",
+    "questions": [
+      { "key": "name", "label": "姓名", "type": "text", "required": true },
+      { "key": "student_id", "label": "学号", "type": "text", "required": true },
+      { "key": "college", "label": "学院", "type": "text", "required": true },
+      { "key": "class_name", "label": "班级", "type": "text", "required": true },
+      { "key": "phone", "label": "手机", "type": "text", "required": true },
+      { "key": "song", "label": "曲目", "type": "text", "required": false }
+    ]
+  },
+  "ruleset": { "present": false, "raw": {} },
+  "rubric": {
+    "criteria": [{ "key": "总分", "weight": 1, "maximum": 100, "minimum": 0 }],
+    "tiePolicy": "review"
+  },
+  "rounds": [
+    {
+      "legacyId": 21,
+      "key": "final",
+      "sequence": 1,
+      "judgeCount": 1,
+      "minimumJudges": 1,
+      "completion": "minimum_valid",
+      "scoringMethod": "average",
+      "advanceCount": 1,
+      "state": "prepared"
+    }
+  ],
+  "registrations": [
+    {
+      "legacyId": 101,
+      "participantKey": "legacy-user:1",
+      "status": "approved",
+      "answers": {
+        "name": "Alice",
+        "student_id": "20250001",
+        "college": "信息学院",
+        "class_name": "1 班",
+        "phone": "13800000001",
+        "song": "夜空中最亮的星"
+      },
+      "reviewNote": "ok",
+      "reviewedBy": "staff",
+      "createdAt": "2025-10-02T00:00:00Z",
+      "liveStatus": "not_checked_in"
+    },
+    {
+      "legacyId": 102,
+      "participantKey": "legacy-user:2",
+      "status": "rejected",
+      "answers": {
+        "name": "Bob",
+        "student_id": "20250002",
+        "college": "信息学院",
+        "class_name": "2 班",
+        "phone": "13800000002",
+        "song": "晴天"
+      },
+      "reviewNote": "资料不全",
+      "reviewedBy": "staff",
+      "createdAt": "2025-10-02T00:00:00Z",
+      "liveStatus": "not_checked_in"
+    }
+  ],
+  "roster": { "status": "unknown", "approvedCount": 0, "finalizedAt": null },
+  "materials": [],
+  "competition": {
+    "panels": [],
+    "seats": [],
+    "performances": [],
+    "scores": [],
+    "rankings": []
+  },
+  "voting": { "sessions": [], "ballots": [] },
+  "results": { "stageResults": [], "releases": [] },
+  "counts": {
+    "registrations": 2,
+    "approvedRegistrations": 1,
+    "materials": 0,
+    "rounds": 1,
+    "scores": 0,
+    "ballots": 0,
+    "releases": 0
+  },
+  "excluded": {
+    "testRegistrations": 1,
+    "testScores": 0,
+    "testBallots": 0,
+    "testMaterials": 0
+  },
+  "unsupported": []
+}

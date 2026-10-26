@@ -19,6 +19,7 @@ export * from "./registration-projection.js";
 export * from "./studio-service.js";
 export * from "./live-service.js";
 export * from "./legacy-bundle.js";
+export * from "./legacy-import-service.js";
 export * from "./mode-guard.js";
 export * from "./rehearsal-service.js";
 export * from "./material-service.js";

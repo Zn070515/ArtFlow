@@ -1,3 +1,5 @@
+import { DomainError } from "@artflow-plus/domain";
+
 /** Versioned JSON contract produced by the v1 `export_plus_bundle` command. */
 
 export interface LegacyBundleQuestion {
@@ -197,4 +199,75 @@ export interface LegacyBundle {
   readonly counts: LegacyCounts;
   readonly excluded: LegacyExcluded;
   readonly unsupported: readonly { readonly kind: string; readonly legacyId?: number; readonly reason: string }[];
+}
+
+function invalid(message: string): never {
+  throw new DomainError("LEGACY_BUNDLE_INVALID", message);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requireArray(value: Record<string, unknown>, key: string): unknown[] {
+  const item = value[key];
+  if (!Array.isArray(item)) invalid(`The bundle is missing the ${key} array.`);
+  return item;
+}
+
+/** Structural validation plus the reference integrity everything below relies on. */
+export function parseLegacyBundle(value: unknown): LegacyBundle {
+  if (!isRecord(value)) invalid("The bundle must be a JSON object.");
+  if (value.format !== "artflow-plus-legacy-bundle") invalid("Unsupported bundle format.");
+  if (value.version !== 1) invalid("Unsupported bundle version.");
+  if (!isRecord(value.activity) || typeof value.activity.publicCode !== "string" || value.activity.publicCode === "") {
+    invalid("The bundle is missing activity.publicCode.");
+  }
+  if (!isRecord(value.source) || typeof value.source.publicCode !== "string") {
+    invalid("The bundle is missing source.publicCode.");
+  }
+  if (!isRecord(value.questionnaire) || typeof value.questionnaire.version !== "string") {
+    invalid("The bundle is missing questionnaire.version.");
+  }
+  if (!isRecord(value.rubric) || !Array.isArray(value.rubric.criteria)) {
+    invalid("The bundle is missing rubric.criteria.");
+  }
+  if (!isRecord(value.roster) || !isRecord(value.counts) || !isRecord(value.excluded)) {
+    invalid("The bundle is missing roster/counts/excluded.");
+  }
+  requireArray(value, "registrations");
+  requireArray(value, "materials");
+  requireArray(value, "rounds");
+  requireArray(value, "unsupported");
+  if (!isRecord(value.competition)) invalid("The bundle is missing competition.");
+  for (const key of ["panels", "seats", "performances", "scores", "rankings"]) {
+    requireArray(value.competition, key);
+  }
+  if (!isRecord(value.voting)) invalid("The bundle is missing voting.");
+  requireArray(value.voting, "sessions");
+  requireArray(value.voting, "ballots");
+  if (!isRecord(value.results)) invalid("The bundle is missing results.");
+  requireArray(value.results, "stageResults");
+  requireArray(value.results, "releases");
+
+  const bundle = value as unknown as LegacyBundle;
+  const registrationIds = new Set(bundle.registrations.map((row) => row.legacyId));
+  for (const material of bundle.materials) {
+    if (!registrationIds.has(material.registrationLegacyId)) {
+      invalid(`Material ${material.legacyId} references an unknown registration.`);
+    }
+  }
+  const roundIds = new Set(bundle.rounds.map((row) => row.legacyId));
+  for (const score of bundle.competition.scores) {
+    if (!roundIds.has(score.roundLegacyId)) invalid(`Score ${score.legacyId} references an unknown round.`);
+  }
+  const sessionIds = new Set(bundle.voting.sessions.map((row) => row.legacyId));
+  const optionIds = new Set(bundle.voting.sessions.flatMap((row) => row.options.map((option) => option.legacyId)));
+  for (const ballot of bundle.voting.ballots) {
+    if (!sessionIds.has(ballot.sessionLegacyId)) invalid(`Ballot ${ballot.legacyId} references an unknown session.`);
+    for (const optionId of ballot.optionLegacyIds) {
+      if (!optionIds.has(optionId)) invalid(`Ballot ${ballot.legacyId} references an unknown option.`);
+    }
+  }
+  return bundle;
 }
