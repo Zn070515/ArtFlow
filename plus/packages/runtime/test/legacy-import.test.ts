@@ -59,7 +59,7 @@ describe.skipIf(!connectionString)("legacy import", () => {
     expect(result.report.checks.every((check) => check.ok)).toBe(true);
     const activity = await db.selectFrom("activity").selectAll()
       .where("public_code", "=", "LEG-1").executeTakeFirstOrThrow();
-    expect(activity.status).toBe("active");
+    expect(activity.status).toBe("closed");
     expect(await listApprovedParticipantIds(db, activity.id)).toHaveLength(1);
     expect(await getRoster(db, activity.id)).toMatchObject({ status: "final", approvedCount: 1 });
     const rows = await db.selectFrom("registration").selectAll()
@@ -83,6 +83,20 @@ describe.skipIf(!connectionString)("legacy import", () => {
       .where("activity_id", "=", activity.id).execute();
     expect(rankings).toHaveLength(1);
     expect(rankings[0]).toMatchObject({ mode: "formal", status: "ready" });
+
+    const voteSession = await db.selectFrom("vote_session").selectAll()
+      .where("activity_id", "=", activity.id).executeTakeFirstOrThrow();
+    expect(voteSession).toMatchObject({ mode: "formal", status: "closed" });
+    const ballots = await db.selectFrom("ballot").selectAll()
+      .where("activity_id", "=", activity.id).execute();
+    expect(ballots).toHaveLength(2);
+    expect(ballots.every((row) => row.identity_type === "anonymous")).toBe(true);
+    const release = await db.selectFrom("result_release").selectAll()
+      .where("activity_id", "=", activity.id).executeTakeFirstOrThrow();
+    expect(release.status).toBe("active");
+    expect(release.snapshot).toMatchObject({
+      publicTitle: "2025 院十佳 · 正式赛果",
+    });
   });
 
   it("replays the same bundle without duplicating rows", async () => {

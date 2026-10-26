@@ -1,13 +1,22 @@
 import json
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 
-from common.authority import ACTIVITY_STATE, CONTEST_ROUND_STATE, authority_write
+from common.authority import (
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    VOTE_BALLOT_WRITE,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from core.models import Activity
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 from singer_contest.models import ContestRound, Judge, ScoreRecord, SingerRegistration
+from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
 class ExportPlusBundleTests(TestCase):
@@ -89,3 +98,49 @@ class ExportPlusBundleTests(TestCase):
         self.assertEqual(bundle["competition"]["scores"][0]["criteria"], {"总分": 91.5})
         self.assertEqual(bundle["roster"]["status"], "final")
         self.assertEqual(bundle["roster"]["approvedCount"], 1)
+
+    def test_export_includes_vote_sessions_and_ballots(self) -> None:
+        activity = self._activity()
+        singer = self._registration(activity, "Alice")
+        now = timezone.now()
+        with authority_write(VOTE_SESSION_STATE), authority_write(VOTE_BALLOT_WRITE):
+            session = VoteSession.objects.create(
+                activity=activity,
+                name="人气投票",
+                start_time=now,
+                end_time=now + timedelta(hours=1),
+                is_open=False,
+                selection_type=VoteSession.SelectionType.SINGLE,
+                max_selections=1,
+                purpose=VoteSession.Purpose.SELECTION,
+            )
+            option = VoteOption.objects.create(
+                vote_session=session,
+                singer=singer,
+                sort_order=1,
+            )
+            VoteSession.objects.filter(pk=session.pk).update(is_open=True)
+            session.refresh_from_db()
+            key = "b" * 32
+            ballot = VoteBallot.objects.create(
+                vote_session=session,
+                browser_session_key=key,
+                ip_address="127.0.0.1",
+            )
+            VoteRecord.objects.create(
+                ballot=ballot,
+                vote_session=session,
+                vote_option=option,
+                browser_session_key=key,
+                ip_address="127.0.0.1",
+            )
+        output = Path(tempfile.mkdtemp()) / "bundle.json"
+
+        call_command("export_plus_bundle", activity="LEG2025", output=str(output))
+
+        bundle = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(bundle["counts"]["ballots"], 1)
+        self.assertEqual(len(bundle["voting"]["sessions"]), 1)
+        self.assertEqual(bundle["voting"]["sessions"][0]["status"], "open")
+        self.assertEqual(bundle["voting"]["sessions"][0]["options"][0]["legacyId"], option.pk)
+        self.assertEqual(bundle["voting"]["ballots"][0]["optionLegacyIds"], [option.pk])

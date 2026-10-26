@@ -4,13 +4,16 @@ from typing import Any
 
 from core.models import Activity
 from django.core.management.base import BaseCommand, CommandError
+from public_portal.models import ResultRelease
 from singer_contest.models import (
     ContestRound,
     CriterionScore,
     GroupStage,
     ScoreRecord,
     SingerRegistration,
+    StageResult,
 )
+from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
 class Command(BaseCommand):
@@ -147,6 +150,115 @@ class Command(BaseCommand):
             round__activity=activity, is_test_data=True
         ).count()
 
+        vote_sessions = []
+        ballots = []
+        for vote_session in VoteSession.objects.filter(
+            activity=activity, is_test_data=False
+        ).order_by("pk"):
+            vote_options = list(
+                VoteOption.objects.filter(vote_session=vote_session, is_test_data=False)
+                .order_by("sort_order", "pk")
+            )
+            option_ids = {option.pk for option in vote_options}
+            vote_sessions.append(
+                {
+                    "legacyId": vote_session.pk,
+                    "name": vote_session.name,
+                    "purpose": vote_session.purpose,
+                    "selectionType": vote_session.selection_type,
+                    "maxSelections": vote_session.max_selections,
+                    "identityPolicy": "ticket" if vote_session.requires_ticket else "anonymous",
+                    "scoringRule": {"kind": "ballot_share_percent", "scale": 100, "decimals": 2},
+                    "status": "open" if vote_session.is_open else "closed",
+                    "openedAt": vote_session.start_time.isoformat() if vote_session.start_time else None,
+                    "closedAt": None if vote_session.is_open else vote_session.end_time.isoformat() if vote_session.end_time else None,
+                    "options": [
+                        {
+                            "legacyId": option.pk,
+                            "candidateKey": participant_by_singer.get(
+                                option.singer_id, f"legacy-user:{option.singer_id}"
+                            ),
+                        }
+                        for option in vote_options
+                    ],
+                }
+            )
+            for ballot in VoteBallot.objects.filter(
+                vote_session=vote_session, is_test_data=False
+            ).order_by("pk"):
+                selected = sorted(
+                    set(
+                        VoteRecord.objects.filter(
+                            ballot=ballot, is_test_data=False
+                        ).values_list("vote_option_id", flat=True)
+                    )
+                    & option_ids
+                )
+                ballots.append(
+                    {
+                        "legacyId": ballot.pk,
+                        "sessionLegacyId": vote_session.pk,
+                        "optionLegacyIds": selected,
+                        "submittedAt": ballot.submitted_at.isoformat(),
+                    }
+                )
+        excluded_ballots = VoteBallot.objects.filter(
+            vote_session__activity=activity, is_test_data=True
+        ).count()
+
+        stage_results = []
+        for stage_result in StageResult.objects.filter(
+            activity=activity, status=StageResult.Status.CONFIRMED, is_test_data=False
+        ).order_by("pk"):
+            decisions = [
+                {
+                    "rank": decision.rank,
+                    "contestantId": participant_by_singer.get(
+                        decision.singer_id, f"legacy-user:{decision.singer_id}"
+                    ),
+                    "score": str(decision.score),
+                }
+                for decision in stage_result.decisions.filter(
+                    is_test_data=False, rank__isnull=False
+                ).order_by("rank")
+            ]
+            awards = [
+                {
+                    "award": award.name,
+                    "contestantId": participant_by_singer.get(
+                        award.singer_id, f"legacy-user:{award.singer_id}"
+                    ),
+                }
+                for award in stage_result.award_decisions.filter(is_test_data=False).order_by("pk")
+            ]
+            stage_results.append(
+                {
+                    "stageKey": stage_result.stage_key,
+                    "status": "confirmed",
+                    "decisions": decisions,
+                    "awards": awards,
+                    "confirmedAt": (
+                        stage_result.confirmed_at or stage_result.computed_at
+                    ).isoformat(),
+                }
+            )
+        releases = [
+            {
+                "stageKey": release.stage_result.stage_key,
+                "status": release.status,
+                "snapshot": release.result_snapshot,
+                "resultVersion": release.result_version,
+                "postVersion": release.post_version,
+                "note": release.note,
+                "releasedAt": release.released_at.isoformat(),
+            }
+            for release in ResultRelease.objects.filter(
+                stage_result__activity=activity,
+                stage_result__is_test_data=False,
+            ).select_related("stage_result").order_by("released_at", "pk")
+            if release.result_snapshot
+        ]
+
         bundle = {
             "format": "artflow-plus-legacy-bundle",
             "version": 1,
@@ -215,21 +327,21 @@ class Command(BaseCommand):
                 "scores": scores,
                 "rankings": [],
             },
-            "voting": {"sessions": [], "ballots": []},
-            "results": {"stageResults": [], "releases": []},
+            "voting": {"sessions": vote_sessions, "ballots": ballots},
+            "results": {"stageResults": stage_results, "releases": releases},
             "counts": {
                 "registrations": formal.count(),
                 "approvedRegistrations": formal.filter(pre_status="approved").count(),
                 "materials": 0,
                 "rounds": len(rounds),
                 "scores": len(scores),
-                "ballots": 0,
-                "releases": 0,
+                "ballots": len(ballots),
+                "releases": len(releases),
             },
             "excluded": {
                 "testRegistrations": excluded,
                 "testScores": excluded_scores,
-                "testBallots": 0,
+                "testBallots": excluded_ballots,
                 "testMaterials": 0,
             },
             "unsupported": unsupported,

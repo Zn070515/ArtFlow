@@ -8,12 +8,18 @@ import {
   insertRankingSnapshot,
   insertRegistration,
   insertRelease,
+  insertResultPublication,
+  insertResultRelease,
   insertRound,
   insertScoreFact,
+  insertStageResult,
+  insertVoteOptions,
+  insertVoteSession,
   updateRound,
   upsertRoster,
 } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
+import type { ResultAward, ResultDecision, ResultSnapshot } from "@artflow-plus/domain";
 import type { Kysely, Transaction } from "kysely";
 
 import { executeCommand } from "./command.js";
@@ -368,6 +374,164 @@ async function importCompetition(
   }
 }
 
+async function importVoting(
+  trx: Transaction<Database>,
+  bundle: LegacyBundle,
+  activityId: string,
+  prefix: string,
+): Promise<void> {
+  const sessionIds = new Map<number, string>();
+  const optionIds = new Set<number>();
+  for (const session of bundle.voting.sessions) {
+    if (!["popularity", "score_component"].includes(session.purpose)) {
+      throw new DomainError("LEGACY_BUNDLE_INVALID", `Unknown vote purpose ${session.purpose}.`);
+    }
+    const id = `${prefix}-vote-${session.legacyId}`;
+    sessionIds.set(session.legacyId, id);
+    await insertVoteSession(trx, {
+      id,
+      activityId,
+      definitionVersion: 1,
+      mode: "formal",
+      purpose: session.purpose,
+      selectionType: session.selectionType,
+      maxSelections: session.maxSelections,
+      identityPolicy: session.identityPolicy,
+      scoringRule: session.scoringRule as never,
+      status: session.status,
+      revision: 0,
+      ...(session.openedAt === null ? {} : { openedAt: session.openedAt }),
+      ...(session.closedAt === null ? {} : { closedAt: session.closedAt }),
+    });
+    await insertVoteOptions(trx, session.options.map((option, ordinal) => {
+      optionIds.add(option.legacyId);
+      return {
+        id: `${prefix}-option-${option.legacyId}`,
+        activityId,
+        sessionId: id,
+        candidateId: option.candidateKey,
+        ordinal,
+      };
+    }));
+  }
+
+  for (const ballot of bundle.voting.ballots) {
+    const sessionId = sessionIds.get(ballot.sessionLegacyId);
+    if (sessionId === undefined) {
+      throw new DomainError("LEGACY_BUNDLE_INVALID", "A ballot references an unknown session.");
+    }
+    const ballotId = `${prefix}-ballot-${ballot.legacyId}`;
+    await trx.insertInto("ballot").values({
+      id: ballotId,
+      activity_id: activityId,
+      session_id: sessionId,
+      identity_type: "anonymous",
+      identity_digest: null,
+      ticket_id: null,
+      submitted_at: ballot.submittedAt,
+    }).execute();
+    for (const optionLegacyId of ballot.optionLegacyIds) {
+      if (!optionIds.has(optionLegacyId)) {
+        throw new DomainError("LEGACY_BUNDLE_INVALID", "A ballot references an unknown option.");
+      }
+      await trx.insertInto("vote_record").values({
+        id: `${prefix}-record-${ballot.legacyId}-${optionLegacyId}`,
+        activity_id: activityId,
+        session_id: sessionId,
+        ballot_id: ballotId,
+        option_id: `${prefix}-option-${optionLegacyId}`,
+      }).execute();
+    }
+  }
+}
+
+function stageToken(stageKey: string): string {
+  return stableHash(stageKey).slice(0, 16);
+}
+
+async function importResults(
+  trx: Transaction<Database>,
+  bundle: LegacyBundle,
+  activityId: string,
+  bundleHash: string,
+  prefix: string,
+): Promise<void> {
+  const stageIds = new Map<string, string>();
+  for (const stage of bundle.results.stageResults) {
+    const id = `${prefix}-stage-${stageToken(stage.stageKey)}`;
+    stageIds.set(stage.stageKey, id);
+    await insertStageResult(trx, {
+      id,
+      activityId,
+      stageKey: stage.stageKey,
+      status: "confirmed",
+      candidateRevision: 1,
+      sourceCandidateRevision: 1,
+      inputFingerprint: bundleHash,
+      decisions: stage.decisions as unknown as readonly ResultDecision[],
+      awards: stage.awards as unknown as readonly ResultAward[],
+      note: "",
+      revision: 1,
+      confirmedAt: stage.confirmedAt,
+    });
+  }
+
+  const publications = new Set<string>();
+  for (const [index, release] of bundle.results.releases.entries()) {
+    const snapshot = release.snapshot as unknown as ResultSnapshot;
+    let stageId = stageIds.get(release.stageKey);
+    if (stageId === undefined) {
+      stageId = `${prefix}-stage-${stageToken(release.stageKey)}`;
+      stageIds.set(release.stageKey, stageId);
+      await insertStageResult(trx, {
+        id: stageId,
+        activityId,
+        stageKey: release.stageKey,
+        status: "confirmed",
+        candidateRevision: 1,
+        sourceCandidateRevision: 1,
+        inputFingerprint: bundleHash,
+        decisions: (snapshot.decisions ?? []) as readonly ResultDecision[],
+        awards: (snapshot.awards ?? []) as readonly ResultAward[],
+        note: release.note,
+        revision: 1,
+        confirmedAt: release.releasedAt,
+      });
+    }
+    const publicationId = `${prefix}-pub-${stageToken(release.stageKey)}`;
+    if (!publications.has(publicationId)) {
+      publications.add(publicationId);
+      await insertResultPublication(trx, {
+        id: publicationId,
+        activityId,
+        stageKey: release.stageKey,
+        title: String(snapshot.publicTitle ?? release.stageKey),
+        content: "",
+        version: 1,
+        revision: 0,
+      });
+    }
+    await insertResultRelease(trx, {
+      id: `${prefix}-release-${stageToken(release.stageKey)}-${index + 1}`,
+      activityId,
+      publicationId,
+      stageResultId: stageId,
+      stageKey: release.stageKey,
+      status: release.status,
+      snapshot,
+      snapshotCandidateRevision: 1,
+      resultVersion: release.resultVersion,
+      postVersion: release.postVersion,
+      inputFingerprint: bundleHash,
+      note: release.note,
+      releasedAt: release.releasedAt,
+      ...(release.status === "revoked" ? { revokedAt: release.releasedAt } : {}),
+      ...(release.status === "superseded" ? { supersededAt: release.releasedAt } : {}),
+      revision: 0,
+    });
+  }
+}
+
 async function importActivity(
   trx: Transaction<Database>,
   bundle: LegacyBundle,
@@ -518,6 +682,8 @@ async function importActivity(
   }
 
   await importCompetition(trx, bundle, activityId, prefix, roundsByLegacy);
+  await importVoting(trx, bundle, activityId, prefix);
+  await importResults(trx, bundle, activityId, bundleHash, prefix);
 
   const imported = await countImported(trx, activityId);
   const checks: LegacyImportCheck[] = [
@@ -529,6 +695,44 @@ async function importActivity(
     check("ballots", imported.ballots, bundle.counts.ballots),
     check("releases", imported.releases, bundle.counts.releases),
   ];
+
+  const expectedOptionCounts = new Map<number, number>();
+  for (const ballot of bundle.voting.ballots) {
+    for (const optionId of ballot.optionLegacyIds) {
+      expectedOptionCounts.set(optionId, (expectedOptionCounts.get(optionId) ?? 0) + 1);
+    }
+  }
+  const recordRows = await trx.selectFrom("vote_record").select(["option_id"])
+    .where("activity_id", "=", activityId)
+    .execute();
+  const actualOptionCounts = new Map<string, number>();
+  for (const row of recordRows) {
+    actualOptionCounts.set(row.option_id, (actualOptionCounts.get(row.option_id) ?? 0) + 1);
+  }
+  const expectedOptionSignature = [...expectedOptionCounts.entries()]
+    .map(([optionId, count]) => `${prefix}-option-${optionId}:${count}`)
+    .sort()
+    .join(",");
+  const actualOptionSignature = [...actualOptionCounts.entries()]
+    .map(([optionId, count]) => `${optionId}:${count}`)
+    .sort()
+    .join(",");
+  checks.push(check("ballots.optionCounts", actualOptionSignature, expectedOptionSignature));
+
+  const releaseRows = await trx.selectFrom("result_release").select(["snapshot"])
+    .where("activity_id", "=", activityId)
+    .execute();
+  const normalizeSnapshot = (value: unknown): unknown =>
+    typeof value === "string" ? JSON.parse(value) as unknown : value;
+  const actualSnapshotSignature = releaseRows
+    .map((row) => stableHash(normalizeSnapshot(row.snapshot)))
+    .sort()
+    .join(",");
+  const expectedSnapshotSignature = bundle.results.releases
+    .map((release) => stableHash(release.snapshot))
+    .sort()
+    .join(",");
+  checks.push(check("releases.snapshotHash", actualSnapshotSignature, expectedSnapshotSignature));
   const failed = checks.filter((item) => !item.ok);
   if (failed.length > 0) {
     throw new DomainError(
