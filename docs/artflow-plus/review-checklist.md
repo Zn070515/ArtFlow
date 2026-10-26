@@ -180,6 +180,21 @@
 - [x] `confirmStageResult` 的 note 写入 `stage_result`（迁移 0014）、确认事件与
       读取 DTO；不再只剩 payload hash。
 
+### M8e-1 Mode hardening
+
+- [x] `score_fact`、`vote_session`、`ranking_snapshot` 都有 `mode`；写入一律来自
+      运行中的 session，HTTP body 不能指定 mode。
+- [x] current score fact 的唯一键包含 mode；排练分不阻塞正式分。
+- [x] 正式 resolve/ranking 只读 formal 事实；podium、advancement、tie、publishing
+      在非 formal session 返回 `FORMAL_MODE_REQUIRED`。
+- [x] 回合存在任何 formal score fact 时，非 formal 的 open/lock/resolve 返回
+      `FORMAL_FACTS_EXIST` 且无副作用。
+- [x] `reset-rehearsal` 只删非 formal 数据、supersede panel、回合回到 prepared；
+      有 formal 事实时拒绝且无副作用。
+- [x] 报名/材料仍为 formal-only；测试报名走独立测试活动（导入策略留给 M8e-2）。
+- [x] Live 与 judge context 按运行中 session 的 mode 读取计数与已提交分。
+- [x] E2E 覆盖“排练 → reset → 正式重跑”同活动链路。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

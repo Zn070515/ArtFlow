@@ -7,7 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   closeDb,
   createDb,
+  getCurrentRankingSnapshot,
+  getScoreFactForUpdate,
   insertPerformance,
+  insertRankingSnapshot,
   insertRound,
   insertScoreFact,
   insertScoreRevision,
@@ -75,6 +78,7 @@ async function seedScoreFact(): Promise<StoredScoreFact> {
     panelSnapshotId: panelId,
     seatId,
     source: "direct_judge",
+    mode: "formal",
     total: "91.00",
     criteria: { technique: 36, stage: 27, emotion: 28 },
     notes: "",
@@ -124,6 +128,51 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
     }).execute();
     await insertScoreFact(db, fact);
     await expect(insertScoreFact(db, { ...fact, id: `${fact.id}-duplicate` })).rejects.toThrow();
+  });
+
+  it("keeps one current score fact and one ranking per mode", async () => {
+    const fact = await seedScoreFact();
+    await db.insertInto("panel_snapshot").values({
+      id: fact.panelSnapshotId,
+      activity_id: fact.activityId,
+      round_id: fact.roundId,
+      version: 1,
+      state: "active",
+      expected_judges: 5,
+      minimum_judges: 3,
+      roster_digest: "roster",
+      context_version: 1,
+      current: true,
+    }).execute();
+    await db.insertInto("judge_seat").values({
+      id: fact.seatId,
+      panel_id: fact.panelSnapshotId,
+      judge_id: "judge-1",
+      state: "assigned",
+      revision: 0,
+    }).execute();
+    await insertScoreFact(db, fact);
+    await insertScoreFact(db, { ...fact, id: `${fact.id}-rehearsal`, mode: "rehearsal", total: "80.00" });
+
+    expect(await getScoreFactForUpdate(db, fact.roundId, fact.contestantId, fact.judgeId, "formal"))
+      .toMatchObject({ mode: "formal", total: "91.00" });
+    expect(await getScoreFactForUpdate(db, fact.roundId, fact.contestantId, fact.judgeId, "rehearsal"))
+      .toMatchObject({ mode: "rehearsal", total: "80.00" });
+
+    const base = {
+      activityId: fact.activityId,
+      roundId: fact.roundId,
+      sourceScoreVersion: 0,
+      inputFingerprint: "fp",
+      status: "ready" as const,
+      rows: [],
+      tieGroups: [],
+      revision: 1,
+    };
+    await insertRankingSnapshot(db, { ...base, id: "ranking-formal", mode: "formal" });
+    await insertRankingSnapshot(db, { ...base, id: "ranking-rehearsal", mode: "rehearsal" });
+    expect((await getCurrentRankingSnapshot(db, fact.roundId, "formal"))?.id).toBe("ranking-formal");
+    expect((await getCurrentRankingSnapshot(db, fact.roundId, "rehearsal"))?.id).toBe("ranking-rehearsal");
   });
 
   it("updates a fact with CAS and keeps an immutable revision row", async () => {

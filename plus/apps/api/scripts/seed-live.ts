@@ -37,6 +37,9 @@ const stamp = Date.now();
 const activityId = `act_e2e_live_${stamp}`;
 const publicCode = `E2E-LIVE-${stamp}`;
 const title = `E2E Live ${stamp}`;
+const modeActivityId = `act_e2e_mode_${stamp}`;
+const modePublicCode = `E2E-MODE-${stamp}`;
+const modeTitle = `E2E Mode ${stamp}`;
 const competition = {
   order: ["round-1"],
   nodes: [
@@ -68,59 +71,71 @@ const competition = {
   tiePolicy: "review",
 };
 
-await db.transaction().execute(async (trx) => {
-  await trx.insertInto("activity").values({
-    id: activityId,
-    public_code: publicCode,
-    title,
-    status: "active",
-    revision: 1,
-    enabled_capabilities: JSON.stringify(["competition", "ticketing"]),
-    active_definition_version: 1,
-  }).execute();
-  await insertRelease(trx, {
-    activityId,
-    version: 1,
-    contentHash: `e2e-live-${stamp}`,
-    capabilities: {
-      competition: {
-        ok: true,
-        capabilityKey: "competition",
-        contentHash: `e2e-live-${stamp}`,
-        artifact: competition,
+async function seedLiveActivity(id: string, code: string, label: string): Promise<void> {
+  await db.transaction().execute(async (trx) => {
+    await trx.insertInto("activity").values({
+      id,
+      public_code: code,
+      title: label,
+      status: "active",
+      revision: 1,
+      enabled_capabilities: JSON.stringify(["competition", "ticketing"]),
+      active_definition_version: 1,
+    }).execute();
+    await insertRelease(trx, {
+      activityId: id,
+      version: 1,
+      contentHash: `e2e-live-${code}`,
+      capabilities: {
+        competition: {
+          ok: true,
+          capabilityKey: "competition",
+          contentHash: `e2e-live-${code}`,
+          artifact: competition,
+        },
+        ticketing: {
+          ok: true,
+          capabilityKey: "ticketing",
+          contentHash: `e2e-live-ticketing-${code}`,
+          artifact: { schemaVersion: 1 },
+        },
       },
-      ticketing: {
-        ok: true,
-        capabilityKey: "ticketing",
-        contentHash: `e2e-live-ticketing-${stamp}`,
-        artifact: { schemaVersion: 1 },
-      },
-    },
-    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
-    capabilityVersions: { competition: "1", ticketing: "1" },
-    bindings: [],
-    releasedAt: new Date().toISOString(),
-    sourceDraftRevision: 1,
+      executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
+      capabilityVersions: { competition: "1", ticketing: "1" },
+      bindings: [],
+      releasedAt: new Date().toISOString(),
+      sourceDraftRevision: 1,
+    });
+    await insertRegistration(trx, {
+      id: `live-reg-${code}`,
+      activityId: id,
+      participantId: "singer-a",
+      questionnaireVersion: "live",
+      questionnaireHash: "live",
+      status: "approved",
+      answers: {},
+      revision: 1,
+    });
+    await upsertRoster(trx, id, {
+      status: "final",
+      revision: 1,
+      approvedCount: 1,
+      finalizedAt: new Date().toISOString(),
+    }, 0);
   });
-  await insertRegistration(trx, {
-    id: `live-reg-${stamp}`,
-    activityId,
-    participantId: "singer-a",
-    questionnaireVersion: "live",
-    questionnaireHash: "live",
-    status: "approved",
-    answers: {},
-    revision: 1,
-  });
-  await upsertRoster(trx, activityId, {
-    status: "final",
-    revision: 1,
-    approvedCount: 1,
-    finalizedAt: new Date().toISOString(),
-  }, 0);
-});
+}
+
+await seedLiveActivity(activityId, publicCode, title);
+await seedLiveActivity(modeActivityId, modePublicCode, modeTitle);
 
 const output = process.env.E2E_LIVE_OUTPUT ?? resolve(process.cwd(), "../../apps/web/.e2e-live.json");
-await writeFile(output, JSON.stringify({ activityId, publicCode, title }, null, 2), "utf8");
+await writeFile(output, JSON.stringify({
+  activityId,
+  publicCode,
+  title,
+  modeActivityId,
+  modePublicCode,
+  modeTitle,
+}, null, 2), "utf8");
 await closeDb(db);
-console.log(`Seeded Live E2E activity ${activityId} (${publicCode})`);
+console.log(`Seeded Live E2E activities ${activityId} and ${modeActivityId}`);

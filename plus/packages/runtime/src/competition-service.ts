@@ -49,6 +49,7 @@ import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
+import { requireNoFormalFacts } from "./mode-guard.js";
 
 interface CompetitionActivity {
   readonly id: string;
@@ -450,6 +451,7 @@ export async function openPerformance(
     const round = requireRoundForActivity(await getRoundForUpdate(trx, input.roundId), input.activityId);
     if (round.state !== "scoring") throw new DomainError("ROUND_NOT_PREPARED", "The round is not accepting performances.");
     const { session } = await runningSession(trx, activity, input.scope);
+    await requireNoFormalFacts(trx, round.id, session.mode);
     const performance = await openPerformanceInTransaction(trx, activity, round, input);
     const savedRound = await updateRound(trx, { ...round, revision: round.revision + 1 }, round.revision);
     await appendEngineEvent(trx, deps, {
@@ -498,6 +500,7 @@ export async function lockPerformance(
     if (round.state !== "scoring") throw new DomainError("ROUND_LOCKED", "The round is not scoring.");
     const panel = requireActivePanel(await getCurrentPanelForUpdate(trx, round.id));
     const { session } = await runningSession(trx, activity, input.scope);
+    await requireNoFormalFacts(trx, round.id, session.mode);
     const performance = await getPerformanceForUpdate(trx, input.performanceId);
     if (performance === null) throw new DomainError("NOT_FOUND", "The performance was not found.");
     if (performance.roundId !== round.id || performance.activityId !== activity.id) throw new DomainError("CROSS_ACTIVITY", "The performance belongs to another round.");
@@ -509,6 +512,7 @@ export async function lockPerformance(
       performanceId: performance.id,
       panelSnapshotId: panel.id,
       contextVersion: performance.contextVersion,
+      mode: session.mode,
     }));
     const nextPerformance: StoredPerformance = { ...performance, state: "locked" };
     await updatePerformance(trx, nextPerformance, performance.contextVersion);
@@ -573,6 +577,7 @@ export async function advancePerformance(
     if (round.state !== "scoring") throw new DomainError("ROUND_LOCKED", "The round is not scoring.");
     const panel = requireActivePanel(await getCurrentPanelForUpdate(trx, round.id));
     const { session } = await runningSession(trx, activity, input.scope);
+    await requireNoFormalFacts(trx, round.id, session.mode);
     const current = await getPerformanceForUpdate(trx, input.currentPerformanceId);
     if (current === null) throw new DomainError("NOT_FOUND", "The current performance was not found.");
     if (current.roundId !== round.id || current.activityId !== activity.id) throw new DomainError("CROSS_ACTIVITY", "The performance belongs to another round.");
@@ -583,6 +588,7 @@ export async function advancePerformance(
       performanceId: current.id,
       panelSnapshotId: panel.id,
       contextVersion: current.contextVersion,
+      mode: session.mode,
     }));
     const lockedCurrent: StoredPerformance = { ...current, state: "locked" };
     await updatePerformance(trx, lockedCurrent, current.contextVersion);
@@ -652,6 +658,8 @@ export async function lockRound(
     if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
     requireActive(activity);
     const round = requireRoundForActivity(await getRoundForUpdate(trx, input.roundId), input.activityId);
+    const { session } = await runningSession(trx, activity, input.scope);
+    await requireNoFormalFacts(trx, round.id, session.mode);
     if (round.revision !== input.expectedRevision) throw new DomainError("STALE_REVISION", "The round changed since it was read.");
     if (round.state !== "scoring") throw new DomainError("ROUND_LOCKED", "The round is not scoring.");
     const performances = await listRoundPerformances(trx, round.id);
@@ -662,7 +670,6 @@ export async function lockRound(
         throw new DomainError("PERFORMANCE_SCORE_OPEN", "Every performance score gate must be locked before the round can lock.");
       }
     }
-    const { session } = await runningSession(trx, activity, input.scope);
     const saved = await updateRound(trx, {
       ...round,
       state: "locked",

@@ -390,6 +390,35 @@ authoritative recovery path.
 approved `singer-a`, final roster) and writes `.e2e-live.json` for the Playwright
 spec.
 
+## M8e-1 Mode hardening
+
+Execution mode now belongs to the facts that decide outcomes:
+
+```text
+score_fact.mode          partial unique → (round, contestant, judge, mode) where current
+vote_session.mode        derived from the running execution session at open
+ranking_snapshot.mode    one current ranking per round and mode
+```
+
+Writes derive the mode from the running session; reads filter by it. Rehearsal
+scores do not block formal scores, and a rehearsal ranking can never become a
+podium candidate, advancement decision, or published result
+(`FORMAL_MODE_REQUIRED`). `GET .../ranking` accepts an optional `mode` query
+(default `formal`); write commands never accept a mode.
+
+Round/panel/performance state is shared, so a non-formal session may not
+open/lock/resolve a round that already has a formal score fact
+(`FORMAL_FACTS_EXIST`). Rehearse before the formal run, then clear it:
+
+```text
+POST /api/activities/:id/competition/rounds/:roundKey/reset-rehearsal
+     body: { scope: "judging", mode: "test" | "rehearsal" }
+```
+
+The reset deletes the round's non-formal facts/corrections/revisions/rankings
+and performances, supersedes its panel, and returns the round to `prepared`.
+After formal facts exist, rehearse in a copied activity instead.
+
 ## M6 feature slice and M6.5 authority hardening complete
 
 - Migrations `0010_m6_voting_ticketing` and `0011_voting_identity_policy` own frozen vote sessions/options, ballot

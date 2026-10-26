@@ -4,6 +4,7 @@ import {
   FinalizeAdvancementBodySchema,
   LockCompetitionRoundBodySchema,
   CompetitionRoundParamsSchema,
+  CompetitionRankingQuerySchema,
   CompetitionScoreBodySchema,
   CompetitionScopeBodySchema,
   errorResponse,
@@ -13,6 +14,7 @@ import {
   OpenScoreCorrectionBodySchema,
   PackInstantiateBodySchema,
   PrepareCompetitionRoundBodySchema,
+  ResetRehearsalBodySchema,
   ResolveCompetitionBodySchema,
   RecomputePodiumBodySchema,
   ScoreCorrectionLifecycleBodySchema,
@@ -82,6 +84,7 @@ import {
   recordTieDecision,
   recalculateAfterCorrection,
   recomputePodiumCandidate,
+  resetRehearsalRound,
   resolveRound,
   submitJudgeScore,
   submitPaperScore,
@@ -166,6 +169,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   MATERIAL_NOT_ALLOWED: 422,
   ROSTER_UNKNOWN: 409,
   ROSTER_FINAL: 409,
+  FORMAL_FACTS_EXIST: 409,
   NOT_FOUND: 404,
   CROSS_ACTIVITY: 404,
   STALE_REVISION: 409,
@@ -1424,6 +1428,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   );
 
   app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/reset-rehearsal",
+    { schema: { params: CompetitionRoundParamsSchema, body: ResetRehearsalBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string; mode: "test" | "rehearsal" };
+      const round = await routeRound(id, roundKey);
+      const outcome = await resetRehearsalRound(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        scope: body.scope,
+        mode: body.mode,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
     "/api/activities/:id/competition/rounds/:roundKey/advancement/finalize",
     { schema: { params: CompetitionRoundParamsSchema, body: FinalizeAdvancementBodySchema } },
     async (request, reply) => {
@@ -1474,12 +1497,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/competition/rounds/:roundKey/ranking",
-    { schema: { params: RoundParams, querystring: CompetitionScopeBodySchema } },
+    { schema: { params: RoundParams, querystring: CompetitionRankingQuerySchema } },
     async (request) => {
       await requestActor(request);
       const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const query = request.query as { mode?: "test" | "rehearsal" | "formal" };
       const round = await routeRound(id, roundKey);
-      const ranking = await getCurrentRankingSnapshot(db, round.id);
+      const ranking = await getCurrentRankingSnapshot(db, round.id, query.mode ?? "formal");
       if (ranking === null) throw new DomainError("NOT_FOUND", "The ranking was not found.");
       return ranking;
     },

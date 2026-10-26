@@ -674,4 +674,21 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     expect(claims.filter((result) => result.status === "rejected").map((result) => (result as PromiseRejectedResult).reason.code)).toContain("SEAT_UNAVAILABLE");
     expect(Number((await db.selectFrom("judge_session").select(({ fn }) => fn.countAll<number>().as("count")).where("activity_id", "=", judgeActivity).executeTakeFirstOrThrow()).count)).toBe(1);
   });
+
+  it("tags a vote session with the execution mode", async () => {
+    const activityId = await seedActivity();
+    await db.updateTable("execution_session").set({ mode: "rehearsal" })
+      .where("activity_id", "=", activityId).execute();
+    const opened = await openVoteSession(db, deps(staff), {
+      commandId: "m8e1-vote-rehearsal",
+      activityId,
+      sessionId: `vote-rehearsal-${activityId}`,
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+    expect(opened.body.session.mode).toBe("rehearsal");
+    const row = await db.selectFrom("vote_session").select("mode")
+      .where("id", "=", `vote-rehearsal-${activityId}`).executeTakeFirstOrThrow();
+    expect(row.mode).toBe("rehearsal");
+  });
 });

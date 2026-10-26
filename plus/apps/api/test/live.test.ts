@@ -288,6 +288,50 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
     });
   });
 
+  it("scopes Live counts and judge context by the running mode", async () => {
+    await db.updateTable("execution_session").set({ mode: "rehearsal" })
+      .where("activity_id", "=", activityId).execute();
+    const scored = await app.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/competition/rounds/round-1/scores`,
+      headers: {
+        cookie: `artflow_judge_session=${judgeToken}`,
+        "idempotency-key": `rehearsal-score-${randomUUID()}`,
+      },
+      payload: {
+        scope: "judging",
+        source: "direct_judge",
+        performanceId,
+        panelSnapshotId: panelId,
+        seatId,
+        contextVersion: 1,
+        criteria: { "演唱技巧": 90, "舞台表现": 92, "情感表达": 91 },
+        notes: "彩排",
+      },
+    });
+    expect(scored.statusCode, scored.body).toBe(201);
+
+    const rehearsalContext = await app.inject({
+      method: "GET",
+      url: "/api/judge/context",
+      headers: { cookie: `artflow_judge_session=${judgeToken}` },
+    });
+    expect(rehearsalContext.json()).toMatchObject({ mode: "rehearsal", existingScore: { total: "273.00" } });
+    const rehearsalLive = await app.inject({ method: "GET", url: `/api/activities/${activityId}/live` });
+    expect(rehearsalLive.json().rounds[0].performances[0].scoreCount).toBe(1);
+
+    await db.updateTable("execution_session").set({ mode: "formal" })
+      .where("activity_id", "=", activityId).execute();
+    const formalContext = await app.inject({
+      method: "GET",
+      url: "/api/judge/context",
+      headers: { cookie: `artflow_judge_session=${judgeToken}` },
+    });
+    expect(formalContext.json()).toMatchObject({ mode: "formal", existingScore: null });
+    const formalLive = await app.inject({ method: "GET", url: `/api/activities/${activityId}/live` });
+    expect(formalLive.json().rounds[0].performances[0].scoreCount).toBe(0);
+  });
+
   it("records a direct judge score through the API and reflects it in Live state", async () => {
     const response = await app.inject({
       method: "POST",
