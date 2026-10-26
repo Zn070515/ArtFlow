@@ -104,6 +104,17 @@ export function hasStudioAccess(session: SessionResponse | null): boolean {
   return permissions.includes("*") || permissions.includes("studio.manage") || roles.includes("admin");
 }
 
+export function hasLiveAccess(session: SessionResponse | null): boolean {
+  if (session === null) return false;
+  const { permissions, roles } = session.actor;
+  return (
+    permissions.includes("*") ||
+    permissions.includes("competition.manage") ||
+    permissions.includes("judge.manage") ||
+    roles.includes("admin")
+  );
+}
+
 export function defaultLanding(session: SessionResponse): string {
   if (hasOpsAccess(session)) return "/ops";
   if (hasStudioAccess(session)) return "/studio";

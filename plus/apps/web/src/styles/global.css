@@ -736,6 +736,57 @@ input {
   text-transform: none;
 }
 
+.live-rounds {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.judge-entry,
+.panel-form,
+.performance-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 1rem;
+}
+
+.panel-form .primary-button,
+.performance-form .primary-button {
+  align-self: flex-start;
+}
+
+.judge-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.panel-summary,
+.ranking-block {
+  margin-top: 1rem;
+}
+
+.seat-list {
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seat-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(245, 239, 230, 0.08);
+  font-size: 0.84rem;
+}
+
+.judge-page .studio-grid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+}
+
 .pack-questions {
   display: flex;
   flex-direction: column;
