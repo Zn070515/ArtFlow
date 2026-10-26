@@ -99,6 +99,34 @@ describe.skipIf(!connectionString)("legacy import", () => {
     });
   });
 
+  it("derives a ranking when the bundle has no frozen ranking", async () => {
+    const noRanking = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-3" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-3" },
+      competition: { ...(bundle.competition as Record<string, unknown>), rankings: [] },
+      voting: { sessions: [], ballots: [] },
+      results: { stageResults: [], releases: [] },
+      counts: {
+        ...(bundle.counts as Record<string, unknown>),
+        ballots: 0,
+        releases: 0,
+      },
+    };
+    const result = await importLegacyBundle(db, deps, {
+      commandId: "legacy-import-derived-ranking",
+      bundle: noRanking,
+      dryRun: false,
+    });
+    const rankings = await db.selectFrom("ranking_snapshot").selectAll()
+      .where("activity_id", "=", result.report.activityId).execute();
+    expect(rankings).toHaveLength(1);
+    expect(rankings[0]?.mode).toBe("formal");
+    expect(rankings[0]?.rows).toMatchObject([
+      { contestantId: "legacy-user:1", total: "91.50", judgeCount: 1 },
+    ]);
+  });
+
   it("replays the same bundle without duplicating rows", async () => {
     const imported = await importLegacyBundle(db, deps, {
       commandId: "legacy-import-1",
