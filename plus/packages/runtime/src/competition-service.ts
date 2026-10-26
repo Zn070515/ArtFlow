@@ -509,6 +509,7 @@ export async function lockPerformance(
       performanceId: performance.id,
       panelSnapshotId: panel.id,
       contextVersion: performance.contextVersion,
+      mode: session.mode,
     }));
     const nextPerformance: StoredPerformance = { ...performance, state: "locked" };
     await updatePerformance(trx, nextPerformance, performance.contextVersion);
@@ -583,6 +584,7 @@ export async function advancePerformance(
       performanceId: current.id,
       panelSnapshotId: panel.id,
       contextVersion: current.contextVersion,
+      mode: session.mode,
     }));
     const lockedCurrent: StoredPerformance = { ...current, state: "locked" };
     await updatePerformance(trx, lockedCurrent, current.contextVersion);

@@ -5,6 +5,7 @@ import {
   createDb,
   insertRelease,
   insertSession,
+  listCurrentScoreFacts,
   migrate,
   readEventsSince,
 } from "@artflow-plus/db";
@@ -219,6 +220,62 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
       total: "91.00",
       version: 1,
     });
+  });
+
+  it("keeps rehearsal facts separate from formal facts", async () => {
+    const context = await seedScoreWindow();
+    await submitJudgeScore(db, deps(judge), {
+      commandId: "mode-formal-score",
+      ...context,
+      contextVersion: 1,
+      criteria,
+      notes: "",
+      scope: "judging",
+    });
+    await db.updateTable("execution_session")
+      .set({ status: "closed" })
+      .where("activity_id", "=", context.activityId)
+      .execute();
+    await insertSession(db, {
+      id: `rehearsal-${context.activityId}`,
+      activityId: context.activityId,
+      definitionVersion: 1,
+      contentHash: "score-release",
+      scope: "judging",
+      mode: "rehearsal",
+      status: "running",
+      revision: 0,
+    }, "2026-10-19T16:30:00Z");
+    const rehearsal = await submitJudgeScore(db, deps(judge), {
+      commandId: "mode-rehearsal-score",
+      ...context,
+      contextVersion: 1,
+      criteria: { technique: 40, stage: 30, emotion: 30 },
+      notes: "彩排",
+      scope: "judging",
+    });
+    expect(rehearsal.body).toMatchObject({ mode: "rehearsal", total: "100.00" });
+    expect(await listCurrentScoreFacts(db, context.roundId, "formal")).toHaveLength(1);
+    expect(await listCurrentScoreFacts(db, context.roundId, "rehearsal")).toHaveLength(1);
+
+    await db.updateTable("execution_session").set({ status: "closed" })
+      .where("activity_id", "=", context.activityId).where("mode", "=", "rehearsal").execute();
+    await db.updateTable("execution_session").set({ status: "running" })
+      .where("activity_id", "=", context.activityId).where("mode", "=", "formal").execute();
+    await expect(editScoreFact(db, deps(staff), {
+      commandId: "mode-wrong-edit",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      scoreFactId: rehearsal.body.id,
+      panelSnapshotId: context.panelSnapshotId,
+      seatId: context.seatId,
+      contextVersion: 1,
+      expectedVersion: 1,
+      criteria: { technique: 1, stage: 1, emotion: 1 },
+      reason: "wrong mode",
+      scope: "judging",
+    })).rejects.toMatchObject({ code: "SCORE_FACT_NOT_FOUND" });
   });
 
   it("rejects proxy duplication without an event or fact mutation", async () => {

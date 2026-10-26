@@ -30,6 +30,7 @@ import {
 import type {
   ActorContext,
   CompiledCompetitionArtifact,
+  ExecutionMode,
   ScoreSource,
 } from "@artflow-plus/domain";
 import {
@@ -251,6 +252,7 @@ async function submitScore(
       context.round.id,
       context.contestantId,
       context.judgeId,
+      context.mode,
     );
     if (existing !== null) {
       if (existing.contextVersion !== context.contextVersion || existing.panelSnapshotId !== context.panelId) {
@@ -259,7 +261,7 @@ async function submitScore(
       throw new DomainError("DUPLICATE_SCORE_FACT", "This judge already has a score fact for the performance.");
     }
     const fact: StoredScoreFact = {
-      id: idFromCommand("score", `${scoreFactKey(context.round.id, context.contestantId, context.judgeId)}:${context.contextVersion}`),
+      id: idFromCommand("score", `${scoreFactKey(context.round.id, context.contestantId, context.judgeId)}:${context.contextVersion}:${context.mode}`),
       activityId: context.activity.id,
       roundId: context.round.id,
       performanceId: context.performanceId,
@@ -268,6 +270,7 @@ async function submitScore(
       panelSnapshotId: context.panelId,
       seatId: input.seatId,
       source,
+      mode: context.mode,
       total: normalized.total,
       criteria: normalized.criteria,
       notes: normalized.notes,
@@ -346,7 +349,7 @@ export async function editScoreFact(
     payload: { ...input, reason },
   }, async (trx) => {
     const context = await loadScoreContext(trx, input, true);
-    const fact = await getScoreFactForUpdate(trx, context.round.id, context.contestantId, context.judgeId);
+    const fact = await getScoreFactForUpdate(trx, context.round.id, context.contestantId, context.judgeId, context.mode);
     if (fact === null) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
     if (input.scoreFactId !== undefined && fact.id !== input.scoreFactId) {
       throw new DomainError("SCORE_FACT_NOT_FOUND", "The requested score fact does not match the scoring context.");
@@ -472,6 +475,9 @@ async function correctionContext(
   if (fact.panelSnapshotId !== panel.id) throw new DomainError("STALE_CONTEXT", "The score fact belongs to a superseded panel.");
   const session = await findRunningSessionByScope(trx, activity.id, input.scope);
   if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+  if (fact.mode !== session.mode) {
+    throw new DomainError("FORBIDDEN", "The score fact belongs to another execution mode.");
+  }
   return {
     activity,
     round,
