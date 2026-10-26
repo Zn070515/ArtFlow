@@ -1,6 +1,9 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 
 import { Landing } from "./routes/index.js";
+import { JoinPage } from "./routes/join.js";
+import { LoginPage } from "./routes/login.js";
+import { OpsPage } from "./routes/ops.js";
 import { ResultsRoute } from "./routes/results.js";
 import { RootLayout } from "./routes/__root.js";
 
@@ -18,7 +21,28 @@ const resultsRoute = createRoute({
   component: ResultsRoute,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, resultsRoute]);
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/login",
+  validateSearch: (search: Record<string, unknown>) => ({
+    next: typeof search.next === "string" ? search.next : undefined,
+  }),
+  component: LoginPage,
+});
+
+const joinRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/join",
+  component: JoinPage,
+});
+
+const opsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ops",
+  component: OpsPage,
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, resultsRoute, loginRoute, joinRoute, opsRoute]);
 
 export const router = createRouter({
   routeTree,
