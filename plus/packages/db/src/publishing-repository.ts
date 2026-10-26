@@ -362,12 +362,23 @@ export async function selectPublicResults(
     .where("public_code", "=", publicCode)
     .executeTakeFirst();
   if (activity === undefined) return null;
-  let query = db.selectFrom("result_release").selectAll()
+  const rows = await db.selectFrom("result_release").selectAll()
     .where("activity_id", "=", activity.id)
-    .where("status", "=", "active");
-  if (stageKey !== undefined) query = query.where("stage_key", "=", stageKey);
-  const rows = await query.orderBy("stage_key", "asc").orderBy("released_at", "desc").execute();
-  const mapped = rows.map((row) => {
+    .where("status", "=", "active")
+    .orderBy("stage_key", "asc")
+    .orderBy("released_at", "desc")
+    .execute();
+  const newest = [...rows].sort((left, right) => {
+    const leftAt = iso(left.released_at) ?? "";
+    const rightAt = iso(right.released_at) ?? "";
+    if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
+    return right.id.localeCompare(left.id);
+  })[0];
+  const activityTitle = newest === undefined
+    ? ""
+    : (json(newest.snapshot) as ResultSnapshot).activityTitle;
+  const visible = stageKey === undefined ? rows : rows.filter((row) => row.stage_key === stageKey);
+  const results = visible.map((row) => {
     const snapshot = json(row.snapshot) as ResultSnapshot;
     return {
       releaseId: row.id,
@@ -378,14 +389,5 @@ export async function selectPublicResults(
       awards: snapshot.awards,
     };
   });
-  const newest = [...rows].sort((left, right) => {
-    const leftAt = iso(left.released_at) ?? "";
-    const rightAt = iso(right.released_at) ?? "";
-    if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
-    return right.id.localeCompare(left.id);
-  })[0];
-  const activityTitle = newest === undefined
-    ? ""
-    : (json(newest.snapshot) as ResultSnapshot).activityTitle;
-  return { activity: { publicCode: activity.public_code }, activityTitle, results: mapped };
+  return { activity: { publicCode: activity.public_code }, activityTitle, results };
 }
