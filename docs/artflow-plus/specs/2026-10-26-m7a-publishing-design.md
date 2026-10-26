@@ -80,8 +80,9 @@ inputFingerprint      // 行内权威字段，不进 snapshot、不进 selector
 - 同一 `(activityId, stageKey)` 最多一条 ACTIVE release（部分唯一索引）；
 - revoke 只改状态，不删除历史；unlock 将 ACTIVE release 置为 `superseded`。
 
-`publicTitle` 由 snapshot 生成：`"{release 时的 activityTitle} · 正式赛果"`。
-活动之后改名不改变已发布 snapshot（`archive-identity` 的同一原则）。
+`publicTitle` 由 snapshot 生成：`"{release 时的 activityTitle} · {stage.label}"`，
+默认 stage 的 label 是 `正式赛果`。活动之后改名不改变已发布 snapshot
+（`archive-identity` 的同一原则）。
 
 ## Capability 契约
 
@@ -109,8 +110,8 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 ### confirm_stage_result
 
-输入：`stageKey`、`expectedSourceRevision`（podium candidate revision）、
-`expectedInputFingerprint`、`awards`、`note`。
+输入：`stageKey`、`scope`、`expectedSourceRevision`（podium candidate
+revision）、`expectedInputFingerprint`、`awards`、`note`。
 
 1. 锁 activity，再锁 stage result 行；`recomputePodiumCandidate` 也锁 activity，
    因此 confirm 读到的 latest candidate 不会被并发重算越过；
@@ -123,7 +124,8 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 ### release_result
 
-输入：`stageKey`、`expectedCandidateRevision`（stage result revision）、`note`。
+输入：`stageKey`、`scope`、`expectedCandidateRevision`（stage result
+revision）、`note`。
 
 - stage result 必须为 `confirmed` 且 revision 匹配（否则 `RESULT_NOT_CONFIRMED`
   / `STALE_REVISION`）；
@@ -134,7 +136,7 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 ### revoke_result_release
 
-输入：`releaseId`、`note`。
+输入：`releaseId`、`scope`、`note`。
 
 - 锁 release 行；必须属于该活动且为 ACTIVE，否则
   `RESULT_RELEASE_NOT_ACTIVE`（不按 stage 猜测“当前 active”）；
@@ -142,7 +144,8 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 ### unlock_stage_result
 
-输入：`stageKey`、`expectedCandidateRevision`（stage result revision）、`note`。
+输入：`stageKey`、`scope`、`expectedCandidateRevision`（stage result
+revision）、`note`。
 
 - stage result 必须为 `confirmed` 且 revision 匹配；
 - stage result → `ready_to_confirm`，revision + 1；
@@ -152,7 +155,7 @@ audit、outbox，并要求 `publishing` scope 有运行中的 execution session�
 
 ### edit_result_publication
 
-输入：`stageKey`、`expectedVersion`、`title`、`content`。
+输入：`stageKey`、`scope`、`expectedVersion`、`title`、`content`。
 
 - 存在 ACTIVE release → `RESULT_POST_FROZEN`，无副作用；
 - publication 不存在时，`expectedVersion` 必须为 0，创建草稿；
