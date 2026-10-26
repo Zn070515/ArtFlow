@@ -274,6 +274,7 @@ it("a pack diagnoses a disabled dependency instead of silently re-enabling it", 
 
 it("the default registry exposes only implemented capabilities", () => {
   expect(defaultCapabilityRegistry.list().map((item) => item.manifest.identity)).toEqual([
+    "archive",
     "competition",
     "materials",
     "publishing",
@@ -286,6 +287,15 @@ it("the default registry exposes only implemented capabilities", () => {
     answers: { "publish-results": false, archive: false },
   });
   expect(result.ok).toBe(true);
+});
+
+it("instantiates the Singer Pack with every default now that archive exists", () => {
+  const result = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.instantiation.enabledCapabilities).toEqual(
+    expect.arrayContaining(["archive", "competition", "materials", "publishing", "questionnaire", "registration"]),
+  );
 });
 
 it("allows browser voting without ticketing and rejects ticket voting without it", () => {

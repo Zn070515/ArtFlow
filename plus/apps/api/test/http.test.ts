@@ -383,9 +383,10 @@ dbIt("lists the registered capabilities using the shared manifest contract", asy
   const response = await app.inject({ method: "GET", url: "/api/capabilities" });
   expect(response.statusCode).toBe(200);
   const body = response.json() as { capabilities: unknown[] };
-  expect(body.capabilities).toHaveLength(7);
+  expect(body.capabilities).toHaveLength(8);
   expect(Value.Check(CapabilityManifestSchema, body.capabilities[0])).toBe(true);
   expect((body.capabilities as { identity: string }[]).map((item) => item.identity)).toEqual([
+    "archive",
     "competition",
     "materials",
     "publishing",
@@ -407,7 +408,7 @@ dbIt("lists activity packs and explains missing capabilities", async () => {
     method: "POST",
     url: "/api/packs/singer-competition/instantiate",
     headers: { "content-type": "application/json" },
-    payload: {},
+    payload: { enable: ["not-a-capability"] },
   });
   expect(response.statusCode).toBe(422);
   expect(response.json().code).toBe("PACK_COMPOSITION_INVALID");
