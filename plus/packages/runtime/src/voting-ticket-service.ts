@@ -280,6 +280,7 @@ export async function submitBallot(
     const execution = await findRunningSessionByScope(trx, input.activityId, input.scope);
     if (execution === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
     if (execution.definitionVersion !== voteSession.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
+    if (execution.mode !== voteSession.mode) throw new DomainError("STALE_CONTEXT", "The voting session belongs to another execution mode.");
     let ticketId: string | undefined;
     if (input.identity.type === "ticket") {
       if (voteSession.identityPolicy !== "ticket") throw new DomainError("BALLOT_IDENTITY_INVALID", "Ticket identity is not allowed for this voting session.");
@@ -382,6 +383,7 @@ export async function closeVoteSession(
     const execution = await findRunningSessionByScope(trx, input.activityId, input.scope);
     if (execution === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
     if (execution.definitionVersion !== session.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
+    if (execution.mode !== session.mode) throw new DomainError("STALE_CONTEXT", "The voting session belongs to another execution mode.");
     const closed: StoredVoteSession = { ...session, status: "closed", revision: session.revision + 1, closedAt: deps.now() };
     await updateVoteSessionStatus(trx, closed, input.expectedRevision, deps.now());
     await appendEngineEvent(trx, deps, {

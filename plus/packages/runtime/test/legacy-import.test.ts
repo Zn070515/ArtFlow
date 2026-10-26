@@ -127,6 +127,114 @@ describe.skipIf(!connectionString)("legacy import", () => {
     ]);
   });
 
+  it("keeps only the latest stage result when v1 has several versions", async () => {
+    const results = bundle.results as {
+      stageResults: Record<string, unknown>[];
+      releases: unknown[];
+    };
+    const latest = {
+      ...results.stageResults[0],
+      decisions: [{ rank: 1, contestantId: "legacy-user:1", score: "93.00" }],
+      confirmedAt: "2025-10-08T00:00:00Z",
+    };
+    const duplicated = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-5" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-5" },
+      results: { ...results, stageResults: [...results.stageResults, latest] },
+    };
+    const result = await importLegacyBundle(db, deps, {
+      commandId: "legacy-import-duplicate-stage",
+      bundle: duplicated,
+      dryRun: false,
+    });
+    const stages = await db.selectFrom("stage_result").selectAll()
+      .where("activity_id", "=", result.report.activityId).execute();
+    expect(stages).toHaveLength(1);
+    expect(stages[0]?.decisions).toMatchObject([{ score: "93.00" }]);
+  });
+
+  it("keeps a synthesized panel consistent with the round judge minimum", async () => {
+    const rounds = bundle.rounds as Record<string, unknown>[];
+    const variant = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-6" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-6" },
+      rounds: [{ ...rounds[0], judgeCount: 3, minimumJudges: 3 }],
+      competition: { ...(bundle.competition as Record<string, unknown>), panels: [], seats: [] },
+    };
+    const result = await importLegacyBundle(db, deps, {
+      commandId: "legacy-import-panel-minimum",
+      bundle: variant,
+      dryRun: false,
+    });
+    const panel = await db.selectFrom("panel_snapshot").selectAll()
+      .where("activity_id", "=", result.report.activityId).executeTakeFirstOrThrow();
+    expect(panel.expected_judges).toBeGreaterThanOrEqual(panel.minimum_judges);
+    expect(panel.minimum_judges).toBe(3);
+  });
+
+  it("applies drop_high_low when deriving a ranking", async () => {
+    const rounds = bundle.rounds as Record<string, unknown>[];
+    const scores = (bundle.competition as { scores: Record<string, unknown>[] }).scores;
+    const variant = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-7" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-7" },
+      rounds: [{ ...rounds[0], judgeCount: 3, minimumJudges: 1, scoringMethod: "drop_high_low" }],
+      competition: {
+        ...(bundle.competition as Record<string, unknown>),
+        panels: [],
+        seats: [],
+        performances: [],
+        rankings: [],
+        scores: [
+          { ...scores[0], legacyId: 91, judgeId: "legacy-judge:1", total: "99.00", criteria: { 总分: 99 } },
+          { ...scores[0], legacyId: 92, judgeId: "legacy-judge:2", total: "90.00", criteria: { 总分: 90 } },
+          { ...scores[0], legacyId: 93, judgeId: "legacy-judge:3", total: "60.00", criteria: { 总分: 60 } },
+        ],
+      },
+      counts: { ...(bundle.counts as Record<string, unknown>), scores: 3 },
+    };
+    const result = await importLegacyBundle(db, deps, {
+      commandId: "legacy-import-drop-high-low",
+      bundle: variant,
+      dryRun: false,
+    });
+    const ranking = await db.selectFrom("ranking_snapshot").selectAll()
+      .where("activity_id", "=", result.report.activityId).executeTakeFirstOrThrow();
+    expect(ranking.rows).toMatchObject([{ contestantId: "legacy-user:1", total: "90.00" }]);
+  });
+
+  it("keeps only the last panel current when a round has several snapshots", async () => {
+    const panels = (bundle.competition as { panels: Record<string, unknown>[] }).panels;
+    const variant = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-8" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-8" },
+      competition: {
+        ...(bundle.competition as Record<string, unknown>),
+        panels: [
+          panels[0],
+          { ...panels[0], legacyId: 22 },
+        ],
+      },
+    };
+    const result = await importLegacyBundle(db, deps, {
+      commandId: "legacy-import-multiple-panels",
+      bundle: variant,
+      dryRun: false,
+    });
+    const current = await db.selectFrom("panel_snapshot").selectAll()
+      .where("activity_id", "=", result.report.activityId)
+      .where("current", "=", true).execute();
+    expect(current).toHaveLength(1);
+    const all = await db.selectFrom("panel_snapshot").selectAll()
+      .where("activity_id", "=", result.report.activityId).execute();
+    expect(all).toHaveLength(2);
+    expect(all.filter((panel) => panel.state === "superseded")).toHaveLength(1);
+  });
+
   it("replays the same bundle without duplicating rows", async () => {
     const imported = await importLegacyBundle(db, deps, {
       commandId: "legacy-import-1",

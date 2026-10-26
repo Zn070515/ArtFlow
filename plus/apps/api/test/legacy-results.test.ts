@@ -57,6 +57,42 @@ describe.skipIf(!connectionString)("legacy published results", () => {
     await admin.end();
   });
 
+  it("normalizes a snake_case v1 snapshot into the public selector shape", async () => {
+    const snakeCase = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-4" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-4" },
+      results: {
+        ...(bundle.results as Record<string, unknown>),
+        releases: [{
+          ...((bundle.results as { releases: Record<string, unknown>[] }).releases[0] ?? {}),
+          status: "active",
+          snapshot: {
+            activity_title: "2025 院十佳",
+            public_title: "2025 院十佳 · 正式赛果",
+            stage_key: "final_podium",
+            decisions: [{ rank: 1, contestant_id: "legacy-user:1", score: "91.50" }],
+            awards: [{ award: "冠军", contestant_id: "legacy-user:1" }],
+          },
+        }],
+      },
+    };
+    await importLegacyBundle(db, deps, {
+      commandId: "legacy-results-snake",
+      bundle: snakeCase,
+      dryRun: false,
+    });
+    const response = await app.inject({ method: "GET", url: "/api/public/results/LEG-4" });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      activityTitle: "2025 院十佳",
+      results: [{
+        publicTitle: "2025 院十佳 · 正式赛果",
+        decisions: [{ rank: 1, contestantId: "legacy-user:1", score: "91.50" }],
+      }],
+    });
+  });
+
   it("serves the imported v1 snapshot through the public results selector", async () => {
     const response = await app.inject({ method: "GET", url: "/api/public/results/LEG-1" });
     expect(response.statusCode, response.body).toBe(200);

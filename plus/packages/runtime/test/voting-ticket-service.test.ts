@@ -675,6 +675,35 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     expect(Number((await db.selectFrom("judge_session").select(({ fn }) => fn.countAll<number>().as("count")).where("activity_id", "=", judgeActivity).executeTakeFirstOrThrow()).count)).toBe(1);
   });
 
+  it("binds ballots and closing to the vote session mode", async () => {
+    const activityId = await seedActivity(undefined, false, "anonymous");
+    const opened = await openVoteSession(db, deps(staff), {
+      commandId: "mode-vote-open",
+      activityId,
+      sessionId: `vote-mode-${activityId}`,
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+    const optionId = opened.body.options[0]?.id ?? "";
+    await db.updateTable("execution_session").set({ mode: "rehearsal" })
+      .where("activity_id", "=", activityId).execute();
+    await expect(submitBallot(db, deps(judgeA), {
+      commandId: "mode-vote-ballot",
+      activityId,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [optionId],
+      identity: { type: "anonymous" },
+    })).rejects.toMatchObject({ code: "STALE_CONTEXT" });
+    await expect(closeVoteSession(db, deps(staff), {
+      commandId: "mode-vote-close",
+      activityId,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      expectedRevision: 0,
+    })).rejects.toMatchObject({ code: "STALE_CONTEXT" });
+  });
+
   it("tags a vote session with the execution mode", async () => {
     const activityId = await seedActivity();
     await db.updateTable("execution_session").set({ mode: "rehearsal" })

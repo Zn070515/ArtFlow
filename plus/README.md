@@ -384,7 +384,9 @@ The judge claims an entry seat, polls `/api/judge/context`, and submits three
 rubric scores as `direct_judge`. Staff then lock the performance, lock the round,
 and resolve the ranking. SSE only invalidates the Live query; when it fails the
 page polls every 5 seconds, and `/events` + `/execution-state` remain the
-authoritative recovery path.
+authoritative recovery path. `/events` and `/stream` require an operations
+session (`studio.manage`, `competition.manage`, or `judge.manage`): their
+payloads contain judging and registration details.
 
 `apps/api/scripts/seed-live.ts` seeds `E2E-LIVE-*` (competition + ticketing,
 approved `singer-a`, final roster) and writes `.e2e-live.json` for the Playwright

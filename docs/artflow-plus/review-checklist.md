@@ -206,6 +206,20 @@
 - [x] 材料只迁元数据（`storage_key=legacy:<id>`），不复制字节。
 - [x] 导入历史活动后公开结果页可读。
 
+### 2026-10-26 M8 review fixes
+
+- [x] `/events` 与 `/stream` 需要 `studio.manage`/`competition.manage`/`judge.manage`；
+      匿名读不到评分/审核私有事实。
+- [x] v1 snake_case 结果快照在导入时归一化为 v2 camelCase，公开结果页可见。
+- [x] v1 投票目的 `selection`/`repechage` 映射为 `popularity` 并记入 `unsupported`。
+- [x] 同一 stage_key 的多个 v1 结果只导入最新版本；导入器按 stageKey 去重。
+- [x] ballot 提交与关票要求 execution.mode 与 vote_session.mode 一致。
+- [x] 合成 panel 满足 `minimum_judges <= expected_judges`。
+- [x] 派生排名遵守 `drop_high_low`。
+- [x] 导出器迁移材料元数据（含审核状态与 review note），不再硬编码空数组。
+- [x] 同一 round 多个 panel 只有最后一个 current，版本号递增。
+- [x] MemoryRateLimiter 定期清扫过期窗口，避免 key 无限增长。
+
 ## 数据与并发
 
 - [ ] 唯一性由数据库约束 + command 双重保证。

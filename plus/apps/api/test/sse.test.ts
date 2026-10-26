@@ -18,6 +18,7 @@ if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
 const schema = `artflow_sse_${Date.now()}_${process.pid}`;
 
 let app: FastifyInstance;
+let anonymousApp: FastifyInstance;
 let db: Kysely<Database>;
 let admin: Client;
 let baseUrl = "";
@@ -77,12 +78,15 @@ beforeAll(async () => {
   db = createDb({ connectionString, schema });
   await migrate(db);
   app = await buildApp({ db, actor: studioActor });
+  anonymousApp = await buildApp({ db });
+  await anonymousApp.ready();
   const address = await app.listen({ port: 0, host: "127.0.0.1" });
   baseUrl = address.replace("127.0.0.1", "localhost");
 });
 
 afterAll(async () => {
   if (!connectionString) return;
+  await anonymousApp.close();
   await app.close();
   await closeDb(db);
   await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
@@ -150,4 +154,18 @@ dbIt("streams a fact over SSE and recovers it with the HTTP cursor", async () =>
   };
   expect(feed.events.every((event) => event.sequence > lastId)).toBe(true);
   expect(feed.headCursor).toBe(lastId);
+});
+
+dbIt("requires an operations session for the event feed and stream", async () => {
+  const activityId = await releasedActivity();
+  const events = await anonymousApp.inject({
+    method: "GET",
+    url: `/api/activities/${activityId}/events`,
+  });
+  expect(events.statusCode).toBe(401);
+  const stream = await anonymousApp.inject({
+    method: "GET",
+    url: `/api/activities/${activityId}/stream`,
+  });
+  expect(stream.statusCode).toBe(401);
 });
