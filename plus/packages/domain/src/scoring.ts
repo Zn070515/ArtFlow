@@ -66,10 +66,6 @@ export function decimalValue(value: DecimalInput, decimals = 2): DecimalValue {
   return new Decimal(value).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP).toFixed(decimals);
 }
 
-export function roundScore(value: DecimalInput, decimals = 2): DecimalValue {
-  return decimalValue(value, decimals);
-}
-
 export function compareScores(left: DecimalInput, right: DecimalInput): number {
   return new Decimal(left).comparedTo(new Decimal(right));
 }

@@ -18,7 +18,6 @@
   },
   "dependencies": {
     "@artflow-plus/domain": "workspace:*",
-    "decimal.js": "10.6.0",
     "kysely": "0.29.7",
     "pg": "8.23.1"
   },

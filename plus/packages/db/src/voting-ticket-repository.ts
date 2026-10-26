@@ -341,19 +341,6 @@ export async function countBallots(
   return Number(row.count);
 }
 
-export async function countVotesByOption(
-  db: Kysely<Database>,
-  sessionId: string,
-): Promise<Readonly<Record<string, number>>> {
-  const rows = await db.selectFrom("vote_record")
-    .select(["vote_record.option_id", ({ fn }) => fn.countAll<number>().as("count")])
-    .where("vote_record.session_id", "=", sessionId)
-    .where("vote_record.ballot_id", "in", validBallots(db, sessionId).select("ballot.id"))
-    .groupBy("vote_record.option_id")
-    .execute();
-  return Object.fromEntries(rows.map((row) => [row.option_id, Number(row.count)]));
-}
-
 export async function findTicketByCredential(
   db: Kysely<Database>,
   publicCode: string,

@@ -246,9 +246,6 @@ importers:
       '@artflow-plus/domain':
         specifier: workspace:*
         version: link:../domain
-      decimal.js:
-        specifier: 10.6.0
-        version: 10.6.0
       kysely:
         specifier: 0.29.7
         version: 0.29.7
