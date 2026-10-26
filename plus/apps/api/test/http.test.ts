@@ -383,11 +383,12 @@ dbIt("lists the registered capabilities using the shared manifest contract", asy
   const response = await app.inject({ method: "GET", url: "/api/capabilities" });
   expect(response.statusCode).toBe(200);
   const body = response.json() as { capabilities: unknown[] };
-  expect(body.capabilities).toHaveLength(6);
+  expect(body.capabilities).toHaveLength(7);
   expect(Value.Check(CapabilityManifestSchema, body.capabilities[0])).toBe(true);
   expect((body.capabilities as { identity: string }[]).map((item) => item.identity)).toEqual([
     "competition",
     "materials",
+    "publishing",
     "questionnaire",
     "registration",
     "ticketing",
