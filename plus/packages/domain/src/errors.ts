@@ -81,6 +81,8 @@ export type DomainErrorCode =
   | "ARCHIVE_VOTE_SESSION_OPEN"
   | "ARCHIVE_INTEGRITY_FAILED"
   | "ARCHIVE_NOT_FOUND"
+  | "CSRF_INVALID"
+  | "USERNAME_TAKEN"
   | "RATE_LIMITED";
 
 /**

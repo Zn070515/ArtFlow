@@ -8,4 +8,5 @@ export * from "./execution.js";
 export * from "./voting.js";
 export * from "./publishing.js";
 export * from "./archive.js";
+export * from "./registration.js";
 export * from "./packs.js";

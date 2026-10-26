@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 
 import {
   getLocalAccount,
@@ -66,4 +66,54 @@ export async function resolveActorFromBearer(
   if (!token?.trim()) return null;
   const session = await getLocalSession(db, token.trim(), now.toISOString());
   return session?.actor ?? null;
+}
+
+export function csrfTokenFor(sessionToken: string, secret: string): string {
+  return createHmac("sha256", secret).update(`csrf:${sessionToken}`).digest("hex");
+}
+
+export async function resolveLocalSession(
+  db: Kysely<Database>,
+  token: string,
+  now: string,
+) {
+  return getLocalSession(db, token, now);
+}
+
+/**
+ * Self-service participant account. The actor id is opaque; the username is the
+ * login name, not a public identity.
+ */
+export async function registerParticipantAccount(
+  db: Kysely<Database>,
+  input: { readonly username: string; readonly password: string },
+): Promise<{ readonly token: string; readonly actor: ActorContext; readonly expiresAt: string }> {
+  const username = input.username.trim();
+  if (!/^[A-Za-z0-9_.-]{3,64}$/.test(username)) {
+    throw new DomainError("INVALID_INPUT", "Username must be 3-64 letters, numbers, dots, dashes, or underscores.");
+  }
+  if (input.password.length < 8 || input.password.length > 128) {
+    throw new DomainError("INVALID_INPUT", "Password must be 8-128 characters.");
+  }
+  if ((await getLocalAccount(db, username)) !== null) {
+    throw new DomainError("USERNAME_TAKEN", "This username is already registered.");
+  }
+  try {
+    await createLocalAccount(db, {
+      username,
+      password: input.password,
+      actor: {
+        actorId: `participant:${randomUUID()}`,
+        actorType: "user",
+        roles: ["participant"],
+        permissions: [],
+      },
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "23505") {
+      throw new DomainError("USERNAME_TAKEN", "This username is already registered.");
+    }
+    throw error;
+  }
+  return authenticateLocalAccount(db, { username, password: input.password });
 }

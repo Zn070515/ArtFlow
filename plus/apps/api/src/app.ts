@@ -38,8 +38,9 @@ import {
   CloseActivityBodySchema,
   RenameActivityBodySchema,
   UnarchiveActivityBodySchema,
+  RegisterParticipantBodySchema,
 } from "@artflow-plus/contracts";
-import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, getVoteSession, selectPublicResults, type Database } from "@artflow-plus/db";
+import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, getVoteSession, revokeLocalSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
   defaultCapabilityRegistry,
   DomainError,
@@ -118,14 +119,17 @@ import {
   readArchiveFile,
   renameActivity,
   unarchiveActivity,
+  csrfTokenFor,
+  registerParticipantAccount,
+  resolveLocalSession,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
 import swagger from "@fastify/swagger";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import type { Kysely } from "kysely";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
 export interface AppOptions {
   readonly db: Kysely<Database>;
@@ -218,6 +222,8 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   RESULT_CANDIDATE_HOLD: 409,
   AWARD_INVALID: 422,
   FORMAL_MODE_REQUIRED: 409,
+  CSRF_INVALID: 403,
+  USERNAME_TAKEN: 409,
   ACTIVITY_ARCHIVED: 409,
   ARCHIVE_RESULT_NOT_RELEASED: 409,
   ARCHIVE_ROUND_NOT_LOCKED: 409,
@@ -482,14 +488,53 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const deps =
     options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
+  const isProduction =
+    process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+  const sessionSecret =
+    deps.credentialSecret ??
+    process.env.ARTFLOW_PLUS_CREDENTIAL_SECRET ??
+    (isProduction ? "" : "artflow-plus-development-secret");
+  if (sessionSecret === "") {
+    throw new Error("ARTFLOW_PLUS_CREDENTIAL_SECRET is required in production.");
+  }
+  const secureCookie = isProduction ? "; Secure" : "";
+
+  function setSessionCookies(reply: FastifyReply, token: string, csrf: string): void {
+    reply.header("set-cookie", [
+      `artflow_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${secureCookie}`,
+      `artflow_csrf=${csrf}; Path=/; SameSite=Strict; Max-Age=28800${secureCookie}`,
+    ]);
+  }
+
+  function clearSessionCookies(reply: FastifyReply): void {
+    reply.header("set-cookie", [
+      `artflow_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookie}`,
+      `artflow_csrf=; Path=/; SameSite=Strict; Max-Age=0${secureCookie}`,
+    ]);
+  }
+
+  function publicActor(actor: ActorContext): ActorContext {
+    const { authContext: _authContext, ...rest } = actor;
+    return rest;
+  }
+
+  async function requestSession(request: FastifyRequest) {
+    const token = cookieValue(request, "artflow_session") ?? bearerToken(request);
+    if (token === undefined || token.trim() === "") return null;
+    return resolveLocalSession(db, token.trim(), new Date().toISOString());
+  }
+
   async function requestActor(request: FastifyRequest): Promise<ActorContext> {
     if (options.actor !== undefined) return options.actor;
     if (baseDeps.actor !== undefined && baseDeps.actor.actorId !== "system") {
       return baseDeps.actor;
     }
-    const actor = await resolveActorFromBearer(db, bearerToken(request));
+    const actor = await resolveActorFromBearer(
+      db,
+      cookieValue(request, "artflow_session") ?? bearerToken(request),
+    );
     if (actor === null) {
-      throw new DomainError("UNAUTHENTICATED", "A valid Bearer session is required.");
+      throw new DomainError("UNAUTHENTICATED", "A valid session is required.");
     }
     return actor;
   }
@@ -524,6 +569,28 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return round;
   }
 
+  app.addHook("onRequest", async (request) => {
+    if (request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") return;
+    if (
+      request.url.startsWith("/api/auth/login") ||
+      request.url.startsWith("/api/auth/register") ||
+      request.url.startsWith("/api/auth/logout")
+    ) {
+      return;
+    }
+    if (bearerToken(request) !== undefined) return;
+    const sessionToken = cookieValue(request, "artflow_session");
+    if (sessionToken === undefined) return;
+    const provided = request.headers["x-csrf-token"];
+    const expected = csrfTokenFor(sessionToken, sessionSecret);
+    const providedText = typeof provided === "string" ? provided : "";
+    const left = Buffer.from(providedText);
+    const right = Buffer.from(expected);
+    if (left.length !== right.length || !timingSafeEqual(left, right)) {
+      throw new DomainError("CSRF_INVALID", "A valid CSRF token is required.");
+    }
+  });
+
   await app.register(swagger, {
     openapi: {
       info: { title: "ArtFlow-Plus API", version: "0.0.0" },
@@ -545,12 +612,56 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.post(
     "/api/auth/login",
     { schema: { body: LoginBody } },
-    async (request) => {
+    async (request, reply) => {
       const body = request.body as { username: string; password: string };
       const result = await authenticateLocalAccount(db, body);
-      return { token: result.token, expiresAt: result.expiresAt };
+      const csrf = csrfTokenFor(result.token, sessionSecret);
+      setSessionCookies(reply, result.token, csrf);
+      return {
+        token: result.token,
+        actor: publicActor(result.actor),
+        csrfToken: csrf,
+        expiresAt: result.expiresAt,
+      };
     },
   );
+
+  app.post(
+    "/api/auth/register",
+    { schema: { body: RegisterParticipantBodySchema } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "auth-register", 5);
+      const body = request.body as { username: string; password: string };
+      const result = await registerParticipantAccount(db, body);
+      const csrf = csrfTokenFor(result.token, sessionSecret);
+      setSessionCookies(reply, result.token, csrf);
+      return reply.status(201).send({
+        token: result.token,
+        actor: publicActor(result.actor),
+        csrfToken: csrf,
+        expiresAt: result.expiresAt,
+      });
+    },
+  );
+
+  app.get("/api/auth/me", async (request) => {
+    const session = await requestSession(request);
+    if (session === null) throw new DomainError("UNAUTHENTICATED", "A valid session is required.");
+    return {
+      actor: publicActor(session.actor),
+      csrfToken: csrfTokenFor(session.token, sessionSecret),
+      expiresAt: session.expiresAt,
+    };
+  });
+
+  app.post("/api/auth/logout", async (request, reply) => {
+    const token = cookieValue(request, "artflow_session") ?? bearerToken(request);
+    if (token !== undefined && token.trim() !== "") {
+      await revokeLocalSession(db, token.trim(), new Date().toISOString());
+    }
+    clearSessionCookies(reply);
+    return { ok: true };
+  });
 
   app.get("/api/capabilities", async () => ({
     capabilities: registry.list().map((registration) => registration.manifest),
