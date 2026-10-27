@@ -3,6 +3,20 @@
 This directory is the v2 workspace. The Django application at the repository
 root is the frozen v1 reference implementation; nothing here imports it.
 
+## Current state
+
+M0–M13 are complete. The workspace covers the full activity journey —
+registration → evaluation → voting → publishing → archive — plus grouping, the
+public vote page, and one protected realtime core. Production still runs v1 on
+`main`; the cutover code and runbooks are ready, but the domain has not been
+switched. Milestone exits and evidence live in
+`docs/artflow-plus/roadmap.md`.
+
+The Live console and the voting card share the single WebSocket core in
+`packages/realtime`. Sockets only invalidate queries; HTTP remains the recovery
+authority. Two topics exist: `voting:<activityId>` and
+`activity:<activityId>`.
+
 ## First vertical slice
 
 `packages/domain` implements the GOAL's kernel shape:
@@ -84,11 +98,11 @@ instantiateActivityPack(SINGER_COMPETITION_PACK, registry, { answers })
   → enabled capabilities + compilable empty definition
 ```
 
-The default registry exposes the capabilities implemented today
-(`competition`, `materials`, `questionnaire`, `registration`, `ticketing`, and
-`voting`). A Pack that
-references a capability scheduled for M5-M7 still fails with
-`CAPABILITY_UNKNOWN` diagnostics rather than producing placeholders.
+The default registry exposes every implemented capability (`registration`,
+`questionnaire`, `materials`, `competition`, `voting`, `ticketing`,
+`publishing`, `archive`, and `grouping`). A Pack that references an unknown
+capability fails with `CAPABILITY_UNKNOWN` diagnostics rather than producing
+placeholders.
 
 ## Execution runtime (M3)
 
@@ -103,8 +117,8 @@ POST /api/activities/:id/executions          start a scoped session
 POST /api/activities/:id/executions/:sid/close
 GET  /api/activities/:id/executions          authoritative read
 GET  /api/activities/:id/events?after=       cursor recovery (authoritative)
-GET  /api/activities/:id/stream              SSE (enhancement only)
 GET  /api/activities/:id/execution-state     projection + stale watermark
+WS   /api/realtime                           invalidation-only notifications
 ```
 
 Every release freezes its execution semantics: capability versions, declared
@@ -201,17 +215,19 @@ pnpm -C plus --filter @artflow-plus/worker ops rebuild --activity <id> --mode fo
 ```text
 plus/
 ├── apps/
-│   ├── api/          # Fastify composition root, HTTP contracts, SSE
+│   ├── api/          # Fastify composition root, HTTP contracts, /api/realtime
+│   ├── web/          # React 19 surfaces and the public vote page
 │   └── worker/       # outbox relay + pg-boss scheduling
 ├── packages/
 │   ├── domain/       # engine kernel, registry, packs, compilers, projections
-│   ├── contracts/    # TypeBox/JSON Schema contracts
+│   ├── runtime/      # durable command service, repositories orchestration, relay
 │   ├── db/           # Kysely schema access and module-owned migrations
-│   └── runtime/      # durable command service, repositories orchestration, relay
+│   ├── contracts/    # TypeBox/JSON Schema contracts
+│   └── realtime/     # protected WebSocket core (see realtime/CORE.md)
 └── README.md
 ```
 
-Planned but not created yet: `apps/web`, `packages/ui`.
+Planned but not created yet: `packages/ui`.
 
 Tooling baseline (ADR-0002): Node 24 LTS (`.node-version` 24.22.0), TypeScript 7
 strict, pnpm 12.14.0 workspaces, Fastify 5 + TypeBox, Kysely, pg-boss 12,
@@ -243,10 +259,13 @@ new architecture.
 - The local-session migration is `0004_local_sessions`; registration/material
   projections are in `0005_registration_materials`.
 
-## Next slice
+## Next steps
 
-1. M8b Ops + Participant Portal: login, registration, questionnaire, materials,
-   and roster review. M8a web shell and public results are complete.
+1. Execute the production cutover when the operator chooses the window; follow
+   `docs/artflow-plus/cutover-runbook.md`.
+2. Close the remaining product gaps: ticket-backed voting, participant account
+   claim/migration, a public program page for stage shows, bracket/composite
+   scoring, XLSX export, on-site display, and multi-instance realtime broadcast.
 
 ## M7a publishing / results
 
@@ -382,11 +401,12 @@ Staff start a `judging` session, prepare rounds, activate the panel, open a
 performance from the final roster, and generate `/judge/<publicCode>?capability=…`.
 The judge claims an entry seat, polls `/api/judge/context`, and submits three
 rubric scores as `direct_judge`. Staff then lock the performance, lock the round,
-and resolve the ranking. SSE only invalidates the Live query; when it fails the
-page polls every 5 seconds, and `/events` + `/execution-state` remain the
-authoritative recovery path. `/events` and `/stream` require an operations
-session (`studio.manage`, `competition.manage`, or `judge.manage`): their
-payloads contain judging and registration details.
+and resolve the ranking. The Live page subscribes to `activity:<id>` through
+`@artflow-plus/realtime`; messages only invalidate queries, and when the socket
+fails the page polls every 5 seconds. `/events` + `/execution-state` remain the
+authoritative recovery path and require an operations session
+(`studio.manage`, `competition.manage`, or `judge.manage`): their payloads
+contain judging and registration details.
 
 `apps/api/scripts/seed-live.ts` seeds `E2E-LIVE-*` (competition + ticketing,
 approved `singer-a`, final roster) and writes `.e2e-live.json` for the Playwright
@@ -502,8 +522,8 @@ pnpm -C plus --filter @artflow-plus/api exec vitest run test/activity-shapes.tes
 ```
 
 Known gaps (documented in `docs/artflow-plus/shape-validation.md`): no public
-program page for stage shows, no publishing path for vote-only activities, no
-bracket/composite scoring, and no participant account claim/migration.
+program page for stage shows, no bracket/composite scoring, no participant
+account claim/migration, and no ticket-backed voting entry.
 
 ## M6 feature slice and M6.5 authority hardening complete
 
@@ -521,3 +541,50 @@ bracket/composite scoring, and no participant account claim/migration.
   ballots, and judge-seat claims.
 - Configure `ARTFLOW_PLUS_CREDENTIAL_SECRET` outside development; production has
   no signing-secret fallback.
+
+## M9–M13 feature slices
+
+Grouping (M9) is a standalone capability over registration and competition:
+
+```text
+GET   /api/activities/:id/grouping
+POST  /api/activities/:id/grouping/stages
+PATCH /api/activities/:id/grouping/stages/:stageId/groups
+POST  /api/activities/:id/grouping/stages/:stageId/confirm
+POST  /api/activities/:id/grouping/stages/:stageId/freeze
+POST  /api/activities/:id/grouping/stages/:stageId/correct
+POST  /api/activities/:id/grouping/stages/:stageId/cancel
+PATCH /api/activities/:id/grouping/stages/:stageId/window
+```
+
+Stages move `draft → confirmed → frozen` (or `cancelled`). Membership history is
+append-only, the roster source is fingerprinted, and an unfrozen stage blocks
+archival. See `docs/domains/grouping.md` and GRP-01…09.
+
+Vote-result publishing (M10) decouples `publishing` from `competition`, so a
+`vote-poll` activity can confirm a closed vote session and publish its tally:
+
+```text
+GET  /api/activities/:id/publishing/vote-results/:sessionId
+POST /api/activities/:id/publishing/stage-results/:stageKey/confirm-vote
+```
+
+The participant vote page (M12) is public and anonymous by default:
+
+```text
+GET /api/public/vote/:sessionId     # formal sessions only; no counts or identities
+GET /vote/<sessionId>               # web route; ticket-backed sessions are blocked
+```
+
+Realtime (M11, M13) is one protected WebSocket core:
+
+```text
+WS /api/realtime
+```
+
+`packages/realtime` owns the protocol, the Fastify plugin, and the browser
+client; feature code only registers a `RealtimeTopic`. Topics are
+`voting:<activityId>` (aggregate vote read) and `activity:<activityId>`
+(outbox-head invalidation). The Live console and the voting card both fall back
+to polling when the socket fails. `GATE-REALTIME-CORE-01` enforces the transport
+monopoly; the contract is in `packages/realtime/CORE.md`.

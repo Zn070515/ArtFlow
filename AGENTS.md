@@ -1,7 +1,9 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-ArtFlow is a Django monolith for student arts department activity operations. Core project settings live in `config/`; feature apps are split by domain:
+ArtFlow is a two-era repository. `main` is the **1.x production line** (Django monolith); `artflow-plus` is the **v2 development line (ArtFlow-Plus)** under `plus/`. This section describes v1; the v2 layout follows it.
+
+Core project settings live in `config/`; feature apps are split by domain:
 
 - `accounts/`: custom user model, roles, login/register flows.
 - `entry_access/`: entry points, access grants, and ephemeral entry sessions.
@@ -20,6 +22,34 @@ ArtFlow is a Django monolith for student arts department activity operations. Co
 - `exports/`, `archive/`, `incidents/`: export, archive, and incident records.
 
 Templates are under `templates/`. Tests live in the app that owns the behavior, either in `tests.py` or in `test_*.py` modules beside it. Local media under `media/` must not be committed.
+
+### ArtFlow-Plus (v2) layout
+
+v2 is a pnpm 12 workspace with Node 24, Fastify 5, Kysely/PostgreSQL 18, and React 19:
+
+- `plus/apps/api/`: Fastify HTTP + the single `/api/realtime` WebSocket endpoint; command routes, public reads, cookie sessions/CSRF.
+- `plus/apps/web/`: React + Vite + TanStack Router/Query; Studio, Ops, Live, Portal, and `/vote/<sessionId>`.
+- `plus/apps/worker/`: outbox relay (in-process 250ms loop + pg-boss backstop).
+- `plus/packages/domain/`: pure domain, capability registry, packs, compilers, command/event model.
+- `plus/packages/runtime/`: command handlers, projections, and capability services.
+- `plus/packages/db/`: Kysely schema, module-owned migrations, repositories.
+- `plus/packages/contracts/`: shared TypeBox schemas.
+- `plus/packages/realtime/`: the protected WebSocket core (`/protocol`, `/server`, `/client`); read `CORE.md` before touching it. Feature code registers `RealtimeTopic` definitions and must not open sockets directly (`GATE-REALTIME-CORE-01`).
+
+v2 commands (from the repository root):
+
+```powershell
+Set-Location plus
+pnpm install
+pnpm run check
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+$env:REQUIRE_DB = "1"
+pnpm run test
+pnpm --filter @artflow-plus/api start
+pnpm --filter @artflow-plus/web dev
+```
+
+The v2 API migrates on start. Browser E2E uses the `artflow_e2e` schema and `workers: 1`. Structural gates (`uv run pytest tests/gates -q`) include `GATE-PLUS-BOUNDARY-01` and `GATE-REALTIME-CORE-01`. Do not mechanically merge `main` into `artflow-plus`; implement v2 behavior from its own domain specs.
 
 ## Build, Test, and Development Commands
 Prefix shell commands with `rtk` in agent workflows when `rtk` is installed. If the command is unavailable on the current machine, run the command directly and report that fallback; do not block repository work on an optional wrapper.
@@ -76,7 +106,7 @@ git -c http.proxy=http://127.0.0.1:12334 -c https.proxy=http://127.0.0.1:12334 p
 
 ## Branch & Worktree Workflow
 
-Do not use `.worktree/`, `worktrees/`, or any other linked worktree for ArtFlow development. Work directly in the repository checkout on a short-lived branch created from a clean, up-to-date `main`:
+Do not use `.worktree/`, `worktrees/`, or any other linked worktree for ArtFlow development. Work directly in the repository checkout on a short-lived branch created from the clean, up-to-date base of the line you are changing: `main` for 1.x production fixes, `artflow-plus` for v2 work. Never merge across lines; the only cross-line step is the deliberate cutover.
 
 ```bash
 git status --short --branch
@@ -99,6 +129,8 @@ git pull --ff-only origin main
 git merge --no-ff <branch-name>
 git push origin main
 ```
+
+For v2 work, substitute `artflow-plus` for `main` in the commands above; the feature branch merges back into `artflow-plus`, not `main`.
 
 Keep the feature branch until the merge and push have been confirmed. Delete it only after the final Git status and remote state are verified.
 

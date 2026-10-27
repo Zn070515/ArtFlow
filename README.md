@@ -21,13 +21,29 @@
 </p>
 
 <p>
+  <strong>ArtFlow-Plus (v2)</strong>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/Node-24-339933?logo=node.js&logoColor=white" alt="Node 24">
+  <img src="https://img.shields.io/badge/TypeScript-7-3178C6?logo=typescript&logoColor=white" alt="TypeScript 7">
+  <img src="https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white" alt="Fastify 5">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19">
+  <img src="https://img.shields.io/badge/PostgreSQL-18-336791?logo=postgresql&logoColor=white" alt="PostgreSQL 18">
+  <img src="https://img.shields.io/badge/pnpm-12-F69220?logo=pnpm&logoColor=white" alt="pnpm 12">
+  <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/gates.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/gates.yml?branch=artflow-plus&label=Gates" alt="Plus gates status"></a>
+</p>
+
+<p>
   <img src="docs/assets/brand/artflow-logo.png" alt="ArtFlow 标志 · ArtFlow logo" height="108" width="122">
   &nbsp;&nbsp;
   <img src="docs/assets/brand/xinxu-studio-logo.png" alt="昕序软件科技标志 · XINXU SOFTWARE logo" height="108" width="131">
 </p>
 
 <p>
-  <a href="#模块与流程--modules--flows">模块与流程 · Modules &amp; flows</a> ·
+  <a href="#两条时代线--two-era-lines">两条时代线 · Two era lines</a> ·
+  <a href="#artflow-plusv2">ArtFlow-Plus（v2）</a> ·
+  <a href="#模块与流程--modules--flows">1.x 模块与流程 · v1 modules</a> ·
   <a href="#角色手册--role-handbooks">角色手册 · Role handbooks</a> ·
   <a href="#快速开始--setup">快速开始 · Get started</a> ·
   <a href="#先读这些--read-these-first">文档索引 · Docs</a> ·
@@ -41,18 +57,100 @@ ArtFlow 是面向学院文艺部的 **EventOps 活动运行平台**：把原本�
 
 第一个生产验证场景是学院十佳歌手大赛与毕业晚会，但 ArtFlow 的目标不是「十佳算分器」，而是一套可长期运行、可复用到多类学院文艺活动的运行平台。产品目标与领域边界见 [GOAL.md](GOAL.md)。
 
-> **项目状态：** 开发基线、验证入口与人工验收范围以 [开发基线](docs/development-baseline.md) 为准。本文档不复述具体的测试数量、commit 或 CI 运行结果，避免它们与代码漂移。
+> **项目状态：** 仓库里同时存在两条时代线。`main` 是 **1.x 生产维护线**（Django，线上 v1.0.x，故事见下文「1.x 生产线」）；`artflow-plus` 是 **v2 开发主线 ArtFlow-Plus**，M0–M13 已完成，cutover 代码与手册已就绪但**尚未切换生产**。开发基线与验证入口以 [开发基线](docs/development-baseline.md) 为准；本文档不复述具体测试数量、commit 或 CI 运行结果，避免与代码漂移。
+
+## 两条时代线 · Two era lines
+
+| 分支 | 角色 | 技术栈 | 状态 |
+|---|---|---|---|
+| [`main`](https://github.com/Zn070515/ArtFlow/tree/main) | ArtFlow 1.x 生产维护线 | Django 6 / SQLite·PostgreSQL / TypeScript 前端入口 | 线上 v1.0.x；只接受现场与部署的最小修复 |
+| [`artflow-plus`](https://github.com/Zn070515/ArtFlow/tree/artflow-plus) | ArtFlow-Plus（v2）开发主线 | Node 24 / Fastify 5 / TypeBox / Kysely / React 19 / PostgreSQL 18 | M0–M13 完成；cutover 待执行 |
+
+两条线的纪律：
+
+- **不机械合并**。v1 的局部实现 bug 只修 `main`；业务不变量提炼成 v2 的 domain spec / golden / contract，用 v2 自己的实现重新满足；部署事故提炼成部署不变量。
+- **版本 tag 只从 `main` 打**。`v*` tag 是发布权威；普通 push 不构建镜像。
+- **生产只在一条线上写**。cutover 是主域名整体替换，回滚边界是「首次 v2 正式写入前」（ADR-0023）。
+
+## ArtFlow-Plus（v2）
+
+v2 把 v1 的「按 app 与页面切分」重写成 **薄 Activity + capability 组合 + 不可变 release + 事件日志投影**：
+
+| 层 | 目录 | 职责 |
+|---|---|---|
+| API | [`plus/apps/api`](plus/apps/api) | Fastify 5 + TypeBox OpenAPI；command 路由、公开读、Cookie 会话与 CSRF、单一 WebSocket 端点 `/api/realtime` |
+| Web | [`plus/apps/web`](plus/apps/web) | React 19 + Vite + TanStack Router/Query；Studio / Ops / Live / Portal，以及观众投票页 `/vote/<sessionId>` |
+| Worker | [`plus/apps/worker`](plus/apps/worker) | 事务 outbox → 投影 relay（进程内 250ms 循环 + pg-boss 分钟级兜底） |
+| Domain | [`plus/packages/domain`](plus/packages/domain) | 纯领域：Activity、capability registry、compiler、Pack、command/event 模型 |
+| Runtime | [`plus/packages/runtime`](plus/packages/runtime) | command handler、投影、competition/voting/publishing/archive/grouping/legacy import |
+| DB | [`plus/packages/db`](plus/packages/db) | Kysely schema、module-owned migrations、repository |
+| Contracts | [`plus/packages/contracts`](plus/packages/contracts) | 服务端与浏览器共享的 TypeBox schema |
+| Realtime | [`plus/packages/realtime`](plus/packages/realtime) | 受保护的 WebSocket 核心（`/protocol`、`/server`、`/client`），契约见 [CORE.md](plus/packages/realtime/CORE.md) |
+
+**capability**：`registration`、`questionnaire`、`materials`、`competition`、`voting`、`ticketing`、`publishing`、`archive`、`grouping`。**Pack**：`singer-competition`、`stage-show`、`review-awards`、`vote-poll`。三个结构不同的活动已在同一内核上验证；新增形状只改组合与默认 definition。
+
+**里程碑**：M0 Legacy Extraction → M1 Engine Kernel → M2 Capability Composition → M3 Execution Runtime → M4 Registration → M5 Competition/Evaluation → M6 Voting/Ticketing → M7 Publishing/Archive → M8 Product Surfaces 与 Cutover → M9 Grouping → M10 投票结果发布 → M11 实时核心与投票 UI → M12 参与者投票页 → M13 Live 迁移到实时核心。逐项出口见 [roadmap](docs/artflow-plus/roadmap.md)。
+
+**关键不变量**：单写路径（receipt + audit + fact + outbox 同事务）、release 不可变、事件/投影按 mode 分区、公开结果唯一 selector、实时通道只做失效提示（HTTP 是恢复权威）。规则全集见 [不变量索引](docs/invariants/README.md)，结构门禁见 [门禁索引](docs/gates/README.md)。
+
+### v2 快速开始
+
+v2 使用 PostgreSQL 18 与 pnpm 12。本地开发库容器为 `artflow-plus-postgres`（`127.0.0.1:5433`，库 `artflow_plus`，用户 `artflow`，开发口令 `artflow_dev`）：
+
+```powershell
+# 1. 启动本地 PostgreSQL（Docker Desktop）
+docker start artflow-plus-postgres
+
+# 2. 安装并跑 v2 门禁
+Set-Location plus
+pnpm install
+pnpm run check
+
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+$env:REQUIRE_DB = "1"
+pnpm run test
+
+# 3. 本地启动 API（启动时自动 migrate）与 Web
+pnpm --filter @artflow-plus/api start   # 默认 127.0.0.1:3000
+pnpm --filter @artflow-plus/web dev     # Vite 代理 /api 到 API
+```
+
+环境变量：`ARTFLOW_PLUS_DATABASE_URL`（必填）、`ARTFLOW_PLUS_DB_SCHEMA`（可选隔离 schema）、`PORT` / `HOST`、`ARTFLOW_PLUS_CREDENTIAL_SECRET`、`ARTFLOW_PLUS_ARCHIVE_DIR`、`ARTFLOW_PLUS_INLINE_RELAY=1`（单进程/E2E 时在 API 内跑 relay）、`VITE_API_TARGET`（Web 代理目标）。浏览器 E2E 用独立 schema `artflow_e2e`。
+
+### v2 文档入口
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/artflow-plus/README.md`](docs/artflow-plus/README.md) | v2 开发主线、两条时代线与分支纪律 |
+| [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | M0–M13 里程碑与出口证据 |
+| [`docs/artflow-plus/shape-validation.md`](docs/artflow-plus/shape-validation.md) | 三类活动验证与明确缺口 |
+| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0029） |
+| [`docs/invariants/`](docs/invariants/README.md) | 领域不变量（AUTH/LIFE/CONC/SCOR/RES/TICK/GRP/RT/DEPL） |
+| [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / realtime） |
+| [`docs/gates/`](docs/gates/README.md) | 结构/golden/架构门禁 |
+| [`docs/artflow-plus/specs/`](docs/artflow-plus/specs/) · [`plans/`](docs/artflow-plus/plans/) | 每个 slice 的设计与实现计划 |
+| [`docs/artflow-plus/cutover-runbook.md`](docs/artflow-plus/cutover-runbook.md) · [`rehearsal-runbook.md`](docs/artflow-plus/rehearsal-runbook.md) | 生产切换与现场彩排 |
+
+### v2 部署与 cutover
+
+v2 以 compose `plus` profile 与 v1 同主机并行运行，使用独立的 PostgreSQL 库/卷/凭证；主域名通过 Caddy site profile **整体替换**，不按活动或路径混跑。回滚边界是首次 v2 正式写入前；切换后 v1 只读一个完整活动周期。具体预检、导入、smoke 与回滚步骤见 [cutover runbook](docs/artflow-plus/cutover-runbook.md)，拓扑决策见 ADR-0023。
 
 ## 先读这些 · Read these first
 
 | 文档 | 它约束什么 |
 |---|---|
-| [`GOAL.md`](GOAL.md) | 产品目标、领域边界与工程原则基线。 |
+| [`GOAL.md`](GOAL.md) | 产品目标、领域边界与工程原则基线（v2 身份权威）。 |
 | [`CLAUDE.md`](CLAUDE.md) | 编码代理的运行约定与仓库红线。 |
 | [`AGENTS.md`](AGENTS.md) | 模块划分、目录职责与贡献准则。 |
-| [`docs/development-baseline.md`](docs/development-baseline.md) | 已验证的开发与运行基线。 |
-| [`CHANGELOG.md`](CHANGELOG.md) | 按批次记录的权威收敛与行为变更。 |
+| [`docs/development-baseline.md`](docs/development-baseline.md) | v1 与 v2 已验证的开发与运行基线。 |
+| [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | v2 里程碑 M0–M13 与出口证据。 |
+| [`docs/artflow-plus/shape-validation.md`](docs/artflow-plus/shape-validation.md) | 三类活动验证与明确缺口。 |
+| [`CHANGELOG.md`](CHANGELOG.md) | v1 按批次记录的权威收敛与行为变更；v2 见 roadmap 与 ADR。 |
 | [`docs/`](docs/) | 部署、演练、备份恢复与现场运行手册。 |
+
+## 1.x 生产线 · 1.x production line
+
+以下章节描述 `main` 上的 Django 生产实现；v2 的对应能力见上文与 roadmap。
 
 ## 产品方向 · Product direction
 
@@ -320,9 +418,11 @@ farewell_show/       毕晚节目提交与节目单。
 voting/              观众投票会话、选项与投票记录。
 staff_panel/         工作人员与管理员后台视图。
 exports/ archive/ incidents/  导出、归档与异常事件记录。
-frontend/            浏览器端 TypeScript 入口（评分、投票、检票等）。
-deploy/              生产与现场事件 Compose 契约。
-docs/                开发基线、部署、演练与现场运行手册。
+frontend/            1.x 浏览器端 TypeScript 入口（评分、投票、检票等）。
+plus/                ArtFlow-Plus（v2）：apps/{api,web,worker} 与 packages/{domain,runtime,db,contracts,realtime}。
+deploy/              生产与现场事件 Compose 契约；deploy/plus 为 v2 镜像与 Caddy profile。
+docs/                开发基线、部署、演练、现场手册与 v2 设计/计划。
+docs/artflow-plus/   v2 目标、roadmap、规格、计划、彩排与 cutover 手册。
 docs/diagrams/       流程图产物与图源定义（archify 生成，可持续再生成）。
 scripts/             引导、校验、备份恢复与启动脚本。
 ```
@@ -342,10 +442,21 @@ scripts/             引导、校验、备份恢复与启动脚本。
 | 用户模型 | 使用 `settings.AUTH_USER_MODEL` 或 `get_user_model()`，不要直接引用 `auth.User`。 |
 | 不提交运行时产物 | `.env`、密钥、SQLite 数据库、上传文件、导出、归档与生成媒体都不入库。 |
 | 文档门禁 | 面向用户的文档改动后运行 `pwsh -NoProfile -File scripts/check_docs.ps1`。 |
+| v2 单写路径 | 每条 command 的 receipt、audit、事实与 outbox 在同一事务提交；同 command id 重试先 replay，不重新校验。 |
+| v2 release 不可变 | Release 冻结 capability 版本、declared scopes 与冲突策略；执行只读 release 快照，不读当前 registry。 |
+| v2 模式隔离 | 事实、选票、排名、事件与投影都按 mode 分区；测试/彩排不得污染正式结果。 |
+| v2 capability 边界 | capability 不跨表读写；只能通过命令、查询、事件、稳定 ID 与 binding 组合；`GATE-PLUS-BOUNDARY-01` 强制。 |
+| v2 实时核心 | 只有 `packages/realtime` 拥有 WebSocket 传输；socket 只做失效提示，HTTP 是恢复权威；`GATE-REALTIME-CORE-01` 强制。 |
 
 ## 开发与合并流程
 
-在干净且最新的 `main` 上创建短期分支，完成验证后在分支提交；由负责合并的人以非快进方式合入 `main` 并推送。提交前至少运行 Django 检查、迁移检查、测试和文档检查。完整的数据库、Docker、CI、故障排查和安全说明见 [开发基线](docs/development-baseline.md)。
+两条线各有自己的集成目标，**不要跨国合并**：
+
+- **1.x 修复**：从干净的 `main` 切短期分支（`hotfix/*`），验证后以非快进方式合入 `main` 并推送；`v*` tag 只从 `main` 打。
+- **v2 开发**：从干净的 `artflow-plus` 切短期分支（`feat/*`、`fix/*`、`docs/*`），验证后合入 `artflow-plus` 并推送。v1 的实现 bug 不 cherry-pick 进 v2；业务不变量转译成 v2 的 domain spec / golden。
+- **cutover**：主域名整体切换，不做长期双写；步骤见 [cutover runbook](docs/artflow-plus/cutover-runbook.md)。
+
+v1 提交前至少运行 Django 检查、迁移检查、测试和文档检查；v2 提交前运行 `pnpm -C plus run check`、`pnpm -C plus run test`（`REQUIRE_DB=1`）、`uv run pytest tests/gates -q` 与 `scripts/check_docs.ps1`。完整的数据库、Docker、CI、故障排查和安全说明见 [开发基线](docs/development-baseline.md)。
 
 ## 许可与商业授权 · License
 
