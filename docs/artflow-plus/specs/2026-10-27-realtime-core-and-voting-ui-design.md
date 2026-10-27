@@ -120,7 +120,7 @@ plus/packages/realtime/
 createRealtimeServer({
   fastify,
   path = "/api/realtime",
-  authenticate(request): Promise<ActorContext | null>,
+  authenticate(request): Promise<RealtimeActor | null>,
   topics: readonly RealtimeTopic[],
   pollIntervalMs = 1000,
   heartbeatIntervalMs = 30000,
@@ -143,6 +143,13 @@ createRealtimeServer({
 - 日志只记录 connection id、actorId、topic、错误码，不记录 `data`。
 
 ```ts
+// 核心不 import domain：ActorContext 结构上兼容这个最小形状。
+interface RealtimeActor {
+  readonly actorId: string;
+  readonly roles: readonly string[];
+  readonly permissions: readonly string[];
+}
+
 interface RealtimeTarget {
   readonly topic: string;
   readonly activityId: string;
@@ -152,7 +159,7 @@ interface RealtimeTarget {
 interface RealtimeTopic {
   readonly namespace: string;
   parse(topic: string): { activityId: string; aggregateId: string } | null;
-  authorize(actor: ActorContext, target: RealtimeTarget): Promise<boolean>;
+  authorize(actor: RealtimeActor, target: RealtimeTarget): Promise<boolean>;
   snapshot(target: RealtimeTarget): Promise<{ seq: number; data: unknown } | null>;
   readonly schema?: TSchema;
 }
@@ -249,6 +256,8 @@ publishing artifact）；没有 active release 时为空数组，旧字段不变
 - Web 单测：hook fallback 切轮询、topic 变化退旧订新（fake client）。
 - Playwright E2E：Ops 启动会话 → 开启投票 → 公开接口投票 → 卡片不刷新显示票数变化
   → 关闭 → 预览 → 确认 → 发布 → 公开结果可见。
+- E2E 的 API 进程通过 `ARTFLOW_PLUS_INLINE_RELAY=1` 运行 250ms outbox relay，否则
+  `live_state` 不会在只有 api+web 的环境里推进。生产仍由 worker 负责，默认关闭。
 
 ## 构建与部署
 
