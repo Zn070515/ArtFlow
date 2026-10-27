@@ -1142,6 +1142,9 @@ export async function createRealtimeServer(
           actor = null;
         }
         if (actor === null) {
+          // Resume before closing: a paused socket never reads the peer's close
+          // reply, so the handshake would otherwise wait for the close timeout.
+          socket.resume();
           socket.close(CLOSE_CODES.unauthenticated, "unauthenticated");
           return;
         }
