@@ -1,7 +1,9 @@
 # ArtFlow-Plus GOAL
 
-> Status: Draft for finalization  
-> Scope: ArtFlow-Plus / ArtFlow v2 and later  
+> Status: Adopted (2026-10-19); the product and architecture identity authority
+>
+> Scope: ArtFlow-Plus / ArtFlow v2 and later
+>
 > This document defines **what ArtFlow is, what it must become, and the architectural principles that must remain true as it evolves**.
 >
 > Concrete frameworks, libraries, database access layers, deployment manifests, milestone plans, and temporary implementation decisions belong in ADRs and roadmap documents rather than this GOAL.

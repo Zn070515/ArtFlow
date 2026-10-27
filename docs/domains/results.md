@@ -80,4 +80,6 @@ resolve → candidate (revision N)
   `ResultRelease` 在迁移 `0012_m7_publishing`。
 - 公开 selector 唯一实现于 `selectPublicResults`；同一 stage 最多一条 ACTIVE release。
 - `unlock` 在同一事务写 `StageResultUnlocked` + `ResultReleaseSuperseded`。
-- Archive 仍是 M7b。
+- 投票来源的赛果确认（M10）走 `publishing.vote_result.confirm`，与比赛来源共用
+  同一个 release selector。
+- 归档见 [`archive.md`](archive.md)（M7b，已完成）。

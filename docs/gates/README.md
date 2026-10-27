@@ -8,8 +8,8 @@
 | 层 | 形式 | 运行时机 |
 | --- | --- | --- |
 | 结构门禁 | `tests/gates/`（静态/契约检查，不需要业务数据） | 每次提交 / PR |
-| Golden 门禁 | `tests/golden/`（实现无关的领域样例） | v1 适配器已接入；Plus 接入同一份文件 |
-| 架构门禁 | Plus 的 domain contract（状态机、selector 唯一性） | Plus 实现阶段 |
+| Golden 门禁 | `tests/golden/`（实现无关的领域样例） | v1 与 Plus 适配器均已接入 |
+| 架构门禁 | Plus 的 domain contract（状态机、selector 唯一性） | Plus runtime/domain 测试 |
 
 ## 已自动化的结构门禁
 
@@ -33,7 +33,7 @@ uv run python tests/golden/validate_fixtures.py
 
 `artflow-plus` 的 `.github/workflows/gates.yml` 会在每次 push/PR 时跑这两条。
 
-## Golden 门禁（已有文件，尚未全部接入 v1）
+## Golden 门禁（v1 与 Plus 适配器均已接入）
 
 | Gate | 对应不变量 | 样例 |
 | --- | --- | --- |
@@ -44,16 +44,19 @@ uv run python tests/golden/validate_fixtures.py
 | GATE-ROSTER-01 | LIFE-07 | `unknown-roster.json` |
 | GATE-STATIC-01 | DEPL-02 | `static-artifact-identity.json` |
 
-## 还需要在 Plus 实现的架构门禁
+## 架构门禁在 Plus 的落点
 
-这些无法靠 v1 源码静态检查得出，必须在 Plus 的领域层落地：
+这些无法靠 v1 源码静态检查得出，现在由 Plus 的领域实现与测试覆盖：
 
-1. **单一 selector**：每个公开事实只能有一个 read model 入口；其他模块不得
-   自行拼查询（RES-02/RES-05）。
-2. **状态机边集合**：迁移表是显式数据；非法边在类型/运行时都被拒绝（LIFE-01）。
-3. **评分事实唯一键**：数据库约束 + command 双重保证（SCOR-01）。
-4. **未知/零/空**：类型层区分 unknown 与 zero；DEFERRED 不等于 PASS（LIFE-07）。
-5. **部署产物一致性**：启动时证明 baked SHA、static bundle、配置与镜像同版
+1. **单一 selector**：`selectPublicResults` 是公开结果的唯一读入口，其他模块
+   不得自行拼查询（RES-02/RES-05）。
+2. **状态机边集合**：domain 的迁移表是显式数据；非法边被运行时拒绝，并有
+   反例测试（LIFE-01）。
+3. **评分事实唯一键**：数据库 partial unique index + command 双重保证（SCOR-01）。
+4. **未知/零/空**：`unknown-roster` golden 与类型层区分 unknown 与 zero；
+   DEFERRED 不等于 PASS（LIFE-07）。
+5. **部署产物一致性**：`GATE-RELEASE-01` / `GATE-DEPL-01` 检查镜像只由 tag
+   发布、baked SHA 与 manifest 变量；运行时的产物同版证明仍以这些结构门禁为准
    （DEPL-01/02）。
 
 ## 明确不做成门禁的东西

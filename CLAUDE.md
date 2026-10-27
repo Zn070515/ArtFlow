@@ -2,7 +2,9 @@
 
 ## Project overview
 
-ArtFlow is a Django monolith for university arts-department activity operations. Read `GOAL.md` for product scope, [`AGENTS.md`](AGENTS.md) for the per-app module breakdown, and [the development baseline](docs/development-baseline.md) for the current, verified operating procedures.
+ArtFlow is a two-era repository. `main` is the **1.x production line** — a Django monolith serving the live v1.0.x deployment. `artflow-plus` is the **v2 development line (ArtFlow-Plus)** under `plus/` — a Node 24 / Fastify 5 / React 19 / PostgreSQL 18 workspace that is complete through M13 but has not cut production over. The two lines do not merge mechanically; implement v2 behavior, not v1 bug fixes, and only the deliberate cutover crosses lines.
+
+Read `GOAL.md` for product scope, [`AGENTS.md`](AGENTS.md) for the module breakdown of both lines, and [the development baseline](docs/development-baseline.md) for the current, verified operating procedures.
 
 ## Development environment
 
@@ -18,6 +20,21 @@ uv run python manage.py test
 For a first local setup, copy `.env.example` to `.env` and replace every `change-me` value. `scripts\bootstrap.ps1` prepares the local environment, runs migrations and diagnostics, and never resets data. It accepts `-SeedDemoData` only when deterministic demo records are wanted.
 
 `seed_dev_admin` creates or updates the local administrator using `DEV_ADMIN_PASSWORD` or an interactive prompt. `seed_demo_data` is idempotent. `seed_demo_data --reset` is deliberately constrained to command-owned, test-marked runtime rows; never treat it as a general-purpose data deletion tool.
+
+ArtFlow-Plus (v2) uses Node 24, pnpm 12.14.0, and PostgreSQL 18 in a pnpm workspace under `plus/`. The local database container is `artflow-plus-postgres` on `127.0.0.1:5433`:
+
+```powershell
+Set-Location plus
+pnpm install
+pnpm run check
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+$env:REQUIRE_DB = "1"
+pnpm run test
+pnpm --filter @artflow-plus/api start
+pnpm --filter @artflow-plus/web dev
+```
+
+The v2 API migrates on start. Browser E2E uses the `artflow_e2e` schema with `workers: 1`. `uv run pytest tests/gates -q` includes the v2 structural gates.
 
 ## Runtime operations
 
@@ -44,6 +61,6 @@ Use `uv run python manage.py doctor` for read-only configuration, database, migr
 
 ## Git workflow
 
-Work on a short-lived feature branch from a clean, updated `main`. Verify the scoped change before committing. The integration owner merges the verified branch into `main` with a non-fast-forward merge and pushes `main`; do not rewrite or force-push shared history.
+Work on a short-lived feature branch from the clean, updated base of the line you are changing — `main` for 1.x fixes, `artflow-plus` for v2 work. Verify the scoped change before committing. Merge the verified branch back into that same line with a non-fast-forward merge and push it; do not rewrite or force-push shared history, and never merge across lines.
 
-Pushing is automatic and does not need to be requested each time: once a scoped change has passed its focused gate, commit it on the short-lived branch, merge it into `main` with `--no-ff`, and push `main`. Never push a change that has not passed its focused gate, and never force-push or rewrite shared history.
+Pushing is automatic and does not need to be requested each time: once a scoped change has passed its focused gate, commit it on the short-lived branch, merge it into the line it targets (`main` or `artflow-plus`) with `--no-ff`, and push that line. Never push a change that has not passed its focused gate, and never force-push or rewrite shared history.

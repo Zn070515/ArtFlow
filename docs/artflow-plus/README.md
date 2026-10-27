@@ -14,9 +14,9 @@
 | `main` | ArtFlow 1.x 生产维护线 | 真实彩排/现场发现的问题、部署问题、P0–P2 正确性、必要的现场 UX 修复，以及对应的回归测试 |
 | `artflow-plus` | ArtFlow-Plus（v2）开发主线 | 新领域模型、新前后端架构、技术栈现代化；可以大规模重构 |
 
-- `main` 已封版为 v1.0.0；不再接受“顺便优化”和 opportunistic refactor。
-- `v1.0.0` tag 永不移动。后续生产修复走 `hotfix/*` → `main` → 验证 → tag `v1.0.1`，
-  由 `publish.yml` 自动发布新镜像。
+- `main` 已发布到 **v1.0.2**（2026-10-19），不再接受“顺便优化”和 opportunistic refactor。
+- 已发布的 tag 永不移动。后续生产修复走 `hotfix/*` → `main` → 验证 → 下一个补丁号
+  （`v1.0.3`），由 `publish.yml` 自动发布新镜像。
 - `release/1.x` 暂不单独创建：在 `main` 仍是 1.x 生产线期间它与 `main` 重复；
   等 Plus 准备接管 `main` 时再从当时的 1.x 末端切出长期维护分支。
 
@@ -71,7 +71,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 - 多实例实时广播（Redis）与权限实时撤销。
 - 生产 cutover：代码与 runbook 就绪，待执行。
 
-## 规划基线（2026-10-19）
+## 文档与规划基线
 
 | 内容 | 位置 |
 | --- | --- |
