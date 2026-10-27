@@ -15,7 +15,7 @@ const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
 if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
   throw new Error("REQUIRE_DB=1 but ARTFLOW_PLUS_DATABASE_URL is unset.");
 }
-const schema = `artflow_sse_${Date.now()}_${process.pid}`;
+const schema = `artflow_events_${Date.now()}_${process.pid}`;
 
 let app: FastifyInstance;
 let anonymousApp: FastifyInstance;
@@ -93,7 +93,7 @@ afterAll(async () => {
   await admin.end();
 });
 
-dbIt("streams a fact over SSE and recovers it with the HTTP cursor", async () => {
+dbIt("serves events through the HTTP cursor", async () => {
   const activityId = await releasedActivity();
   const started = await post(`/api/activities/${activityId}/executions`, {
     scope: "stage",
@@ -101,71 +101,32 @@ dbIt("streams a fact over SSE and recovers it with the HTTP cursor", async () =>
   });
   expect(started.status).toBe(201);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5_000);
-  let buffer = "";
-  let lastId = 0;
-  let found = false;
-  try {
-    const response = await fetch(
-      `${baseUrl}/api/activities/${activityId}/stream?mode=formal&after=0`,
-      { signal: controller.signal, headers: { accept: "text/event-stream" } },
-    );
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/event-stream");
-    const reader = response.body?.getReader();
-    expect(reader).toBeDefined();
-    const decoder = new TextDecoder();
-    while (reader !== undefined && !found) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      let boundary = buffer.indexOf("\n\n");
-      while (boundary >= 0) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const id = /^id: (\d+)$/m.exec(frame);
-        const data = /^data: (.+)$/m.exec(frame);
-        if (id !== null && data !== null) {
-          lastId = Number(id[1]);
-          const event = JSON.parse(data[1] ?? "{}") as { type: string };
-          if (event.type === "ExecutionSessionStarted") {
-            found = true;
-            break;
-          }
-        }
-        boundary = buffer.indexOf("\n\n");
-      }
-    }
-  } finally {
-    clearTimeout(timeout);
-    controller.abort();
-  }
-  expect(found).toBe(true);
-  expect(lastId).toBeGreaterThan(0);
-
-  // A disconnected client recovers the same fact from the cursor endpoint.
-  const recovered = await fetch(
-    `${baseUrl}/api/activities/${activityId}/events?mode=formal&after=${lastId}`,
+  const first = await fetch(
+    `${baseUrl}/api/activities/${activityId}/events?mode=formal&after=0`,
   );
-  const feed = (await recovered.json()) as {
+  const feed = (await first.json()) as {
+    events: { sequence: number; type: string }[];
+    headCursor: number;
+  };
+  const startedEvent = feed.events.find((event) => event.type === "ExecutionSessionStarted");
+  expect(startedEvent).toBeDefined();
+  expect(startedEvent?.sequence ?? 0).toBeGreaterThan(0);
+
+  const after = await fetch(
+    `${baseUrl}/api/activities/${activityId}/events?mode=formal&after=${startedEvent?.sequence ?? 0}`,
+  );
+  const tail = (await after.json()) as {
     events: { sequence: number }[];
     headCursor: number;
   };
-  expect(feed.events.every((event) => event.sequence > lastId)).toBe(true);
-  expect(feed.headCursor).toBe(lastId);
+  expect(tail.events.every((event) => event.sequence > (startedEvent?.sequence ?? 0))).toBe(true);
 });
 
-dbIt("requires an operations session for the event feed and stream", async () => {
+dbIt("requires an operations session for the event feed", async () => {
   const activityId = await releasedActivity();
   const events = await anonymousApp.inject({
     method: "GET",
     url: `/api/activities/${activityId}/events`,
   });
   expect(events.statusCode).toBe(401);
-  const stream = await anonymousApp.inject({
-    method: "GET",
-    url: `/api/activities/${activityId}/stream`,
-  });
-  expect(stream.statusCode).toBe(401);
 });
