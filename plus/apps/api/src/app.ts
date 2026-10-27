@@ -163,7 +163,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { createRealtimeServer } from "@artflow-plus/realtime/server";
 
 import { isProductionEnvironment, sessionCookie } from "./cookies.js";
-import { createVotingRealtimeTopic } from "./realtime-topics.js";
+import { createActivityRealtimeTopic, createVotingRealtimeTopic } from "./realtime-topics.js";
 
 export interface AppOptions {
   readonly db: Kysely<Database>;
@@ -2661,7 +2661,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         return null;
       }
     },
-    topics: [createVotingRealtimeTopic(db)],
+    topics: [createVotingRealtimeTopic(db), createActivityRealtimeTopic(db)],
   });
   app.addHook("onClose", async () => {
     await realtime.close();

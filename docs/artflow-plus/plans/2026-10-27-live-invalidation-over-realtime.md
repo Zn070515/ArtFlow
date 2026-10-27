@@ -142,6 +142,7 @@ async function event(activityId: string): Promise<string> {
   const row = await db.insertInto("outbox").values({
     event_id: `event-${randomUUID()}`,
     event_type: "ProbeEvent",
+    payload: "{}",
     occurred_at: "2026-10-27T09:00:00Z",
     activity_id: activityId,
     aggregate_type: "activity",
