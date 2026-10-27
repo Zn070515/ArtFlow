@@ -1,6 +1,7 @@
 import type { VotingSessionsSnapshot } from "@artflow-plus/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import * as QRCode from "qrcode";
+import { useEffect, useState } from "react";
 
 import { ApiError } from "../../api/client.js";
 import {
@@ -26,6 +27,40 @@ function humanError(error: unknown): string {
   if (code === "RESULT_NOT_CONFIRMED") return "先确认赛果再发布。";
   if (code === "SESSION_NOT_RUNNING") return "对应的执行会话还没有启动。";
   return error instanceof Error ? error.message : String(error);
+}
+
+function VoteLink({ sessionId }: { readonly sessionId: string }) {
+  const [qr, setQr] = useState<string | null>(null);
+  const url = `${window.location.origin}/vote/${encodeURIComponent(sessionId)}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    void QRCode.toDataURL(url, { width: 160, margin: 1 })
+      .then((data) => {
+        if (!cancelled) setQr(data);
+      })
+      .catch(() => {
+        if (!cancelled) setQr(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  return (
+    <div className="vote-link">
+      <a href={url} target="_blank" rel="noreferrer">{url}</a>
+      <button
+        type="button"
+        onClick={() => {
+          void navigator.clipboard?.writeText(url);
+        }}
+      >
+        复制链接
+      </button>
+      {qr === null ? null : <img src={qr} alt="投票二维码" width={160} height={160} />}
+    </div>
+  );
 }
 
 export function VotingCard(props: {
@@ -223,6 +258,9 @@ export function VotingCard(props: {
                 </button>
               )}
             </div>
+            {session.status === "open" && session.mode === "formal" ? (
+              <VoteLink sessionId={session.id} />
+            ) : null}
           </li>
         ))}
       </ul>
