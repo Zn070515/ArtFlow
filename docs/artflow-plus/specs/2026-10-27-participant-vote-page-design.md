@@ -27,6 +27,9 @@ v2 只有一个公开 ballot 写接口，没有公开读接口告诉页面候选
 - **身份（已定）**：沿用 `browser` / `anonymous` 策略。页面在 browser 策略下先调
   `GET /api/activities/:id/voting/browser-identity` 拿 HttpOnly cookie，再读公开数据；
   `anonymous` 直接投票。`ticket` 阻断。
+- **只公开正式场次（已定）**：`readPublicVoteSession` 对 `mode !== "formal"` 的场次返回
+  null（404），Ops 卡片也只对 `mode === "formal"` 的开放场次展示链接/二维码。排练/测试
+  场次不能被观众通过链接投票，也不能泄露给公众。
 
 ## 公共读
 
@@ -47,13 +50,14 @@ v2 只有一个公开 ballot 写接口，没有公开读接口告诉页面候选
 ```
 
 - 运行时 `readPublicVoteSession(db, sessionId, browserFingerprint?)`：
-  - 场次不存在 → `null` → 404。
+  - 场次不存在、或 `mode !== "formal"` → `null` → 404。
   - 活动标题从 `activity` 读取；活动被归档不影响读取，页面按场次状态显示。
   - 候选按 `ordinal` 排序；**不返回 counts、ballots、身份**。
   - `voted`：`identityPolicy === "browser"` 且提供了 fingerprint 时，用
     `stableHash(fingerprint)` 查 `ballot(session_id, identity_digest)`；其他情况 false。
 - Cookie 名 `artflow_browser_id`，长度 ≥ 32 才参与 `voted` 判定（与 ballot 路由一致）。
-- 路由只做参数校验与限流，不要求登录。
+- 路由只做参数校验与限流，不要求登录；响应 `cache-control: no-store`。
+- `anonymous` 场次无法计算 `voted`（没有身份），恒为 false；这是既有轻量防刷边界。
 
 ## 投票页
 
@@ -65,6 +69,7 @@ v2 只有一个公开 ballot 写接口，没有公开读接口告诉页面候选
 2. 若 `identityPolicy === "browser"`：调
    `/api/activities/<activityId>/voting/browser-identity`，再读一次公共数据，
    拿到 `voted`。页面 `staleTime: Infinity`，不轮询。
+   身份请求失败**不阻塞页面渲染**；提交时会得到 `BALLOT_IDENTITY_INVALID` 并提示刷新。
 3. 其他策略不再请求身份。
 
 状态与 UI：
@@ -94,11 +99,13 @@ v2 只有一个公开 ballot 写接口，没有公开读接口告诉页面候选
 
 ## Ops 卡片
 
-- 对每个 `status === "open"` 的场次显示：
-  - 完整链接 `${window.location.origin}/vote/${session.id}`；
+- 对每个 `status === "open" && mode === "formal"` 的场次显示：
+  - 完整链接 `${window.location.origin}/vote/${encodeURIComponent(session.id)}`；
   - “复制链接”按钮（`navigator.clipboard.writeText`，失败时只展示文本）；
   - 二维码 `<img alt="投票二维码">`，由 `qrcode` 在客户端生成（`toDataURL`，宽度 160）。
-- 关闭的场次不显示入口。
+- 关闭的或非正式场次不显示入口。
+- 二维码编码的是 ops 当前访问的 origin；现场扫码前应确认 ops 用的是观众可访问的
+  公网域名（而不是 localhost）。
 - 新增依赖：`qrcode@1.5.4` 与 `@types/qrcode@1.5.6`（提交 lockfile）。
 
 ## 测试
@@ -109,8 +116,9 @@ v2 只有一个公开 ballot 写接口，没有公开读接口告诉页面候选
   - `voted`：无 cookie false；带合法 browser cookie 且已投 true；
   - closed 场次返回 `status: "closed"`；
   - ticket 场次返回 `identityPolicy: "ticket"`；
+  - rehearsal/test 场次 404（只公开 formal）；
   - 未知场次 404；
-  - 公共读不限流误伤正常使用（多次请求仍 200）。
+  - 连续 5 次读取仍 200（限流键不与正常使用冲突）。
 - Web：
   - 页面单测（可选）：closed / ticket / voted / open 四种状态的渲染；
   - Playwright E2E：Ops 开场 → 新匿名浏览器上下文打开 `/vote/<sessionId>` →
