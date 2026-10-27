@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   closeDb,
   createDb,
+  insertGroupingStage,
   insertRelease,
   insertResultPublication,
   insertResultRelease,
@@ -186,6 +187,83 @@ describe.skipIf(!connectionString)("archive service", () => {
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
     await admin.end();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("refuses to archive while a grouping stage is not frozen or cancelled", async () => {
+    const activityId = await seed({ capabilities: ["publishing", "archive", "grouping"] });
+    await insertGroupingStage(db, {
+      id: "grouping-archive-stage",
+      activityId,
+      stageKey: "chorus",
+      name: "分组合唱",
+      status: "draft",
+      rosterSource: "all_approved",
+      sourceFingerprint: "",
+      materialWindow: "closed",
+      cancelReason: "",
+      revision: 1,
+    }, "2026-10-27T10:00:00Z");
+    await expect(
+      archiveActivity(db, deps(), {
+        commandId: "archive-grouping-open",
+        activityId,
+        expectedRevision: 1,
+        note: "活动结束归档",
+      }),
+    ).rejects.toMatchObject({ code: "ARCHIVE_GROUPING_NOT_FROZEN" });
+  });
+
+  it("includes frozen grouping data in the archive package", async () => {
+    const activityId = await seed({ capabilities: ["publishing", "archive", "grouping"] });
+    const stageId = "grouping-archive-frozen";
+    await insertGroupingStage(db, {
+      id: stageId,
+      activityId,
+      stageKey: "chorus",
+      name: "分组合唱",
+      status: "frozen",
+      rosterSource: "all_approved",
+      sourceFingerprint: "fingerprint",
+      materialWindow: "open",
+      cancelReason: "",
+      confirmedAt: "2026-10-27T10:00:00Z",
+      confirmedBy: "staff",
+      frozenAt: "2026-10-27T10:01:00Z",
+      frozenBy: "staff",
+      revision: 3,
+    }, "2026-10-27T10:00:00Z");
+    await db.insertInto("grouping_group").values({
+      id: "grouping-archive-group",
+      stage_id: stageId,
+      group_order: 1,
+      name: "A 组",
+      is_active: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }).execute();
+    await db.insertInto("grouping_membership").values({
+      id: "grouping-archive-member",
+      stage_id: stageId,
+      group_id: "grouping-archive-group",
+      participant_id: "p1",
+      is_current: true,
+      joined_at: new Date(),
+      left_at: null,
+      removed_by: null,
+      reason: "",
+    }).execute();
+
+    await archiveActivity(db, deps(), {
+      commandId: "archive-grouping-frozen",
+      activityId,
+      expectedRevision: 1,
+      note: "活动结束归档",
+    });
+    const file = await readArchiveFile(db, deps(), { activityId });
+    const entries = unzipSync(file.bytes);
+    expect(Object.keys(entries)).toContain("grouping.json");
+    expect(strFromU8(entries["grouping.json"] ?? new Uint8Array())).toContain("A 组");
+    expect(strFromU8(entries["grouping.csv"] ?? new Uint8Array())).toContain("p1");
   });
 
   it("archives a closed activity and serves a verified ZIP", async () => {

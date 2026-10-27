@@ -15,6 +15,9 @@ import {
   insertArchivePackage,
   listActiveResultReleases,
   listArchivePackages,
+  listCurrentGroupingMemberships,
+  listGroupingGroups,
+  listGroupingStages,
   listResultReleases,
   listRoundsForActivity,
   listStageResults,
@@ -76,6 +79,15 @@ async function requireArchiveClosure(
     const corrections = await listUnsettledCorrectionsForActivity(trx, activity.id);
     if (corrections.length > 0) {
       throw new DomainError("ARCHIVE_CORRECTION_OPEN", "Finish every score correction before archiving.");
+    }
+  }
+  if (activity.enabledCapabilities.includes("grouping")) {
+    const stages = await listGroupingStages(trx, activity.id);
+    if (stages.some((stage) => stage.status !== "frozen" && stage.status !== "cancelled")) {
+      throw new DomainError(
+        "ARCHIVE_GROUPING_NOT_FROZEN",
+        "Freeze or cancel every grouping stage before archiving.",
+      );
     }
   }
   if (activity.enabledCapabilities.includes("voting")) {
@@ -148,6 +160,18 @@ export async function archiveActivity(
         limit: 100_000,
         mode: "formal",
       });
+      const groupingStages = activity.enabledCapabilities.includes("grouping")
+        ? await listGroupingStages(trx, activity.id)
+        : [];
+      const groupingGroups = await listGroupingGroups(
+        trx,
+        groupingStages.map((stage) => stage.id),
+      );
+      const groupingMembers = (
+        await Promise.all(
+          groupingStages.map((stage) => listCurrentGroupingMemberships(trx, stage.id)),
+        )
+      ).flat();
       const built = buildArchivePackage({
         packageId,
         version,
@@ -162,6 +186,25 @@ export async function archiveActivity(
         stageResults,
         sessions,
         events,
+        grouping: {
+          stages: groupingStages.map((stage) => ({
+            stageKey: stage.stageKey,
+            name: stage.name,
+            status: stage.status,
+            rosterSource: stage.rosterSource,
+            materialWindow: stage.materialWindow,
+            groups: groupingGroups
+              .filter((group) => group.stageId === stage.id && group.isActive)
+              .map((group) => ({
+                order: group.groupOrder,
+                name: group.name,
+                active: group.isActive,
+                participantIds: groupingMembers
+                  .filter((member) => member.groupId === group.id)
+                  .map((member) => member.participantId),
+              })),
+          })),
+        },
         archivedAt,
         archivedBy: actor.actorId,
       });
