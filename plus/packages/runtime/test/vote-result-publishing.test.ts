@@ -272,4 +272,17 @@ describe.skipIf(!connectionString)("vote-result publishing", () => {
       confirmVoteStageResult(db, deps(), { ...input, commandId: "vote-confirm-b" }),
     ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
   });
+
+  it("trims padded candidate ids before matching counts", async () => {
+    const { activityId, sessionId } = await seed({ counts: [2, 1] });
+    await db.updateTable("vote_option")
+      .set({ candidate_id: " candidate-0 " })
+      .where("id", "=", `${sessionId}-option-0`)
+      .execute();
+    const preview = await getVoteResultCandidate(db, deps(), { activityId, sessionId });
+    expect(preview.decisions[0]).toMatchObject({
+      contestantId: "candidate-0",
+      count: 2,
+    });
+  });
 });

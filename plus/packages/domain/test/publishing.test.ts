@@ -107,6 +107,25 @@ describe("vote result decisions", () => {
     ]);
   });
 
+  it("rejects duplicate contestants and malformed shares", () => {
+    expectCode(
+      () =>
+        buildVoteResultDecisions([
+          { contestantId: "a", count: 1, share: "50.00", ordinal: 0 },
+          { contestantId: " a ", count: 2, share: "50.00", ordinal: 1 },
+        ]),
+      "INVALID_INPUT",
+    );
+    expectCode(
+      () => buildVoteResultDecisions([{ contestantId: "a", count: 1, share: "NaN", ordinal: 0 }]),
+      "INVALID_INPUT",
+    );
+    expectCode(
+      () => buildVoteResultDecisions([{ contestantId: "a", count: 1, share: "abc", ordinal: 0 }]),
+      "INVALID_INPUT",
+    );
+  });
+
   it("rejects empty and malformed entries", () => {
     expectCode(() => buildVoteResultDecisions([]), "INVALID_INPUT");
     expectCode(
