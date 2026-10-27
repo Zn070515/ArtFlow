@@ -64,7 +64,7 @@ async function seed() {
         },
       },
     },
-    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
+    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 2, commandScopes: PUBLISHING_COMMAND_SCOPES },
     capabilityVersions: { publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",

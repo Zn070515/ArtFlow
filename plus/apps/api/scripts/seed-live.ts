@@ -103,7 +103,7 @@ async function seedLiveActivity(id: string, code: string, label: string): Promis
       executionPolicy: {
         declaredScopes: ["judging"],
         conflicts: {},
-        runtimeContractVersion: 1,
+        runtimeContractVersion: 2,
         commandScopes: Object.fromEntries(
           [
             "competition.configure",

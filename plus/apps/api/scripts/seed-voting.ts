@@ -93,7 +93,7 @@ async function seedActivity(
     executionPolicy: {
       declaredScopes: ["voting", "publishing"],
       conflicts: {},
-      runtimeContractVersion: 1,
+      runtimeContractVersion: 2,
       commandScopes: {
         "voting.session.open": ["voting"],
         "voting.ballot.submit": ["voting"],

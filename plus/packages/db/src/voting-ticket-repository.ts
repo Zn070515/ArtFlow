@@ -359,6 +359,21 @@ export async function countBallots(
   return Number(row.count);
 }
 
+/** Vote sessions in which this ticket actually cast a ballot. */
+export async function listVoteSessionIdsForTicket(
+  db: Kysely<Database>,
+  activityId: string,
+  ticketId: string,
+): Promise<readonly string[]> {
+  const rows = await db.selectFrom("ballot")
+    .select("session_id")
+    .distinct()
+    .where("activity_id", "=", activityId)
+    .where("ticket_id", "=", ticketId)
+    .execute();
+  return rows.map((row) => row.session_id);
+}
+
 export async function findTicketByCredential(
   db: Kysely<Database>,
   publicCode: string,

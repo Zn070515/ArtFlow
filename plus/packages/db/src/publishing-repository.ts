@@ -30,6 +30,12 @@ export interface StoredResultSource {
   readonly mode: "test" | "rehearsal" | "formal";
   readonly sourceRevision: number;
   readonly inputFingerprint: string;
+  /**
+   * The upstream aggregates this result actually consumed. A score edit only
+   * invalidates results whose dependency set intersects its round; a vote
+   * security action only invalidates the affected vote session.
+   */
+  readonly dependencyIds?: readonly string[];
 }
 
 export interface StoredStageResult {
@@ -403,11 +409,22 @@ export async function selectPublicResults(
     .where("public_code", "=", publicCode)
     .executeTakeFirst();
   if (activity === undefined) return null;
-  const rows = await db.selectFrom("result_release").selectAll()
-    .where("activity_id", "=", activity.id)
-    .where("status", "=", "active")
-    .orderBy("stage_key", "asc")
-    .orderBy("released_at", "desc")
+  const rows = await db.selectFrom("result_release")
+    .innerJoin("stage_result", (join) =>
+      join
+        .onRef("stage_result.id", "=", "result_release.stage_result_id")
+        .onRef("stage_result.activity_id", "=", "result_release.activity_id"),
+    )
+    .selectAll("result_release")
+    .where("result_release.activity_id", "=", activity.id)
+    .where("result_release.status", "=", "active")
+    // Fail closed: an active release whose source is missing, unconfirmed, or
+    // stale is not public, even if an older code path forgot to supersede it.
+    .where("stage_result.status", "=", "confirmed")
+    .where("stage_result.source", "is not", null)
+    .where("stage_result.stale_at", "is", null)
+    .orderBy("result_release.stage_key", "asc")
+    .orderBy("result_release.released_at", "desc")
     .execute();
   const validRows = rows.filter((row) => isResultSnapshot(json(row.snapshot)));
   const newest = [...validRows].sort((left, right) => {

@@ -44,7 +44,7 @@ import { requireRunningCommandSession } from "./command-scope.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
-import { requireNoConfirmedResult } from "./result-consumption.js";
+import { requireNoConsumedRound } from "./result-consumption.js";
 
 interface ScoreActivity {
   readonly id: string;
@@ -134,12 +134,6 @@ async function loadScoreContext(
   const activity = await getActivityForUpdate(trx, input.activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
   requireActive(activity);
-  await requireNoConfirmedResult(
-    trx,
-    activity.id,
-    "RESULT_CONSUMED",
-    "A confirmed result consumed this activity's scores; unlock it before changing scores.",
-  );
   const judgeSession = judgeSessionToken === undefined
     ? null
     : await getJudgeSessionForUpdate(trx, stableHash(judgeSessionToken));
@@ -150,6 +144,13 @@ async function loadScoreContext(
   if (round === null) throw new DomainError("NOT_FOUND", "The competition round was not found.");
   if (round.activityId !== activity.id) throw new DomainError("CROSS_ACTIVITY", "The round belongs to another activity.");
   if (round.state === "locked") throw new DomainError("ROUND_LOCKED", "The round is locked.");
+  await requireNoConsumedRound(
+    trx,
+    activity.id,
+    round.id,
+    "RESULT_CONSUMED",
+    "A confirmed result consumed this round's scores; unlock it before changing scores.",
+  );
   const panel = await getCurrentPanelForUpdate(trx, round.id);
   if (panel === null || panel.state !== "active" || !panel.current || panel.id !== input.panelSnapshotId) {
     throw new DomainError("PANEL_NOT_ACTIVE", "The submitted panel is not the current active panel.");
@@ -460,14 +461,15 @@ async function correctionContext(
   const activity = await getActivityForUpdate(trx, input.activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
   requireActive(activity);
-  await requireNoConfirmedResult(
-    trx,
-    activity.id,
-    "RESULT_CONSUMED",
-    "A confirmed result consumed this activity's scores; unlock it before correcting scores.",
-  );
   const round = await getRoundForUpdate(trx, input.roundId);
   if (round === null || round.activityId !== activity.id) throw new DomainError("NOT_FOUND", "The competition round was not found.");
+  await requireNoConsumedRound(
+    trx,
+    activity.id,
+    round.id,
+    "RESULT_CONSUMED",
+    "A confirmed result consumed this round's scores; unlock it before correcting scores.",
+  );
   if (round.state === "locked") throw new DomainError("ROUND_LOCKED", "The round is locked.");
   const panel = await getCurrentPanelForUpdate(trx, round.id);
   if (panel === null || panel.id !== input.panelSnapshotId || panel.state !== "active" || !panel.current) throw new DomainError("PANEL_NOT_ACTIVE", "The panel is not active.");

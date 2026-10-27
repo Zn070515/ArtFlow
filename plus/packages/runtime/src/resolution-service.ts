@@ -481,7 +481,7 @@ export async function recomputePodiumCandidate(
       trx,
       deps,
       activity.id,
-      "podium_candidate",
+      { kind: "podium_candidate", dependencyIds: stored.sourceRoundIds },
       "The podium candidate was recomputed after the result was confirmed.",
     );
     await appendEngineEvent(trx, deps, {

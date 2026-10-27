@@ -5,7 +5,7 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## Current state
 
-M0–M13 are complete. The workspace covers the full activity journey —
+M0–M13.1 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
 public vote page, and one protected realtime core. Production still runs v1 on
 `main`; the cutover code and runbooks are ready, but the domain has not been
@@ -23,6 +23,13 @@ a read-surface level for every GET route at boot, and stopped returning bearer
 tokens from the browser login/register responses. Releases and confirmed results
 created before that pass must be re-released or reconfirmed because the new
 guards fail closed.
+
+ADR-0031 splits `import:legacy` into a read-only `historical` mode and an
+`adoption` mode that compiles and releases a real Plus definition for a current
+v1 activity. Consumption is now source-aware (a confirmed result only locks the
+rounds/vote sessions it actually consumed), the public selector requires a
+confirmed, non-stale, provenance-bearing result, and runtime contract v2 refuses
+sessions on releases without command ownership.
 
 ## First vertical slice
 
@@ -268,8 +275,10 @@ new architecture.
 
 ## Next steps
 
-1. Cutover infrastructure is ready for rehearsal; production cutover remains
-   gated by activity-specific capability completeness and the authority audit,
+1. Cutover infrastructure is ready for rehearsal, but production cutover must be
+   driven by an `import:legacy --mode adoption --pack <id>` of the first current
+   activity followed by the operational smoke profile; it remains gated by that
+   rehearsal, activity-specific capability completeness, and the authority audit,
    not by the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
 2. Close the remaining product gaps: ticket-backed voting, participant account
    claim/migration, a public program page for stage shows, bracket/composite

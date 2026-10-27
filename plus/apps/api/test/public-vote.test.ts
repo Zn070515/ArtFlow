@@ -71,7 +71,7 @@ async function seed(options: {
         },
       },
     },
-    executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1, commandScopes: VOTING_COMMAND_SCOPES },
+    executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 2, commandScopes: VOTING_COMMAND_SCOPES },
     capabilityVersions: { voting: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",

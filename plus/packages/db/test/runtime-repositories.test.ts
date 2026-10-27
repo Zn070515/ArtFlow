@@ -58,7 +58,7 @@ const releaseSnapshot = {
   executionPolicy: {
     declaredScopes: [] as string[],
     conflicts: {},
-    runtimeContractVersion: 1,
+    runtimeContractVersion: 2,
     commandScopes: {},
   },
   capabilityVersions: {} as Record<string, string>,
@@ -177,7 +177,7 @@ describe.skipIf(!connectionString)("runtime repositories on PostgreSQL", () => {
       executionPolicy: {
         declaredScopes: ["stage"],
         conflicts: { stage: ["rehearsal"] },
-        runtimeContractVersion: 1,
+        runtimeContractVersion: 2,
         commandScopes: {},
       },
       capabilityVersions: { competition: "1" },

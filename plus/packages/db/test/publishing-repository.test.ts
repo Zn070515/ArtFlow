@@ -60,11 +60,22 @@ async function seed(activityId: string, publicCode: string): Promise<void> {
     candidateRevision: 3,
     sourceCandidateRevision: 3,
     inputFingerprint: "fp-1",
+    source: {
+      kind: "legacy_import",
+      aggregateId: `stage-${activityId}`,
+      definitionVersion: 1,
+      releaseHash: "repo-release",
+      mode: "formal",
+      sourceRevision: 3,
+      inputFingerprint: "fp-1",
+      dependencyIds: [],
+    },
     decisions,
     awards,
     note: "核定",
     revision: 1,
     confirmedAt: "2026-10-19T17:00:00.000Z",
+    staleReason: "",
   });
   await insertResultPublication(db, {
     id: `publication-${activityId}`,
@@ -142,6 +153,34 @@ describe.skipIf(!connectionString)("publishing repository", () => {
     expect((await selectPublicResults(db, publicCode))?.results).toEqual([]);
     expect(await listResultReleases(db, activityId, "final_podium")).toHaveLength(1);
     expect(await selectPublicResults(db, "UNKNOWN-CODE")).toBeNull();
+  });
+
+  it("hides an ACTIVE release whose source is missing or stale", async () => {
+    const activityId = `act-${randomUUID()}`;
+    const publicCode = `FRESH${activityId.slice(-6).toUpperCase()}`;
+    await seed(activityId, publicCode);
+    await release(activityId, `release-fresh-${activityId}`);
+    expect((await selectPublicResults(db, publicCode))?.results).toHaveLength(1);
+
+    await db.updateTable("stage_result").set({ source: null })
+      .where("id", "=", `stage-${activityId}`).execute();
+    expect((await selectPublicResults(db, publicCode))?.results).toEqual([]);
+
+    await db.updateTable("stage_result").set({
+      source: JSON.stringify({
+        kind: "legacy_import",
+        aggregateId: `stage-${activityId}`,
+        definitionVersion: 1,
+        releaseHash: "repo-release",
+        mode: "formal",
+        sourceRevision: 3,
+        inputFingerprint: "fp-1",
+        dependencyIds: [],
+      }),
+      stale_at: "2026-10-19T20:00:00.000Z",
+      stale_reason: "source changed",
+    }).where("id", "=", `stage-${activityId}`).execute();
+    expect((await selectPublicResults(db, publicCode))?.results).toEqual([]);
   });
 
   it("keeps an ACTIVE legacy release without a snapshot invisible", async () => {

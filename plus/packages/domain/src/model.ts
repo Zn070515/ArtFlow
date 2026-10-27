@@ -111,7 +111,12 @@ export interface ExecutionPolicy {
   readonly commandScopes?: Readonly<Record<string, readonly string[]>>;
 }
 
-export const RUNTIME_CONTRACT_VERSION = 1;
+/**
+ * v2 adds command-to-scope ownership to the frozen execution policy. A v1
+ * release may exist (historical imports are read-only), but starting a session
+ * against it is refused instead of producing a zombie session.
+ */
+export const RUNTIME_CONTRACT_VERSION = 2;
 
 /** A released definition package is immutable; corrections release a new version. */
 export interface ReleasedActivityDefinition {

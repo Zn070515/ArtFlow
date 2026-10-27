@@ -401,7 +401,7 @@ describe.skipIf(!connectionString)("execution runtime on PostgreSQL", () => {
         execution_policy: JSON.stringify({
           declaredScopes: [],
           conflicts: {},
-          runtimeContractVersion: 1,
+          runtimeContractVersion: 2,
         }),
         capability_versions: JSON.stringify({}),
       })

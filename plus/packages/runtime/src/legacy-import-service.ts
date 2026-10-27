@@ -1,5 +1,6 @@
 import type { Database, StoredRound } from "@artflow-plus/db";
 import {
+  insertDraft,
   insertJudgeSeat,
   insertMaterial,
   insertPanelMember,
@@ -15,11 +16,30 @@ import {
   insertStageResult,
   insertVoteOptions,
   insertVoteSession,
+  updateActivity,
   updateRound,
   upsertRoster,
 } from "@artflow-plus/db";
-import { computeRanking, decimalValue, DomainError } from "@artflow-plus/domain";
-import type { ResultAward, ResultDecision, ResultSnapshot } from "@artflow-plus/domain";
+import {
+  compileActivityDefinitionPackage,
+  computeRanking,
+  decimalValue,
+  DomainError,
+  instantiateActivityPack,
+  releaseDefinition,
+  RUNTIME_CONTRACT_VERSION,
+} from "@artflow-plus/domain";
+import type {
+  Activity,
+  ActivityPack,
+  CapabilityRegistry,
+  CompiledActivityDefinition,
+  DefinitionDraft,
+  ExecutionPolicy,
+  ResultAward,
+  ResultDecision,
+  ResultSnapshot,
+} from "@artflow-plus/domain";
 import type { Kysely, Transaction } from "kysely";
 
 import { executeCommand } from "./command.js";
@@ -48,7 +68,18 @@ export interface LegacyImportCheck {
   readonly actual: number | string;
 }
 
+export type LegacyImportMode = "historical" | "adoption";
+
+export interface LegacyAdoptionOptions {
+  readonly registry: CapabilityRegistry;
+  readonly pack: ActivityPack;
+  readonly answers?: Readonly<Record<string, boolean>>;
+  readonly enable?: readonly string[];
+  readonly disable?: readonly string[];
+}
+
 export interface LegacyImportReport {
+  readonly mode: LegacyImportMode;
   readonly publicCode: string;
   readonly activityId: string;
   readonly bundleHash: string;
@@ -57,6 +88,12 @@ export interface LegacyImportReport {
   readonly excluded: LegacyExcluded;
   readonly unsupported: LegacyBundle["unsupported"];
   readonly checks: readonly LegacyImportCheck[];
+  /** Adoption only: the real Plus composition, release and readiness. */
+  readonly capabilities?: readonly string[];
+  readonly definitionVersion?: number;
+  readonly releaseHash?: string;
+  readonly rehearsalReady?: boolean;
+  readonly warnings?: readonly string[];
 }
 
 export interface LegacyImportResult {
@@ -130,6 +167,82 @@ function plans(bundle: LegacyBundle) {
       contentHash,
       artifact,
     }),
+  };
+}
+
+interface AdoptionPlan {
+  readonly capabilities: readonly string[];
+  readonly definition: DefinitionDraft["package"];
+  readonly compiled: CompiledActivityDefinition;
+  readonly executionPolicy: ExecutionPolicy;
+  readonly capabilityVersions: Readonly<Record<string, string>>;
+  readonly bindings: DefinitionDraft["package"]["bindings"];
+  readonly warnings: readonly string[];
+}
+
+function buildAdoptionPlan(
+  bundle: LegacyBundle,
+  options: LegacyAdoptionOptions,
+): AdoptionPlan {
+  const instantiated = instantiateActivityPack(options.pack, options.registry, {
+    title: bundle.activity.title,
+    ...(options.answers === undefined ? {} : { answers: options.answers }),
+    ...(options.enable === undefined ? {} : { enable: options.enable }),
+    ...(options.disable === undefined ? {} : { disable: options.disable }),
+  });
+  if (!instantiated.ok) {
+    throw new DomainError(
+      "LEGACY_BUNDLE_INVALID",
+      `The adoption pack is not compatible: ${instantiated.issues.map((item) => `${item.code} ${item.path}`).join(", ")}.`,
+    );
+  }
+  const composition = options.registry.validateComposition({
+    enable: instantiated.instantiation.enabledCapabilities,
+  });
+  if (!composition.ok) {
+    throw new DomainError(
+      "LEGACY_BUNDLE_INVALID",
+      `The adoption composition is invalid: ${composition.issues.map((item) => item.code).join(", ")}.`,
+    );
+  }
+  const compiled = compileActivityDefinitionPackage(
+    instantiated.instantiation.definition,
+    options.registry.compilers,
+  );
+  if (!compiled.ok) {
+    throw new DomainError(
+      "LEGACY_BUNDLE_INVALID",
+      `The adoption definition does not compile: ${compiled.issues.map((item) => `${item.code} ${item.path}`).join(", ")}.`,
+    );
+  }
+  const capabilityVersions: Record<string, string> = {};
+  for (const identity of composition.plan.enabledCapabilities) {
+    const registration = options.registry.get(identity);
+    if (registration !== undefined) capabilityVersions[identity] = registration.manifest.version;
+  }
+  const warnings: string[] = [];
+  if (bundle.competition.scores.length > 0) {
+    warnings.push("Legacy scores stay in v1; adoption imports preparation facts only.");
+  }
+  if (bundle.voting.ballots.length > 0) {
+    warnings.push("Legacy ballots stay in v1; open fresh voting sessions in Plus.");
+  }
+  if (bundle.results.releases.length > 0) {
+    warnings.push("Legacy published results stay in v1; this adoption has no active result.");
+  }
+  return {
+    capabilities: composition.plan.enabledCapabilities,
+    definition: instantiated.instantiation.definition,
+    compiled,
+    executionPolicy: {
+      declaredScopes: composition.plan.declaredScopes,
+      conflicts: composition.plan.scopeConflicts,
+      runtimeContractVersion: RUNTIME_CONTRACT_VERSION,
+      commandScopes: composition.plan.commandScopes,
+    },
+    capabilityVersions,
+    bindings: instantiated.instantiation.definition.bindings,
+    warnings,
   };
 }
 
@@ -577,6 +690,7 @@ async function importResults(
         mode: "formal",
         sourceRevision: 1,
         inputFingerprint: bundleHash,
+        dependencyIds: [],
       },
       decisions: stage.decisions as unknown as readonly ResultDecision[],
       awards: stage.awards as unknown as readonly ResultAward[],
@@ -610,6 +724,7 @@ async function importResults(
           mode: "formal",
           sourceRevision: 1,
           inputFingerprint: bundleHash,
+          dependencyIds: [],
         },
         decisions: (snapshot.decisions ?? []) as readonly ResultDecision[],
         awards: (snapshot.awards ?? []) as readonly ResultAward[],
@@ -745,6 +860,7 @@ async function importActivity(
   activityId: string,
   bundleHash: string,
   deps: RuntimeDeps,
+  adoption?: AdoptionPlan,
 ): Promise<LegacyImportReport> {
   const existing = await trx.selectFrom("activity").select("id")
     .where("public_code", "=", bundle.activity.publicCode)
@@ -752,14 +868,22 @@ async function importActivity(
   if (existing !== undefined) {
     throw new DomainError("LEGACY_ACTIVITY_EXISTS", "An activity with this public code already exists.");
   }
+  if (adoption !== undefined && bundle.results.releases.some((release) => release.status === "active")) {
+    throw new DomainError(
+      "LEGACY_BUNDLE_INVALID",
+      "Adoption requires a current activity without an active published result.",
+    );
+  }
   const artifacts = plans(bundle);
   const hasGrouping = bundle.grouping !== undefined && bundle.grouping.length > 0;
-  const enabledCapabilities = hasGrouping
+  const enabledCapabilities = adoption?.capabilities ?? (hasGrouping
     ? [...LEGACY_CAPABILITIES, "grouping"]
-    : [...LEGACY_CAPABILITIES];
-  const status = bundle.results.releases.some((release) => release.status === "active")
-    ? "closed"
-    : "active";
+    : [...LEGACY_CAPABILITIES]);
+  const status = adoption !== undefined
+    ? "active"
+    : bundle.results.releases.some((release) => release.status === "active")
+      ? "closed"
+      : "active";
   await trx.insertInto("activity").values({
     id: activityId,
     public_code: bundle.activity.publicCode,
@@ -767,57 +891,97 @@ async function importActivity(
     status,
     revision: 1,
     enabled_capabilities: JSON.stringify(enabledCapabilities),
-    active_definition_version: 1,
+    active_definition_version: adoption === undefined ? 1 : 0,
   }).execute();
 
-  const capabilityEntries = {
-    questionnaire: artifacts.capabilityPlan(
-      "questionnaire",
-      artifacts.questionnaire,
-      artifacts.contentHashes.questionnaire,
-    ),
-    competition: artifacts.capabilityPlan(
-      "competition",
-      artifacts.competition,
-      artifacts.contentHashes.competition,
-    ),
-    registration: artifacts.capabilityPlan("registration", {
-      schemaVersion: 1,
-      lifecycleVersion: 1,
-      rosterStatus: "unknown",
-    }, stableHash({ registration: 1 })),
-    materials: artifacts.capabilityPlan("materials", {
-      schemaVersion: 1,
-      maxBytes: 25_000_000,
-      allowedPurposes: ["audio", "video", "image", "document"],
-    }, stableHash({ materials: 1 })),
-    ...(hasGrouping
-      ? {
-          grouping: artifacts.capabilityPlan(
-            "grouping",
-            { schemaVersion: 1 },
-            stableHash({ grouping: 1 }),
-          ),
-        }
-      : {}),
-  };
-  await insertRelease(trx, {
-    activityId,
-    version: 1,
-    contentHash: bundleHash,
-    capabilities: capabilityEntries,
-    // Imported history is read-only: no command may claim a running session.
-    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1, commandScopes: {} },
-    capabilityVersions: {
-      questionnaire: "1",
-      competition: "1",
-      registration: "1",
-      materials: "1",
-    },
-    bindings: [],
-    releasedAt: bundle.exportedAt,
-    sourceDraftRevision: 1,
-  });
+  if (adoption !== undefined) {
+    const draft: DefinitionDraft = {
+      activityId,
+      revision: 0,
+      status: "draft",
+      package: adoption.definition,
+    };
+    const baseActivity: Activity = {
+      id: activityId,
+      title: bundle.activity.title,
+      status: "active",
+      revision: 1,
+      enabledCapabilities,
+      activeDefinitionVersion: 0,
+    };
+    const released = releaseDefinition({
+      activity: baseActivity,
+      draft,
+      expectedDraftRevision: 0,
+      compiled: adoption.compiled,
+      releasedAt: bundle.exportedAt,
+      executionPolicy: adoption.executionPolicy,
+      capabilityVersions: adoption.capabilityVersions,
+      bindings: adoption.bindings ?? [],
+    });
+    await insertDraft(trx, { activityId, revision: 0, package: adoption.definition });
+    await insertRelease(trx, {
+      activityId,
+      version: released.version.version,
+      contentHash: released.version.contentHash,
+      capabilities: released.version.capabilities,
+      executionPolicy: released.version.executionPolicy,
+      capabilityVersions: released.version.capabilityVersions,
+      bindings: released.version.bindings,
+      releasedAt: released.version.releasedAt,
+      sourceDraftRevision: 0,
+    });
+    await updateActivity(trx, released.activity, 1);
+  } else {
+    const capabilityEntries = {
+      questionnaire: artifacts.capabilityPlan(
+        "questionnaire",
+        artifacts.questionnaire,
+        artifacts.contentHashes.questionnaire,
+      ),
+      competition: artifacts.capabilityPlan(
+        "competition",
+        artifacts.competition,
+        artifacts.contentHashes.competition,
+      ),
+      registration: artifacts.capabilityPlan("registration", {
+        schemaVersion: 1,
+        lifecycleVersion: 1,
+        rosterStatus: "unknown",
+      }, stableHash({ registration: 1 })),
+      materials: artifacts.capabilityPlan("materials", {
+        schemaVersion: 1,
+        maxBytes: 25_000_000,
+        allowedPurposes: ["audio", "video", "image", "document"],
+      }, stableHash({ materials: 1 })),
+      ...(hasGrouping
+        ? {
+            grouping: artifacts.capabilityPlan(
+              "grouping",
+              { schemaVersion: 1 },
+              stableHash({ grouping: 1 }),
+            ),
+          }
+        : {}),
+    };
+    await insertRelease(trx, {
+      activityId,
+      version: 1,
+      contentHash: bundleHash,
+      capabilities: capabilityEntries,
+      // Imported history is read-only: no command may claim a running session.
+      executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1, commandScopes: {} },
+      capabilityVersions: {
+        questionnaire: "1",
+        competition: "1",
+        registration: "1",
+        materials: "1",
+      },
+      bindings: [],
+      releasedAt: bundle.exportedAt,
+      sourceDraftRevision: 1,
+    });
+  }
 
   const questionnaire = artifacts.questionnaire;
   const prefix = `legacy-${bundle.activity.publicCode}`;
@@ -887,7 +1051,9 @@ async function importActivity(
       activityId,
       roundKey: round.key,
       releaseVersion: 1,
-      state: round.state,
+      // Adoption starts from preparation: the round exists but is not locked
+      // and carries no legacy score/panel facts.
+      state: adoption === undefined ? round.state : "prepared",
       revision: 0,
       scoreVersion: 0,
       minimumJudges: round.minimumJudges,
@@ -902,7 +1068,9 @@ async function importActivity(
     roundsByLegacy.set(round.legacyId, stored);
   }
 
-  await importCompetition(trx, bundle, activityId, prefix, roundsByLegacy);
+  if (adoption === undefined) {
+    await importCompetition(trx, bundle, activityId, prefix, roundsByLegacy);
+  }
   const groupingNotes: string[] = [];
   if (bundle.grouping !== undefined && bundle.grouping.length > 0) {
     const participantKeys = new Set(bundle.registrations.map((row) => row.participantKey));
@@ -919,8 +1087,10 @@ async function importActivity(
       groupingNotes,
     );
   }
-  await importVoting(trx, bundle, activityId, prefix);
-  await importResults(trx, bundle, activityId, bundleHash, prefix);
+  if (adoption === undefined) {
+    await importVoting(trx, bundle, activityId, prefix);
+    await importResults(trx, bundle, activityId, bundleHash, prefix);
+  }
 
   const imported = await countImported(trx, activityId);
   const checks: LegacyImportCheck[] = [
@@ -928,56 +1098,60 @@ async function importActivity(
     check("approvedRegistrations", imported.approvedRegistrations, bundle.counts.approvedRegistrations),
     check("materials", imported.materials, bundle.counts.materials),
     check("rounds", imported.rounds, bundle.counts.rounds),
-    check("scores", imported.scores, bundle.counts.scores),
-    check("ballots", imported.ballots, bundle.counts.ballots),
-    check("releases", imported.releases, bundle.counts.releases),
   ];
+  if (adoption === undefined) {
+    checks.push(
+      check("scores", imported.scores, bundle.counts.scores),
+      check("ballots", imported.ballots, bundle.counts.ballots),
+      check("releases", imported.releases, bundle.counts.releases),
+    );
 
-  const expectedOptionCounts = new Map<number, number>();
-  for (const ballot of bundle.voting.ballots) {
-    for (const optionId of ballot.optionLegacyIds) {
-      expectedOptionCounts.set(optionId, (expectedOptionCounts.get(optionId) ?? 0) + 1);
+    const expectedOptionCounts = new Map<number, number>();
+    for (const ballot of bundle.voting.ballots) {
+      for (const optionId of ballot.optionLegacyIds) {
+        expectedOptionCounts.set(optionId, (expectedOptionCounts.get(optionId) ?? 0) + 1);
+      }
     }
-  }
-  const recordRows = await trx.selectFrom("vote_record").select(["option_id"])
-    .where("activity_id", "=", activityId)
-    .execute();
-  const actualOptionCounts = new Map<string, number>();
-  for (const row of recordRows) {
-    actualOptionCounts.set(row.option_id, (actualOptionCounts.get(row.option_id) ?? 0) + 1);
-  }
-  const expectedOptionSignature = [...expectedOptionCounts.entries()]
-    .map(([optionId, count]) => `${prefix}-option-${optionId}:${count}`)
-    .sort()
-    .join(",");
-  const actualOptionSignature = [...actualOptionCounts.entries()]
-    .map(([optionId, count]) => `${optionId}:${count}`)
-    .sort()
-    .join(",");
-  checks.push(check("ballots.optionCounts", actualOptionSignature, expectedOptionSignature));
+    const recordRows = await trx.selectFrom("vote_record").select(["option_id"])
+      .where("activity_id", "=", activityId)
+      .execute();
+    const actualOptionCounts = new Map<string, number>();
+    for (const row of recordRows) {
+      actualOptionCounts.set(row.option_id, (actualOptionCounts.get(row.option_id) ?? 0) + 1);
+    }
+    const expectedOptionSignature = [...expectedOptionCounts.entries()]
+      .map(([optionId, count]) => `${prefix}-option-${optionId}:${count}`)
+      .sort()
+      .join(",");
+    const actualOptionSignature = [...actualOptionCounts.entries()]
+      .map(([optionId, count]) => `${optionId}:${count}`)
+      .sort()
+      .join(",");
+    checks.push(check("ballots.optionCounts", actualOptionSignature, expectedOptionSignature));
 
-  const releaseRows = await trx.selectFrom("result_release").select(["snapshot"])
-    .where("activity_id", "=", activityId)
-    .execute();
-  const normalizeSnapshot = (value: unknown): unknown =>
-    typeof value === "string" ? JSON.parse(value) as unknown : value;
-  const actualSnapshotSignature = releaseRows
-    .map((row) => stableHash(normalizeResultSnapshot(
-      normalizeSnapshot(row.snapshot),
-      "",
-      bundle.activity.title,
-    )))
-    .sort()
-    .join(",");
-  const expectedSnapshotSignature = bundle.results.releases
-    .map((release) => stableHash(normalizeResultSnapshot(
-      release.snapshot,
-      release.stageKey,
-      bundle.activity.title,
-    )))
-    .sort()
-    .join(",");
-  checks.push(check("releases.snapshotHash", actualSnapshotSignature, expectedSnapshotSignature));
+    const releaseRows = await trx.selectFrom("result_release").select(["snapshot"])
+      .where("activity_id", "=", activityId)
+      .execute();
+    const normalizeSnapshot = (value: unknown): unknown =>
+      typeof value === "string" ? JSON.parse(value) as unknown : value;
+    const actualSnapshotSignature = releaseRows
+      .map((row) => stableHash(normalizeResultSnapshot(
+        normalizeSnapshot(row.snapshot),
+        "",
+        bundle.activity.title,
+      )))
+      .sort()
+      .join(",");
+    const expectedSnapshotSignature = bundle.results.releases
+      .map((release) => stableHash(normalizeResultSnapshot(
+        release.snapshot,
+        release.stageKey,
+        bundle.activity.title,
+      )))
+      .sort()
+      .join(",");
+    checks.push(check("releases.snapshotHash", actualSnapshotSignature, expectedSnapshotSignature));
+  }
   const failed = checks.filter((item) => !item.ok);
   if (failed.length > 0) {
     throw new DomainError(
@@ -1000,12 +1174,15 @@ async function importActivity(
     payload: {
       publicCode: bundle.activity.publicCode,
       bundleHash,
+      mode: adoption === undefined ? "historical" : "adoption",
+      capabilities: enabledCapabilities,
       imported,
       excluded: bundle.excluded,
       unsupported,
     },
   });
   return {
+    mode: adoption === undefined ? "historical" : "adoption",
     publicCode: bundle.activity.publicCode,
     activityId,
     bundleHash,
@@ -1014,7 +1191,73 @@ async function importActivity(
     excluded: bundle.excluded,
     unsupported,
     checks,
+    ...(adoption === undefined
+      ? {}
+      : {
+          capabilities: adoption.capabilities,
+          definitionVersion: 1,
+          releaseHash: adoption.compiled.contentHash,
+          rehearsalReady: true,
+          warnings: adoption.warnings,
+        }),
   };
+}
+
+export interface AdoptLegacyInput extends LegacyAdoptionOptions {
+  readonly commandId: string;
+  readonly bundle: unknown;
+  readonly dryRun: boolean;
+}
+
+/**
+ * Operational adoption: the same v1 facts, but the activity is given a real
+ * Plus composition, compiled definition and release, then preparation facts are
+ * imported. Historical scores/ballots/results stay in v1.
+ */
+export async function adoptLegacyBundle(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: AdoptLegacyInput,
+): Promise<LegacyImportResult> {
+  const bundle = parseLegacyBundle(input.bundle);
+  const bundleHash = stableHash(bundle);
+  const activityId = activityIdFor(bundle.activity.publicCode);
+  const actor = runtimeActor(deps);
+  const plan = buildAdoptionPlan(bundle, input);
+
+  if (input.dryRun) {
+    return {
+      report: {
+        mode: "adoption",
+        publicCode: bundle.activity.publicCode,
+        activityId,
+        bundleHash,
+        dryRun: true,
+        imported: plannedCounts(bundle),
+        excluded: bundle.excluded,
+        unsupported: bundle.unsupported,
+        checks: declaredChecks(bundle),
+        capabilities: plan.capabilities,
+        definitionVersion: 1,
+        releaseHash: plan.compiled.contentHash,
+        rehearsalReady: false,
+        warnings: plan.warnings,
+      },
+    };
+  }
+
+  const outcome = await executeCommand(db, {
+    commandId: input.commandId,
+    activityId,
+    capability: "engine",
+    commandType: "activity.legacy.adopt",
+    actor,
+    payload: { bundleHash, publicCode: bundle.activity.publicCode, capabilities: plan.capabilities },
+  }, async (trx) => {
+    const report = await importActivity(trx, bundle, activityId, bundleHash, deps, plan);
+    return { body: report, status: 201 };
+  });
+  return { report: outcome.body };
 }
 
 export async function importLegacyBundle(
@@ -1030,6 +1273,7 @@ export async function importLegacyBundle(
   if (input.dryRun) {
     return {
       report: {
+        mode: "historical",
         publicCode: bundle.activity.publicCode,
         activityId,
         bundleHash,
