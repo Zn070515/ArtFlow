@@ -9,6 +9,10 @@ export function formatReleasedAt(value: string): string {
   }).format(date);
 }
 
+function scoreText(decision: PublicDecision): string {
+  return decision.unit === "percent" ? `${decision.score}%` : decision.score;
+}
+
 function RankRow({ decision }: { readonly decision: PublicDecision }) {
   const champion = decision.rank === 1;
   return (
@@ -17,9 +21,10 @@ function RankRow({ decision }: { readonly decision: PublicDecision }) {
         {String(decision.rank).padStart(2, "0")}
       </span>
       <span className="rank-contestant">{decision.contestantId}</span>
-      <span className="rank-score">{decision.score}</span>
+      <span className="rank-score">{scoreText(decision)}</span>
       <span className="sr-only">
-        第 {decision.rank} 名，{decision.contestantId}，{decision.score} 分
+        第 {decision.rank} 名，{decision.contestantId}，
+        {decision.unit === "percent" ? scoreText(decision) : `${decision.score} 分`}
       </span>
     </li>
   );
