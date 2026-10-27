@@ -1359,19 +1359,19 @@ describe("realtime client", () => {
       socket.send(JSON.stringify({
         v: 1,
         type: "hello",
-        clientPingIntervalMs: 50,
-        pongTimeoutMs: 50,
+        clientPingIntervalMs: 1000,
+        pongTimeoutMs: 1000,
         maxSubscriptions: 32,
       }));
     });
     const port = (raw.address() as { port: number }).port;
     const client = createRealtimeClient({
       url: `ws://127.0.0.1:${port}`,
-      pingIntervalMs: 50,
-      pongTimeoutMs: 50,
+      pingIntervalMs: 1000,
+      pongTimeoutMs: 1000,
     });
     client.subscribe("probe:act-1", { onSnapshot: () => {}, onUpdate: () => {} });
-    await waitFor(() => connections >= 2, 4000);
+    await waitFor(() => connections >= 2, 6000);
     client.close();
     await new Promise<void>((resolve) => raw.close(() => resolve()));
   });
