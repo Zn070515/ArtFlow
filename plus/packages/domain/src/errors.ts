@@ -97,7 +97,8 @@ export type DomainErrorCode =
   | "GROUPING_GROUP_COUNT"
   | "GROUPING_CONSUMED"
   | "GROUPING_WINDOW_INVALID"
-  | "ARCHIVE_GROUPING_NOT_FROZEN";
+  | "ARCHIVE_GROUPING_NOT_FROZEN"
+  | "NO_VALID_BALLOTS";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel
