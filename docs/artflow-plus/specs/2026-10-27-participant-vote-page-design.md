@@ -50,7 +50,8 @@ v2 只有一个公开 ballot 写接口，没有公开读接口告诉页面候选
 ```
 
 - 运行时 `readPublicVoteSession(db, sessionId, browserFingerprint?)`：
-  - 场次不存在、或 `mode !== "formal"` → `null` → 404。
+  - 场次不存在、`mode !== "formal"`、或 `status === "draft"` → `null` → 404
+    （draft 还不能对外分享）。
   - 活动标题从 `activity` 读取；活动被归档不影响读取，页面按场次状态显示。
   - 候选按 `ordinal` 排序；**不返回 counts、ballots、身份**。
   - `voted`：`identityPolicy === "browser"` 且提供了 fingerprint 时，用

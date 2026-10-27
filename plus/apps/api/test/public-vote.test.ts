@@ -34,7 +34,7 @@ const deps: RuntimeDeps = {
 
 async function seed(options: {
   readonly mode?: "formal" | "rehearsal";
-  readonly status?: "open" | "closed";
+  readonly status?: "draft" | "open" | "closed";
   readonly identityPolicy?: "browser" | "ticket" | "anonymous";
 } = {}): Promise<{ activityId: string; sessionId: string }> {
   const activityId = `act-${randomUUID()}`;
@@ -210,13 +210,20 @@ describe.skipIf(!connectionString)("public vote session", () => {
     expect(ticketRead.json()).toMatchObject({ identityPolicy: "ticket" });
   });
 
-  it("hides rehearsal sessions and unknown ids", async () => {
+  it("hides rehearsal and draft sessions, and unknown ids", async () => {
     const rehearsal = await seed({ mode: "rehearsal" });
     const hidden = await app.inject({
       method: "GET",
       url: `/api/public/vote/${rehearsal.sessionId}`,
     });
     expect(hidden.statusCode).toBe(404);
+
+    const draft = await seed({ status: "draft" });
+    const draftRead = await app.inject({
+      method: "GET",
+      url: `/api/public/vote/${draft.sessionId}`,
+    });
+    expect(draftRead.statusCode).toBe(404);
 
     const unknown = await app.inject({ method: "GET", url: "/api/public/vote/nope" });
     expect(unknown.statusCode).toBe(404);
