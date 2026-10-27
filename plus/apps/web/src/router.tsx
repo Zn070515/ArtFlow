@@ -15,6 +15,7 @@ import { RootLayout } from "./routes/__root.js";
 import { StudioPage } from "./routes/studio.js";
 import { StudioActivityPage } from "./routes/studioActivity.js";
 import { StudioNewPage } from "./routes/studioNew.js";
+import { VotePage } from "./routes/vote.js";
 
 const rootRoute = createRootRoute({ component: RootLayout });
 
@@ -99,6 +100,12 @@ const liveActivityRoute = createRoute({
   component: LiveActivityPage,
 });
 
+const voteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vote/$sessionId",
+  component: VotePage,
+});
+
 const judgeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/judge/$publicCode",
@@ -122,6 +129,7 @@ const routeTree = rootRoute.addChildren([
   studioActivityRoute,
   liveRoute,
   liveActivityRoute,
+  voteRoute,
   judgeRoute,
 ]);
 

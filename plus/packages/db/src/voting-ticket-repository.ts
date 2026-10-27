@@ -648,3 +648,17 @@ export async function insertTicketAccessSession(
 ): Promise<void> {
   await trx.insertInto("ticket_access_session").values({ ...input }).execute();
 }
+
+export async function hasBallotForIdentity(
+  db: Kysely<Database>,
+  sessionId: string,
+  identityDigest: string,
+): Promise<boolean> {
+  const row = await db.selectFrom("ballot")
+    .select("id")
+    .where("session_id", "=", sessionId)
+    .where("identity_type", "=", "browser")
+    .where("identity_digest", "=", identityDigest)
+    .executeTakeFirst();
+  return row !== undefined;
+}

@@ -141,6 +141,7 @@ import {
   getStudioState,
   getJudgeContext,
   getLiveState as getLiveActivityState,
+  readPublicVoteSession,
   readVotingSessionsState,
   cancelGroupingStage,
   confirmGroupingStage,
@@ -292,6 +293,11 @@ const CreateActivityBody = Type.Object(
 
 const ActivityParams = Type.Object(
   { id: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const PublicVoteParams = Type.Object(
+  { sessionId: Type.String({ minLength: 1, maxLength: 100 }) },
   { additionalProperties: false },
 );
 
@@ -939,6 +945,23 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       }
       reply.header("cache-control", "no-store");
       return activity;
+    },
+  );
+
+  app.get(
+    "/api/public/vote/:sessionId",
+    { schema: { params: PublicVoteParams } },
+    async (request, reply) => {
+      const { sessionId } = request.params as { sessionId: string };
+      await requirePublicRateLimit(request, `public-vote:${sessionId}`, 120);
+      const session = await readPublicVoteSession(
+        db,
+        sessionId,
+        cookieValue(request, "artflow_browser_id"),
+      );
+      if (session === null) throw new DomainError("NOT_FOUND", "Voting session not found.");
+      reply.header("cache-control", "no-store");
+      return session;
     },
   );
 

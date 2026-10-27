@@ -56,3 +56,4 @@ $env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:543
 pnpm -C plus --filter @artflow-plus/domain test
 pnpm -C plus --filter @artflow-plus/api exec vitest run test/activity-shapes.test.ts
 ```
+| 参与者投票页缺失 | v2 只有 ballot 写接口，观众没有投票入口 | 已由 M12 的 `/vote/<sessionId>` 关闭；票据投票仍待后续 slice |

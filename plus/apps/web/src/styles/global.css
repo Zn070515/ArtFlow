@@ -1337,3 +1337,14 @@ a.primary-button {
 .voting-preview th,
 .voting-preview td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line, #ddd); }
 .voting-publish { display: grid; gap: 8px; margin-top: 12px; }
+
+.vote-page { max-width: 640px; margin: 0 auto; padding: 32px 20px 64px; display: grid; gap: 20px; }
+.vote-header { display: grid; gap: 6px; }
+.vote-card { display: grid; gap: 16px; border: 1px solid var(--line, #ddd); border-radius: 14px; padding: 20px; }
+.vote-candidates { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.vote-candidate { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--line, #ddd); border-radius: 12px; font-size: 17px; cursor: pointer; }
+.vote-candidate input { width: 20px; height: 20px; }
+
+.vote-link { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
+.vote-link a { word-break: break-all; font-size: 13px; }
+.vote-link img { border-radius: 8px; background: #fff; }

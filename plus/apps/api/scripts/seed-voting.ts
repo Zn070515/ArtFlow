@@ -25,28 +25,31 @@ if (schema !== undefined) {
 const db = createDb({ connectionString, ...(schema === undefined ? {} : { schema }) });
 await migrate(db);
 
-const activityId = "act_e2e_voting";
-const publicCode = "E2E-VOTING";
+async function seedActivity(
+  activityId: string,
+  publicCode: string,
+  title: string,
+): Promise<void> {
+  // Reset only what this seed owns; the activity and its release are reused.
+  await db.deleteFrom("result_release").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("result_publication").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("stage_result").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("live_state").where("activity_id", "=", activityId).execute();
+  // A stale dead letter blocks the (activity, mode) projection partition forever.
+  await db.deleteFrom("outbox").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("execution_projection").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("vote_record").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("ballot").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("vote_option").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("vote_session").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("execution_session").where("activity_id", "=", activityId).execute();
 
-// Reset only what this seed owns; the activity and its release are reused.
-await db.deleteFrom("result_release").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("result_publication").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("stage_result").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("live_state").where("activity_id", "=", activityId).execute();
-// A stale dead letter blocks the (activity, mode) projection partition forever.
-await db.deleteFrom("outbox").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("execution_projection").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("vote_record").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("ballot").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("vote_option").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("vote_session").where("activity_id", "=", activityId).execute();
-await db.deleteFrom("execution_session").where("activity_id", "=", activityId).execute();
+  if ((await getActivity(db, activityId)) !== null) return;
 
-if ((await getActivity(db, activityId)) === null) {
   await db.insertInto("activity").values({
     id: activityId,
     public_code: publicCode,
-    title: "E2E 投票",
+    title,
     status: "active",
     revision: 1,
     enabled_capabilities: JSON.stringify(["voting", "publishing"]),
@@ -56,12 +59,12 @@ if ((await getActivity(db, activityId)) === null) {
   await insertRelease(db, {
     activityId,
     version: 1,
-    contentHash: "e2e-voting-release",
+    contentHash: `${publicCode}-release`,
     capabilities: {
       voting: {
         ok: true,
         capabilityKey: "voting",
-        contentHash: "e2e-voting",
+        contentHash: `${publicCode}-voting`,
         artifact: {
           version: 2,
           schemaVersion: 2,
@@ -75,7 +78,7 @@ if ((await getActivity(db, activityId)) === null) {
       publishing: {
         ok: true,
         capabilityKey: "publishing",
-        contentHash: "e2e-voting-publishing",
+        contentHash: `${publicCode}-publishing`,
         artifact: {
           version: 1,
           schemaVersion: 1,
@@ -95,5 +98,8 @@ if ((await getActivity(db, activityId)) === null) {
   });
 }
 
+await seedActivity("act_e2e_voting", "E2E-VOTING", "E2E 投票");
+await seedActivity("act_e2e_vote_page", "E2E-VOTE-PAGE", "E2E 投票页");
+
 await closeDb(db);
-console.log(`Seeded voting activity ${activityId} (${publicCode}).`);
+console.log("Seeded voting activities act_e2e_voting and act_e2e_vote_page.");
