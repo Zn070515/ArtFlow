@@ -696,9 +696,12 @@ describe("realtime server", () => {
     } as unknown as WebSocket;
     const logger = { error: () => {}, info: () => {} };
     const hub = new RealtimeHub({ pollIntervalMs: 1000, logger });
-    const connection = new RealtimeConnection(socket, actor, new Map(), hub, logger, "c1");
+    const connection = new RealtimeConnection(socket, actor, new Map(), hub, logger, "c1", 1000);
     connection.ping();
-    connection.checkAlive();
+    // Same-tick sweep: the timeout window has not elapsed yet.
+    connection.checkAlive(Date.now() + 100);
+    expect(socket.terminate).not.toHaveBeenCalled();
+    connection.checkAlive(Date.now() + 2000);
     expect(socket.terminate).toHaveBeenCalledTimes(1);
   });
 });
@@ -906,9 +909,11 @@ export class RealtimeConnection implements RealtimePeer {
   readonly id: string;
   private readonly subscriptions = new Map<string, Subscription>();
   private alive = true;
+  private lastPingAt = 0;
   private violations = 0;
   private subscribeTokens = LIMITS.subscribePerSecond;
   private readonly tokenTimer: ReturnType<typeof setInterval>;
+  private readonly heartbeatTimeoutMs: number;
 
   constructor(
     private readonly socket: WebSocket,
@@ -917,8 +922,10 @@ export class RealtimeConnection implements RealtimePeer {
     private readonly hub: RealtimeHub,
     private readonly logger: RealtimeLogger,
     id: string,
+    heartbeatTimeoutMs: number = HEARTBEAT.serverPongTimeoutMs,
   ) {
     this.id = id;
+    this.heartbeatTimeoutMs = heartbeatTimeoutMs;
     this.tokenTimer = setInterval(() => {
       this.subscribeTokens = LIMITS.subscribePerSecond;
     }, 1000);
@@ -956,11 +963,15 @@ export class RealtimeConnection implements RealtimePeer {
 
   ping(): void {
     this.alive = false;
+    this.lastPingAt = Date.now();
     this.socket.ping();
   }
 
-  checkAlive(): void {
+  checkAlive(now: number = Date.now()): void {
     if (this.alive) return;
+    // A ping and the liveness sweep can fire in the same tick; never judge a
+    // connection before the timeout window has actually elapsed.
+    if (now - this.lastPingAt < this.heartbeatTimeoutMs) return;
     this.socket.close(CLOSE_CODES.heartbeatTimeout, "heartbeat timeout");
     this.socket.terminate();
   }
@@ -1155,6 +1166,7 @@ export async function createRealtimeServer(
           hub,
           logger,
           randomUUID(),
+          options.heartbeatTimeoutMs ?? HEARTBEAT.serverPongTimeoutMs,
         );
         connections.add(connection);
         socket.once("close", () => {
