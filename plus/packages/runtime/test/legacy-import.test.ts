@@ -62,6 +62,17 @@ describe.skipIf(!connectionString)("legacy import", () => {
     expect(activity.status).toBe("closed");
     expect(await listApprovedParticipantIds(db, activity.id)).toHaveLength(1);
     expect(await getRoster(db, activity.id)).toMatchObject({ status: "final", approvedCount: 1 });
+    const groupingStage = await db.selectFrom("grouping_stage").selectAll()
+      .where("activity_id", "=", activity.id).executeTakeFirstOrThrow();
+    expect(groupingStage).toMatchObject({
+      stage_key: "chorus",
+      status: "frozen",
+      roster_source: "all_approved",
+      material_window: "open",
+    });
+    const groupingMembers = await db.selectFrom("grouping_membership").selectAll()
+      .where("stage_id", "=", groupingStage.id).where("is_current", "=", true).execute();
+    expect(groupingMembers.map((row) => row.participant_id)).toEqual(["legacy-user:1"]);
     const rows = await db.selectFrom("registration").selectAll()
       .where("activity_id", "=", activity.id).execute();
     expect(rows.map((row) => row.status).sort()).toEqual(["approved", "rejected"]);
