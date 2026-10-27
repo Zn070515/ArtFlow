@@ -103,6 +103,12 @@ export interface ExecutionPolicy {
   readonly declaredScopes: readonly string[];
   readonly conflicts: ScopeConflictPolicy;
   readonly runtimeContractVersion: number;
+  /**
+   * Which execution scopes may run each command. Frozen with the release so a
+   * command can never borrow another capability's running session. Releases
+   * created before this field existed lack it; the runtime fails closed.
+   */
+  readonly commandScopes?: Readonly<Record<string, readonly string[]>>;
 }
 
 export const RUNTIME_CONTRACT_VERSION = 1;

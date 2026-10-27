@@ -1,3 +1,4 @@
+import { PUBLISHING_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -64,7 +65,7 @@ async function seed(): Promise<{ activityId: string; sessionId: string; publicCo
         },
       },
     },
-    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
     capabilityVersions: { publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",
@@ -130,7 +131,7 @@ async function seed(): Promise<{ activityId: string; sessionId: string; publicCo
 async function login(username: string, password: string): Promise<string> {
   const response = await app.inject({
     method: "POST",
-    url: "/api/auth/login",
+    url: "/api/auth/token",
     headers: { "content-type": "application/json" },
     payload: { username, password },
   });

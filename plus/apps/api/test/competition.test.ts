@@ -60,7 +60,7 @@ afterAll(async () => {
 async function bearer(): Promise<string> {
   const response = await app.inject({
     method: "POST",
-    url: "/api/auth/login",
+    url: "/api/auth/token",
     headers: { "content-type": "application/json" },
     payload: { username: "competition-api-staff", password: "test-password" },
   });

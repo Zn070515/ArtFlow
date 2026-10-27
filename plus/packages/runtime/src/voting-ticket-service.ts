@@ -13,7 +13,6 @@ import {
   findJudgeSession,
   findTicketAccessSession,
   findTicketByCredential,
-  findRunningSessionByScope,
   getActivityForUpdate,
   getJudgeEntryForUpdate,
   getRelease,
@@ -49,9 +48,11 @@ import type { CompiledVotingArtifact, DecimalValue, ExecutionMode } from "@artfl
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
+import { requireRunningCommandSession } from "./command-scope.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
+import { markConsumedResultsStale } from "./result-consumption.js";
 
 const DEFAULT_TICKET_TTL_MS = 8 * 60 * 60 * 1000;
 
@@ -183,8 +184,7 @@ export async function openVoteSession(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     requireActive(activity, "Voting");
-    const session = await findRunningSessionByScope(trx, input.activityId, input.scope);
-    if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
+    const { session } = await requireRunningCommandSession(trx, activity, "voting.session.open", input.scope);
     const artifact = await votingArtifact(trx, activity, session.definitionVersion);
     const candidateIds = [...new Set(input.candidateIds.map((candidate) => candidate.trim()).filter(Boolean))];
     if (candidateIds.length === 0) throw new DomainError("INVALID_INPUT", "A voting session needs at least one candidate.");
@@ -277,8 +277,7 @@ export async function submitBallot(
     if (voteSession === null) throw new DomainError("NOT_FOUND", "The voting session was not found.");
     if (voteSession.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The voting session belongs to another activity.");
     if (voteSession.status !== "open") throw new DomainError("VOTE_SESSION_CLOSED", "The voting session is closed.");
-    const execution = await findRunningSessionByScope(trx, input.activityId, input.scope);
-    if (execution === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
+    const { session: execution } = await requireRunningCommandSession(trx, activity, "voting.ballot.submit", input.scope);
     if (execution.definitionVersion !== voteSession.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
     if (execution.mode !== voteSession.mode) throw new DomainError("STALE_CONTEXT", "The voting session belongs to another execution mode.");
     let ticketId: string | undefined;
@@ -380,8 +379,7 @@ export async function closeVoteSession(
     if (session.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The voting session belongs to another activity.");
     if (session.revision !== input.expectedRevision) throw new DomainError("STALE_REVISION", "The voting session changed since it was read.");
     if (session.status !== "open") throw new DomainError("VOTE_SESSION_CLOSED", "The voting session is already closed.");
-    const execution = await findRunningSessionByScope(trx, input.activityId, input.scope);
-    if (execution === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution.`);
+    const { session: execution } = await requireRunningCommandSession(trx, activity, "voting.session.close", input.scope);
     if (execution.definitionVersion !== session.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
     if (execution.mode !== session.mode) throw new DomainError("STALE_CONTEXT", "The voting session belongs to another execution mode.");
     const closed: StoredVoteSession = { ...session, status: "closed", revision: session.revision + 1, closedAt: deps.now() };
@@ -519,6 +517,13 @@ export async function rotateTicketCredential(
       capability: "ticketing",
       payload: { ticketId: current.id, credentialVersion: nextVersion },
     });
+    await markConsumedResultsStale(
+      trx,
+      deps,
+      input.activityId,
+      "vote_session",
+      "A ticket credential was rotated after the result was confirmed.",
+    );
     const body: IssuedTicketResult = { ticket: next, credential: rawCredential };
     return { body, persistedBody: { ticket: next, credential: null } };
   });
@@ -558,6 +563,13 @@ export async function revokeTicket(
       capability: "ticketing",
       payload: { ticketId: ticket.id, reason },
     });
+    await markConsumedResultsStale(
+      trx,
+      deps,
+      input.activityId,
+      "vote_session",
+      "A ticket was revoked after the result was confirmed.",
+    );
     return { body: revoked };
   });
 }
@@ -709,6 +721,13 @@ export async function revokeTicketAccessSession(
       capability: "ticketing",
       payload: { sessionId: input.sessionId, ticketId: session.ticket_id, reason },
     });
+    await markConsumedResultsStale(
+      trx,
+      deps,
+      input.activityId,
+      "vote_session",
+      "A ticket access session was revoked after the result was confirmed.",
+    );
     return { body: { sessionId: input.sessionId, revoked: true } };
   });
 }

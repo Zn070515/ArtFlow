@@ -569,11 +569,21 @@ async function importResults(
       candidateRevision: 1,
       sourceCandidateRevision: 1,
       inputFingerprint: bundleHash,
+      source: {
+        kind: "legacy_import",
+        aggregateId: id,
+        definitionVersion: 1,
+        releaseHash: bundleHash,
+        mode: "formal",
+        sourceRevision: 1,
+        inputFingerprint: bundleHash,
+      },
       decisions: stage.decisions as unknown as readonly ResultDecision[],
       awards: stage.awards as unknown as readonly ResultAward[],
       note: "",
       revision: 1,
       confirmedAt: stage.confirmedAt,
+      staleReason: "",
     });
   }
 
@@ -592,11 +602,21 @@ async function importResults(
         candidateRevision: 1,
         sourceCandidateRevision: 1,
         inputFingerprint: bundleHash,
+        source: {
+          kind: "legacy_import",
+          aggregateId: stageId,
+          definitionVersion: 1,
+          releaseHash: bundleHash,
+          mode: "formal",
+          sourceRevision: 1,
+          inputFingerprint: bundleHash,
+        },
         decisions: (snapshot.decisions ?? []) as readonly ResultDecision[],
         awards: (snapshot.awards ?? []) as readonly ResultAward[],
         note: release.note,
         revision: 1,
         confirmedAt: release.releasedAt,
+        staleReason: "",
       });
     }
     const publicationId = `${prefix}-pub-${stageToken(release.stageKey)}`;
@@ -786,7 +806,8 @@ async function importActivity(
     version: 1,
     contentHash: bundleHash,
     capabilities: capabilityEntries,
-    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
+    // Imported history is read-only: no command may claim a running session.
+    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1, commandScopes: {} },
     capabilityVersions: {
       questionnaire: "1",
       competition: "1",

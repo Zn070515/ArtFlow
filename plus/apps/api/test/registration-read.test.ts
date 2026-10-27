@@ -1,3 +1,4 @@
+import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -113,7 +114,7 @@ describe.skipIf(!connectionString)("registration read endpoints", () => {
           artifact: { schemaVersion: 1, maxBytes: 1000, allowedPurposes: ["audio"] },
         },
       },
-      executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 1 },
+      executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 1, commandScopes: {} },
       capabilityVersions: {},
       bindings: [],
       releasedAt: "2026-10-26T10:00:00Z",
@@ -186,7 +187,7 @@ describe.skipIf(!connectionString)("registration read endpoints", () => {
       version: 1,
       contentHash: "live-only-release",
       capabilities: {},
-      executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
+      executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1, commandScopes: COMPETITION_COMMAND_SCOPES },
       capabilityVersions: {},
       bindings: [],
       releasedAt: "2026-10-26T10:00:00Z",

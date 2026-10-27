@@ -22,6 +22,16 @@ function json(value: unknown): unknown {
   return typeof value === "string" ? (JSON.parse(value) as unknown) : value;
 }
 
+export interface StoredResultSource {
+  readonly kind: "podium_candidate" | "vote_session" | "legacy_import";
+  readonly aggregateId: string;
+  readonly definitionVersion: number;
+  readonly releaseHash: string;
+  readonly mode: "test" | "rehearsal" | "formal";
+  readonly sourceRevision: number;
+  readonly inputFingerprint: string;
+}
+
 export interface StoredStageResult {
   readonly id: string;
   readonly activityId: string;
@@ -30,17 +40,22 @@ export interface StoredStageResult {
   readonly candidateRevision: number;
   readonly sourceCandidateRevision: number;
   readonly inputFingerprint: string;
+  readonly source?: StoredResultSource | null;
   readonly decisions: readonly ResultDecision[];
   readonly awards: readonly ResultAward[];
   readonly note: string;
   readonly revision: number;
   readonly confirmedAt?: string;
   readonly unlockedAt?: string;
+  readonly staleAt?: string;
+  readonly staleReason?: string;
 }
 
 function stageResult(row: Selectable<StageResultRow>): StoredStageResult {
   const confirmedAt = iso(row.confirmed_at);
   const unlockedAt = iso(row.unlocked_at);
+  const staleAt = iso(row.stale_at);
+  const source = row.source === null ? null : (json(row.source) as StoredResultSource);
   return {
     id: row.id,
     activityId: row.activity_id,
@@ -49,12 +64,15 @@ function stageResult(row: Selectable<StageResultRow>): StoredStageResult {
     candidateRevision: row.candidate_revision,
     sourceCandidateRevision: row.source_candidate_revision,
     inputFingerprint: row.input_fingerprint,
+    source,
     decisions: json(row.decisions) as ResultDecision[],
     awards: json(row.awards) as ResultAward[],
     note: row.note,
     revision: row.revision,
+    staleReason: row.stale_reason,
     ...(confirmedAt === null ? {} : { confirmedAt }),
     ...(unlockedAt === null ? {} : { unlockedAt }),
+    ...(staleAt === null ? {} : { staleAt }),
   };
 }
 
@@ -109,6 +127,9 @@ export async function insertStageResult(
     decisions: JSON.stringify(value.decisions),
     awards: JSON.stringify(value.awards),
     note: value.note,
+    source: value.source === undefined || value.source === null ? null : JSON.stringify(value.source),
+    stale_at: value.staleAt ?? null,
+    stale_reason: value.staleReason ?? "",
     revision: value.revision,
     confirmed_at: value.confirmedAt ?? null,
     unlocked_at: value.unlockedAt ?? null,
@@ -127,6 +148,9 @@ export async function updateStageResult(
     decisions: JSON.stringify(value.decisions),
     awards: JSON.stringify(value.awards),
     note: value.note,
+    source: value.source === undefined || value.source === null ? null : JSON.stringify(value.source),
+    stale_at: value.staleAt ?? null,
+    stale_reason: value.staleReason ?? "",
     revision: value.revision,
     confirmed_at: value.confirmedAt ?? null,
     unlocked_at: value.unlockedAt ?? null,

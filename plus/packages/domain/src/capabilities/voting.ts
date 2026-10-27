@@ -176,6 +176,14 @@ export function createEmptyVotingDefinition(): CapabilityDefinition {
   });
 }
 
+/** The canonical voting command → execution scope binding. */
+export const VOTING_COMMAND_SCOPES: Readonly<Record<string, readonly string[]>> = deepFreeze({
+  "voting.session.open": ["voting"],
+  "voting.ballot.submit": ["voting"],
+  "voting.session.close": ["voting"],
+  "voting.scores.compute": ["voting"],
+});
+
 export const votingCapability: CapabilityRegistration = deepFreeze({
   manifest: {
     identity: "voting",
@@ -200,6 +208,7 @@ export const votingCapability: CapabilityRegistration = deepFreeze({
     permissions: ["voting.manage", "voting.ballot.submit"],
     surfaces: ["studio", "ops", "portal", "live"],
     scopes: ["voting"],
+    commandScopes: VOTING_COMMAND_SCOPES,
   },
   compiler: votingCompiler,
   emptyDefinition: createEmptyVotingDefinition,

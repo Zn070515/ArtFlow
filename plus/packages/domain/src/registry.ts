@@ -34,6 +34,12 @@ export interface CapabilityManifest {
    * declared scopes. Empty means "not specified yet" during migration.
    */
   readonly scopes?: readonly string[];
+  /**
+   * Execution-scoped commands owned by this capability and the scopes each may
+   * run in. Commands absent from this map are activity-scoped, not session
+   * commands. The composition freezes the merged map into the release.
+   */
+  readonly commandScopes?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -67,6 +73,8 @@ export interface CompositionPlan {
   readonly scopeConflicts: ScopeConflictPolicy;
   /** The sorted union of scopes declared by the enabled capabilities. */
   readonly declaredScopes: readonly string[];
+  /** The merged command → allowed scopes map, frozen into the release. */
+  readonly commandScopes: Readonly<Record<string, readonly string[]>>;
 }
 
 export type CompositionResult =
@@ -104,6 +112,65 @@ function mergeScopeConflicts(
   const policy: Record<string, readonly string[]> = {};
   for (const scope of [...merged.keys()].sort()) {
     policy[scope] = [...(merged.get(scope) ?? new Set<string>())].sort();
+  }
+  return policy;
+}
+
+function mergeCommandScopes(
+  registrations: readonly CapabilityRegistration[],
+  declaredScopes: readonly string[],
+  record: (value: RegistryIssue) => void,
+): Readonly<Record<string, readonly string[]>> {
+  const merged = new Map<string, { owner: string; scopes: Set<string> }>();
+  for (const registration of registrations) {
+    const identity = registration.manifest.identity;
+    const commands = new Set(registration.manifest.commands);
+    const ownScopes = new Set(registration.manifest.scopes ?? []);
+    for (const [command, scopes] of Object.entries(registration.manifest.commandScopes ?? {})) {
+      if (!commands.has(command)) {
+        record(issue(
+          "COMMAND_SCOPE_UNKNOWN_COMMAND",
+          `Capability ${identity} binds a command it does not declare: ${command}.`,
+          `capabilities.${identity}.commandScopes.${command}`,
+        ));
+        continue;
+      }
+      if (!Array.isArray(scopes) || scopes.length === 0) {
+        record(issue(
+          "COMMAND_SCOPE_EMPTY",
+          `Command ${command} must bind at least one execution scope.`,
+          `capabilities.${identity}.commandScopes.${command}`,
+        ));
+        continue;
+      }
+      const invalid = scopes.filter(
+        (scope) => !ownScopes.has(scope) || !declaredScopes.includes(scope),
+      );
+      if (invalid.length > 0) {
+        record(issue(
+          "COMMAND_SCOPE_UNDECLARED",
+          `Command ${command} binds scopes the capability does not declare: ${invalid.join(", ")}.`,
+          `capabilities.${identity}.commandScopes.${command}`,
+        ));
+        continue;
+      }
+      const existing = merged.get(command);
+      if (existing !== undefined && existing.owner !== identity) {
+        record(issue(
+          "COMMAND_SCOPE_CONFLICT",
+          `Command ${command} is claimed by both ${existing.owner} and ${identity}.`,
+          `capabilities.${identity}.commandScopes.${command}`,
+        ));
+        continue;
+      }
+      const target = existing ?? { owner: identity, scopes: new Set<string>() };
+      for (const scope of scopes) target.scopes.add(scope);
+      merged.set(command, target);
+    }
+  }
+  const policy: Record<string, readonly string[]> = {};
+  for (const command of [...merged.keys()].sort()) {
+    policy[command] = [...(merged.get(command)?.scopes ?? new Set<string>())].sort();
   }
   return policy;
 }
@@ -374,10 +441,15 @@ function validateComposition(
   const declaredScopes = [
     ...new Set(enabledRegistrations.flatMap((item) => item.manifest.scopes ?? [])),
   ].sort();
+  const commandScopes = mergeCommandScopes(enabledRegistrations, declaredScopes, record);
+  if (issues.length > 0) {
+    return deepFreeze({ ok: false as const, issues: Object.freeze(issues) });
+  }
   const plan: CompositionPlan = {
     enabledCapabilities: Object.freeze(enabledList),
     scopeConflicts: deepFreeze(mergeScopeConflicts(enabledRegistrations)),
     declaredScopes: Object.freeze(declaredScopes),
+    commandScopes: deepFreeze(commandScopes),
   };
   return deepFreeze({ ok: true as const, plan });
 }

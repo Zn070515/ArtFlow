@@ -465,6 +465,9 @@ export interface StageResultRow {
   decisions: ColumnType<unknown, string, string>;
   awards: ColumnType<unknown, string, string>;
   note: string;
+  source: ColumnType<unknown, string | null | undefined, string | null>;
+  stale_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  stale_reason: ColumnType<string, string | undefined, string>;
   revision: number;
   confirmed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   unlocked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;

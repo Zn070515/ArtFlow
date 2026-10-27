@@ -1,3 +1,4 @@
+import { PUBLISHING_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -78,6 +79,23 @@ async function seedActivity(
     enabled_capabilities: JSON.stringify(["competition", "publishing"]),
     active_definition_version: 1,
   }).execute();
+  // A podium candidate is always produced by a concrete round; the provenance
+  // check must be able to prove which release that round ran under.
+  const roundId = `round-${activityId}`;
+  await db.insertInto("competition_round").values({
+    id: roundId,
+    activity_id: activityId,
+    round_key: "final",
+    release_version: 1,
+    state: "locked",
+    revision: 1,
+    score_version: 1,
+    minimum_judges: 1,
+    judge_count: 1,
+    completion_mode: "full_matrix",
+    scoring_method: "average",
+    advance_count: 0,
+  }).execute();
   await insertRelease(db, {
     activityId,
     version: 1,
@@ -94,7 +112,7 @@ async function seedActivity(
         },
       },
     },
-    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
     capabilityVersions: { publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-19T17:00:00Z",
@@ -117,8 +135,8 @@ async function seedActivity(
     inputFingerprint: fingerprint,
     status: "candidate",
     placements,
-    sourceRoundIds: ["round-final"],
-    sourceScoreVersions: [{ roundId: "round-final", sourceScoreVersion: 1 }],
+    sourceRoundIds: [roundId],
+    sourceScoreVersions: [{ roundId, sourceScoreVersion: 1 }],
     revision: sourceRevision,
   });
   return activityId;
@@ -446,5 +464,78 @@ describe.skipIf(!connectionString)("publishing service", () => {
     expect(events.map((event) => event.type)).toEqual(
       expect.arrayContaining(["StageResultConfirmed", "ResultReleased", "ResultReleaseRevoked"]),
     );
+  });
+
+  it("refuses to release a result whose source candidate was replaced", async () => {
+    const activityId = await seedActivity();
+    const confirmed = await confirmStageResult(db, deps(staff), {
+      commandId: `m7-stale-source-confirm-${activityId}`,
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: 3,
+      expectedInputFingerprint: "fp-1",
+      awards: [{ award: "冠军", contestantId: "singer-a" }],
+      note: "核定",
+    });
+    await insertPodiumCandidate(db, {
+      id: `podium-2-${activityId}`,
+      activityId,
+      inputFingerprint: "fp-2",
+      status: "candidate",
+      placements: [{ place: 1, contestantId: "singer-b", total: "99.00" }],
+      sourceRoundIds: [`round-${activityId}`],
+      sourceScoreVersions: [{ roundId: `round-${activityId}`, sourceScoreVersion: 2 }],
+      revision: 4,
+    });
+    await expect(releaseResult(db, deps(staff), {
+      commandId: `m7-stale-source-release-${activityId}`,
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: confirmed.body.candidateRevision,
+      note: "release",
+    })).rejects.toMatchObject({ code: "RESULT_STALE" });
+  });
+
+  it("refuses a podium candidate produced by another definition release", async () => {
+    const activityId = await seedActivity();
+    await insertRelease(db, {
+      activityId,
+      version: 2,
+      contentHash: "m7-release-2",
+      capabilities: {
+        publishing: {
+          ok: true,
+          capabilityKey: "publishing",
+          contentHash: "publishing-2",
+          artifact: {
+            version: 1,
+            schemaVersion: 1,
+            stages: [{ key: "final_podium", label: "正式赛果" }],
+          },
+        },
+      },
+      executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
+      capabilityVersions: { publishing: "1" },
+      bindings: [],
+      releasedAt: "2026-10-19T17:30:00Z",
+      sourceDraftRevision: 2,
+    });
+    await db.updateTable("activity").set({ active_definition_version: 2 }).where("id", "=", activityId).execute();
+    await db.updateTable("execution_session")
+      .set({ definition_version: 2, content_hash: "m7-release-2" })
+      .where("id", "=", `publishing-${activityId}`)
+      .execute();
+    await expect(confirmStageResult(db, deps(staff), {
+      commandId: `m7-release-mismatch-${activityId}`,
+      activityId,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: 3,
+      expectedInputFingerprint: "fp-1",
+      awards: [{ award: "冠军", contestantId: "singer-a" }],
+      note: "核定",
+    })).rejects.toMatchObject({ code: "SOURCE_RELEASE_MISMATCH" });
   });
 });

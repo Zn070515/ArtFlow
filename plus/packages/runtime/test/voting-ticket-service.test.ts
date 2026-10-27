@@ -1,3 +1,4 @@
+import { COMPETITION_COMMAND_SCOPES, VOTING_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -147,7 +148,7 @@ async function seedActivity(
       },
       ...(includeJudging ? { competition } : {}),
     },
-    executionPolicy: { declaredScopes: includeJudging ? ["judging", "voting"] : ["voting"], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: includeJudging ? ["judging", "voting"] : ["voting"], conflicts: {}, runtimeContractVersion: 1, commandScopes: { ...COMPETITION_COMMAND_SCOPES, ...VOTING_COMMAND_SCOPES } },
     capabilityVersions: includeJudging ? { competition: "1", ticketing: "1", voting: "1" } : { ticketing: "1", voting: "1" },
     bindings: [],
     releasedAt: "2026-10-19T17:00:00Z",
@@ -521,7 +522,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
           },
         },
       },
-      executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1 },
+      executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1, commandScopes: VOTING_COMMAND_SCOPES },
       capabilityVersions: { voting: "1" },
       bindings: [],
       releasedAt: "2026-10-19T17:30:00Z",
@@ -608,7 +609,7 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
           },
         },
       },
-      executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1 },
+      executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1, commandScopes: VOTING_COMMAND_SCOPES },
       capabilityVersions: { voting: "1" },
       bindings: [],
       releasedAt: "2026-10-19T17:30:00Z",
@@ -719,5 +720,72 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const row = await db.selectFrom("vote_session").select("mode")
       .where("id", "=", `vote-rehearsal-${activityId}`).executeTakeFirstOrThrow();
     expect(row.mode).toBe("rehearsal");
+  });
+
+  it("refuses to borrow another running scope for a voting command", async () => {
+    const activityId = await seedActivity(`act-borrow-${randomUUID()}`, true, "browser");
+    const opened = await openVoteSession(db, deps(staff), {
+      commandId: `borrow-open-${activityId}`,
+      activityId,
+      sessionId: `borrow-vote-${activityId}`,
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+    // Closing the voting session must close the command's authority, even while
+    // another scope under the same release is still running.
+    await db.updateTable("execution_session")
+      .set({ status: "closed", revision: 1 })
+      .where("id", "=", `execution-${activityId}`)
+      .execute();
+    await seedJudgeScoreContext(activityId);
+    await expect(submitBallot(db, deps(judgeA), {
+      commandId: `borrow-ballot-${activityId}`,
+      activityId,
+      sessionId: opened.body.session.id,
+      scope: "judging",
+      optionIds: [opened.body.options[0]?.id ?? ""],
+      identity: { type: "browser", fingerprint: "f".repeat(32) },
+    })).rejects.toMatchObject({ code: "SCOPE_NOT_AUTHORIZED" });
+  });
+
+  it("fails closed when a release has no command-to-scope binding", async () => {
+    const activityId = await seedActivity(`act-legacy-scope-${randomUUID()}`, false, "browser");
+    await insertRelease(db, {
+      activityId,
+      version: 2,
+      contentHash: "m6-release-2",
+      capabilities: {
+        ticketing: { ok: true, capabilityKey: "ticketing", contentHash: "ticketing", artifact: { schemaVersion: 1 } },
+        voting: {
+          ok: true,
+          capabilityKey: "voting",
+          contentHash: "voting-2",
+          artifact: {
+            version: 2,
+            schemaVersion: 2,
+            purpose: "popularity",
+            selectionType: "single",
+            maxSelections: 1,
+            identityPolicy: "browser",
+            scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+          },
+        },
+      },
+      executionPolicy: { declaredScopes: ["voting"], conflicts: {}, runtimeContractVersion: 1 },
+      capabilityVersions: { ticketing: "1", voting: "1" },
+      bindings: [],
+      releasedAt: "2026-10-19T17:30:00Z",
+      sourceDraftRevision: 2,
+    });
+    await db.updateTable("activity").set({ active_definition_version: 2 }).where("id", "=", activityId).execute();
+    await db.updateTable("execution_session").set({ definition_version: 2, content_hash: "m6-release-2" })
+      .where("activity_id", "=", activityId).execute();
+    await expect(openVoteSession(db, deps(staff), {
+      commandId: `legacy-scope-open-${activityId}`,
+      activityId,
+      sessionId: `legacy-scope-vote-${activityId}`,
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    })).rejects.toMatchObject({ code: "COMMAND_SCOPE_UNDECLARED" });
   });
 });

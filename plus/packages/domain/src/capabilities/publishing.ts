@@ -252,6 +252,16 @@ export const publishingCompiler: CapabilityCompiler = {
   },
 };
 
+/** The canonical publishing command → execution scope binding. */
+export const PUBLISHING_COMMAND_SCOPES: Readonly<Record<string, readonly string[]>> = deepFreeze({
+  "publishing.stage_result.confirm": ["publishing"],
+  "publishing.stage_result.unlock": ["publishing"],
+  "publishing.result.release": ["publishing"],
+  "publishing.result.revoke": ["publishing"],
+  "publishing.publication.edit": ["publishing"],
+  "publishing.vote_result.confirm": ["publishing"],
+});
+
 export const publishingCapability: CapabilityRegistration = deepFreeze({
   manifest: {
     identity: "publishing",
@@ -283,6 +293,7 @@ export const publishingCapability: CapabilityRegistration = deepFreeze({
     permissions: ["result.manage"],
     surfaces: ["studio", "ops", "portal"],
     scopes: ["publishing"],
+    commandScopes: PUBLISHING_COMMAND_SCOPES,
   },
   compiler: publishingCompiler,
   emptyDefinition: createEmptyPublishingDefinition,

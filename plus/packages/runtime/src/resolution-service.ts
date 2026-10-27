@@ -6,7 +6,6 @@ import type {
   StoredRound,
 } from "@artflow-plus/db";
 import {
-  findRunningSessionByScope,
   getActivityForUpdate,
   getCurrentPanelForUpdate,
   getLatestAdvancementDecision,
@@ -42,6 +41,8 @@ import {
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
+import { requireRunningCommandSession } from "./command-scope.js";
+import { markConsumedResultsStale } from "./result-consumption.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
@@ -159,7 +160,7 @@ export async function resolveRound(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     const roundRow = await getRoundForUpdate(trx, input.roundId);
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
+    const { session } = await requireRunningCommandSession(trx, activity, "competition.ranking.resolve", input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
     if (roundRow === null) throw new DomainError("NOT_FOUND", "The competition round was not found.");
     if (roundRow.activityId !== activity.id) throw new DomainError("CROSS_ACTIVITY", "The round belongs to another activity.");
@@ -230,7 +231,7 @@ export async function finalizeAdvancement(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     const round = requireRound(await getRoundForUpdate(trx, input.roundId), activity.id);
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
+    const { session } = await requireRunningCommandSession(trx, activity, "competition.advancement.finalize", input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
     if (session.mode !== "formal") throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can advance contestants.");
     const rankingSnapshot = await getCurrentRankingSnapshot(trx, round.id, session.mode);
@@ -301,7 +302,7 @@ export async function recordTieDecision(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     const round = requireRound(await getRoundForUpdate(trx, input.roundId), activity.id);
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
+    const { session } = await requireRunningCommandSession(trx, activity, "competition.tie.decide", input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
     if (session.mode !== "formal") throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can decide ties.");
     const current = await getCurrentRankingSnapshot(trx, round.id, session.mode);
@@ -429,7 +430,7 @@ export async function recomputePodiumCandidate(
     requireResolutionPermission(actor);
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    const session = await findRunningSessionByScope(trx, activity.id, input.scope);
+    const { session } = await requireRunningCommandSession(trx, activity, "competition.podium.recompute", input.scope);
     if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
     if (session.mode !== "formal") throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can produce podium candidates.");
     const anchorRoundId = input.roundIds[0];
@@ -476,6 +477,13 @@ export async function recomputePodiumCandidate(
       revision: (previous?.revision ?? 0) + 1,
     };
     await insertPodiumCandidate(trx, stored);
+    await markConsumedResultsStale(
+      trx,
+      deps,
+      activity.id,
+      "podium_candidate",
+      "The podium candidate was recomputed after the result was confirmed.",
+    );
     await appendEngineEvent(trx, deps, {
       type: "StageResultCandidateProduced",
       activityId: activity.id,

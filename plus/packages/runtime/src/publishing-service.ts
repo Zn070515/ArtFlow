@@ -3,16 +3,17 @@ import type {
   StoredPodiumCandidate,
   StoredResultPublication,
   StoredResultRelease,
+  StoredResultSource,
   StoredStageResult,
 } from "@artflow-plus/db";
 import {
-  findRunningSessionByScope,
   getActiveResultRelease,
   getActivity,
   getActivityForUpdate,
   getLatestPodiumCandidate,
   getRelease,
   getVoteSession,
+  listRoundsForActivity,
   listVoteOptions,
   getResultPublicationForUpdate,
   getResultReleaseByIdForUpdate,
@@ -46,9 +47,11 @@ import type {
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
+import { requireRunningCommandSession } from "./command-scope.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
+import { requireSourceFingerprint } from "./result-consumption.js";
 import { getClosedVoteScores } from "./voting-ticket-service.js";
 
 function requireActive(activity: { readonly status: string }, label: string): void {
@@ -74,6 +77,7 @@ async function lockPublishingActivity(
   trx: Kysely<Database>,
   actor: ActorContext,
   activityId: string,
+  commandType: string,
   scope: string,
 ) {
   requirePermission(actor, "result.manage");
@@ -81,10 +85,7 @@ async function lockPublishingActivity(
   if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
   requireActive(activity, "Publishing");
   requireCapability(activity, "publishing");
-  const session = await findRunningSessionByScope(trx, activity.id, scope);
-  if (session === null) {
-    throw new DomainError("SESSION_NOT_RUNNING", `Scope ${scope} has no running execution.`);
-  }
+  const { session } = await requireRunningCommandSession(trx, activity, commandType, scope);
   if (session.mode !== "formal") {
     throw new DomainError("FORMAL_MODE_REQUIRED", "Publishing is a formal-only capability.");
   }
@@ -175,7 +176,7 @@ export async function confirmStageResult(
       note,
     },
   }, async (trx) => {
-    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, "publishing.stage_result.confirm", input.scope);
     requireCapability(activity, "competition");
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     const candidate = await getLatestPodiumCandidate(trx, activity.id);
@@ -189,6 +190,33 @@ export async function confirmStageResult(
     ) {
       throw new DomainError("STALE_RESOLUTION_INPUT", "The podium candidate changed since it was read.");
     }
+    const sourceRelease = await getRelease(trx, activity.id, session.definitionVersion);
+    if (sourceRelease === null) {
+      throw new DomainError("VERSION_NOT_RELEASED", "The publishing release is no longer available.");
+    }
+    const rounds = await listRoundsForActivity(trx, activity.id);
+    const sourceRounds = candidate.sourceRoundIds.map((roundId) =>
+      rounds.find((round) => round.id === roundId),
+    );
+    if (
+      candidate.sourceRoundIds.length === 0 ||
+      sourceRounds.some((round) => round === undefined) ||
+      sourceRounds.some((round) => round?.releaseVersion !== session.definitionVersion)
+    ) {
+      throw new DomainError(
+        "SOURCE_RELEASE_MISMATCH",
+        "The podium candidate was produced by a different definition release.",
+      );
+    }
+    const source: StoredResultSource = {
+      kind: "podium_candidate",
+      aggregateId: candidate.id,
+      definitionVersion: session.definitionVersion,
+      releaseHash: sourceRelease.contentHash,
+      mode: session.mode,
+      sourceRevision: candidate.revision,
+      inputFingerprint: candidate.inputFingerprint,
+    };
     const decisions = decisionsFromCandidate(candidate);
     validateAwards(decisions, input.awards);
     const existing = await getStageResultForUpdate(trx, activity.id, stage.key);
@@ -206,11 +234,13 @@ export async function confirmStageResult(
       candidateRevision,
       sourceCandidateRevision: candidate.revision,
       inputFingerprint: candidate.inputFingerprint,
+      source,
       decisions,
       awards: input.awards.map((award) => ({ award: award.award.trim(), contestantId: award.contestantId })),
       note,
       revision: (existing?.revision ?? 0) + 1,
       confirmedAt: deps.now(),
+      staleReason: "",
     };
     if (existing === null) await insertStageResult(trx, stored);
     else await updateStageResult(trx, stored);
@@ -230,6 +260,7 @@ export async function confirmStageResult(
         decisions: stored.decisions,
         awards: stored.awards,
         note: stored.note,
+        source: stored.source,
       },
     });
     return { body: stored, status: existing === null ? 201 : 200 };
@@ -377,7 +408,7 @@ export async function confirmVoteStageResult(
       note,
     },
   }, async (trx) => {
-    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, "publishing.vote_result.confirm", input.scope);
     requireCapability(activity, "voting");
     const stage = requireStage(
       await publishingArtifact(trx, activity, session.definitionVersion),
@@ -394,7 +425,26 @@ export async function confirmVoteStageResult(
     if (voteSession.mode !== session.mode) {
       throw new DomainError("FORMAL_MODE_REQUIRED", "The voting session belongs to another execution mode.");
     }
+    if (voteSession.definitionVersion !== session.definitionVersion) {
+      throw new DomainError(
+        "SOURCE_RELEASE_MISMATCH",
+        "The voting session was opened by a different definition release.",
+      );
+    }
+    const sourceRelease = await getRelease(trx, activity.id, session.definitionVersion);
+    if (sourceRelease === null) {
+      throw new DomainError("VERSION_NOT_RELEASED", "The publishing release is no longer available.");
+    }
     const { tally, entries, fingerprint } = await voteResultData(trx, activity.id, voteSession);
+    const source: StoredResultSource = {
+      kind: "vote_session",
+      aggregateId: voteSession.id,
+      definitionVersion: session.definitionVersion,
+      releaseHash: sourceRelease.contentHash,
+      mode: session.mode,
+      sourceRevision: voteSession.revision,
+      inputFingerprint: fingerprint,
+    };
     if (tally.scoreStatus === "hold") {
       throw new DomainError("NO_VALID_BALLOTS", "A voting session with no valid ballots cannot be published.");
     }
@@ -421,11 +471,13 @@ export async function confirmVoteStageResult(
       candidateRevision,
       sourceCandidateRevision: voteSession.revision,
       inputFingerprint: fingerprint,
+      source,
       decisions,
       awards: input.awards.map((award) => ({ award: award.award.trim(), contestantId: award.contestantId })),
       note,
       revision: (existing?.revision ?? 0) + 1,
       confirmedAt: deps.now(),
+      staleReason: "",
     };
     if (existing === null) await insertStageResult(trx, stored);
     else await updateStageResult(trx, stored);
@@ -445,7 +497,7 @@ export async function confirmVoteStageResult(
         decisions: stored.decisions,
         awards: stored.awards,
         note: stored.note,
-        source: { kind: "vote_session", sessionId: voteSession.id },
+        source: stored.source,
       },
     });
     return { body: stored, status: existing === null ? 201 : 200 };
@@ -510,7 +562,7 @@ export async function releaseResult(
     actor,
     payload: { stageKey: input.stageKey, expectedCandidateRevision: input.expectedCandidateRevision, note },
   }, async (trx) => {
-    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, "publishing.result.release", input.scope);
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     const stageResult = await getStageResultForUpdate(trx, activity.id, stage.key);
     if (stageResult === null) throw new DomainError("RESULT_NOT_CONFIRMED", "The stage result has not been confirmed.");
@@ -520,6 +572,33 @@ export async function releaseResult(
     if (stageResult.candidateRevision !== input.expectedCandidateRevision) {
       throw new DomainError("STALE_REVISION", "The stage result changed since it was read.");
     }
+    if (stageResult.source === undefined || stageResult.source === null) {
+      throw new DomainError(
+        "RESULT_PROVENANCE_MISSING",
+        "The confirmed result has no frozen source identity; unlock and confirm it again.",
+      );
+    }
+    if (stageResult.source.definitionVersion !== session.definitionVersion) {
+      throw new DomainError(
+        "SOURCE_RELEASE_MISMATCH",
+        "The confirmed result was produced by a different definition release.",
+      );
+    }
+    let currentFingerprint = stageResult.inputFingerprint;
+    if (stageResult.source.kind === "vote_session") {
+      const voteSession = await getVoteSession(trx, stageResult.source.aggregateId);
+      if (voteSession === null || voteSession.activityId !== activity.id) {
+        throw new DomainError("RESULT_STALE", "The source voting session no longer exists.");
+      }
+      currentFingerprint = (await voteResultData(trx, activity.id, voteSession)).fingerprint;
+    } else if (stageResult.source.kind === "podium_candidate") {
+      const candidate = await getLatestPodiumCandidate(trx, activity.id);
+      if (candidate === null || candidate.id !== stageResult.source.aggregateId) {
+        throw new DomainError("RESULT_STALE", "The source podium candidate was replaced.");
+      }
+      currentFingerprint = candidate.inputFingerprint;
+    }
+    requireSourceFingerprint(stageResult, currentFingerprint);
     const active = await getActiveResultRelease(trx, activity.id, stage.key);
     if (active !== null) {
       throw new DomainError("RESULT_ALREADY_RELEASED", "Revoke the active release before publishing again.");
@@ -606,7 +685,7 @@ export async function revokeResultRelease(
     actor,
     payload: { releaseId: input.releaseId, note },
   }, async (trx) => {
-    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, "publishing.result.revoke", input.scope);
     const release = await getResultReleaseByIdForUpdate(trx, input.releaseId);
     if (release === null || release.activityId !== activity.id) {
       throw new DomainError("NOT_FOUND", "The result release was not found.");
@@ -665,7 +744,7 @@ export async function unlockStageResult(
     actor,
     payload: { stageKey: input.stageKey, expectedCandidateRevision: input.expectedCandidateRevision, note },
   }, async (trx) => {
-    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, "publishing.stage_result.unlock", input.scope);
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     const stageResult = await getStageResultForUpdate(trx, activity.id, stage.key);
     if (stageResult === null) throw new DomainError("RESULT_NOT_CONFIRMED", "The stage result has not been confirmed.");
@@ -698,12 +777,14 @@ export async function unlockStageResult(
         payload: { releaseId: active.id, stageKey: active.stageKey },
       });
     }
+    const { staleAt: _staleAt, ...current } = stageResult;
     const unlocked: StoredStageResult = {
-      ...stageResult,
+      ...current,
       status: "ready_to_confirm",
       candidateRevision: stageResult.candidateRevision + 1,
       revision: stageResult.revision + 1,
       unlockedAt: deps.now(),
+      staleReason: "",
     };
     await updateStageResult(trx, unlocked);
     await appendEngineEvent(trx, deps, {
@@ -753,7 +834,7 @@ export async function editPublication(
       content: input.content,
     },
   }, async (trx) => {
-    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, input.scope);
+    const { activity, session } = await lockPublishingActivity(trx, actor, input.activityId, "publishing.publication.edit", input.scope);
     const stage = requireStage(await publishingArtifact(trx, activity, session.definitionVersion), input.stageKey);
     if ((await getActiveResultRelease(trx, activity.id, stage.key)) !== null) {
       throw new DomainError("RESULT_POST_FROZEN", "An active result release freezes the publication.");

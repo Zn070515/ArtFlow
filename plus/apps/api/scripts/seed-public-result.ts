@@ -68,11 +68,21 @@ if (existing === null) {
       candidateRevision: 3,
       sourceCandidateRevision: 3,
       inputFingerprint: "fingerprint-not-public",
+      source: {
+        kind: "legacy_import",
+        aggregateId: "stage-e2e",
+        definitionVersion: 1,
+        releaseHash: "seed-public-result",
+        mode: "formal",
+        sourceRevision: 3,
+        inputFingerprint: "fingerprint-not-public",
+      },
       decisions,
       awards,
       note: "",
       revision: 1,
       confirmedAt: "2026-10-20T17:00:00.000Z",
+      staleReason: "",
     });
     await insertResultPublication(trx, {
       id: "publication-e2e",

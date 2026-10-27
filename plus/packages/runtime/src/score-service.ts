@@ -5,7 +5,6 @@ import type {
   StoredRound,
 } from "@artflow-plus/db";
 import {
-  findRunningSessionByScope,
   getActivityForUpdate,
   getCurrentPanelForUpdate,
   getCorrectionForUpdate,
@@ -41,9 +40,11 @@ import {
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
+import { requireRunningCommandSession } from "./command-scope.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
+import { requireNoConfirmedResult } from "./result-consumption.js";
 
 interface ScoreActivity {
   readonly id: string;
@@ -126,12 +127,19 @@ async function loadScoreContext(
   trx: Kysely<Database>,
   input: ScoreContextInput,
   allowLockedPerformance: boolean,
+  commandType: string,
   judgeSessionToken?: string,
   now?: string,
 ): Promise<LoadedScoreContext> {
   const activity = await getActivityForUpdate(trx, input.activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
   requireActive(activity);
+  await requireNoConfirmedResult(
+    trx,
+    activity.id,
+    "RESULT_CONSUMED",
+    "A confirmed result consumed this activity's scores; unlock it before changing scores.",
+  );
   const judgeSession = judgeSessionToken === undefined
     ? null
     : await getJudgeSessionForUpdate(trx, stableHash(judgeSessionToken));
@@ -185,8 +193,7 @@ async function loadScoreContext(
   if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The round release is no longer available.");
   const plan = release.capabilities.competition;
   if (plan === undefined || plan.ok !== true) throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The round has no competition rubric.");
-  const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-  if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+  const { session } = await requireRunningCommandSession(trx, activity, commandType, input.scope);
   if (session.definitionVersion !== round.releaseVersion) throw new DomainError("STALE_CONTEXT", "The execution session is not bound to this round release.");
   return {
     activity,
@@ -217,6 +224,7 @@ async function submitScore(
   reason?: string,
 ): Promise<CommandOutcome<ScoreFactResult>> {
   const actor = runtimeActor(deps);
+  const commandType = `competition.score.${source}`;
   if (source !== "direct_judge") requireStaffScorePermission(actor);
   if (source === "staff_proxy" || source === "paper_dr") {
     requireReason(sourceReference, "SOURCE_REFERENCE_REQUIRED", "sourceReference");
@@ -226,7 +234,7 @@ async function submitScore(
     commandId: input.commandId,
     activityId: input.activityId,
     capability: "competition",
-    commandType: `competition.score.${source}`,
+    commandType,
     scope: input.scope,
     actor,
     payload: {
@@ -242,7 +250,7 @@ async function submitScore(
       reason: reason ?? null,
     },
   }, async (trx) => {
-    const context = await loadScoreContext(trx, input, false, source === "direct_judge" ? deps.judgeSessionToken : undefined, deps.now());
+    const context = await loadScoreContext(trx, input, false, commandType, source === "direct_judge" ? deps.judgeSessionToken : undefined, deps.now());
     if (source === "direct_judge" && context.judgeSessionSeatId === undefined && actor.actorId !== context.judgeId) {
       throw new DomainError("FORBIDDEN", "The judge actor does not own this seat.");
     }
@@ -348,7 +356,7 @@ export async function editScoreFact(
     actor,
     payload: { ...input, reason },
   }, async (trx) => {
-    const context = await loadScoreContext(trx, input, true);
+    const context = await loadScoreContext(trx, input, true, "competition.score.edit");
     const fact = await getScoreFactForUpdate(trx, context.round.id, context.contestantId, context.judgeId, context.mode);
     if (fact === null) throw new DomainError("SCORE_FACT_NOT_FOUND", "The score fact was not found.");
     if (input.scoreFactId !== undefined && fact.id !== input.scoreFactId) {
@@ -400,8 +408,6 @@ export async function editScoreFact(
     if (correction !== null) {
       await updateCorrection(trx, { ...correction, state: "revised", revision: correction.revision + 1 }, correction.revision);
     }
-    const session = await findRunningSessionByScope(trx, context.activity.id, input.scope);
-    if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
     await appendEngineEvent(trx, deps, {
       type: "ScoreFactRevised",
       activityId: context.activity.id,
@@ -409,8 +415,8 @@ export async function editScoreFact(
       aggregateId: fact.id,
       revision: savedRound.revision,
       capability: "competition",
-      mode: session.mode,
-      scope: session.scope,
+      mode: context.mode,
+      scope: context.scope,
       payload: { scoreFact: result(updated), reason, correctionId: input.correctionId ?? null, sourceScoreVersion: savedRound.scoreVersion },
     });
     return { body: result(updated) };
@@ -440,6 +446,7 @@ interface CorrectionContextInput {
 async function correctionContext(
   trx: Kysely<Database>,
   input: CorrectionContextInput,
+  commandType: string,
 ): Promise<{
   readonly activity: ScoreActivity;
   readonly round: StoredRound;
@@ -453,6 +460,12 @@ async function correctionContext(
   const activity = await getActivityForUpdate(trx, input.activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
   requireActive(activity);
+  await requireNoConfirmedResult(
+    trx,
+    activity.id,
+    "RESULT_CONSUMED",
+    "A confirmed result consumed this activity's scores; unlock it before correcting scores.",
+  );
   const round = await getRoundForUpdate(trx, input.roundId);
   if (round === null || round.activityId !== activity.id) throw new DomainError("NOT_FOUND", "The competition round was not found.");
   if (round.state === "locked") throw new DomainError("ROUND_LOCKED", "The round is locked.");
@@ -473,8 +486,7 @@ async function correctionContext(
     throw new DomainError("STALE_CONTEXT", "The score fact belongs to a stale performance context.");
   }
   if (fact.panelSnapshotId !== panel.id) throw new DomainError("STALE_CONTEXT", "The score fact belongs to a superseded panel.");
-  const session = await findRunningSessionByScope(trx, activity.id, input.scope);
-  if (session === null) throw new DomainError("SESSION_NOT_RUNNING", `Scope ${input.scope} has no running execution session.`);
+  const { session } = await requireRunningCommandSession(trx, activity, commandType, input.scope);
   if (fact.mode !== session.mode) {
     throw new DomainError("FORBIDDEN", "The score fact belongs to another execution mode.");
   }
@@ -503,7 +515,7 @@ export async function openScoreCorrection(db: Kysely<Database>, deps: RuntimeDep
     actor,
     payload: { ...input, reason },
   }, async (trx) => {
-    const context = await correctionContext(trx, input);
+    const context = await correctionContext(trx, input, "competition.score.correction.open");
     if (await getOpenCorrectionForUpdate(trx, context.fact.id) !== null) throw new DomainError("CORRECTION_ALREADY_OPEN", "A correction is already open for this fact.");
     const correction: StoredScoreCorrection = {
       id: idFromCommand("correction", input.commandId),
@@ -559,7 +571,7 @@ export async function closeScoreCorrection(db: Kysely<Database>, deps: RuntimeDe
     actor,
     payload: input,
   }, async (trx) => {
-    const context = await correctionContext(trx, input);
+    const context = await correctionContext(trx, input, "competition.score.correction.close");
     const correction = await getCorrectionForUpdate(trx, input.correctionId);
     if (correction === null || correction.scoreFactId !== context.fact.id) throw new DomainError("CORRECTION_NOT_FOUND", "The correction was not found.");
     const expectedFingerprint = correctionFingerprint({
@@ -602,7 +614,7 @@ export async function recalculateAfterCorrection(db: Kysely<Database>, deps: Run
     actor,
     payload: input,
   }, async (trx) => {
-    const context = await correctionContext(trx, input);
+    const context = await correctionContext(trx, input, "competition.score.correction.recalculate");
     const correction = await getCorrectionForUpdate(trx, input.correctionId);
     if (correction === null || correction.scoreFactId !== context.fact.id) throw new DomainError("CORRECTION_NOT_FOUND", "The correction was not found.");
     if (correction.state !== "closed") throw new DomainError("CORRECTION_REQUIRED", "The correction must be closed before recalculation.");
