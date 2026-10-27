@@ -138,6 +138,14 @@ import {
   getStudioState,
   getJudgeContext,
   getLiveState as getLiveActivityState,
+  cancelGroupingStage,
+  confirmGroupingStage,
+  correctGroupingStage,
+  createGroupingStage,
+  freezeGroupingStage,
+  getGroupingState,
+  recordGroupingGroups,
+  setGroupingMaterialWindow,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -362,6 +370,72 @@ const RegistrationBody = Type.Object(
 
 const RegistrationParams = Type.Object(
   { id: Type.String({ minLength: 1 }), registrationId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const GroupingStageParams = Type.Object(
+  { id: Type.String({ minLength: 1 }), stageId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const CreateGroupingStageBody = Type.Object(
+  {
+    stageKey: Type.String({ minLength: 1, maxLength: 100 }),
+    name: Type.String({ minLength: 1, maxLength: 200 }),
+    rosterSource: Type.Union([Type.Literal("all_approved"), Type.Literal("round_advanced")]),
+    sourceRoundId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+  },
+  { additionalProperties: false },
+);
+
+const GroupingGroupSpecSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ maxLength: 200 })),
+    participantIds: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), { minItems: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const RecordGroupingGroupsBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 1 }),
+    groups: Type.Array(GroupingGroupSpecSchema, { minItems: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const GroupingRevisionBody = Type.Object(
+  { expectedRevision: Type.Integer({ minimum: 1 }) },
+  { additionalProperties: false },
+);
+
+const CorrectGroupingBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 1 }),
+    groups: Type.Array(GroupingGroupSpecSchema, { minItems: 1 }),
+    reason: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const CancelGroupingBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 1 }),
+    reason: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const GroupingWindowBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 1 }),
+    window: Type.Union([
+      Type.Literal("closed"),
+      Type.Literal("open"),
+      Type.Literal("supplement_only"),
+    ]),
+    note: Type.Optional(Type.String({ maxLength: 500 })),
+  },
   { additionalProperties: false },
 );
 
@@ -905,6 +979,158 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     async (request) => {
       const { id } = request.params as { id: string };
       return { roster: await getRosterForReview(db, await requestDeps(request), id) };
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/grouping",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return getGroupingState(db, await requestDeps(request), { activityId: id });
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/grouping/stages",
+    { schema: { params: ActivityParams, body: CreateGroupingStageBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        stageKey: string;
+        name: string;
+        rosterSource: "all_approved" | "round_advanced";
+        sourceRoundId?: string;
+      };
+      const outcome = await createGroupingStage(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageKey: body.stageKey,
+        name: body.name,
+        rosterSource: body.rosterSource,
+        ...(body.sourceRoundId === undefined ? {} : { sourceRoundId: body.sourceRoundId }),
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.patch(
+    "/api/activities/:id/grouping/stages/:stageId/groups",
+    { schema: { params: GroupingStageParams, body: RecordGroupingGroupsBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageId } = request.params as { id: string; stageId: string };
+      const body = request.body as {
+        expectedRevision: number;
+        groups: readonly { name?: string; participantIds: readonly string[] }[];
+      };
+      const outcome = await recordGroupingGroups(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageId,
+        expectedRevision: body.expectedRevision,
+        groups: body.groups,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/grouping/stages/:stageId/confirm",
+    { schema: { params: GroupingStageParams, body: GroupingRevisionBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageId } = request.params as { id: string; stageId: string };
+      const body = request.body as { expectedRevision: number };
+      const outcome = await confirmGroupingStage(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageId,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/grouping/stages/:stageId/freeze",
+    { schema: { params: GroupingStageParams, body: GroupingRevisionBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageId } = request.params as { id: string; stageId: string };
+      const body = request.body as { expectedRevision: number };
+      const outcome = await freezeGroupingStage(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageId,
+        expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/grouping/stages/:stageId/correct",
+    { schema: { params: GroupingStageParams, body: CorrectGroupingBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageId } = request.params as { id: string; stageId: string };
+      const body = request.body as {
+        expectedRevision: number;
+        groups: readonly { name?: string; participantIds: readonly string[] }[];
+        reason: string;
+      };
+      const outcome = await correctGroupingStage(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageId,
+        expectedRevision: body.expectedRevision,
+        groups: body.groups,
+        reason: body.reason,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/grouping/stages/:stageId/cancel",
+    { schema: { params: GroupingStageParams, body: CancelGroupingBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageId } = request.params as { id: string; stageId: string };
+      const body = request.body as { expectedRevision: number; reason: string };
+      const outcome = await cancelGroupingStage(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageId,
+        expectedRevision: body.expectedRevision,
+        reason: body.reason,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.patch(
+    "/api/activities/:id/grouping/stages/:stageId/window",
+    { schema: { params: GroupingStageParams, body: GroupingWindowBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageId } = request.params as { id: string; stageId: string };
+      const body = request.body as {
+        expectedRevision: number;
+        window: "closed" | "open" | "supplement_only";
+        note?: string;
+      };
+      const outcome = await setGroupingMaterialWindow(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageId,
+        expectedRevision: body.expectedRevision,
+        window: body.window,
+        ...(body.note === undefined ? {} : { note: body.note }),
+      });
+      return reply.status(outcome.status).send(outcome.body);
     },
   );
 
