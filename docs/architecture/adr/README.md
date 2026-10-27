@@ -36,6 +36,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0029](0029-live-realtime-invalidation.md) | Live 失效提示迁移到实时核心，SSE 退役 | accepted |
 | [0030](0030-authority-closure.md) | 命令 scope 冻结、结果来源身份与消费失效、读面契约、浏览器不返回 bearer token | accepted |
 | [0031](0031-operational-adoption.md) | 历史导入与运营接管分离、按来源消费、公开 selector fail-closed、runtime contract v2 | accepted |
+| [0032](0032-semantic-adoption-closure.md) | Adoption Definition 由 bundle 生成、canonical round id、registration lifecycle、媒体桥、语义 readiness | accepted |
 
 新增 ADR 的规则：
 

@@ -178,6 +178,26 @@ ERROR 也不是 PASS。
 
 ---
 
+## LIFE-09 Registration 有自己的生命周期，不由 Activity.status 代管
+
+**规则**：registration capability 的 release artifact 冻结
+`draft/open/review/final` 生命周期。只有 `open` 允许 `registration.start`、
+答题与提交；`registrationOpen` 公开读同样要求 `open`。Activity 处于 active
+不等于报名开放。Adoption 导入已截止的 v1 活动时必须落为 `review` 或 `final`。
+
+**为什么**：v1 的报名截止只体现在 phase/名单状态；cutover 把活动接管为 active
+后，旧的 `registrationOpen = Activity.active` 会把报名重新打开，Portal 还会自动
+创建新报名，留下名单 final 后无法审核的 submitted 行。
+
+**必须攻击的形状**：adoption 后新账号进入 `/join/<code>`；roster final 后
+start/answer/submit；旧 release 没有 lifecycle 字段；Portal 自动 start；
+supplement 被误当作重新报名。
+
+**Plus 要求**：release 冻结 lifecycle；命令与公开读共用同一 artifact；
+旧 release 缺失字段按 `open` 兼容；`final` 后只允许显式补交 seam，不能重新报名。
+
+---
+
 ## GRP-01…09 分组赛段
 
 **规则**：一名选手在一个分组赛段内最多一条 current 成员关系；确认必须完整覆盖

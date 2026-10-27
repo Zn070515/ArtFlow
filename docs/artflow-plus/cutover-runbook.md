@@ -39,7 +39,15 @@
      `voting` 与 `ticketing`，至少确认 `competition`、`registration`、
      `publishing` 已启用。
    - 要求：报告 `checks` 全部 `ok`、`rehearsalReady=true`、`capabilities` 符合
-     预期；`warnings` 中列出的历史分数/选票/结果已由负责人确认留在 v1。
+     预期。`rehearsalReady` 只有在 questionnaire keys、round keys/judge config、
+     rubric、groupCount、material slots、registration lifecycle、publishing
+     stages 全部匹配时才为 true；`multiple_rubrics` / `group_material` 会直接
+     拒绝 adoption。
+   - **媒体**：plus-api 必须挂载持久化的 `ARTFLOW_PLUS_MEDIA_DIR`，并只读挂载
+     v1 媒体卷为 `ARTFLOW_PLUS_LEGACY_MEDIA_DIR`。v1 exporter 记录的
+     `storagePath` 会以 `legacy-file:` 桥接；没有路径的历史材料保持 metadata
+     并返回 `MATERIAL_CONTENT_UNAVAILABLE`。
+   - 历史分数/选票/结果仍在 v1，只在 `warnings` 中列出并由负责人确认。
 6. **Provision staff 账号**：
    ```powershell
    docker run --rm --network $network -e ARTFLOW_PLUS_DATABASE_URL="..." -e ARTFLOW_PLUS_ACCOUNT_PASSWORD="<password>" artflow-plus-tools:<sha> pnpm --filter @artflow-plus/api create-account -- --username <ops> --roles admin

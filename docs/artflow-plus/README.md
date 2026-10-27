@@ -22,7 +22,7 @@
 
 ## 当前阶段（2026-10-27）
 
-`artflow-plus` 上的 v2 已完成 **M0–M13.1**；`main` 仍是 1.x 生产线，**生产 cutover
+`artflow-plus` 上的 v2 已完成 **M0–M13.2**；`main` 仍是 1.x 生产线，**生产 cutover
 尚未执行**。切换拓扑与工具链已就绪，历史导入与运营接管已分开；正式切换仍取决于
 首个活动走完 adoption 彩排、capability 完整度与 authority 审计，而不是日期。
 逐项出口与证据在 [roadmap.md](roadmap.md)。
@@ -44,6 +44,7 @@
 | M12 Participant Vote Page | 已完成 | `/vote/<sessionId>` 公开投票页与二维码 |
 | M13 Live on the Realtime Core | 已完成 | `activity:<id>` 失效主题；SSE 与 `useLiveEvents` 退役 |
 | M13.1 Cutover Adoption & Consumption | 已完成 | `--mode adoption` 生成真实 Release；来源级消费；公开 selector fail-closed；runtime contract v2；smoke 双 profile |
+| M13.2 Semantic Adoption Closure | 已完成 | Adoption Definition 来自 bundle；canonical round id；registration lifecycle；媒体桥；语义 readiness；来源 refs |
 
 ### v2 架构速览
 

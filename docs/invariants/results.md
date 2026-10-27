@@ -213,9 +213,11 @@ Release；旧 release 产生的候选可以被新 release 的发布会话确认�
 round / vote session。评分编辑只锁定依赖该 round 的 podium 结果；票据吊销只
 stale 该票实际投过票的 vote session 对应结果；未使用票据的轮换、access session
 撤销不 stale 任何结果（当前 tally 只看 `ticket.state`）；分组修正只在结果
-decisions 命中将被改动的参与者时拒绝。普通纠错在命中时拒绝并要求先 unlock；
+显式声明 `groupingStage:<id>` 依赖时拒绝。普通纠错在命中时拒绝并要求先 unlock；
 安全动作允许执行，但同事务标记受影响结果为 stale 并 supersede 其 ACTIVE release。
-stale 结果不得发布，必须重新确认。
+stale 结果不得发布，必须重新确认。各类来源以 typed `dependencyRefs`
+（`round:` / `voteSession:` / `groupingStage:`）声明依赖；Grouping 由 ref 判断，
+不使用“参与者是否出现在 decisions”的重合猜测。
 
 **为什么**：活动级“任何 CONFIRMED 结果锁全场”会让初赛结果锁死决赛评分、一个
 人气投票锁死正式评分；而“任何票据动作 stale 所有投票结果”会让一张从未使用的票
