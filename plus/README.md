@@ -299,6 +299,9 @@ new architecture.
    scoring, XLSX export, on-site display, and multi-instance realtime broadcast.
    Ticket-backed voting is a cutover prerequisite whenever the first v2 activity
    relies on real ticket-holding audience votes.
+3. Split the frontend into the public Portal shell and the operations Console
+   shell before the next UX round; the fixed direction, desktop layout and
+   acceptance gates are in `docs/artflow-plus/frontend-design-direction.md`.
 
 ## M7a publishing / results
 

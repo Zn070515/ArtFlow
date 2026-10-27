@@ -38,6 +38,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0031](0031-operational-adoption.md) | 历史导入与运营接管分离、按来源消费、公开 selector fail-closed、runtime contract v2 | accepted |
 | [0032](0032-semantic-adoption-closure.md) | Adoption Definition 由 bundle 生成、canonical round id、registration lifecycle、媒体桥、语义 readiness | accepted |
 | [0033](0033-participant-material-cutover.md) | MaterialCheck 进 bundle、补交 capability、原子材料上传、生产媒体卷、Unicode 路径、128 MiB 传输上限 | accepted |
+| [0034](0034-portal-console-shell-split.md) | 公开 Portal 与运营 Console 双壳；品牌 token 共享，页面骨架与动效分离 | proposed |
 
 新增 ADR 的规则：
 
