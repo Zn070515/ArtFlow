@@ -103,3 +103,32 @@ export const VotingSessionsSnapshotSchema = Type.Object(
 );
 
 export type VotingSessionsSnapshot = Static<typeof VotingSessionsSnapshotSchema>;
+
+export const PublicVoteSessionSchema = Type.Object(
+  {
+    activityId: Type.String({ minLength: 1, maxLength: 100 }),
+    activityTitle: Type.String({ maxLength: 200 }),
+    sessionId: Type.String({ minLength: 1, maxLength: 100 }),
+    status: Type.Union([Type.Literal("open"), Type.Literal("closed")]),
+    selectionType: Type.Union([Type.Literal("single"), Type.Literal("multi")]),
+    maxSelections: Type.Integer({ minimum: 1 }),
+    identityPolicy: Type.Union([
+      Type.Literal("browser"),
+      Type.Literal("ticket"),
+      Type.Literal("anonymous"),
+    ]),
+    candidates: Type.Array(
+      Type.Object(
+        {
+          optionId: Type.String({ minLength: 1, maxLength: 100 }),
+          candidateId: Type.String({ minLength: 1, maxLength: 100 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    voted: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export type PublicVoteSession = Static<typeof PublicVoteSessionSchema>;

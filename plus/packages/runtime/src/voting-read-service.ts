@@ -2,11 +2,14 @@ import type { Database } from "@artflow-plus/db";
 import {
   getActivity,
   getLiveState,
+  getVoteSession,
+  hasBallotForIdentity,
   listVoteOptions,
   listVoteSessionsForActivity,
 } from "@artflow-plus/db";
 import type { Kysely } from "kysely";
 
+import { stableHash } from "./hash.js";
 import type { VotingLiveState } from "./live-projection.js";
 
 export interface VotingSessionsState {
@@ -65,4 +68,54 @@ export async function readVotingSessionsState(
     });
   }
   return { activityId, sessions: result };
+}
+
+export interface PublicVoteSessionState {
+  readonly activityId: string;
+  readonly activityTitle: string;
+  readonly sessionId: string;
+  readonly status: "open" | "closed";
+  readonly selectionType: "single" | "multi";
+  readonly maxSelections: number;
+  readonly identityPolicy: "browser" | "ticket" | "anonymous";
+  readonly candidates: readonly {
+    readonly optionId: string;
+    readonly candidateId: string;
+  }[];
+  readonly voted: boolean;
+}
+
+/** A formal session that can be shared publicly; never exposes tallies or identities. */
+export async function readPublicVoteSession(
+  db: Kysely<Database>,
+  sessionId: string,
+  browserFingerprint?: string,
+): Promise<PublicVoteSessionState | null> {
+  const session = await getVoteSession(db, sessionId);
+  if (session === null || session.mode !== "formal") return null;
+  const activity = await getActivity(db, session.activityId);
+  if (activity === null) return null;
+  const options = await listVoteOptions(db, sessionId);
+  let voted = false;
+  if (
+    session.identityPolicy === "browser" &&
+    browserFingerprint !== undefined &&
+    browserFingerprint.length >= 32
+  ) {
+    voted = await hasBallotForIdentity(db, sessionId, stableHash(browserFingerprint));
+  }
+  return {
+    activityId: activity.id,
+    activityTitle: activity.title,
+    sessionId: session.id,
+    status: session.status === "closed" ? "closed" : "open",
+    selectionType: session.selectionType,
+    maxSelections: session.maxSelections,
+    identityPolicy: session.identityPolicy,
+    candidates: options.map((option) => ({
+      optionId: option.id,
+      candidateId: option.candidateId,
+    })),
+    voted,
+  };
 }
