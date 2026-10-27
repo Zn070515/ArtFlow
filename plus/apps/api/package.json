@@ -17,6 +17,7 @@
     "@artflow-plus/contracts": "workspace:*",
     "@artflow-plus/db": "workspace:*",
     "@artflow-plus/domain": "workspace:*",
+    "@artflow-plus/realtime": "workspace:*",
     "@artflow-plus/runtime": "workspace:*",
     "@fastify/swagger": "9.9.2",
     "@sinclair/typebox": "0.34.52",
