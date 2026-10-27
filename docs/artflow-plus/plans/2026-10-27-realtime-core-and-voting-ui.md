@@ -2976,6 +2976,12 @@ await db.deleteFrom("result_release").where("activity_id", "=", activityId).exec
 await db.deleteFrom("result_publication").where("activity_id", "=", activityId).execute();
 await db.deleteFrom("stage_result").where("activity_id", "=", activityId).execute();
 await db.deleteFrom("live_state").where("activity_id", "=", activityId).execute();
+// A stale dead letter blocks the (activity, mode) projection partition forever.
+await db.deleteFrom("outbox").where("activity_id", "=", activityId).execute();
+await db.deleteFrom("execution_projection").where("activity_id", "=", activityId).execute();
+await db.deleteFrom("vote_record").where("activity_id", "=", activityId).execute();
+await db.deleteFrom("ballot").where("activity_id", "=", activityId).execute();
+await db.deleteFrom("vote_option").where("activity_id", "=", activityId).execute();
 await db.deleteFrom("vote_session").where("activity_id", "=", activityId).execute();
 await db.deleteFrom("execution_session").where("activity_id", "=", activityId).execute();
 
@@ -3057,7 +3063,7 @@ const proxy = {
 `plus/apps/web/e2e/voting.spec.ts`:
 
 ```ts
-import { expect, test } from "@playwright/test";
+import { expect, request as apiRequest, test } from "@playwright/test";
 
 test("ops runs a vote and publishes the live result", async ({ page }) => {
   await page.goto("/login");
@@ -3088,17 +3094,21 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
     id: string;
     candidates: { optionId: string; candidateId: string }[];
   };
-  await page.request.get(`/api/activities/${activityId}/voting/browser-identity`);
+  // A voter is anonymous: a fresh request context has no Ops session cookie,
+  // so the write does not require a CSRF token.
+  const voter = await apiRequest.newContext({ baseURL: new URL(page.url()).origin });
+  await voter.get(`/api/activities/${activityId}/voting/browser-identity`);
   const alice = session.candidates.find((candidate) => candidate.candidateId === "alice");
   if (alice === undefined) throw new Error("alice option missing");
-  const ballot = await page.request.post(
+  const ballot = await voter.post(
     `/api/activities/${activityId}/voting/sessions/${session.id}/ballots`,
     {
       headers: { "idempotency-key": `e2e-ballot-${Date.now()}` },
       data: { scope: "voting", optionIds: [alice.optionId], identity: { type: "browser" } },
     },
   );
-  expect(ballot.ok()).toBe(true);
+  expect(ballot.ok(), await ballot.text()).toBe(true);
+  await voter.dispose();
 
   // The card updates over WebSocket without a reload.
   await expect(page.getByText(/alice · 1 票/)).toBeVisible({ timeout: 10_000 });
@@ -3112,8 +3122,16 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
 
   const publicRead = await page.request.get("/api/public/results/E2E-VOTING");
   expect(publicRead.ok()).toBe(true);
-  expect(await publicRead.json()).toMatchObject({
-    results: [{ decisions: [{ contestantId: "alice", unit: "percent" }] }],
+  const publicBody = await publicRead.json() as {
+    results: { decisions: { contestantId: string; unit?: string }[] }[];
+  };
+  expect(publicBody.results[0]?.decisions[0]).toMatchObject({
+    contestantId: "alice",
+    unit: "percent",
+  });
+  expect(publicBody.results[0]?.decisions[1]).toMatchObject({
+    contestantId: "bob",
+    unit: "percent",
   });
 });
 ```

@@ -1327,3 +1327,13 @@ a.primary-button {
   cursor: pointer;
   color: var(--muted, #666);
 }
+
+.voting-card { display: grid; gap: 12px; }
+.voting-session-row { display: flex; gap: 12px; align-items: center; }
+.voting-list { list-style: none; padding: 0; display: grid; gap: 12px; }
+.voting-session { border: 1px solid var(--line, #ddd); border-radius: 10px; padding: 12px; }
+.voting-candidates { margin: 8px 0; padding-left: 18px; }
+.voting-preview table { width: 100%; border-collapse: collapse; }
+.voting-preview th,
+.voting-preview td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line, #ddd); }
+.voting-publish { display: grid; gap: 8px; margin-top: 12px; }

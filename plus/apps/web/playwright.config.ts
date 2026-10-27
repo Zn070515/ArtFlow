@@ -36,6 +36,7 @@ export default defineConfig({
       env: {
         ARTFLOW_PLUS_DATABASE_URL: databaseUrl,
         ARTFLOW_PLUS_DB_SCHEMA: "artflow_e2e",
+        ARTFLOW_PLUS_INLINE_RELAY: "1",
         PORT: String(apiPort),
         HOST: "127.0.0.1",
       },

@@ -8,7 +8,7 @@
     "build:bundle": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/main.cjs --external:pg-native",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/main.ts",
-    "seed:e2e": "tsx scripts/seed-public-result.ts && tsx scripts/seed-registration.ts && tsx scripts/seed-live.ts && tsx scripts/seed-legacy.ts && tsx scripts/seed-grouping.ts",
+    "seed:e2e": "tsx scripts/seed-public-result.ts && tsx scripts/seed-registration.ts && tsx scripts/seed-live.ts && tsx scripts/seed-legacy.ts && tsx scripts/seed-grouping.ts && tsx scripts/seed-voting.ts",
     "import:legacy": "tsx scripts/import-legacy.ts",
     "create-account": "tsx scripts/create-account.ts",
     "test": "vitest run"

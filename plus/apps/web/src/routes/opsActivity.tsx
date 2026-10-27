@@ -7,6 +7,12 @@ import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { GroupingCard } from "../components/ops/GroupingCard.js";
 import { RegistrationTable } from "../components/ops/RegistrationTable.js";
 import { RosterCard } from "../components/ops/RosterCard.js";
+import { VotingCard } from "../components/ops/VotingCard.js";
+
+function can(permissions: readonly string[] | undefined, permission: string): boolean {
+  if (permissions === undefined) return false;
+  return permissions.includes("*") || permissions.includes(permission);
+}
 
 export function OpsActivityPage() {
   return (
@@ -85,6 +91,18 @@ function OpsActivityContent() {
         {activity?.enabledCapabilities.includes("grouping") &&
         (session?.actor.permissions.includes("grouping.manage") ?? false) ? (
           <GroupingCard key={activityId} activityId={activityId} />
+        ) : null}
+        {activity?.enabledCapabilities.includes("voting") ? (
+          <VotingCard
+            key={activityId}
+            activityId={activityId}
+            canManageVotes={can(session?.actor.permissions, "voting.manage")}
+            canManageResults={can(session?.actor.permissions, "result.manage")}
+            canManageSessions={
+              can(session?.actor.permissions, "studio.manage") ||
+              can(session?.actor.permissions, "competition.manage")
+            }
+          />
         ) : null}
       </div>
     </section>
