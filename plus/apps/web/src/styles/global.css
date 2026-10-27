@@ -1289,3 +1289,41 @@ a.primary-button {
     transition-duration: 0.001ms !important;
   }
 }
+
+.grouping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.grouping-group {
+  border: 1px solid var(--line, #ddd);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.grouping-group ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.grouping-group li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.grouping-more {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.grouping-more summary {
+  cursor: pointer;
+  color: var(--muted, #666);
+}

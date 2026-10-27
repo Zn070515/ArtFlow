@@ -186,7 +186,8 @@ describe.skipIf(!connectionString)("judge entry seat reuse", () => {
     });
     expect(claimed.body.seatKey).toBe("seat-1");
     const firstToken = claimed.body.sessionToken ?? "";
-    await expect(authenticateJudgeSession(db, firstToken)).resolves.toMatchObject({
+    const authenticationTime = new Date("2026-10-26T14:00:10Z");
+    await expect(authenticateJudgeSession(db, firstToken, authenticationTime)).resolves.toMatchObject({
       activityId,
       seatId: claimed.body.seatId,
     });
@@ -205,7 +206,7 @@ describe.skipIf(!connectionString)("judge entry seat reuse", () => {
       judges: [{ judgeId: "judge-b", seatKey: "seat-1" }],
     });
 
-    await expect(authenticateJudgeSession(db, firstToken)).rejects.toMatchObject({
+    await expect(authenticateJudgeSession(db, firstToken, authenticationTime)).rejects.toMatchObject({
       code: "UNAUTHENTICATED",
     });
     const grant = await db.selectFrom("judge_seat_grant").selectAll()

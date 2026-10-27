@@ -1,4 +1,5 @@
 import { createCompetitionDefinition } from "./capabilities/competition.js";
+import { createGroupingDefinition } from "./capabilities/grouping.js";
 import { createMaterialsDefinition } from "./capabilities/materials.js";
 import { createQuestionnaireDefinition } from "./capabilities/questionnaire.js";
 import { deepFreeze } from "./model.js";
@@ -30,6 +31,12 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       id: "collect-materials",
       prompt: "节目是否需要提交材料？",
       capability: "materials",
+      default: true,
+    },
+    {
+      id: "grouping",
+      prompt: "需要第一轮分组/合唱吗？",
+      capability: "grouping",
       default: true,
     },
     {
@@ -85,6 +92,7 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       { key: "description", label: "自我介绍", type: "text", required: false },
     ]),
     materials: createMaterialsDefinition(25 * 1024 * 1024, ["audio"]),
+    grouping: createGroupingDefinition(5),
   },
 });
 

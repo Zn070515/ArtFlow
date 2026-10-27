@@ -197,6 +197,21 @@ export interface LegacyBundle {
     readonly stageResults: readonly LegacyStageResultBundle[];
     readonly releases: readonly LegacyReleaseBundle[];
   };
+  readonly grouping?: readonly {
+    readonly legacyId: number;
+    readonly stageKey: string;
+    readonly name: string;
+    readonly status: "draft" | "confirmed" | "frozen" | "cancelled";
+    readonly rosterSource: "all_approved" | "round_advanced";
+    readonly sourceRoundLegacyId?: number | null;
+    readonly materialWindow: "closed" | "open" | "supplement_only";
+    readonly groups: readonly {
+      readonly legacyId: number;
+      readonly name: string;
+      readonly groupOrder: number;
+      readonly participantKeys: readonly string[];
+    }[];
+  }[];
   readonly counts: LegacyCounts;
   readonly excluded: LegacyExcluded;
   readonly unsupported: readonly { readonly kind: string; readonly legacyId?: number; readonly reason: string }[];

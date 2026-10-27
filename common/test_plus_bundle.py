@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from common.authority import (
+    ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     VOTE_BALLOT_WRITE,
@@ -16,6 +17,12 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from files.models import MaterialCheck, SubmissionFile
+from singer_contest.group_chorus import (
+    confirm_group_stage,
+    create_group_stage,
+    freeze_group_stage,
+    record_group_stage,
+)
 from singer_contest.models import ContestRound, Judge, ScoreRecord, SingerRegistration
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
@@ -150,6 +157,41 @@ class ExportPlusBundleTests(TestCase):
             "vote_purpose_mapped",
             {entry["kind"] for entry in bundle["unsupported"]},
         )
+
+    def test_export_includes_grouping_stages(self) -> None:
+        activity = self._activity()
+        alice = self._registration(activity, "Alice")
+        bob = self._registration(activity, "Bob")
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=activity.pk).update(phase=Activity.Phase.REHEARSAL)
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = get_user_model().objects.create_user(
+                username="export-staff", password="staff-password", role="admin"
+            )
+        stage = create_group_stage(
+            activity, stage_key="chorus", name="分组合唱", operator=staff
+        )
+        record_group_stage(
+            stage,
+            [
+                {"name": "A 组", "singer_ids": [alice.pk]},
+                {"name": "B 组", "singer_ids": [bob.pk]},
+            ],
+            staff,
+        )
+        confirm_group_stage(stage, staff)
+        freeze_group_stage(stage, staff)
+        output = Path(tempfile.mkdtemp()) / "bundle.json"
+
+        call_command("export_plus_bundle", activity="LEG2025", output=str(output))
+
+        bundle = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(len(bundle["grouping"]), 1)
+        self.assertEqual(bundle["grouping"][0]["status"], "frozen")
+        self.assertEqual(bundle["grouping"][0]["materialWindow"], "closed")
+        self.assertEqual(len(bundle["grouping"][0]["groups"]), 2)
+        kinds = {entry["kind"] for entry in bundle["unsupported"]}
+        self.assertNotIn("group_stage", kinds)
 
     def test_export_includes_material_metadata(self) -> None:
         activity = self._activity()

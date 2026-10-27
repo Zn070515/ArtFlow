@@ -140,12 +140,40 @@ class Command(BaseCommand):
                 }
             )
 
-        group_stages = GroupStage.objects.filter(activity=activity).count()
-        if group_stages > 0:
-            unsupported.append(
+        grouping = []
+        for stage in (
+            GroupStage.objects.filter(activity=activity)
+            .order_by("created_at", "pk")
+            .prefetch_related("groups__memberships")
+        ):
+            groups = []
+            for group in stage.groups.filter(is_active=True).order_by("group_order", "pk"):
+                participant_keys = [
+                    participant_by_singer.get(
+                        membership.singer_id, f"legacy-user:{membership.singer_id}"
+                    )
+                    for membership in group.memberships.filter(is_current=True).order_by("singer_id")
+                ]
+                groups.append(
+                    {
+                        "legacyId": group.pk,
+                        "name": group.name,
+                        "groupOrder": group.group_order,
+                        "participantKeys": participant_keys,
+                    }
+                )
+            if not groups:
+                continue
+            grouping.append(
                 {
-                    "kind": "group_stage",
-                    "reason": f"{group_stages} group-chorus stages have no v2 representation.",
+                    "legacyId": stage.pk,
+                    "stageKey": stage.stage_key,
+                    "name": stage.name,
+                    "status": stage.status,
+                    "rosterSource": stage.roster_source,
+                    "sourceRoundLegacyId": stage.roster_source_round_id,
+                    "materialWindow": stage.material_status,
+                    "groups": groups,
                 }
             )
         excluded_scores = ScoreRecord.objects.filter(
@@ -417,6 +445,7 @@ class Command(BaseCommand):
             "ruleset": {"present": False, "raw": {}},
             "rubric": {"criteria": rubric_criteria, "tiePolicy": "review"},
             "rounds": rounds,
+            "grouping": grouping,
             "registrations": [
                 {
                     "legacyId": row.pk,

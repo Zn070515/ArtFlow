@@ -70,6 +70,7 @@ const SINGER_CAPABILITIES: readonly CapabilityRegistration[] = [
   stubCapability("voting", { dependencies: ["competition"] }),
   stubCapability("publishing", { dependencies: ["competition"] }),
   stubCapability("archive"),
+  stubCapability("grouping", { dependencies: ["registration", "competition"] }),
 ];
 
 function singerRegistry() {
@@ -213,7 +214,7 @@ it("composition merges declared scope conflicts", () => {
     { ...stubCapability("judging"), scopeConflicts: { judging: ["voting"] } },
   ]);
   expect(registry.ok).toBe(true);
-  expect(base.list()).toHaveLength(8);
+  expect(base.list()).toHaveLength(9);
   if (!registry.ok) return;
   const composition = registry.registry.validateComposition({ enable: ["stage", "judging"] });
   expect(composition.ok).toBe(true);
@@ -231,6 +232,7 @@ it("a pack generates a compilable empty definition from its defaults", () => {
   expect(result.instantiation.enabledCapabilities).toEqual([
     "archive",
     "competition",
+    "grouping",
     "materials",
     "publishing",
     "questionnaire",
@@ -278,6 +280,7 @@ it("the default registry exposes only implemented capabilities", () => {
   expect(defaultCapabilityRegistry.list().map((item) => item.manifest.identity)).toEqual([
     "archive",
     "competition",
+    "grouping",
     "materials",
     "publishing",
     "questionnaire",

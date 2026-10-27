@@ -104,6 +104,7 @@ it("default Singer Pack instantiates with all M4 capabilities", () => {
   if (!result.ok) return;
   expect(result.instantiation.enabledCapabilities).toEqual([
     "competition",
+    "grouping",
     "materials",
     "questionnaire",
     "registration",

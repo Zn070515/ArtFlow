@@ -92,6 +92,7 @@ function skeletonRegistry() {
       "voting",
       "publishing",
       "archive",
+      "grouping",
     ].map(stubCapability),
   ];
   const result = createCapabilityRegistry(registrations);

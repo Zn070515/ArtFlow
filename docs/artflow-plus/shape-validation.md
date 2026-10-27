@@ -47,7 +47,7 @@ definition。
 | bracket / 对阵 / 复合分 | v2 competition 只能表达 round/panel/score | 新 capability，不塞进 competition |
 | podium 首次 recompute 需要预先算出 fingerprint | 没有发布 UI；自动旅程通过 `buildPodiumCandidate` 先算 fingerprint 再调用 | 发布/确认 UI 或让 recompute 返回当前 fingerprint |
 | 参与者账号迁移/认领 | 导入的 legacy 报名没有登录账号 | 独立 slice（认领链接或账号迁移） |
-| 分组/合唱阶段 | v1 的 GroupStage 无 v2 表达 | 独立 capability；当前导入标记 unsupported |
+| 分组/合唱阶段 | v1 的 GroupStage 无 v2 表达 | 已由 `grouping` capability 承载（M9）；组材料文件仍归媒体 slice |
 
 ## 复现
 

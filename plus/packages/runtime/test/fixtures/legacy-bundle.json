@@ -167,6 +167,24 @@
       }
     ]
   },
+  "grouping": [
+    {
+      "legacyId": 7,
+      "stageKey": "chorus",
+      "name": "分组合唱",
+      "status": "frozen",
+      "rosterSource": "all_approved",
+      "materialWindow": "open",
+      "groups": [
+        {
+          "legacyId": 70,
+          "name": "A 组",
+          "groupOrder": 1,
+          "participantKeys": ["legacy-user:1"]
+        }
+      ]
+    }
+  ],
   "counts": {
     "registrations": 2,
     "approvedRegistrations": 1,

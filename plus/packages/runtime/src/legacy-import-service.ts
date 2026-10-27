@@ -633,6 +633,92 @@ async function importResults(
   }
 }
 
+async function importGrouping(
+  trx: Transaction<Database>,
+  activityId: string,
+  publicCode: string,
+  prefix: string,
+  stages: NonNullable<LegacyBundle["grouping"]>,
+  participantKeys: ReadonlySet<string>,
+  roundIds: ReadonlySet<string>,
+  createdAt: string,
+  notes: string[],
+): Promise<void> {
+  const stageIdFor = (legacyId: number) => `legacy-${publicCode}-grouping-${legacyId}`;
+  const groupIdFor = (legacyId: number) => `legacy-${publicCode}-grouping-group-${legacyId}`;
+  for (const stage of stages) {
+    const sourceRoundId =
+      stage.sourceRoundLegacyId === undefined || stage.sourceRoundLegacyId === null
+        ? undefined
+        : `${prefix}-round-${stage.sourceRoundLegacyId}`;
+    const rosterSource =
+      stage.rosterSource === "round_advanced" &&
+      sourceRoundId !== undefined &&
+      roundIds.has(sourceRoundId)
+        ? "round_advanced"
+        : "all_approved";
+    if (stage.rosterSource === "round_advanced" && rosterSource === "all_approved") {
+      notes.push(
+        `grouping ${stage.stageKey}: source round ${stage.sourceRoundLegacyId ?? "?"} was not imported; treated as all_approved`,
+      );
+    }
+    const stageId = stageIdFor(stage.legacyId);
+    await trx.insertInto("grouping_stage").values({
+      id: stageId,
+      activity_id: activityId,
+      stage_key: stage.stageKey,
+      name: stage.name,
+      status: stage.status,
+      roster_source: rosterSource,
+      source_round_id: rosterSource === "round_advanced" ? sourceRoundId ?? null : null,
+      source_fingerprint: "",
+      material_window: stage.materialWindow,
+      cancel_reason: "",
+      confirmed_at: stage.status === "draft" ? null : createdAt,
+      confirmed_by: stage.status === "draft" ? null : "legacy",
+      frozen_at: stage.status === "frozen" ? createdAt : null,
+      frozen_by: stage.status === "frozen" ? "legacy" : null,
+      cancelled_at: stage.status === "cancelled" ? createdAt : null,
+      cancelled_by: stage.status === "cancelled" ? "legacy" : null,
+      revision: 1,
+      created_at: new Date(createdAt),
+      updated_at: createdAt,
+    }).execute();
+
+    for (const group of stage.groups) {
+      const groupId = groupIdFor(group.legacyId);
+      await trx.insertInto("grouping_group").values({
+        id: groupId,
+        stage_id: stageId,
+        group_order: group.groupOrder,
+        name: group.name,
+        is_active: true,
+        created_at: new Date(createdAt),
+        updated_at: createdAt,
+      }).execute();
+      for (const participantKey of group.participantKeys) {
+        if (!participantKeys.has(participantKey)) {
+          notes.push(
+            `grouping ${stage.stageKey}: participant ${participantKey} has no imported registration`,
+          );
+          continue;
+        }
+        await trx.insertInto("grouping_membership").values({
+          id: `legacy-${publicCode}-grouping-member-${group.legacyId}-${participantKey}`,
+          stage_id: stageId,
+          group_id: groupId,
+          participant_id: participantKey,
+          is_current: true,
+          joined_at: createdAt,
+          left_at: null,
+          removed_by: null,
+          reason: "",
+        }).execute();
+      }
+    }
+  }
+}
+
 async function importActivity(
   trx: Transaction<Database>,
   bundle: LegacyBundle,
@@ -647,6 +733,10 @@ async function importActivity(
     throw new DomainError("LEGACY_ACTIVITY_EXISTS", "An activity with this public code already exists.");
   }
   const artifacts = plans(bundle);
+  const hasGrouping = bundle.grouping !== undefined && bundle.grouping.length > 0;
+  const enabledCapabilities = hasGrouping
+    ? [...LEGACY_CAPABILITIES, "grouping"]
+    : [...LEGACY_CAPABILITIES];
   const status = bundle.results.releases.some((release) => release.status === "active")
     ? "closed"
     : "active";
@@ -656,7 +746,7 @@ async function importActivity(
     title: bundle.activity.title,
     status,
     revision: 1,
-    enabled_capabilities: JSON.stringify(LEGACY_CAPABILITIES),
+    enabled_capabilities: JSON.stringify(enabledCapabilities),
     active_definition_version: 1,
   }).execute();
 
@@ -681,6 +771,15 @@ async function importActivity(
       maxBytes: 25_000_000,
       allowedPurposes: ["audio", "video", "image", "document"],
     }, stableHash({ materials: 1 })),
+    ...(hasGrouping
+      ? {
+          grouping: artifacts.capabilityPlan(
+            "grouping",
+            { schemaVersion: 1 },
+            stableHash({ grouping: 1 }),
+          ),
+        }
+      : {}),
   };
   await insertRelease(trx, {
     activityId,
@@ -783,6 +882,22 @@ async function importActivity(
   }
 
   await importCompetition(trx, bundle, activityId, prefix, roundsByLegacy);
+  const groupingNotes: string[] = [];
+  if (bundle.grouping !== undefined && bundle.grouping.length > 0) {
+    const participantKeys = new Set(bundle.registrations.map((row) => row.participantKey));
+    const roundIds = new Set([...roundsByLegacy.keys()].map((id) => `${prefix}-round-${id}`));
+    await importGrouping(
+      trx,
+      activityId,
+      bundle.activity.publicCode,
+      prefix,
+      bundle.grouping,
+      participantKeys,
+      roundIds,
+      deps.now(),
+      groupingNotes,
+    );
+  }
   await importVoting(trx, bundle, activityId, prefix);
   await importResults(trx, bundle, activityId, bundleHash, prefix);
 
@@ -850,6 +965,10 @@ async function importActivity(
     );
   }
 
+  const unsupported = [
+    ...bundle.unsupported,
+    ...groupingNotes.map((reason) => ({ kind: "grouping", reason })),
+  ];
   await appendEngineEvent(trx, deps, {
     type: "LegacyBundleImported",
     activityId,
@@ -862,7 +981,7 @@ async function importActivity(
       bundleHash,
       imported,
       excluded: bundle.excluded,
-      unsupported: bundle.unsupported,
+      unsupported,
     },
   });
   return {
@@ -872,7 +991,7 @@ async function importActivity(
     dryRun: false,
     imported,
     excluded: bundle.excluded,
-    unsupported: bundle.unsupported,
+    unsupported,
     checks,
   };
 }

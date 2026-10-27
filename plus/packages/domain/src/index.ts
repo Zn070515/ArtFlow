@@ -8,6 +8,7 @@ export * from "./capabilities/voting.js";
 export * from "./capabilities/ticketing.js";
 export * from "./capabilities/publishing.js";
 export * from "./capabilities/archive.js";
+export * from "./capabilities/grouping.js";
 export * from "./commands.js";
 export * from "./compiler.js";
 export * from "./defaults.js";

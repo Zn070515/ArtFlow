@@ -40,6 +40,21 @@ export interface ArchivePackageInput {
   readonly stageResults: readonly StoredStageResult[];
   readonly sessions: readonly SessionRecord[];
   readonly events: readonly RuntimeEvent[];
+  readonly grouping?: {
+    readonly stages: readonly {
+      readonly stageKey: string;
+      readonly name: string;
+      readonly status: string;
+      readonly rosterSource: string;
+      readonly materialWindow: string;
+      readonly groups: readonly {
+        readonly order: number;
+        readonly name: string;
+        readonly active: boolean;
+        readonly participantIds: readonly string[];
+      }[];
+    }[];
+  };
   readonly archivedAt: string;
   readonly archivedBy: string;
 }
@@ -158,6 +173,33 @@ export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageO
     ),
     "application/json",
   );
+
+  const grouping = input.grouping;
+  if (grouping !== undefined && grouping.stages.length > 0) {
+    add(
+      "grouping.json",
+      JSON.stringify({ stages: grouping.stages }, null, 2),
+      "application/json",
+    );
+    const groupingRows: (string | number)[][] = [
+      ["stage", "group_order", "group_name", "active", "participant_id"],
+    ];
+    for (const stage of grouping.stages) {
+      for (const group of stage.groups) {
+        const members = group.participantIds.length === 0 ? [""] : group.participantIds;
+        for (const participantId of members) {
+          groupingRows.push([
+            stage.stageKey,
+            group.order,
+            group.name,
+            group.active ? "yes" : "no",
+            participantId,
+          ]);
+        }
+      }
+    }
+    add("grouping.csv", csv(groupingRows), "text/csv");
+  }
 
   const resultRows: (string | number | null)[][] = [
     ["stage_key", "release_status", "released_at", "rank", "contestant_id", "score"],

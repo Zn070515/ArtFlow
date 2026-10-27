@@ -408,11 +408,12 @@ dbIt("lists the registered capabilities using the shared manifest contract", asy
   const response = await app.inject({ method: "GET", url: "/api/capabilities" });
   expect(response.statusCode).toBe(200);
   const body = response.json() as { capabilities: unknown[] };
-  expect(body.capabilities).toHaveLength(8);
+  expect(body.capabilities).toHaveLength(9);
   expect(Value.Check(CapabilityManifestSchema, body.capabilities[0])).toBe(true);
   expect((body.capabilities as { identity: string }[]).map((item) => item.identity)).toEqual([
     "archive",
     "competition",
+    "grouping",
     "materials",
     "publishing",
     "questionnaire",
@@ -447,6 +448,7 @@ dbIt("lists activity packs and explains missing capabilities", async () => {
 dbIt("instantiates a pack once every capability is registered", async () => {
   const identities = [
     "competition",
+    "grouping",
     "registration",
     "questionnaire",
     "materials",
