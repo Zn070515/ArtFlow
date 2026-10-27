@@ -1011,7 +1011,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         rosterSource: body.rosterSource,
         ...(body.sourceRoundId === undefined ? {} : { sourceRoundId: body.sourceRoundId }),
       });
-      return reply.status(outcome.status).send(outcome.body);
+      const state = await getGroupingState(db, await requestDeps(request), { activityId: id });
+      const view = state.stages.find((stage) => stage.id === outcome.body.id);
+      if (view === undefined) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+      return reply.status(outcome.status).send(view);
     },
   );
 
@@ -1032,7 +1035,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         expectedRevision: body.expectedRevision,
         groups: body.groups,
       });
-      return reply.status(outcome.status).send(outcome.body);
+      const state = await getGroupingState(db, await requestDeps(request), { activityId: id });
+      const view = state.stages.find((stage) => stage.id === stageId);
+      if (view === undefined) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+      return reply.status(outcome.status).send(view);
     },
   );
 
@@ -1049,7 +1055,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         stageId,
         expectedRevision: body.expectedRevision,
       });
-      return reply.status(outcome.status).send(outcome.body);
+      const state = await getGroupingState(db, await requestDeps(request), { activityId: id });
+      const view = state.stages.find((stage) => stage.id === stageId);
+      if (view === undefined) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+      return reply.status(outcome.status).send(view);
     },
   );
 
@@ -1066,7 +1075,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         stageId,
         expectedRevision: body.expectedRevision,
       });
-      return reply.status(outcome.status).send(outcome.body);
+      const state = await getGroupingState(db, await requestDeps(request), { activityId: id });
+      const view = state.stages.find((stage) => stage.id === stageId);
+      if (view === undefined) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+      return reply.status(outcome.status).send(view);
     },
   );
 
@@ -1089,7 +1101,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         groups: body.groups,
         reason: body.reason,
       });
-      return reply.status(outcome.status).send(outcome.body);
+      const state = await getGroupingState(db, await requestDeps(request), { activityId: id });
+      const view = state.stages.find((stage) => stage.id === stageId);
+      if (view === undefined) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+      return reply.status(outcome.status).send(view);
     },
   );
 
@@ -1107,7 +1122,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         expectedRevision: body.expectedRevision,
         reason: body.reason,
       });
-      return reply.status(outcome.status).send(outcome.body);
+      const state = await getGroupingState(db, await requestDeps(request), { activityId: id });
+      const view = state.stages.find((stage) => stage.id === stageId);
+      if (view === undefined) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+      return reply.status(outcome.status).send(view);
     },
   );
 
@@ -1130,7 +1148,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         window: body.window,
         ...(body.note === undefined ? {} : { note: body.note }),
       });
-      return reply.status(outcome.status).send(outcome.body);
+      const state = await getGroupingState(db, await requestDeps(request), { activityId: id });
+      const view = state.stages.find((stage) => stage.id === stageId);
+      if (view === undefined) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+      return reply.status(outcome.status).send(view);
     },
   );
 

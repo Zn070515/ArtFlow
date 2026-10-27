@@ -41,6 +41,7 @@ const adminPermissions = [
   "competition.round.prepare",
   "competition.score.write",
   "judge.manage",
+  "grouping.manage",
 ];
 if ((await getLocalAccount(db, adminUsername)) === null) {
   await createLocalAccount(db, {

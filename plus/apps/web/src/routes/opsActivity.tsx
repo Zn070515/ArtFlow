@@ -4,6 +4,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { fetchOpsActivities, fetchOpsRegistrations, fetchOpsRoster } from "../api/ops.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
+import { GroupingCard } from "../components/ops/GroupingCard.js";
 import { RegistrationTable } from "../components/ops/RegistrationTable.js";
 import { RosterCard } from "../components/ops/RosterCard.js";
 
@@ -81,6 +82,10 @@ function OpsActivityContent() {
         ) : (
           <RosterCard activityId={activityId} roster={roster.data!} />
         )}
+        {activity?.enabledCapabilities.includes("grouping") &&
+        (session?.actor.permissions.includes("grouping.manage") ?? false) ? (
+          <GroupingCard activityId={activityId} />
+        ) : null}
       </div>
     </section>
   );
