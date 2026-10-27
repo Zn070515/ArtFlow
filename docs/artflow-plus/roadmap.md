@@ -251,6 +251,14 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 关键旅程见 `docs/artflow-plus/shape-validation.md`；现场彩排清单见
 `docs/artflow-plus/rehearsal-runbook.md`。
 
+## M9 — Grouping Capability（已完成，2026-10-27）
+
+- 新 `grouping` capability：四态生命周期、append-only 成员历史、两种名单来源、
+  材料窗口状态、release `groupCount` 校验、活动级消费保护。
+- Ops 三步卡片（分组 → 确认 → 冻结），修正/取消/材料窗口收进「更多操作」。
+- 归档阻塞与归档包 `grouping.json`/CSV；v1 导出与导入分组。
+- 出口：domain/db/runtime/api/web E2E 全绿；GRP-01…09 写入不变量。
+
 ## Definition of Done（每个 slice）
 
 1. 领域规则写入 `docs/invariants/`（新增或引用）。
