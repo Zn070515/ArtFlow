@@ -3,7 +3,7 @@ import { defineConfig } from "vite";
 
 const apiTarget = process.env.VITE_API_TARGET ?? "http://127.0.0.1:3000";
 const proxy = {
-  "/api": { target: apiTarget, changeOrigin: true },
+  "/api": { target: apiTarget, changeOrigin: true, ws: true },
 };
 
 export default defineConfig({

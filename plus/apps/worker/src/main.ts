@@ -1,8 +1,6 @@
 import { closeDb, createDb, migrate } from "@artflow-plus/db";
-import { relayOutboxOnce } from "@artflow-plus/runtime";
+import { relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
 import { PgBoss } from "pg-boss";
-
-import { startRelayLoop } from "./relay-loop.js";
 
 const RELAY_QUEUE = "outbox-relay";
 

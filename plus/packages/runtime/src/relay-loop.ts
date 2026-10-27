@@ -26,6 +26,7 @@ export function startRelayLoop(
   };
 
   const timer = setInterval(tick, intervalMs);
+  timer.unref?.();
   return () => {
     clearInterval(timer);
   };

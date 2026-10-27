@@ -456,6 +456,7 @@ export interface PublishingState {
   readonly stageResults: readonly StoredStageResult[];
   readonly publications: readonly StoredResultPublication[];
   readonly releases: readonly StoredResultRelease[];
+  readonly stages: readonly PublishingStageDefinition[];
 }
 
 export async function getPublishingState(
@@ -464,15 +465,23 @@ export async function getPublishingState(
   input: { readonly activityId: string },
 ): Promise<PublishingState> {
   requirePermission(runtimeActor(deps), "result.manage");
-  const activity = await db.selectFrom("activity").select("id").where("id", "=", input.activityId).executeTakeFirst();
-  if (activity === undefined) throw new DomainError("NOT_FOUND", "The activity was not found.");
+  const activity = await getActivity(db, input.activityId);
+  if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+  let stages: readonly PublishingStageDefinition[] = [];
+  if (activity.activeDefinitionVersion > 0) {
+    const release = await getRelease(db, activity.id, activity.activeDefinitionVersion);
+    const plan = release?.capabilities.publishing;
+    if (plan !== undefined && plan.ok === true) {
+      stages = decodePublishingArtifact(plan.artifact).stages;
+    }
+  }
   // The three collections are independent reads; issue them together.
   const [stageResults, publications, releases] = await Promise.all([
     listStageResults(db, input.activityId),
     listResultPublications(db, input.activityId),
     listResultReleases(db, input.activityId),
   ]);
-  return { stageResults, publications, releases };
+  return { stageResults, publications, releases, stages };
 }
 
 export interface ReleaseResultInput {

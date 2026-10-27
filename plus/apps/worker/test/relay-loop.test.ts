@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import { startRelayLoop } from "../src/relay-loop.js";
+import { startRelayLoop } from "@artflow-plus/runtime";
 
 afterEach(() => {
   vi.useRealTimers();

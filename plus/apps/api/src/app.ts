@@ -141,6 +141,7 @@ import {
   getStudioState,
   getJudgeContext,
   getLiveState as getLiveActivityState,
+  readVotingSessionsState,
   cancelGroupingStage,
   confirmGroupingStage,
   correctGroupingStage,
@@ -158,7 +159,10 @@ import { Type } from "@sinclair/typebox";
 import type { Kysely } from "kysely";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
+import { createRealtimeServer } from "@artflow-plus/realtime/server";
+
 import { isProductionEnvironment, sessionCookie } from "./cookies.js";
+import { createVotingRealtimeTopic } from "./realtime-topics.js";
 
 export interface AppOptions {
   readonly db: Kysely<Database>;
@@ -1988,6 +1992,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   );
 
   app.get(
+    "/api/activities/:id/voting/sessions",
+    { schema: { params: ActivityParams } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const context = await requestDeps(request);
+      requirePermission(context.actor ?? SYSTEM_ACTOR, "voting.manage");
+      const state = await readVotingSessionsState(db, id);
+      if (state === null) throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
+      return state;
+    },
+  );
+
+  app.get(
     "/api/activities/:id/voting/browser-identity",
     { schema: { params: ActivityParams } },
     async (request, reply) => {
@@ -2610,6 +2627,21 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return reply
       .status(500)
       .send(errorResponse("INTERNAL_ERROR", "An unexpected error occurred."));
+  });
+
+  const realtime = await createRealtimeServer({
+    fastify: app,
+    authenticate: async (request) => {
+      try {
+        return await requestActor(request);
+      } catch {
+        return null;
+      }
+    },
+    topics: [createVotingRealtimeTopic(db)],
+  });
+  app.addHook("onClose", async () => {
+    await realtime.close();
   });
 
   return app;

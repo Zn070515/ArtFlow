@@ -1,0 +1,40 @@
+{
+  "name": "@artflow-plus/realtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/protocol/index.ts",
+  "types": "./src/protocol/index.ts",
+  "exports": {
+    "./protocol": {
+      "types": "./src/protocol/index.ts",
+      "default": "./src/protocol/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "@fastify/websocket": "11.3.4",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2",
+    "fastify": "5.12.7",
+    "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "fastify": "5.12.7"
+  }
+}
