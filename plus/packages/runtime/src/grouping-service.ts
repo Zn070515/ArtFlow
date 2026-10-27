@@ -26,7 +26,6 @@ import {
   listApprovedParticipantIds,
   listCurrentGroupingMemberships,
   listGroupingGroups,
-  listStageResults,
   updateGroupingGroup,
   updateGroupingStage,
 } from "@artflow-plus/db";
@@ -36,6 +35,7 @@ import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
+import { requireNoConfirmedResult } from "./result-consumption.js";
 
 const ROSTER_SOURCES: ReadonlySet<string> = new Set(["all_approved", "round_advanced"]);
 const WINDOWS: ReadonlySet<string> = new Set(["closed", "open", "supplement_only"]);
@@ -535,19 +535,6 @@ export async function freezeGroupingStage(
   });
 }
 
-async function requireNoConfirmedResult(
-  trx: Kysely<Database>,
-  activityId: string,
-): Promise<void> {
-  const results = await listStageResults(trx, activityId);
-  if (results.some((result) => result.status === "confirmed")) {
-    throw new DomainError(
-      "GROUPING_CONSUMED",
-      "A confirmed result already consumed this activity's grouping.",
-    );
-  }
-}
-
 export interface CorrectGroupingStageInput {
   readonly commandId: string;
   readonly activityId: string;
@@ -588,7 +575,12 @@ export async function correctGroupingStage(
     if (stage.status !== "confirmed" && stage.status !== "frozen") {
       throw new DomainError("INVALID_TRANSITION", "Only a confirmed or frozen stage can be corrected.");
     }
-    await requireNoConfirmedResult(trx, activity.id);
+    await requireNoConfirmedResult(
+      trx,
+      activity.id,
+      "GROUPING_CONSUMED",
+      "A confirmed result already consumed this activity's grouping.",
+    );
     const source = await resolveGroupingSource(trx, activity.id, stage);
     const groupCount = await compiledGroupCount(trx, activity);
     const normalized = normalizeGroupingGroups(input.groups, new Set(source.participantIds), {
@@ -662,7 +654,12 @@ export async function cancelGroupingStage(
       throw new DomainError("INVALID_TRANSITION", "A frozen stage cannot be cancelled.");
     }
     if (stage.status === "confirmed") {
-      await requireNoConfirmedResult(trx, activity.id);
+      await requireNoConfirmedResult(
+        trx,
+        activity.id,
+        "GROUPING_CONSUMED",
+        "A confirmed result already consumed this activity's grouping.",
+      );
     }
     const saved: StoredGroupingStage = {
       ...stage,
