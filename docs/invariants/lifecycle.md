@@ -198,6 +198,24 @@ supplement 被误当作重新报名。
 
 ---
 
+## LIFE-10 材料字节就绪前不得切换 current
+
+**规则**：`materials.upload` 只创建非 current、`content_ready=false` 的 staging
+行；`PUT /materials/:id/content` 先写字节，成功后才在同一事务退役旧 current 并
+激活新行。失败的字节写入必须保留旧 current；`materials.review` 不得批准没有
+content 的材料。
+
+**为什么**：先改 DB 再传字节会让浏览器断开、磁盘满或容器重启时留下
+`current=true` 但无字节的新材料，同时把旧的好文件从 current authority 中移除。
+
+**必须攻击的形状**：metadata 成功后 content 失败；content 大小不符；review 批准
+pending 行；并发替换同一 slot；legacy `legacy-file:` 无字节；中文文件名路径。
+
+**Plus 要求**：staging 行不可见；写入失败补偿删除；旧 current 在提交前不动；
+material_check 随上传/审核更新；storage 路径只拒绝分隔符、控制字符与 traversal。
+
+---
+
 ## GRP-01…09 分组赛段
 
 **规则**：一名选手在一个分组赛段内最多一条 current 成员关系；确认必须完整覆盖

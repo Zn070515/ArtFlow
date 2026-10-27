@@ -1,9 +1,9 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M13.2 已完成**（2026-10-27）；生产 cutover 未执行。M13.2 把
-operational adoption 做成语义转换（bundle 定义、canonical round id、registration
-lifecycle、媒体桥、语义 readiness）；production cutover 仍需以首个活动的真实
-adoption 彩排与 operational smoke 为准。产品与架构身份的
+状态：**M0–M13.3 已完成**（2026-10-27）；生产 cutover 未执行。M13.3 补齐了
+participant/material cutover：MaterialCheck 导入、补交 capability、原子上传、
+生产媒体卷与 Unicode 路径；production cutover 仍需以首个活动的真实 adoption
+彩排与 operational smoke 为准。产品与架构身份的
 权威是根目录 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）
 与证据。已完成里程碑的段落保留当时的实现描述，后续里程碑在其上覆盖。
 
@@ -330,12 +330,34 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   `ARTFLOW_PLUS_MEDIA_DIR` 并经受控路由读取。
 - **语义 readiness**：questionnaire keys、round keys、judge config、rubric hash、
   groupCount、material slots、registration lifecycle、publishing stages 全过的
-  `rehearsalReady` 才为 true；blocking unsupported（multiple_rubrics/group_material）
+  `semanticReady` 才为 true；blocking unsupported（multiple_rubrics/group_material）
   直接拒绝。
 - **来源依赖 refs**：`round:` / `voteSession:` / `groupingStage:`，grouping 不再用
   参与者重合猜测消费关系；公开 selector 先按 stage 过滤再取 snapshot。
 - 出口：真实 exporter 形状 fixture 跑通 adoption → 报名详情 → judging → score →
   lock → ranking → podium → confirm → release → public selector → 开投票。
+
+## M13.3 — Participant & Material Cutover Closure（已完成，2026-10-27）
+
+- **MaterialCheck 进 bundle**：v1 exporter 独立导出 `materialChecks`（含无
+  SubmissionFile 的缺交项）；adoption 导入 `material_check` 并为每个 slot 生成
+  真实 file question（purpose/扩展名/maxBytes），不再用 `document + */*`。
+- **补交 capability**：staff 命令 `registration.supplement.issue` 绑定
+  registration + allowedKeys 并签发一次性 token；REVIEW/FINAL 禁止新报名与普通
+  编辑，只允许指定 slot 补交；公开 claim/context/upload/submit 端点让 v1 选手
+  无需迁移账号即可补交。
+- **材料原子上传**：metadata 只建 pending 行；bytes 落盘后才在同一事务退役旧
+  current 并激活新行；内容失败时旧文件保持权威；approve 要求 content-ready；
+  material_check 随上传/审核更新状态。
+- **生产媒体**：compose 增加 `plus_media_data` 与 v1 `media_data:ro`，env 模板
+  增加 `ARTFLOW_PLUS_MEDIA_DIR` / `ARTFLOW_PLUS_LEGACY_MEDIA_DIR`；传输上限
+  128 MiB，领域策略仍是权威（stage-show 100 MiB）。
+- **Unicode 路径**：media storage 接受中文文件名（NFC），只拒绝分隔符、控制字符
+  与 traversal。
+- **Readiness 命名**：`semanticReady` 只证明定义/事实兼容；生产 readiness 仍需
+  activity acceptance journey 与 operational smoke。
+- 出口：`material-cutover.test.ts` 覆盖 legacy 伴奏下载、缺交歌词、补交 capability、
+  失败替换保留旧 current、成功替换原子切换、审核、提交、重启后两文件可读。
 
 ## Definition of Done（每个 slice）
 
