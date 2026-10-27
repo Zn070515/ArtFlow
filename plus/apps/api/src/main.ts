@@ -1,4 +1,5 @@
 import { closeDb, createDb, migrate } from "@artflow-plus/db";
+import { relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
 
 import { buildApp } from "./app.js";
 
@@ -19,7 +20,17 @@ async function main(): Promise<void> {
   const host = process.env.HOST ?? "127.0.0.1";
   await app.listen({ port, host });
 
+  // Single-process deployments and the E2E suite need the live projection to move
+  // without a separate worker. Production keeps this off and runs apps/worker.
+  const inlineRelay = process.env.ARTFLOW_PLUS_INLINE_RELAY === "1"
+    ? startRelayLoop(() => relayOutboxOnce(db), {
+        intervalMs: 250,
+        onError: (error) => console.error("inline outbox relay:", error),
+      })
+    : null;
+
   const shutdown = async (): Promise<void> => {
+    inlineRelay?.();
     await app.close();
     await closeDb(db);
   };

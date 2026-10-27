@@ -61,3 +61,45 @@ export type OpenVoteSessionBody = Static<typeof OpenVoteSessionBodySchema>;
 export type SubmitBallotBody = Static<typeof SubmitBallotBodySchema>;
 export type CloseVoteSessionBody = Static<typeof CloseVoteSessionBodySchema>;
 export type JudgeEntryBody = Static<typeof JudgeEntryBodySchema>;
+
+export const VotingCandidateSnapshotSchema = Type.Object(
+  {
+    optionId: Type.String({ minLength: 1, maxLength: 100 }),
+    candidateId: Type.String({ minLength: 1, maxLength: 100 }),
+    ordinal: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+export const VotingSessionSnapshotSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 100 }),
+    status: Type.Union([Type.Literal("open"), Type.Literal("closed")]),
+    mode: Type.String({ minLength: 1, maxLength: 20 }),
+    revision: Type.Integer({ minimum: 0 }),
+    candidateCount: Type.Integer({ minimum: 0 }),
+    candidates: Type.Array(VotingCandidateSnapshotSchema),
+    live: Type.Union([
+      Type.Null(),
+      Type.Object(
+        {
+          seq: Type.Integer({ minimum: 0 }),
+          counts: Type.Record(Type.String(), Type.Integer({ minimum: 0 })),
+          lastEventType: Type.String({ minLength: 1, maxLength: 100 }),
+        },
+        { additionalProperties: false },
+      ),
+    ]),
+  },
+  { additionalProperties: false },
+);
+
+export const VotingSessionsSnapshotSchema = Type.Object(
+  {
+    activityId: Type.String({ minLength: 1, maxLength: 100 }),
+    sessions: Type.Array(VotingSessionSnapshotSchema),
+  },
+  { additionalProperties: false },
+);
+
+export type VotingSessionsSnapshot = Static<typeof VotingSessionsSnapshotSchema>;
