@@ -53,6 +53,7 @@ import {
   SINGER_COMPETITION_PACK,
   STAGE_SHOW_PACK,
   SYSTEM_ACTOR,
+  VOTE_POLL_PACK,
 } from "@artflow-plus/domain";
 import type {
   ActivityDefinitionPackage,
@@ -587,7 +588,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   const { db } = options;
   const registry = options.registry ?? defaultCapabilityRegistry;
-  const packs = options.packs ?? [SINGER_COMPETITION_PACK, STAGE_SHOW_PACK, REVIEW_AWARDS_PACK];
+  const packs = options.packs ?? [
+    SINGER_COMPETITION_PACK,
+    STAGE_SHOW_PACK,
+    REVIEW_AWARDS_PACK,
+    VOTE_POLL_PACK,
+  ];
   const baseDeps = options.deps ?? defaultRuntimeDeps();
   const rateLimiter = options.rateLimiter ?? new MemoryRateLimiter();
   const deps =
