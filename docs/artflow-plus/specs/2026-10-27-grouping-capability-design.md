@@ -77,7 +77,8 @@ v1 的 `GroupStage`（`singer_contest/models.py:536`、`singer_contest/group_cho
 | `name` | 缺省「第 N 组」 |
 | `isActive` | 修正后保留旧组为历史 |
 
-约束：active 组 `(stage_id, group_order)` 与 `(stage_id, name)` 唯一。
+约束：active 组 `(stage_id, group_order)` 唯一；组名唯一由领域校验保证（修正时
+可能交换两个组的名字，数据库唯一索引会在逐行更新时误伤）。
 
 ### GroupingMembership
 
@@ -114,7 +115,7 @@ v1 的 `GroupStage`（`singer_contest/models.py:536`、`singer_contest/group_cho
 | 命令 | 输入要点 | 规则 |
 |---|---|---|
 | `grouping.stage.create` | `stageKey`、`name`、`rosterSource`、`sourceRoundId?` | 活动 ACTIVE 或 CLOSED（ARCHIVED 是终态）、capability 已启用；stageKey 唯一；round_advanced 必须指定同活动轮次 |
-| `grouping.groups.record` | `stageId`、`expectedRevision`、`groups[{name?, participantIds[]}]` | 仅 draft；整体替换组与成员；组非空、名称唯一、成员在来源名单内、一人一组 |
+| `grouping.groups.record` | `stageId`、`expectedRevision`、`groups[{name?, participantIds[]}]` | 仅 draft；来源已确定；整体替换组与成员；组非空、名称唯一、成员在来源名单内、一人一组 |
 | `grouping.stage.confirm` | `stageId`、`expectedRevision` | draft→confirmed；完整覆盖；来源已确定；组数校验；写指纹 |
 | `grouping.stage.freeze` | `stageId`、`expectedRevision` | confirmed→frozen；重算指纹并比对；组数校验 |
 | `grouping.stage.correct` | `stageId`、`expectedRevision`、`groups[]`、`reason` | confirmed/frozen；原因必填；完整覆盖；组数校验；追加历史；D2 消费保护 |
