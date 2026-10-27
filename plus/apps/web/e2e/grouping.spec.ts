@@ -11,9 +11,13 @@ test("ops splits, confirms, and freezes a grouping stage", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "第一轮分组" })).toBeVisible();
 
   await page.getByRole("button", { name: "创建分组赛段" }).click();
+  await expect(page.getByRole("button", { name: "保存分组" })).toBeDisabled();
   await page.getByRole("button", { name: "自动平均分组" }).click();
+  // A local draft is not saved yet: confirming now would use the old grouping.
+  await expect(page.getByRole("button", { name: "确认分组" })).toBeDisabled();
   await page.getByRole("button", { name: "保存分组" }).click();
   await expect(page.getByText("已分 4/4 人")).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认分组" })).toBeEnabled();
 
   await page.getByRole("button", { name: "确认分组" }).click();
   await expect(page.getByText("状态：confirmed")).toBeVisible();

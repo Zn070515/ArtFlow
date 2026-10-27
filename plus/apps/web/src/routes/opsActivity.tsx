@@ -84,7 +84,7 @@ function OpsActivityContent() {
         )}
         {activity?.enabledCapabilities.includes("grouping") &&
         (session?.actor.permissions.includes("grouping.manage") ?? false) ? (
-          <GroupingCard activityId={activityId} />
+          <GroupingCard key={activityId} activityId={activityId} />
         ) : null}
       </div>
     </section>
