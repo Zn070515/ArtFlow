@@ -101,7 +101,10 @@ export async function readPublicVoteSession(
   browserFingerprint?: string,
 ): Promise<PublicVoteSessionState | null> {
   const session = await getVoteSession(db, sessionId);
-  if (session === null || session.mode !== "formal") return null;
+  // Only formal sessions that have actually been opened or closed are public;
+  // a draft is not shareable yet, and treating it as open would render a vote
+  // button that can only fail on submit.
+  if (session === null || session.mode !== "formal" || session.status === "draft") return null;
   const activity = await getActivity(db, session.activityId);
   if (activity === null) return null;
   const options = await listVoteOptions(db, sessionId);
