@@ -140,6 +140,10 @@ if (profile === "historical") {
     if (Object.keys(active[0].capabilityVersions ?? {}).length === 0) {
       throw new Error("the active release freezes no capability versions");
     }
+    const commandScopes = active[0].commandScopes ?? {};
+    if (!commandScopes["competition.round.prepare"] || !commandScopes["voting.ballot.submit"]) {
+      throw new Error("the active release does not bind execution commands to scopes");
+    }
   });
 }
 

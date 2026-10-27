@@ -18,6 +18,7 @@ export interface StudioReleaseSummary {
   readonly releasedAt: string;
   readonly sourceDraftRevision: number;
   readonly declaredScopes: readonly string[];
+  readonly commandScopes: Readonly<Record<string, readonly string[]>>;
   readonly capabilityVersions: Readonly<Record<string, string>>;
   readonly active: boolean;
 }
@@ -84,6 +85,7 @@ export async function getStudioState(
       releasedAt: release.releasedAt,
       sourceDraftRevision: release.sourceDraftRevision,
       declaredScopes: release.executionPolicy.declaredScopes,
+      commandScopes: release.executionPolicy.commandScopes ?? {},
       capabilityVersions: release.capabilityVersions,
       active: release.version === activity.activeDefinitionVersion,
     })),

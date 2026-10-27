@@ -36,6 +36,8 @@ export interface StoredResultSource {
    * security action only invalidates the affected vote session.
    */
   readonly dependencyIds?: readonly string[];
+  /** Typed references such as `round:<id>`, `voteSession:<id>`, `groupingStage:<id>`. */
+  readonly dependencyRefs?: readonly string[];
 }
 
 export interface StoredStageResult {
@@ -427,7 +429,12 @@ export async function selectPublicResults(
     .orderBy("result_release.released_at", "desc")
     .execute();
   const validRows = rows.filter((row) => isResultSnapshot(json(row.snapshot)));
-  const newest = [...validRows].sort((left, right) => {
+  // The response title and results must come from the same stage's snapshot;
+  // filter first, then choose the newest visible release.
+  const visible = stageKey === undefined
+    ? validRows
+    : validRows.filter((row) => row.stage_key === stageKey);
+  const newest = [...visible].sort((left, right) => {
     const leftAt = iso(left.released_at) ?? "";
     const rightAt = iso(right.released_at) ?? "";
     if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
@@ -436,9 +443,6 @@ export async function selectPublicResults(
   const activityTitle = newest === undefined
     ? ""
     : (json(newest.snapshot) as ResultSnapshot).activityTitle;
-  const visible = stageKey === undefined
-    ? validRows
-    : validRows.filter((row) => row.stage_key === stageKey);
   const results = visible.map((row) => {
     const snapshot = json(row.snapshot) as ResultSnapshot;
     return {

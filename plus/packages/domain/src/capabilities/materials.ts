@@ -85,7 +85,7 @@ export const materialsCapability: CapabilityRegistration = deepFreeze({
     dependencies: [],
     conflicts: [],
     definitionSchemaVersion: 1,
-    commands: ["materials.upload", "materials.review"],
+    commands: ["materials.upload", "materials.content.attach", "materials.review"],
     queries: ["materials.read"],
     events: ["MaterialUploaded", "MaterialReviewed"],
     permissions: ["materials.manage", "materials.review"],

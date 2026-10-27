@@ -380,6 +380,9 @@ class Command(BaseCommand):
                     "originalName": submission.original_name,
                     "contentType": mimetypes.guess_type(submission.original_name)[0] or "application/octet-stream",
                     "byteLength": submission.file_size,
+                    # Relative media path so Plus can serve the original bytes
+                    # through its controlled-media bridge after adoption.
+                    "storagePath": submission.file.name if submission.file else None,
                     "status": status,
                     "reviewNote": check.review_note if check is not None else "",
                     "createdAt": submission.uploaded_at.isoformat(),

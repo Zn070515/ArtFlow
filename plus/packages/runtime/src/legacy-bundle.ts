@@ -34,6 +34,8 @@ export interface LegacyMaterialBundle {
   readonly originalName: string;
   readonly contentType: string;
   readonly byteLength: number;
+  /** Relative v1 media path, when the exporter could resolve it. */
+  readonly storagePath?: string | null;
   readonly status: string;
   readonly reviewNote: string;
   readonly createdAt: string;

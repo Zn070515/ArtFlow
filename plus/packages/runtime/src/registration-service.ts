@@ -99,6 +99,31 @@ function requireActive(activity: { readonly status: string }): void {
   }
 }
 
+/**
+ * Registration has its own lifecycle frozen in the release. Adoption imports a
+ * closed activity with lifecycle "final" or "review"; Activity.status alone
+ * must never reopen it.
+ */
+async function requireRegistrationOpen(
+  trx: Kysely<Database>,
+  activity: { readonly id: string; readonly activeDefinitionVersion: number },
+): Promise<void> {
+  const release = await getRelease(trx, activity.id, activity.activeDefinitionVersion);
+  if (release === null) {
+    throw new DomainError("VERSION_NOT_RELEASED", "The activity has no active released definition.");
+  }
+  const plan = release.capabilities.registration;
+  // Releases written before the registration lifecycle existed have no plan;
+  // they behave as open rather than blocking every registration.
+  if (plan === undefined || plan.ok !== true) return;
+  const artifact = plan.artifact as { lifecycle?: string };
+  // Releases written before the lifecycle existed behave as open.
+  const lifecycle = artifact.lifecycle ?? "open";
+  if (lifecycle !== "open") {
+    throw new DomainError("REGISTRATION_CLOSED", `Registration is ${lifecycle} for this activity.`);
+  }
+}
+
 function requireOwnerOrManager(
   actor: Parameters<typeof canActFor>[0],
   participantId: string,
@@ -135,6 +160,7 @@ export async function startRegistration(
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
+      await requireRegistrationOpen(trx, activity);
       const existing = await getRegistrationByParticipantForUpdate(trx, input.activityId, input.participantId);
       if (existing !== null) {
         throw new DomainError("INVALID_TRANSITION", "This participant already has a registration.");
@@ -200,6 +226,7 @@ export async function saveRegistrationAnswer(
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
+      await requireRegistrationOpen(trx, activity);
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
@@ -263,6 +290,7 @@ export async function submitRegistration(
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
+      await requireRegistrationOpen(trx, activity);
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
