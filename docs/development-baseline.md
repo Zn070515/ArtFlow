@@ -240,6 +240,28 @@ The Judge authority browser flow requires a disposable fixture. Prepare it with
 the run. The command is disabled when `APP_ENV=production`, writes no grant to
 stdout, and the Playwright setup deletes the fixture after reading it.
 
+### Mobile layout gate
+
+Field pages treat the phone as the first-class terminal, so layout is gated. Seven
+phone widths (320 / 360 / 375 / 390 / 393 / 412 / 430, covering the first iPhone SE
+through the Pro Max and mainstream Android sizes) are separate Playwright projects;
+iPhone runs WebKit (the real iOS Safari and WeChat iOS engine) and Android runs
+Chromium. The assertion is that a page must not scroll horizontally as a whole;
+horizontal scrolling inside a table with `overflow-x-auto` is allowed (Django
+admin's changelist does the same). The service must already be running:
+
+```powershell
+uv run python manage.py migrate --noinput
+uv run python manage.py prepare_layout_e2e --output-file test-results\layout-e2e.json
+$env:PLAYWRIGHT_LAYOUT_FIXTURE_PATH = "test-results\layout-e2e.json"
+uv run python manage.py runserver
+# another terminal:
+npx playwright install chromium webkit
+npm run test:e2e
+```
+
+Without the fixture the staff pages are skipped; public pages are still measured.
+
 ## Troubleshooting
 
 - If `uv sync --locked` fails, do not edit `requirements.txt` to work around it. Restore the expected lockfile or intentionally update the lockfile and regenerate the compatibility requirements through the provided script.
@@ -252,4 +274,4 @@ stdout, and the Playwright setup deletes the fixture after reading it.
 
 Never commit `.env`, production credentials, database files, uploads, exports, archives, or generated media. Examples use placeholders only; replace them locally or through deployment secret management. Keep internal submission files behind controlled access views, and do not put sensitive configuration in `doctor`, health, CI, or container logs.
 
-Create a short-lived branch from a clean, updated `main`; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into `main` after verification. See [repository instructions](../AGENTS.md) for the repository-wide workflow rules.
+Create a short-lived branch from the clean, updated base of the line you are changing — `main` for 1.x fixes, `artflow-plus` for v2 work; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into that same line after verification. Never merge across lines. See [repository instructions](../AGENTS.md) for the repository-wide workflow rules.

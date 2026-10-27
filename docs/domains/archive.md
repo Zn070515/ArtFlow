@@ -72,6 +72,7 @@ DRAFT → PACKAGING → SEALED
   closed、启用 publishing 时至少一条 ACTIVE release。
 - ARCHIVED 为终态；unarchive 是独立命令，保留包文件与历史。归档后 rename 返回
   `ACTIVITY_ARCHIVED`。
-- 已知缺口：registration/material/vote/score 事实表没有 mode 列，因此不进入包；
-  等后续 hardening 再扩展归档内容。媒体字节仍不复制。
-- DEPL-06 的恢复演练留给部署 slice；下载只验证当前包的存在/可读/哈希一致。
+- 已知缺口：registration/material 事实表没有 mode 列；归档包不包含
+  registration/material/vote/score 明细，只含活动身份、发布与赛果、正式 session、
+  事件摘要与分组。媒体字节仍不复制。
+- DEPL-06 的恢复演练由部署 slice 覆盖；下载只验证当前包的存在/可读/哈希一致。

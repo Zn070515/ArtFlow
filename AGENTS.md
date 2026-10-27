@@ -115,7 +115,7 @@ git pull --ff-only origin main
 git switch -c build/<short-name>
 ```
 
-Use `feat/`, `fix/`, `docs/`, `test/`, or `build/` prefixes as appropriate. Do not start work if `main` has uncommitted changes; preserve existing user changes and ask before proceeding.
+Use `feat/`, `fix/`, `docs/`, `test/`, or `build/` prefixes as appropriate. Do not start work if the base line (`main` or `artflow-plus`) has uncommitted changes; preserve existing user changes and ask before proceeding.
 
 After verification, commit the scoped changes on the feature branch, merge the branch into `main` with a non-fast-forward merge, and push `main`:
 
@@ -137,9 +137,15 @@ Keep the feature branch until the merge and push have been confirmed. Delete it 
 Before opening a PR, run:
 
 ```bash
+# 1.x
 python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test
+
+# v2
+pnpm -C plus run check
+pnpm -C plus run test          # REQUIRE_DB=1 against PostgreSQL
+uv run pytest tests/gates -q
 ```
 
 PRs should summarize behavior changes, list migrations, note verification, and include screenshots for UI changes.

@@ -1,8 +1,8 @@
 # ArtFlow-Plus 路线图
 
-状态：规划基线（2026-10-19）。产品与架构身份的权威是根目录 `GOAL.md`；本文件
-只把它拆成可交付的 vertical slices。每个里程碑的出口条件都是可执行的
-（测试/golden/门禁），不是“代码写完了”。
+状态：**M0–M13 已完成**（2026-10-27）；生产 cutover 未执行。产品与架构身份的
+权威是根目录 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）
+与证据。已完成里程碑的段落保留当时的实现描述，后续里程碑在其上覆盖。
 
 ## M0 — Legacy Extraction（已完成）
 
@@ -52,9 +52,9 @@ fast-check 已迁移，属性测试覆盖 hash 稳定性、陈旧 revision、clo
   半启用的占位 Pack。
 
 **出口**：Singer Pack 在完整注册表上生成可编译的空定义；依赖/冲突诊断正确；
-Gate 检查 capability 边界。真实 Registration 等 capability 仍按
-M4-M7 分片实现；M2 当时的默认注册表只暴露 `competition`，已在 M4 更新为暴露当前
-四个已实现 capability。
+Gate 检查 capability 边界。真实 Registration 等 capability 在
+M4–M7 分片实现；M2 当时的默认注册表只暴露 `competition`，后续里程碑已扩展到
+当前全部九个 capability。
 
 ## M3 — Execution Runtime（已完成，2026-10-19）
 
@@ -67,7 +67,8 @@ M4-M7 分片实现；M2 当时的默认注册表只暴露 `competition`，已在
 - **投影与恢复**：`execution_projection(activity_id, mode)`；失败停批保持顺序；
   `rebuildExecutionProjection` 从事件日志重放；权威 session 列表与最终一致投影分离。
 - **实时降级**：SSE `GET /stream`（Last-Event-ID、heartbeat）尾随事件日志；
-  `GET /events?after=` 是权威恢复路径；SSE 失败不阻塞写。
+  `GET /events?after=` 是权威恢复路径；SSE 失败不阻塞写。（M13 已退役 SSE，
+  改为 `@artflow-plus/realtime` 的失效主题。）
 - **正式/测试隔离**：mode 来自服务端 session；事件、投影、读路径均按 mode 分区。
 - **骨架证明 E2E**：Pack → Activity → Compile/Release → 并行 scope → capability facts →
   投影隔离 → 重放 → 重启后一致（`apps/api/test/skeleton.test.ts`）。
@@ -83,7 +84,7 @@ M4-M7 分片实现；M2 当时的默认注册表只暴露 `competition`，已在
 - 所有 registry/compiler/domain 校验移到 receipt claim 之后，严格 replay。
 - 删除 `saveActivityWithRevision` 第二写路径；结构门禁禁止 API/worker import DB mutator。
 - 真实双连接测试：同 scope、冲突 scope、同 command id retry、并发 relay。
-- `/readyz` 检查 PostgreSQL 与迁移；SSE 轮询不重叠。
+- `/readyz` 检查 PostgreSQL 与迁移；SSE 轮询不重叠（SSE 已于 M13 退役）。
 
 **出口**：多个 scope 并行；冲突策略生效；恢复后状态一致；事件可重放。真实
 Evaluation/Voting 等 capability 仍由 M5-M7 实现。
@@ -217,6 +218,7 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   HttpOnly `artflow_judge_session`；`GET /api/judge/context` 按 seat key 解析当前
   panel 与表演，评委直接写 `direct_judge` 分。
 - SSE 只做失效提示，失败退化为 5s 轮询；events/execution-state 仍是恢复权威。
+  （M13 已把失效提示迁移到实时核心。）
 - E2E：启动会话 → 准备 → 激活评委组 → 开表演 → 生成链接 → 评委打分 →
   锁表演/锁轮 → 生成排名 → 关闭会话。
 - 投票/票据 UI、现场大屏、导出、cutover 不在本 slice。

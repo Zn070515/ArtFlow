@@ -1,5 +1,9 @@
 # ArtFlow realtime collaboration boundary
 
+> **1.x（Django Channels）文档。** v2（ArtFlow-Plus）的实时边界见
+> [`docs/domains/realtime.md`](domains/realtime.md) 与
+> [`plus/packages/realtime/CORE.md`](../plus/packages/realtime/CORE.md)；两者不共用实现。
+
 ArtFlow keeps PostgreSQL and the existing Django services as the only authority
 for formal state. WebSocket messages are an enhancement layer for short-lived
 presence and post-commit invalidation. A browser must be able to continue with
