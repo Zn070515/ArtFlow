@@ -305,6 +305,37 @@ export function createEmptyCompetitionDefinition(): CapabilityDefinition {
   );
 }
 
+const COMPETITION_COMMANDS = [
+  "competition.configure",
+  "competition.round.prepare",
+  "competition.panel.activate",
+  "competition.performance.open",
+  "competition.performance.advance",
+  "competition.performance.lock",
+  "competition.round.lock",
+  "competition.score.direct_judge",
+  "competition.score.staff_rapid",
+  "competition.score.staff_proxy",
+  "competition.score.paper_dr",
+  "competition.score.edit",
+  "competition.score.correction.open",
+  "competition.score.correction.close",
+  "competition.score.correction.recalculate",
+  "competition.ranking.resolve",
+  "competition.advancement.finalize",
+  "competition.tie.decide",
+  "competition.podium.recompute",
+  "competition.rehearsal.reset",
+] as const;
+
+/** The canonical competition command → execution scope binding. */
+export const COMPETITION_COMMAND_SCOPES: Readonly<Record<string, readonly string[]>> = deepFreeze({
+  ...Object.fromEntries(COMPETITION_COMMANDS.map((command) => [command, Object.freeze(["judging"])])),
+  // Producing a podium candidate is the hand-off to publishing, so it may run
+  // in the publishing session that will consume it as well as in judging.
+  "competition.podium.recompute": Object.freeze(["judging", "publishing"]),
+});
+
 export const competitionCapability: CapabilityRegistration = deepFreeze({
   manifest: {
     identity: "competition",
@@ -312,27 +343,7 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
     dependencies: [],
     conflicts: [],
     definitionSchemaVersion: 1,
-    commands: [
-      "competition.configure",
-      "competition.round.prepare",
-      "competition.panel.activate",
-      "competition.performance.open",
-      "competition.performance.advance",
-      "competition.performance.lock",
-      "competition.round.lock",
-      "competition.score.direct_judge",
-      "competition.score.staff_rapid",
-      "competition.score.staff_proxy",
-      "competition.score.paper_dr",
-      "competition.score.edit",
-      "competition.score.correction.open",
-      "competition.score.correction.close",
-      "competition.score.correction.recalculate",
-      "competition.ranking.resolve",
-      "competition.advancement.finalize",
-      "competition.tie.decide",
-      "competition.podium.recompute",
-    ],
+    commands: COMPETITION_COMMANDS,
     queries: ["competition.describe"],
     events: [
       "CompetitionConfigured",
@@ -353,7 +364,8 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
     ],
     permissions: ["competition.manage", "competition.round.prepare", "competition.score.write"],
     surfaces: ["studio", "ops", "live"],
-    scopes: ["stage", "judging", "checkin", "voting"],
+    scopes: ["stage", "judging", "checkin", "voting", "publishing"],
+    commandScopes: COMPETITION_COMMAND_SCOPES,
   },
   compiler: competitionCompiler,
   emptyDefinition: createEmptyCompetitionDefinition,

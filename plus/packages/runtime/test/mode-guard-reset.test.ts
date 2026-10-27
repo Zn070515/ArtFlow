@@ -1,3 +1,4 @@
+import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -105,7 +106,7 @@ async function seedThroughScore(
         artifact: competitionArtifact,
       },
     },
-    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1, commandScopes: COMPETITION_COMMAND_SCOPES },
     capabilityVersions: { competition: "1" },
     bindings: [],
     releasedAt: "2026-10-26T14:00:00Z",

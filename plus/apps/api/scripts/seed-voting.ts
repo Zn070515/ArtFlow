@@ -44,17 +44,21 @@ async function seedActivity(
   await db.deleteFrom("vote_session").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("execution_session").where("activity_id", "=", activityId).execute();
 
-  if ((await getActivity(db, activityId)) !== null) return;
-
-  await db.insertInto("activity").values({
-    id: activityId,
-    public_code: publicCode,
-    title,
-    status: "active",
-    revision: 1,
-    enabled_capabilities: JSON.stringify(["voting", "publishing"]),
-    active_definition_version: 1,
-  }).execute();
+  if ((await getActivity(db, activityId)) === null) {
+    await db.insertInto("activity").values({
+      id: activityId,
+      public_code: publicCode,
+      title,
+      status: "active",
+      revision: 1,
+      enabled_capabilities: JSON.stringify(["voting", "publishing"]),
+      active_definition_version: 1,
+    }).execute();
+  } else {
+    // Re-seeding refreshes the frozen release so a schema kept from an older
+    // run cannot keep serving an outdated execution policy.
+    await db.deleteFrom("definition_release").where("activity_id", "=", activityId).execute();
+  }
 
   await insertRelease(db, {
     activityId,
@@ -90,6 +94,18 @@ async function seedActivity(
       declaredScopes: ["voting", "publishing"],
       conflicts: {},
       runtimeContractVersion: 1,
+      commandScopes: {
+        "voting.session.open": ["voting"],
+        "voting.ballot.submit": ["voting"],
+        "voting.session.close": ["voting"],
+        "voting.scores.compute": ["voting"],
+        "publishing.stage_result.confirm": ["publishing"],
+        "publishing.stage_result.unlock": ["publishing"],
+        "publishing.result.release": ["publishing"],
+        "publishing.result.revoke": ["publishing"],
+        "publishing.publication.edit": ["publishing"],
+        "publishing.vote_result.confirm": ["publishing"],
+      },
     },
     capabilityVersions: { voting: "1", publishing: "1" },
     bindings: [],

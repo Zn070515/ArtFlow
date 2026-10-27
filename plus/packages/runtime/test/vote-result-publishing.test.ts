@@ -1,3 +1,4 @@
+import { PUBLISHING_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -17,6 +18,7 @@ import {
   confirmVoteStageResult,
   getVoteResultCandidate,
   releaseResult,
+  revokeTicket,
 } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
@@ -33,7 +35,7 @@ const staff: ActorContext = {
   actorId: "vote-result-staff",
   actorType: "user",
   roles: ["staff"],
-  permissions: ["result.manage"],
+  permissions: ["result.manage", "ticket.manage"],
 };
 
 function deps(): RuntimeDeps {
@@ -79,7 +81,7 @@ async function seed(
         },
       },
     },
-    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
     capabilityVersions: { publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",
@@ -284,5 +286,95 @@ describe.skipIf(!connectionString)("vote-result publishing", () => {
       contestantId: "candidate-0",
       count: 2,
     });
+  });
+
+  it("refuses to confirm a vote session from another definition release", async () => {
+    const { activityId, sessionId } = await seed();
+    const preview = await getVoteResultCandidate(db, deps(), { activityId, sessionId });
+    await insertRelease(db, {
+      activityId,
+      version: 2,
+      contentHash: "vote-release-2",
+      capabilities: {
+        publishing: {
+          ok: true,
+          capabilityKey: "publishing",
+          contentHash: "vote-publishing-2",
+          artifact: {
+            version: 1,
+            schemaVersion: 1,
+            stages: [{ key: "vote_result", label: "投票结果" }],
+          },
+        },
+      },
+      executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
+      capabilityVersions: { publishing: "1" },
+      bindings: [],
+      releasedAt: "2026-10-27T10:00:00Z",
+      sourceDraftRevision: 2,
+    });
+    await db.updateTable("activity").set({ active_definition_version: 2 }).where("id", "=", activityId).execute();
+    await db.updateTable("execution_session")
+      .set({ definition_version: 2, content_hash: "vote-release-2" })
+      .where("id", "=", `publishing-${activityId}`)
+      .execute();
+    await expect(confirmVoteStageResult(db, deps(), {
+      commandId: `vote-confirm-release-mismatch-${activityId}`,
+      activityId,
+      stageKey: "vote_result",
+      scope: "publishing",
+      voteSessionId: sessionId,
+      expectedSessionRevision: preview.sessionRevision,
+      expectedInputFingerprint: preview.inputFingerprint,
+      awards: [],
+    })).rejects.toMatchObject({ code: "SOURCE_RELEASE_MISMATCH" });
+  });
+
+  it("marks a confirmed vote result stale when a ticket is revoked", async () => {
+    const { activityId, sessionId } = await seed();
+    const preview = await getVoteResultCandidate(db, deps(), { activityId, sessionId });
+    const confirmed = await confirmVoteStageResult(db, deps(), {
+      commandId: `vote-confirm-ticket-${activityId}`,
+      activityId,
+      stageKey: "vote_result",
+      scope: "publishing",
+      voteSessionId: sessionId,
+      expectedSessionRevision: preview.sessionRevision,
+      expectedInputFingerprint: preview.inputFingerprint,
+      awards: [],
+    });
+    const ticketId = `ticket-${randomUUID()}`;
+    await db.updateTable("activity").set({
+      enabled_capabilities: JSON.stringify(["voting", "publishing", "ticketing"]),
+    }).where("id", "=", activityId).execute();
+    await db.insertInto("ticket").values({
+      id: ticketId,
+      activity_id: activityId,
+      public_code: `T-${ticketId.slice(-8)}`,
+      credential_digest: "d".repeat(64),
+      credential_version: 1,
+      state: "issued",
+      issued_at: "2026-10-27T09:00:00Z",
+    }).execute();
+    await revokeTicket(db, deps(), {
+      commandId: `vote-ticket-revoke-${activityId}`,
+      activityId,
+      ticketId,
+      reason: "现场票据泄露",
+    });
+    const row = await db.selectFrom("stage_result")
+      .select(["stale_at", "stale_reason"])
+      .where("activity_id", "=", activityId)
+      .executeTakeFirstOrThrow();
+    expect(row.stale_at).not.toBeNull();
+    expect(row.stale_reason).toContain("ticket");
+    await expect(releaseResult(db, deps(), {
+      commandId: `vote-release-stale-${activityId}`,
+      activityId,
+      stageKey: "vote_result",
+      scope: "publishing",
+      expectedCandidateRevision: confirmed.body.candidateRevision,
+      note: "publish",
+    })).rejects.toMatchObject({ code: "RESULT_STALE" });
   });
 });

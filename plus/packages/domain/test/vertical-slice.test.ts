@@ -63,6 +63,7 @@ const RELEASE_SNAPSHOT = {
     declaredScopes: [] as string[],
     conflicts: {},
     runtimeContractVersion: 1,
+    commandScopes: {},
   },
   capabilityVersions: { competition: "1", registration: "1" },
 };

@@ -98,7 +98,13 @@ export type DomainErrorCode =
   | "GROUPING_CONSUMED"
   | "GROUPING_WINDOW_INVALID"
   | "ARCHIVE_GROUPING_NOT_FROZEN"
-  | "NO_VALID_BALLOTS";
+  | "NO_VALID_BALLOTS"
+  | "COMMAND_SCOPE_UNDECLARED"
+  | "SCOPE_NOT_AUTHORIZED"
+  | "SOURCE_RELEASE_MISMATCH"
+  | "RESULT_PROVENANCE_MISSING"
+  | "RESULT_STALE"
+  | "RESULT_CONSUMED";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel

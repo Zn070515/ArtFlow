@@ -17,6 +17,13 @@ The Live console and the voting card share the single WebSocket core in
 authority. Two topics exist: `voting:<activityId>` and
 `activity:<activityId>`.
 
+An authority-closure pass (ADR-0030) froze command→scope ownership in each
+release, added result source provenance and consumption/stale handling, declared
+a read-surface level for every GET route at boot, and stopped returning bearer
+tokens from the browser login/register responses. Releases and confirmed results
+created before that pass must be re-released or reconfirmed because the new
+guards fail closed.
+
 ## First vertical slice
 
 `packages/domain` implements the GOAL's kernel shape:
@@ -261,11 +268,14 @@ new architecture.
 
 ## Next steps
 
-1. Execute the production cutover when the operator chooses the window; follow
-   `docs/artflow-plus/cutover-runbook.md`.
+1. Cutover infrastructure is ready for rehearsal; production cutover remains
+   gated by activity-specific capability completeness and the authority audit,
+   not by the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
 2. Close the remaining product gaps: ticket-backed voting, participant account
    claim/migration, a public program page for stage shows, bracket/composite
    scoring, XLSX export, on-site display, and multi-instance realtime broadcast.
+   Ticket-backed voting is a cutover prerequisite whenever the first v2 activity
+   relies on real ticket-holding audience votes.
 
 ## M7a publishing / results
 

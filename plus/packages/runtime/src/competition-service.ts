@@ -8,7 +8,6 @@ import {
   countCurrentScoreFactsForContext,
   ensureJudgeEntrySeat,
   findJudgeSeatGrantBySeatKeyForUpdate,
-  findRunningSessionByScope,
   getActivityForUpdate,
   getCurrentPanelForUpdate,
   getNextPanelVersion,
@@ -46,6 +45,7 @@ import {
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
+import { requireRunningCommandSession } from "./command-scope.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
@@ -119,18 +119,12 @@ function roundConfig(artifact: CompiledCompetitionArtifact, roundKey: string) {
 async function runningSession(
   trx: Kysely<Database>,
   activity: CompetitionActivity,
+  commandType: string,
   scope: string,
 ) {
-  const release = await getRelease(trx, activity.id, activity.activeDefinitionVersion);
-  if (release === null) {
-    throw new DomainError("VERSION_NOT_RELEASED", "The activity has no active released definition.");
-  }
+  const { release, session } = await requireRunningCommandSession(trx, activity, commandType, scope);
   if (release.executionPolicy.declaredScopes.length > 0 && !release.executionPolicy.declaredScopes.includes(scope)) {
     throw new DomainError("SCOPE_UNDECLARED", `Scope ${scope} is not declared by the release.`);
-  }
-  const session = await findRunningSessionByScope(trx, activity.id, scope);
-  if (session === null) {
-    throw new DomainError("SESSION_NOT_RUNNING", `Scope ${scope} has no running execution session.`);
   }
   return { release, session };
 }
@@ -196,7 +190,7 @@ export async function prepareCompetitionRound(
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
       const roster = requireFinalRoster(await getRosterForUpdate(trx, input.activityId));
-      const { release, session } = await runningSession(trx, activity, input.scope);
+      const { release, session } = await runningSession(trx, activity, "competition.round.prepare", input.scope);
       const artifact = requireCompetitionArtifact(activity, release);
       const config = roundConfig(artifact, input.roundKey);
       const existing = await getRoundByKeyForUpdate(trx, input.activityId, input.roundKey);
@@ -287,7 +281,7 @@ export async function activateCompetitionPanel(
         judgeIds.add(judge.judgeId);
         seatKeys.add(judge.seatKey);
       }
-      const { session } = await runningSession(trx, activity, input.scope);
+      const { session } = await runningSession(trx, activity, "competition.panel.activate", input.scope);
       const panelId = idFromCommand("panel", input.commandId);
       const panel: StoredPanelSnapshot = {
         id: panelId,
@@ -450,7 +444,7 @@ export async function openPerformance(
     requireActive(activity);
     const round = requireRoundForActivity(await getRoundForUpdate(trx, input.roundId), input.activityId);
     if (round.state !== "scoring") throw new DomainError("ROUND_NOT_PREPARED", "The round is not accepting performances.");
-    const { session } = await runningSession(trx, activity, input.scope);
+    const { session } = await runningSession(trx, activity, "competition.performance.open", input.scope);
     await requireNoFormalFacts(trx, round.id, session.mode);
     const performance = await openPerformanceInTransaction(trx, activity, round, input);
     const savedRound = await updateRound(trx, { ...round, revision: round.revision + 1 }, round.revision);
@@ -499,7 +493,7 @@ export async function lockPerformance(
     const round = requireRoundForActivity(await getRoundForUpdate(trx, input.roundId), input.activityId);
     if (round.state !== "scoring") throw new DomainError("ROUND_LOCKED", "The round is not scoring.");
     const panel = requireActivePanel(await getCurrentPanelForUpdate(trx, round.id));
-    const { session } = await runningSession(trx, activity, input.scope);
+    const { session } = await runningSession(trx, activity, "competition.performance.lock", input.scope);
     await requireNoFormalFacts(trx, round.id, session.mode);
     const performance = await getPerformanceForUpdate(trx, input.performanceId);
     if (performance === null) throw new DomainError("NOT_FOUND", "The performance was not found.");
@@ -576,7 +570,7 @@ export async function advancePerformance(
     const round = requireRoundForActivity(await getRoundForUpdate(trx, input.roundId), input.activityId);
     if (round.state !== "scoring") throw new DomainError("ROUND_LOCKED", "The round is not scoring.");
     const panel = requireActivePanel(await getCurrentPanelForUpdate(trx, round.id));
-    const { session } = await runningSession(trx, activity, input.scope);
+    const { session } = await runningSession(trx, activity, "competition.performance.advance", input.scope);
     await requireNoFormalFacts(trx, round.id, session.mode);
     const current = await getPerformanceForUpdate(trx, input.currentPerformanceId);
     if (current === null) throw new DomainError("NOT_FOUND", "The current performance was not found.");
@@ -658,7 +652,7 @@ export async function lockRound(
     if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
     requireActive(activity);
     const round = requireRoundForActivity(await getRoundForUpdate(trx, input.roundId), input.activityId);
-    const { session } = await runningSession(trx, activity, input.scope);
+    const { session } = await runningSession(trx, activity, "competition.round.lock", input.scope);
     await requireNoFormalFacts(trx, round.id, session.mode);
     if (round.revision !== input.expectedRevision) throw new DomainError("STALE_REVISION", "The round changed since it was read.");
     if (round.state !== "scoring") throw new DomainError("ROUND_LOCKED", "The round is not scoring.");

@@ -22,6 +22,10 @@ export default defineConfig({
   use: {
     baseURL: webUrl,
     trace: "on-first-retry",
+    // Business journeys must not depend on a WebGL renderer. The Aurora scene
+    // falls back to a static backdrop under reduced motion; visual coverage of
+    // the shader belongs in its own smoke test, not in authority E2E.
+    reducedMotion: "reduce",
   },
   projects: [{
     name: "chromium",

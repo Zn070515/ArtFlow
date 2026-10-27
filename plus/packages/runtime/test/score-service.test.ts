@@ -1,3 +1,4 @@
+import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -109,7 +110,7 @@ async function seedScoreWindow(): Promise<{
         },
       },
     },
-    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1, commandScopes: COMPETITION_COMMAND_SCOPES },
     capabilityVersions: { competition: "1" },
     bindings: [],
     releasedAt: "2026-10-19T15:00:00Z",
@@ -510,5 +511,34 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
     });
     expect(ranking.body.sourceScoreVersion).toBe(3);
     expect(ranking.body.rows).toContainEqual(expect.objectContaining({ contestantId: "singer-a", total: "92.00" }));
+  });
+
+  it("refuses score changes after a confirmed result consumed the activity", async () => {
+    const context = await seedScoreWindow();
+    await db.insertInto("stage_result").values({
+      id: `consumed-${context.activityId}`,
+      activity_id: context.activityId,
+      stage_key: "final",
+      status: "confirmed",
+      candidate_revision: 1,
+      source_candidate_revision: 1,
+      input_fingerprint: "fp-consumed",
+      decisions: "[]",
+      awards: "[]",
+      note: "",
+      revision: 1,
+    }).execute();
+    await expect(submitJudgeScore(db, deps(judge), {
+      commandId: `consumed-score-${context.activityId}`,
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      panelSnapshotId: context.panelSnapshotId,
+      seatId: context.seatId,
+      contextVersion: 1,
+      criteria: { technique: 40, stage: 30, emotion: 30 },
+      notes: "",
+      scope: "judging",
+    })).rejects.toMatchObject({ code: "RESULT_CONSUMED" });
   });
 });

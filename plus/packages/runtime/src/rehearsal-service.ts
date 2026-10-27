@@ -13,6 +13,7 @@ import { DomainError, requirePermission } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
+import { requireRunningCommandSession } from "./command-scope.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 
@@ -60,6 +61,15 @@ export async function resetRehearsalRound(
     }
     if (await existsFormalScoreFactsForRound(trx, round.id)) {
       throw new DomainError("FORMAL_FACTS_EXIST", "Formal score facts exist; rehearsal reset is refused.");
+    }
+    const { session } = await requireRunningCommandSession(
+      trx,
+      activity,
+      "competition.rehearsal.reset",
+      input.scope,
+    );
+    if (session.mode !== input.mode) {
+      throw new DomainError("STALE_CONTEXT", "The rehearsal reset does not match the running session mode.");
     }
     const deletedFacts = await deleteNonFormalScoreDataForRound(trx, round.id);
     const deletedRankings = await deleteNonFormalRankingsForRound(trx, round.id);

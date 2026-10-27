@@ -249,6 +249,7 @@ export async function releaseDefinitionCommand(
         declaredScopes: composition.plan.declaredScopes,
         conflicts: composition.plan.scopeConflicts,
         runtimeContractVersion: RUNTIME_CONTRACT_VERSION,
+        commandScopes: composition.plan.commandScopes,
       };
       const result = releaseDefinition({
         activity,

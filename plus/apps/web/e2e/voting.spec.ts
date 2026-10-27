@@ -55,6 +55,14 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
   await page.getByLabel("发布备注").fill("人气投票结果");
   await page.getByRole("button", { name: "发布结果" }).click();
 
+  // The release command commits asynchronously; poll the public selector
+  // instead of assuming the mutation finished before the next HTTP read.
+  await expect.poll(async () => {
+    const response = await page.request.get("/api/public/results/E2E-VOTING");
+    if (!response.ok()) return 0;
+    const body = await response.json() as { results: unknown[] };
+    return body.results.length;
+  }, { timeout: 10_000 }).toBeGreaterThan(0);
   const publicRead = await page.request.get("/api/public/results/E2E-VOTING");
   expect(publicRead.ok()).toBe(true);
   const publicBody = await publicRead.json() as {

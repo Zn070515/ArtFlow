@@ -707,6 +707,60 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
   }
 
+  // Every GET route must declare its read surface. The default is not "public":
+  // an undeclared route fails at boot, so a new endpoint cannot quietly become
+  // an anonymous internal read.
+  type ReadAccess = "public" | "session" | "operations" | "studio" | "voting" | "result" | "archive";
+  const READ_ACCESS_PERMISSIONS: Readonly<Record<"voting" | "result" | "archive", readonly string[]>> = {
+    voting: ["voting.manage", "result.manage"],
+    result: ["result.manage"],
+    archive: ["archive.manage"],
+  };
+
+  async function requireReadAccess(request: FastifyRequest, access: ReadAccess): Promise<void> {
+    if (access === "public") return;
+    if (access === "session") {
+      await requestActor(request);
+      return;
+    }
+    if (access === "operations") {
+      await requireOperationsReader(request);
+      return;
+    }
+    if (access === "studio") {
+      await requireStudio(request);
+      return;
+    }
+    const actor = await requestActor(request);
+    const allowed = [...READ_ACCESS_PERMISSIONS[access], ...OPERATIONS_READ_PERMISSIONS];
+    if (!allowed.some((permission) => hasPermission(actor, permission))) {
+      throw new DomainError("FORBIDDEN", `One of the ${access} read permissions is required.`);
+    }
+  }
+
+  app.addHook("onRoute", (route) => {
+    if (route.method !== "GET") return;
+    // Swagger's documentation routes and the WebSocket upgrade endpoint are not
+    // part of the HTTP read surface.
+    if (!route.url.startsWith("/api/") && route.url !== "/healthz" && route.url !== "/readyz" && route.url !== "/openapi.json") {
+      return;
+    }
+    if (route.url === "/api/realtime") return;
+    const access = (route.config as { access?: ReadAccess } | undefined)?.access;
+    if (access === undefined) {
+      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, studio, voting, result, archive).`);
+    }
+    const guard = async (request: FastifyRequest): Promise<void> => {
+      await requireReadAccess(request, access);
+    };
+    const existing = route.preHandler;
+    route.preHandler = existing === undefined
+      ? [guard]
+      : Array.isArray(existing)
+        ? [...existing, guard]
+        : [existing, guard];
+  });
+
   // The Live console opens and closes scoring sessions without Studio access.
   async function requireSessionManager(request: FastifyRequest): Promise<RuntimeDeps> {
     const requestContext = await requestDeps(request);
@@ -775,8 +829,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   });
 
-  app.get("/healthz", async () => ({ status: "ok" }));
-  app.get("/readyz", async (_request, reply) => {
+  app.get("/healthz", { config: { access: "public" } }, async () => ({ status: "ok" }));
+  app.get("/readyz", { config: { access: "public" } }, async (_request, reply) => {
     try {
       await checkReady(db);
       return { status: "ok" };
@@ -785,7 +839,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       return reply.status(503).send({ status: "unavailable" });
     }
   });
-  app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+  app.get("/openapi.json", { schema: { hide: true }, config: { access: "public" } }, async () => app.swagger());
 
   app.post(
     "/api/auth/login",
@@ -797,10 +851,29 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const result = await authenticateLocalAccount(db, body);
       const csrf = csrfTokenFor(result.token, sessionSecret);
       setSessionCookies(reply, result.token, csrf);
+      // The browser never needs the bearer token: it already holds the HttpOnly
+      // cookie. Returning it here would put the session secret back into JS.
+      return {
+        actor: publicActor(result.actor),
+        csrfToken: csrf,
+        expiresAt: result.expiresAt,
+      };
+    },
+  );
+
+  app.post(
+    "/api/auth/token",
+    { schema: { body: LoginBody } },
+    async (request) => {
+      const body = request.body as { username: string; password: string };
+      await requirePublicRateLimit(request, "auth-token", 10);
+      await requireRateLimit(`auth-token-user:${body.username.trim().toLowerCase()}`, 20);
+      const result = await authenticateLocalAccount(db, body);
+      // Programmatic clients (tests, CLI) authenticate with a bearer token; the
+      // browser login above does not expose one.
       return {
         token: result.token,
         actor: publicActor(result.actor),
-        csrfToken: csrf,
         expiresAt: result.expiresAt,
       };
     },
@@ -816,7 +889,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const csrf = csrfTokenFor(result.token, sessionSecret);
       setSessionCookies(reply, result.token, csrf);
       return reply.status(201).send({
-        token: result.token,
         actor: publicActor(result.actor),
         csrfToken: csrf,
         expiresAt: result.expiresAt,
@@ -824,7 +896,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   );
 
-  app.get("/api/auth/me", async (request) => {
+  app.get("/api/auth/me", { config: { access: "public" } }, async (request) => {
     const session = await requestSession(request);
     if (session === null) throw new DomainError("UNAUTHENTICATED", "A valid session is required.");
     return {
@@ -843,11 +915,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return { ok: true };
   });
 
-  app.get("/api/capabilities", async () => ({
+  app.get("/api/capabilities", { config: { access: "public" } }, async () => ({
     capabilities: registry.list().map((registration) => registration.manifest),
   }));
 
-  app.get("/api/packs", async () => ({ packs }));
+  app.get("/api/packs", { config: { access: "public" } }, async () => ({ packs }));
 
   app.post(
     "/api/packs/:id/instantiate",
@@ -930,13 +1002,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   );
 
-  app.get("/api/activities", async (request) => ({
+  app.get("/api/activities", { config: { access: "session" } }, async (request) => ({
     activities: await listActivitiesForReview(db, await requestDeps(request)),
   }));
 
   app.get(
     "/api/public/activities/:publicCode",
-    { schema: { params: PublicActivityParams } },
+    { schema: { params: PublicActivityParams }, config: { access: "public" } },
     async (request, reply) => {
       const { publicCode } = request.params as { publicCode: string };
       const activity = await getPublicActivity(db, publicCode);
@@ -950,7 +1022,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/public/vote/:sessionId",
-    { schema: { params: PublicVoteParams } },
+    { schema: { params: PublicVoteParams }, config: { access: "public" } },
     async (request, reply) => {
       const { sessionId } = request.params as { sessionId: string };
       await requirePublicRateLimit(request, `public-vote:${sessionId}`, 120);
@@ -967,14 +1039,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/live",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "session" } },
     async (request) => {
       const { id } = request.params as { id: string };
       return getLiveActivityState(db, await requestDeps(request), id);
     },
   );
 
-  app.get("/api/judge/context", async (request, reply) => {
+  app.get("/api/judge/context", { config: { access: "public" } }, async (request, reply) => {
     const token = cookieValue(request, "artflow_judge_session");
     if (token === undefined) throw new DomainError("UNAUTHENTICATED", "A judge session is required.");
     await requirePublicRateLimit(request, "judge-context", 120);
@@ -984,14 +1056,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/studio",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "studio" } },
     async (request) => {
       const { id } = request.params as { id: string };
       return getStudioState(db, await requireStudio(request), id);
     },
   );
 
-  app.get("/api/activities/:id", { schema: { params: ActivityParams } }, async (request) => {
+  app.get("/api/activities/:id", { schema: { params: ActivityParams }, config: { access: "operations" } }, async (request) => {
     const { id } = request.params as { id: string };
     const activity = await getActivity(db, id);
     if (activity === null) {
@@ -1002,7 +1074,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/registrations/mine",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "session" } },
     async (request) => {
       const { id } = request.params as { id: string };
       const registration = await getMyRegistration(db, await requestDeps(request), id);
@@ -1015,7 +1087,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/registrations/:registrationId",
-    { schema: { params: RegistrationParams } },
+    { schema: { params: RegistrationParams }, config: { access: "session" } },
     async (request) => {
       const { id, registrationId } = request.params as { id: string; registrationId: string };
       return getRegistrationDetail(db, await requestDeps(request), id, registrationId);
@@ -1024,7 +1096,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/registrations",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "session" } },
     async (request) => {
       const { id } = request.params as { id: string };
       return {
@@ -1035,7 +1107,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/roster",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "session" } },
     async (request) => {
       const { id } = request.params as { id: string };
       return { roster: await getRosterForReview(db, await requestDeps(request), id) };
@@ -1044,7 +1116,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/grouping",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "session" } },
     async (request) => {
       const { id } = request.params as { id: string };
       return getGroupingState(db, await requestDeps(request), { activityId: id });
@@ -1379,7 +1451,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/materials/:materialId",
-    { schema: { params: MaterialParams } },
+    { schema: { params: MaterialParams }, config: { access: "session" } },
     async (request) => {
       const { id, materialId } = request.params as { id: string; materialId: string };
       return readMaterialForActor(db, {
@@ -1820,9 +1892,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/competition/rounds/:roundKey/ranking",
-    { schema: { params: RoundParams, querystring: CompetitionRankingQuerySchema } },
+    { schema: { params: RoundParams, querystring: CompetitionRankingQuerySchema }, config: { access: "operations" } },
     async (request) => {
-      await requestActor(request);
       const { id, roundKey } = request.params as { id: string; roundKey: string };
       const query = request.query as { mode?: "test" | "rehearsal" | "formal" };
       const round = await routeRound(id, roundKey);
@@ -1947,7 +2018,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/executions",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "operations" } },
     async (request) => {
       const { id } = request.params as { id: string };
       const activity = await getActivity(db, id);
@@ -1960,7 +2031,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/execution-state",
-    { schema: { params: ActivityParams, querystring: StateQuery } },
+    { schema: { params: ActivityParams, querystring: StateQuery }, config: { access: "operations" } },
     async (request) => {
       const { id } = request.params as { id: string };
       const query = request.query as { mode?: ExecutionMode };
@@ -1974,9 +2045,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/events",
-    { schema: { params: ActivityParams, querystring: EventsQuery } },
+    { schema: { params: ActivityParams, querystring: EventsQuery }, config: { access: "operations" } },
     async (request) => {
-      await requireOperationsReader(request);
       const { id } = request.params as { id: string };
       const query = request.query as {
         after?: number;
@@ -2016,7 +2086,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/voting/sessions",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "voting" } },
     async (request) => {
       const { id } = request.params as { id: string };
       const context = await requestDeps(request);
@@ -2029,7 +2099,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/voting/browser-identity",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "public" } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       await requirePublicRateLimit(request, `browser-identity:${id}`, 10);
@@ -2106,7 +2176,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/voting/sessions/:sessionId/scores",
-    { schema: { params: SessionParams } },
+    { schema: { params: SessionParams }, config: { access: "voting" } },
     async (request, reply) => {
       const { id, sessionId } = request.params as { id: string; sessionId: string };
       const session = await getVoteSession(db, sessionId);
@@ -2118,7 +2188,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/voting/sessions/:sessionId/live",
-    { schema: { params: SessionParams } },
+    { schema: { params: SessionParams }, config: { access: "voting" } },
     async (request) => {
       const { id, sessionId } = request.params as { id: string; sessionId: string };
       const session = await getVoteSession(db, sessionId);
@@ -2204,7 +2274,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/archive",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "archive" } },
     async (request) => {
       const { id } = request.params as { id: string };
       return getArchiveState(db, await requestDeps(request), { activityId: id });
@@ -2213,7 +2283,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/archive/file",
-    { schema: { params: ActivityParams, querystring: ArchiveFileQuerySchema } },
+    { schema: { params: ActivityParams, querystring: ArchiveFileQuerySchema }, config: { access: "archive" } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const query = request.query as { version?: number };
@@ -2259,7 +2329,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/publishing/vote-results/:sessionId",
-    { schema: { params: VoteResultParamsSchema } },
+    { schema: { params: VoteResultParamsSchema }, config: { access: "result" } },
     async (request) => {
       const { id, sessionId } = request.params as { id: string; sessionId: string };
       return getVoteResultCandidate(db, await requestDeps(request), {
@@ -2386,7 +2456,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/activities/:id/publishing/state",
-    { schema: { params: ActivityParams } },
+    { schema: { params: ActivityParams }, config: { access: "result" } },
     async (request) => {
       const { id } = request.params as { id: string };
       return getPublishingState(db, await requestDeps(request), { activityId: id });
@@ -2395,7 +2465,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get(
     "/api/public/results/:publicCode",
-    { schema: { params: PublicResultsParamsSchema, querystring: PublicResultsQuerySchema } },
+    { schema: { params: PublicResultsParamsSchema, querystring: PublicResultsQuerySchema }, config: { access: "public" } },
     async (request, reply) => {
       const { publicCode } = request.params as { publicCode: string };
       const query = request.query as { stage?: string };

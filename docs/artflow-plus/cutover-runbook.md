@@ -7,6 +7,8 @@
 
 - 报名已截止，v1 没有进行中的评分/投票/审核写入。
 - v2 已在该活动上完成彩排（Studio/Ops/Live/公开赛果各走通一次）。
+- 源 SHA 在 `artflow-plus` 上的 Gates（Structural and golden gates + Web public
+  journey）为绿；生产镜像只从该 SHA 构建。
 - 已构建并固定镜像 digest：`ARTFLOW_PLUS_API_IMAGE`、`ARTFLOW_PLUS_WEB_IMAGE`。
 - 域名/TLS 不变；Caddy 仍以 `CADDY_SITE_ADDRESS` 为唯一入口。
 - 操作人与观察人明确；回滚决定由现场负责人做出。

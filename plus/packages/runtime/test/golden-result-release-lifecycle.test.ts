@@ -1,3 +1,4 @@
+import { PUBLISHING_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -89,6 +90,20 @@ async function seed(): Promise<string> {
     enabled_capabilities: JSON.stringify(["competition", "publishing"]),
     active_definition_version: 1,
   }).execute();
+  await db.insertInto("competition_round").values({
+    id: "round-final",
+    activity_id: activityId,
+    round_key: "final",
+    release_version: 1,
+    state: "locked",
+    revision: 1,
+    score_version: 1,
+    minimum_judges: 1,
+    judge_count: 1,
+    completion_mode: "full_matrix",
+    scoring_method: "average",
+    advance_count: 0,
+  }).execute();
   await insertRelease(db, {
     activityId,
     version: 1,
@@ -101,7 +116,7 @@ async function seed(): Promise<string> {
         artifact: { version: 1, schemaVersion: 1, stages: [{ key: "final_podium", label: "正式赛果" }] },
       },
     },
-    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
     capabilityVersions: { publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-19T17:00:00Z",

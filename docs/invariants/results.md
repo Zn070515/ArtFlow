@@ -183,3 +183,42 @@ production-readiness 契约冲突；`public_content_index` 曾用当前活动名
 
 **必须攻击的形状**：预览后撤销票据、关闭后改票、用旧指纹确认、rehearsal 场次
 进入公开结果。
+
+---
+
+## RES-10 CONFIRMED 结果绑定完整的来源身份
+
+**规则**：`stage_result` 必须持久化来源描述符：`kind`（podium candidate /
+vote session / legacy import）、`aggregateId`、`definitionVersion`、`releaseHash`、
+`mode`、`sourceRevision` 与 `inputFingerprint`。确认时投票场次或候选回合的
+definition version 必须等于发布 session 的 release；不匹配即
+`SOURCE_RELEASE_MISMATCH`。
+
+**为什么**：只记 revision 与 fingerprint 无法证明候选属于哪一个 Definition
+Release；旧 release 产生的候选可以被新 release 的发布会话确认，release 作为
+“正式运行语义冻结点”被穿透。
+
+**必须攻击的形状**：v1 候选 + v2 发布会话；v1 投票场次 + v2 发布会话；候选来源
+回合缺失或跨活动；发布时来源身份为空；迁移/导入结果伪造 release 身份。
+
+**Plus 要求**：发布命令只接受来源 release 与发布 session 一致的确认；发布时
+再次校验来源仍在且指纹未变，否则 `RESULT_STALE`。
+
+---
+
+## RES-11 来源改变必须让 CONFIRMED 结果失效，不能静默漂移
+
+**规则**：结果消费某组事实后，上游改变必须显式影响结果。普通纠错（评分编辑、
+更正、分组修正）在存在 CONFIRMED 结果时拒绝，必须先 unlock；安全类动作（票据
+吊销/轮换）可以执行，但必须在同一事务把受影响的 CONFIRMED 结果标记 stale，并
+supersede 其 ACTIVE release。stale 结果不得发布，必须重新确认。
+
+**为什么**：只读 selector 是正确的，但确认后的票据吊销会让真实 tally 从
+100/80/60 变成 99/80/60，而 StageResult 仍保留旧值；release 只检查 confirmed
+与 revision，会把过期结果正式发布。
+
+**必须攻击的形状**：确认后吊销票据、确认后改分、确认后重算候选、stale 结果仍可
+release、supersede 后旧 URL 仍可见、把安全动作也一并禁止导致现场无法吊销泄露票。
+
+**Plus 要求**：`requireNoConfirmedResult` 守卫普通纠错；安全动作调用
+`markConsumedResultsStale`；`releaseResult` 拒绝 stale 并重算来源指纹。

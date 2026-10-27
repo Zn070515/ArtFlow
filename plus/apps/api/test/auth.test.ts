@@ -46,6 +46,17 @@ async function login(username: string, password: string) {
   return response;
 }
 
+async function token(username: string, password: string): Promise<string> {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/auth/token",
+    headers: headers(),
+    payload: { username, password },
+  });
+  expect(response.statusCode).toBe(200);
+  return response.json().token as string;
+}
+
 async function seedActivity(status = "active"): Promise<string> {
   const activityId = `act-${randomUUID()}`;
   await db.insertInto("activity").values({
@@ -100,7 +111,8 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
     const raw = loggedIn.headers["set-cookie"];
     expect(JSON.stringify(raw)).toContain("HttpOnly");
     expect(JSON.stringify(raw)).toContain("SameSite=Strict");
-    expect(loggedIn.json().token).toEqual(expect.any(String));
+    // The browser login must not return the session secret to JavaScript.
+    expect(loggedIn.json().token).toBeUndefined();
     expect(loggedIn.json().csrfToken).toEqual(expect.any(String));
     expect(loggedIn.json().actor.authContext).toBeUndefined();
 
@@ -124,6 +136,18 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
       headers: { cookie: cookies },
     });
     expect(after.statusCode).toBe(401);
+  });
+
+  it("issues bearer tokens only from the programmatic endpoint", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/token",
+      headers: headers(),
+      payload: { username: "auth-staff", password: "staff-password" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().token).toEqual(expect.any(String));
+    expect(response.headers["set-cookie"]).toBeUndefined();
   });
 
   it("requires CSRF for cookie mutations but not for bearer clients", async () => {
@@ -150,11 +174,11 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
     expect(valid.json()).toMatchObject({ status: "closed" });
 
     const bearerActivity = await seedActivity();
-    const token = loggedIn.json().token as string;
+    const bearerToken = await token("auth-staff", "staff-password");
     const bearer = await app.inject({
       method: "POST",
       url: `/api/activities/${bearerActivity}/close`,
-      headers: headers({ "idempotency-key": `close-bearer-${bearerActivity}`, authorization: `Bearer ${token}` }),
+      headers: headers({ "idempotency-key": `close-bearer-${bearerActivity}`, authorization: `Bearer ${bearerToken}` }),
       payload: { expectedRevision: 1 },
     });
     expect(bearer.statusCode).toBe(200);
@@ -169,6 +193,7 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
       payload: { username, password: "participant-password" },
     });
     expect(registered.statusCode).toBe(201);
+    expect(registered.json().token).toBeUndefined();
     const cookies = setCookies(registered);
     const csrf = registered.json().csrfToken as string;
     const activityId = await seedActivity();
@@ -239,6 +264,7 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
       payload: { username, password: "participant-password" },
     });
     expect(registered.statusCode).toBe(201);
+    expect(registered.json().token).toBeUndefined();
     expect(registered.json().actor).toMatchObject({ roles: ["participant"], permissions: [] });
     expect(registered.json().actor.authContext).toBeUndefined();
     const cookies = setCookies(registered);

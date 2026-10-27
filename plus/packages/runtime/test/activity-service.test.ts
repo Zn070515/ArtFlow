@@ -1,3 +1,4 @@
+import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import { closeDb, createDb, insertRelease, insertSession, migrate, readEventsSince } from "@artflow-plus/db";
@@ -91,7 +92,7 @@ describe.skipIf(!connectionString)("activity lifecycle commands", () => {
       version: 1,
       contentHash: "hash",
       capabilities: {},
-      executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1 },
+      executionPolicy: { declaredScopes: ["judging"], conflicts: {}, runtimeContractVersion: 1, commandScopes: COMPETITION_COMMAND_SCOPES },
       capabilityVersions: {},
       bindings: [],
       releasedAt: "2026-10-20T09:00:00Z",

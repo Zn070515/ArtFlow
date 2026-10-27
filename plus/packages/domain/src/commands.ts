@@ -244,6 +244,26 @@ export function releaseDefinition(input: ReleaseDefinitionInput): ReleaseDefinit
       "The release snapshot needs a runtime contract version.",
     );
   }
+  if (executionPolicy.commandScopes === undefined) {
+    fail(
+      "RELEASE_SNAPSHOT_INCOMPLETE",
+      "The release snapshot needs a command-to-scope binding.",
+    );
+  }
+  for (const [command, scopes] of Object.entries(executionPolicy.commandScopes)) {
+    if (command.trim() === "" || !Array.isArray(scopes) || scopes.length === 0) {
+      fail(
+        "RELEASE_SNAPSHOT_INCOMPLETE",
+        `The release snapshot has an invalid scope binding for ${command}.`,
+      );
+    }
+    if (scopes.some((scope) => !executionPolicy.declaredScopes.includes(scope))) {
+      fail(
+        "RELEASE_SNAPSHOT_INCOMPLETE",
+        `Command ${command} binds an undeclared scope.`,
+      );
+    }
+  }
 
   const frozenPolicy: ExecutionPolicy = {
     declaredScopes: [...executionPolicy.declaredScopes],
@@ -254,6 +274,11 @@ export function releaseDefinition(input: ReleaseDefinitionInput): ReleaseDefinit
       ]),
     ),
     runtimeContractVersion: executionPolicy.runtimeContractVersion,
+    commandScopes: Object.fromEntries(
+      Object.entries(executionPolicy.commandScopes ?? {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([command, scopes]) => [command, [...scopes].sort()]),
+    ),
   };
   const frozenBindings = [...(bindings ?? draft.package.bindings ?? [])].map(
     (binding) => ({ ...binding }),

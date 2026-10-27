@@ -51,7 +51,7 @@ async function seedGroupingActivity(participants: readonly string[]): Promise<st
         artifact: { schemaVersion: 1, groupCount: 2 },
       },
     },
-    executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 1 },
+    executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 1, commandScopes: {} },
     capabilityVersions: { grouping: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",
@@ -87,7 +87,7 @@ async function seedGroupingActivity(participants: readonly string[]): Promise<st
 async function login(username: string, password: string): Promise<string> {
   const response = await app.inject({
     method: "POST",
-    url: "/api/auth/login",
+    url: "/api/auth/token",
     headers: { "content-type": "application/json" },
     payload: { username, password },
   });

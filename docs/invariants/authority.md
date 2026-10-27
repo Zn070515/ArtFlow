@@ -150,3 +150,50 @@ authority。
 
 **Plus 要求**：公开 read model 明确列出可公开字段；子资产有独立可见性；任何
 “父可公开”的推导都不能自动放行自由资产。
+
+---
+
+## AUTH-08 命令只能使用 release 为它冻结的 execution scope
+
+**规则**：每条 execution-scoped command 在 capability manifest 中声明它可运行的
+scope；composition 把这份映射冻结进 Definition Release；runtime 只用该 release 的
+映射校验调用方给出的 scope。关闭某个 scope 的 session 必须同时关闭该 scope 上
+所有命令的 authority。
+
+**为什么**：只冻结“活动声明了哪些 scope”会让投票命令借用同 release/mode 下仍在
+运行的 stage/judging session；关闭投票执行并不能真正关闭投票写入。
+
+**必须攻击的形状**：
+
+- 投票场次 open，voting session 已关闭，用 `scope=judging` 提交选票；
+- 评分命令借用同 release 的 voting session；
+- 发布命令接受任意声明 scope；
+- 旧 release 没有 command 映射时仍放行；
+- 新增 capability 复制一套 runtime scope 判断而不是走冻结映射。
+
+**Plus 要求**：`ExecutionPolicy.commandScopes` 随 release 冻结；缺失映射 fail
+closed（`COMMAND_SCOPE_UNDECLARED`）；用错 scope 返回 `SCOPE_NOT_AUTHORIZED`。
+
+---
+
+## AUTH-09 内部读面必须显式授权；GET 默认不是公开
+
+**规则**：`/api/public/...` 之外的 activity 读接口必须有显式读面级别（session、
+operations、studio、voting、result、archive）。每个 GET 路由在注册时声明级别，
+未声明即在启动时失败；匿名与无运营权限的参与者不得读到 ranking、execution、
+事件流、投票计数或内部状态。
+
+**为什么**：M12 的公开投票页刻意不显示票数，但旧的 `/voting/.../live` 与
+`/scores` 仍匿名可读，公开页的约束被旧内部 API 完整绕过；ranking 只要登录就能读，
+绕过了 candidate → confirmed → released 的发布链。
+
+**必须攻击的形状**：
+
+- 匿名读取受保护的 activity GET；
+- 普通 participant 账号读取 formal ranking / execution / vote tally；
+- 新增 GET 路由忘记声明 access；
+- 服务层已判权就当作路由层安全；
+- 公开 selector 意外带上内部字段或计数。
+
+**Plus 要求**：`app.addHook("onRoute")` 对每个 GET 强制 `config.access`；读面测试
+以路由表驱动，匿名返回 401、无权限参与者返回 403，公开 selector 保持匿名可读。

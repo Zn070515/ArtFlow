@@ -193,7 +193,7 @@ beforeAll(async () => {
   });
   const login = await app.inject({
     method: "POST",
-    url: "/api/auth/login",
+    url: "/api/auth/token",
     headers: { "content-type": "application/json" },
     payload: { username: "http-studio", password: "studio-password" },
   });
@@ -251,7 +251,7 @@ dbIt("uses local bearer sessions for registration routes", async () => {
   });
   const login = await app.inject({
     method: "POST",
-    url: "/api/auth/login",
+    url: "/api/auth/token",
     headers: { "content-type": "application/json" },
     payload: { username, password: "m4-password" },
   });
@@ -309,9 +309,15 @@ dbIt("creates, replays and activates an activity", async () => {
   expect(activated.statusCode).toBe(200);
   expect(activated.json()).toMatchObject({ status: "active", revision: 1 });
 
+  const anonymousRead = await app.inject({
+    method: "GET",
+    url: `/api/activities/${created.json().id}`,
+  });
+  expect(anonymousRead.statusCode).toBe(401);
   const read = await app.inject({
     method: "GET",
     url: `/api/activities/${created.json().id}`,
+    headers: studioHeaders(),
   });
   expect(read.json()).toMatchObject({ status: "active", revision: 1 });
 });
@@ -546,6 +552,7 @@ dbIt("starts parallel scopes, lists them and closes with OCC", async () => {
   const list = await app.inject({
     method: "GET",
     url: `/api/activities/${activityId}/executions`,
+    headers: studioHeaders(),
   });
   expect(list.json().sessions).toHaveLength(2);
 
@@ -575,6 +582,7 @@ dbIt("projects execution state and serves the event cursor", async () => {
   const state = await app.inject({
     method: "GET",
     url: `/api/activities/${activityId}/execution-state?mode=formal`,
+    headers: studioHeaders(),
   });
   expect(state.statusCode).toBe(200);
   expect(state.json()).toMatchObject({ mode: "formal", stale: false });
