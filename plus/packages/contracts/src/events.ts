@@ -24,3 +24,11 @@ export const DomainEventEnvelopeSchema = Type.Object(
 );
 
 export type DomainEventEnvelope = Static<typeof DomainEventEnvelopeSchema>;
+
+/** The invalidation-only payload of the `activity:<id>` realtime topic. */
+export const ActivityEventsSnapshotSchema = Type.Object(
+  { lastSequence: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+
+export type ActivityEventsSnapshot = Static<typeof ActivityEventsSnapshotSchema>;

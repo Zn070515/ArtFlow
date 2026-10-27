@@ -1,4 +1,8 @@
-import { VotingSessionsSnapshotSchema } from "@artflow-plus/contracts";
+import {
+  ActivityEventsSnapshotSchema,
+  VotingSessionsSnapshotSchema,
+} from "@artflow-plus/contracts";
+import { getActivity, getActivityEventHead } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import {
   parseTopicString,
@@ -30,5 +34,33 @@ export function createVotingRealtimeTopic(db: Kysely<Database>): RealtimeTopic {
       return { seq, data };
     },
     schema: VotingSessionsSnapshotSchema,
+  };
+}
+
+export function createActivityRealtimeTopic(db: Kysely<Database>): RealtimeTopic {
+  return {
+    namespace: "activity",
+    parse(topic) {
+      const parsed = parseTopicString(topic);
+      if (parsed === null || parsed.namespace !== "activity") return null;
+      return { activityId: parsed.rest, aggregateId: parsed.rest };
+    },
+    async authorize(actor, target) {
+      if (target.activityId.length === 0) return false;
+      if (actor.roles.includes("admin")) return true;
+      return (
+        actor.permissions.includes("*") ||
+        actor.permissions.includes("studio.manage") ||
+        actor.permissions.includes("competition.manage") ||
+        actor.permissions.includes("judge.manage")
+      );
+    },
+    async snapshot(target) {
+      const activity = await getActivity(db, target.activityId);
+      if (activity === null) return null;
+      const lastSequence = await getActivityEventHead(db, target.activityId);
+      return { seq: lastSequence, data: { lastSequence } };
+    },
+    schema: ActivityEventsSnapshotSchema,
   };
 }

@@ -163,7 +163,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { createRealtimeServer } from "@artflow-plus/realtime/server";
 
 import { isProductionEnvironment, sessionCookie } from "./cookies.js";
-import { createVotingRealtimeTopic } from "./realtime-topics.js";
+import { createActivityRealtimeTopic, createVotingRealtimeTopic } from "./realtime-topics.js";
 
 export interface AppOptions {
   readonly db: Kysely<Database>;
@@ -2516,82 +2516,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   );
 
-  app.get(
-    "/api/activities/:id/stream",
-    { schema: { params: ActivityParams, querystring: EventsQuery } },
-    async (request, reply) => {
-      await requireOperationsReader(request);
-      const { id } = request.params as { id: string };
-      const query = request.query as {
-        after?: number;
-        mode?: ExecutionMode;
-      };
-      const activity = await getActivity(db, id);
-      if (activity === null) {
-        throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
-      }
-      const headerCursor = request.headers["last-event-id"];
-      const fromHeader = Array.isArray(headerCursor) ? headerCursor[0] : headerCursor;
-      const parsedHeader =
-        typeof fromHeader === "string" && /^\d+$/.test(fromHeader)
-          ? Number(fromHeader)
-          : 0;
-
-      reply.hijack();
-      const raw = reply.raw;
-      raw.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache, no-transform",
-        connection: "keep-alive",
-        "x-accel-buffering": "no",
-      });
-      raw.flushHeaders();
-      let cursor = query.after ?? parsedHeader;
-      let closed = false;
-      let polling = false;
-      const close = (): void => {
-        if (closed) return;
-        closed = true;
-        clearInterval(poll);
-        clearInterval(heartbeat);
-        raw.end();
-      };
-      const poll = setInterval(() => {
-        // Never overlap two reads: a slow query must not emit duplicate frames.
-        if (closed || polling) return;
-        polling = true;
-        void listEvents(db, {
-          activityId: id,
-          after: cursor,
-          limit: 100,
-          ...(query.mode === undefined ? {} : { mode: query.mode }),
-        })
-          .then((feed) => {
-            if (closed) return;
-            for (const event of feed.events) {
-              raw.write(`id: ${event.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
-              cursor = event.sequence;
-            }
-          })
-          .catch(() => {
-            // Realtime is an enhancement; close and let the client poll.
-            close();
-          })
-          .finally(() => {
-            polling = false;
-          });
-      }, 500);
-      const heartbeat = setInterval(() => {
-        if (!closed) raw.write(": heartbeat\n\n");
-      }, 15_000);
-      request.raw.on("close", close);
-      raw.on("error", close);
-      await new Promise<void>((resolve) => {
-        request.raw.on("close", resolve);
-      });
-    },
-  );
-
   if (options.enableRuntimeFacts === true) {
     app.post(
       "/api/activities/:id/runtime-facts",
@@ -2661,7 +2585,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         return null;
       }
     },
-    topics: [createVotingRealtimeTopic(db)],
+    topics: [createVotingRealtimeTopic(db), createActivityRealtimeTopic(db)],
   });
   app.addHook("onClose", async () => {
     await realtime.close();

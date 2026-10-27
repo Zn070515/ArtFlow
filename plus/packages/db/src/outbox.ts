@@ -285,3 +285,15 @@ export async function readExecutionHistory(
     .execute();
   return rows.map(toRuntimeEvent);
 }
+
+/** The activity's newest outbox id, or 0 when it has no events yet. */
+export async function getActivityEventHead(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<number> {
+  const row = await db.selectFrom("outbox")
+    .select(({ fn }) => fn.max("id").as("head"))
+    .where("activity_id", "=", activityId)
+    .executeTakeFirst();
+  return Number(row?.head ?? 0);
+}

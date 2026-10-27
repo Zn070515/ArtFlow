@@ -6,7 +6,7 @@ import { RequireSession } from "../auth/RequireSession.js";
 import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
-import { useLiveEvents } from "../hooks/useLiveEvents.js";
+import { useRealtimeTopic } from "../realtime/useRealtimeTopic.js";
 
 export function LiveActivityPage() {
   return (
@@ -22,9 +22,12 @@ function LiveActivityContent() {
   const queryClient = useQueryClient();
   const allowed = hasLiveAccess(session);
 
-  const fallback = useLiveEvents(activityId, allowed, () => {
-    void queryClient.invalidateQueries({ queryKey: ["live-state", activityId] });
-  });
+  const { fallback } = useRealtimeTopic<{ lastSequence: number }>(
+    allowed ? `activity:${activityId}` : null,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: ["live-state", activityId] });
+    },
+  );
   const query = useQuery({
     queryKey: ["live-state", activityId],
     queryFn: () => fetchLiveState(activityId),
