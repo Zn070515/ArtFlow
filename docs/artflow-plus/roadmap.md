@@ -266,6 +266,13 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - `vote-poll` pack；公开赛果百分比显示（`ResultDecision.unit`）。
 - 出口：domain/runtime/api/web 测试与结构门禁全绿。
 
+## M11 — Realtime Core and Voting UI（已完成，2026-10-27）
+
+- 新 `@artflow-plus/realtime`：协议/服务端/客户端、核心门禁与 CORE.md。
+- `voting:<activityId>` topic；Ops 投票卡片：会话编排、实时票数、发布投票结果。
+- E2E 证明 WebSocket 实时更新与 REST 兜底。
+- Live 控制台的 SSE 保持不动，后续单独迁移。
+
 ## Definition of Done（每个 slice）
 
 1. 领域规则写入 `docs/invariants/`（新增或引用）。
