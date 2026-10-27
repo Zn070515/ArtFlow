@@ -1,5 +1,6 @@
 import type {
   CompiledGroupingArtifact,
+  GroupingMaterialWindow,
   GroupingRosterSource,
 } from "@artflow-plus/domain";
 import {
@@ -25,6 +26,7 @@ import {
   listApprovedParticipantIds,
   listCurrentGroupingMemberships,
   listGroupingGroups,
+  listStageResults,
   updateGroupingGroup,
   updateGroupingStage,
 } from "@artflow-plus/db";
@@ -36,6 +38,7 @@ import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
 
 const ROSTER_SOURCES: ReadonlySet<string> = new Set(["all_approved", "round_advanced"]);
+const WINDOWS: ReadonlySet<string> = new Set(["closed", "open", "supplement_only"]);
 
 function requireGroupingPermission(actor: Parameters<typeof requirePermission>[0]): void {
   requirePermission(actor, "grouping.manage");
@@ -527,6 +530,226 @@ export async function freezeGroupingStage(
       capability: "grouping",
       revision: saved.revision,
       payload: { stageId: stage.id },
+    });
+    return { body: saved };
+  });
+}
+
+async function requireNoConfirmedResult(
+  trx: Kysely<Database>,
+  activityId: string,
+): Promise<void> {
+  const results = await listStageResults(trx, activityId);
+  if (results.some((result) => result.status === "confirmed")) {
+    throw new DomainError(
+      "GROUPING_CONSUMED",
+      "A confirmed result already consumed this activity's grouping.",
+    );
+  }
+}
+
+export interface CorrectGroupingStageInput {
+  readonly commandId: string;
+  readonly activityId: string;
+  readonly stageId: string;
+  readonly expectedRevision: number;
+  readonly groups: readonly { readonly name?: string; readonly participantIds: readonly string[] }[];
+  readonly reason: string;
+}
+
+export async function correctGroupingStage(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: CorrectGroupingStageInput,
+): Promise<CommandOutcome<StoredGroupingStage>> {
+  const actor = runtimeActor(deps);
+  return executeCommand(db, {
+    commandId: input.commandId,
+    activityId: input.activityId,
+    capability: "grouping",
+    commandType: "grouping.stage.correct",
+    actor,
+    payload: {
+      stageId: input.stageId,
+      expectedRevision: input.expectedRevision,
+      groups: input.groups,
+      reason: input.reason,
+    },
+  }, async (trx) => {
+    requireGroupingPermission(actor);
+    const reason = requireReason(input.reason);
+    const activity = await getActivityForUpdate(trx, input.activityId);
+    if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+    requireNotArchived(activity);
+    requireCapability(activity);
+    const stage = await getGroupingStageForUpdate(trx, activity.id, input.stageId);
+    if (stage === null) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+    requireRevision(stage, input.expectedRevision);
+    if (stage.status !== "confirmed" && stage.status !== "frozen") {
+      throw new DomainError("INVALID_TRANSITION", "Only a confirmed or frozen stage can be corrected.");
+    }
+    await requireNoConfirmedResult(trx, activity.id);
+    const source = await resolveGroupingSource(trx, activity.id, stage);
+    const groupCount = await compiledGroupCount(trx, activity);
+    const normalized = normalizeGroupingGroups(input.groups, new Set(source.participantIds), {
+      complete: true,
+      ...(groupCount === undefined ? {} : { groupCount }),
+    });
+    await saveGroups(trx, stage, normalized, {
+      clearExisting: false,
+      reason,
+      actorId: actor.actorId,
+      leftAt: deps.now(),
+      nonce: input.commandId,
+    });
+    const saved: StoredGroupingStage = {
+      ...stage,
+      sourceFingerprint: source.fingerprint,
+      confirmedAt: deps.now(),
+      confirmedBy: actor.actorId,
+      ...(stage.status === "frozen" ? { frozenAt: deps.now(), frozenBy: actor.actorId } : {}),
+      revision: stage.revision + 1,
+    };
+    if (!(await updateGroupingStage(trx, saved, stage.revision))) {
+      throw new DomainError("STALE_REVISION", "The grouping stage changed since it was read.");
+    }
+    await appendEngineEvent(trx, deps, {
+      type: "GroupingStageCorrected",
+      activityId: activity.id,
+      aggregateType: "grouping_stage",
+      aggregateId: stage.id,
+      capability: "grouping",
+      revision: saved.revision,
+      payload: { stageId: stage.id, reason, groups: (await stageGroups(trx, saved)).groups },
+    });
+    return { body: saved };
+  });
+}
+
+export interface CancelGroupingStageInput {
+  readonly commandId: string;
+  readonly activityId: string;
+  readonly stageId: string;
+  readonly expectedRevision: number;
+  readonly reason: string;
+}
+
+export async function cancelGroupingStage(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: CancelGroupingStageInput,
+): Promise<CommandOutcome<StoredGroupingStage>> {
+  const actor = runtimeActor(deps);
+  return executeCommand(db, {
+    commandId: input.commandId,
+    activityId: input.activityId,
+    capability: "grouping",
+    commandType: "grouping.stage.cancel",
+    actor,
+    payload: { stageId: input.stageId, expectedRevision: input.expectedRevision, reason: input.reason },
+  }, async (trx) => {
+    requireGroupingPermission(actor);
+    const reason = requireReason(input.reason);
+    const activity = await getActivityForUpdate(trx, input.activityId);
+    if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+    requireNotArchived(activity);
+    requireCapability(activity);
+    const stage = await getGroupingStageForUpdate(trx, activity.id, input.stageId);
+    if (stage === null) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+    requireRevision(stage, input.expectedRevision);
+    if (stage.status === "cancelled") return { body: stage };
+    if (stage.status === "frozen") {
+      throw new DomainError("INVALID_TRANSITION", "A frozen stage cannot be cancelled.");
+    }
+    if (stage.status === "confirmed") {
+      await requireNoConfirmedResult(trx, activity.id);
+    }
+    const saved: StoredGroupingStage = {
+      ...stage,
+      status: "cancelled",
+      materialWindow: "closed",
+      cancelReason: reason,
+      cancelledAt: deps.now(),
+      cancelledBy: actor.actorId,
+      revision: stage.revision + 1,
+    };
+    if (!(await updateGroupingStage(trx, saved, stage.revision))) {
+      throw new DomainError("STALE_REVISION", "The grouping stage changed since it was read.");
+    }
+    await appendEngineEvent(trx, deps, {
+      type: "GroupingStageCancelled",
+      activityId: activity.id,
+      aggregateType: "grouping_stage",
+      aggregateId: stage.id,
+      capability: "grouping",
+      revision: saved.revision,
+      payload: { stageId: stage.id, reason },
+    });
+    return { body: saved };
+  });
+}
+
+export interface SetGroupingWindowInput {
+  readonly commandId: string;
+  readonly activityId: string;
+  readonly stageId: string;
+  readonly expectedRevision: number;
+  readonly window: GroupingMaterialWindow;
+  readonly note?: string;
+}
+
+export async function setGroupingMaterialWindow(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: SetGroupingWindowInput,
+): Promise<CommandOutcome<StoredGroupingStage>> {
+  const actor = runtimeActor(deps);
+  return executeCommand(db, {
+    commandId: input.commandId,
+    activityId: input.activityId,
+    capability: "grouping",
+    commandType: "grouping.window.set",
+    actor,
+    payload: {
+      stageId: input.stageId,
+      expectedRevision: input.expectedRevision,
+      window: input.window,
+      note: input.note ?? null,
+    },
+  }, async (trx) => {
+    requireGroupingPermission(actor);
+    const activity = await getActivityForUpdate(trx, input.activityId);
+    if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+    requireNotArchived(activity);
+    requireCapability(activity);
+    if (!WINDOWS.has(input.window)) {
+      throw new DomainError("GROUPING_WINDOW_INVALID", "Unknown material window state.");
+    }
+    const stage = await getGroupingStageForUpdate(trx, activity.id, input.stageId);
+    if (stage === null) throw new DomainError("NOT_FOUND", "The grouping stage was not found.");
+    requireRevision(stage, input.expectedRevision);
+    if (stage.status !== "confirmed" && stage.status !== "frozen") {
+      throw new DomainError("INVALID_TRANSITION", "Only a confirmed or frozen stage has a material window.");
+    }
+    if (stage.materialWindow === input.window) {
+      return { body: stage };
+    }
+    const saved: StoredGroupingStage = {
+      ...stage,
+      materialWindow: input.window,
+      revision: stage.revision + 1,
+    };
+    if (!(await updateGroupingStage(trx, saved, stage.revision))) {
+      throw new DomainError("STALE_REVISION", "The grouping stage changed since it was read.");
+    }
+    await appendEngineEvent(trx, deps, {
+      type: "GroupingMaterialWindowChanged",
+      activityId: activity.id,
+      aggregateType: "grouping_stage",
+      aggregateId: stage.id,
+      capability: "grouping",
+      revision: saved.revision,
+      payload: { stageId: stage.id, window: input.window, note: input.note ?? "" },
     });
     return { body: saved };
   });
