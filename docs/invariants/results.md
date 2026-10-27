@@ -169,3 +169,17 @@ production-readiness 契约冲突；`public_content_index` 曾用当前活动名
 
 **Plus 要求**：文档生成是 authority 的消费者；输入是 snapshot ID，不是
 “最新结果”查询；生成物记录来源 revision。
+
+---
+
+## RES-09 投票结果在确认时冻结，预览指纹必须一致
+
+**规则**：从已关闭投票场次生成赛果时，确认命令必须在同一事务内重算 tally，
+并要求 `expectedSessionRevision` 与 `expectedInputFingerprint` 同时匹配；写入
+`stage_result` 后，公开结果只读这份冻结快照，不再回读投票场次。
+
+**为什么**：关闭场次后票据撤销或数据修正会改变 tally；预览与确认之间必须有
+一个显式的指纹闸门，否则公示的内容可能与运营看到的不一致。
+
+**必须攻击的形状**：预览后撤销票据、关闭后改票、用旧指纹确认、rehearsal 场次
+进入公开结果。
