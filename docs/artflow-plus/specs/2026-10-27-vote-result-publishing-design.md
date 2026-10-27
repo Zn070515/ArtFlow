@@ -22,7 +22,8 @@ v1 的观众投票结果可以直接公示；v2 需要在不复制一整套发�
   publishing 启用时，`enabledCapabilities` 必须至少包含 `competition` 或 `voting`
   之一，否则编译/发布被拒绝（`RESULT_SOURCE_REQUIRED`）。
 - **独立命令（已定）**：新增 `publishing.vote_result.confirm`，不复用
-  `stage_result.confirm`。podium 路径零改动，两类来源各自的过期守卫和审计语义清楚。
+  `stage_result.confirm`。podium 的确认流程与现有测试不变，只补一个显式的
+  `CAPABILITY_NOT_ENABLED` 守卫；两类来源各自的过期守卫和审计语义清楚。
 - **并列（已定）**：票数相同共享名次，下一名跳号（`1,1,3`）；次序按票数降序、
   再按选项 ordinal 升序稳定排列。
 - **分数（已定）**：公开赛果的 `score` 显示得票百分比；原始票数只出现在预览，
@@ -44,6 +45,7 @@ publishing
   validateComposition:
     if publishing enabled and neither competition nor voting enabled
       -> RESULT_SOURCE_REQUIRED
+       （编译输出的 issue code 带 CAPABILITY_ 前缀）
 ```
 
 - podium 确认在未启用 `competition` 时返回 `CAPABILITY_NOT_ENABLED`（不再落到
@@ -87,7 +89,8 @@ export function buildVoteResultDecisions(
 1. 按 `count` 降序，再按 `ordinal` 升序。
 2. 与前一名的 `count` 相同 → 共享同一 rank；否则 rank = 位置 + 1。
 3. `score = share`，`unit = "percent"`。
-4. 空输入非法（`INVALID_INPUT`）；`count` 必须是非负整数；`share` 必须是非空字符串。
+4. 空输入非法（`INVALID_INPUT`）；`contestantId` 非空；`count` 必须是非负整数；
+   `ordinal` 必须是非负整数；`share` 必须是非空字符串。
 
 ## 运行时
 
@@ -126,8 +129,9 @@ confirmVoteStageResult(db, deps, {
    `publishing.vote_result.confirm`）。
 2. `lockPublishingActivity`：`result.manage`、活动 ACTIVE、publishing 已启用、
    `publishing` scope 有运行中的 formal 会话。
-3. 要求 `voting` 已启用；读场次（同一事务），校验属于该活动、已关闭、
-   `mode === session.mode`（formal）。
+3. 要求 `voting` 已启用；读场次（同一事务），校验属于该活动
+   （否则 `CROSS_ACTIVITY`）、已关闭（否则 `VOTE_SESSION_NOT_OPEN`）、
+   `mode === session.mode`（否则 `FORMAL_MODE_REQUIRED`）。
 4. 重算 tally；`hold` → `NO_VALID_BALLOTS`。
 5. `session.revision !== expectedSessionRevision` 或指纹不符 →
    `STALE_RESOLUTION_INPUT`。
