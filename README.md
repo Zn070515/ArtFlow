@@ -116,7 +116,7 @@ pnpm --filter @artflow-plus/web dev     # Vite 代理 /api 到 API
 | [`docs/artflow-plus/README.md`](docs/artflow-plus/README.md) | v2 开发主线、两条时代线与分支纪律 |
 | [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | M0–M13 里程碑与出口证据 |
 | [`docs/artflow-plus/shape-validation.md`](docs/artflow-plus/shape-validation.md) | 三类活动验证与明确缺口 |
-| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0029） |
+| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0030） |
 | [`docs/invariants/`](docs/invariants/README.md) | 领域不变量（AUTH/LIFE/CONC/SCOR/RES/TICK/GRP/RT/DEPL） |
 | [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / realtime） |
 | [`docs/gates/`](docs/gates/README.md) | 结构/golden/架构门禁 |

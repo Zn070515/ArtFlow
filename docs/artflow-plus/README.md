@@ -23,7 +23,8 @@
 ## 当前阶段（2026-10-27）
 
 `artflow-plus` 上的 v2 已完成 **M0–M13**；`main` 仍是 1.x 生产线，**生产 cutover
-尚未执行**。逐项出口与证据在 [roadmap.md](roadmap.md)。
+尚未执行**。cutover 基础设施可用于彩排，正式切换仍取决于首个活动的 capability
+完整度与 authority 审计，而不是日期。逐项出口与证据在 [roadmap.md](roadmap.md)。
 
 | 里程碑 | 状态 | 主要交付 |
 |---|---|---|
@@ -61,7 +62,10 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 - Release 不可变：冻结 capability 版本、scopes 与冲突策略。
 - 模式隔离：事实/选票/排名/事件/投影按 mode 分区。
 - 实时通道只做失效提示；HTTP 是恢复权威；只有 `packages/realtime` 拥有传输。
-- 已关闭的流程缺口：分组、投票结果发布、观众投票页、Live 实时迁移。
+- 命令只能使用 release 为其冻结的 execution scope；结果绑定来源身份，来源改变即
+  stale 并 supersede 旧 release；内部读面在启动期为每个 GET 声明权限（ADR-0030）。
+- 已关闭的流程缺口：分组、投票结果发布、观众投票页、Live 实时迁移；M13 之后完成
+  一轮 authority closure（scope、provenance、consumption、read plane）。
 
 ### 仍开放的缺口
 
