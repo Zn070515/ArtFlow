@@ -21,11 +21,10 @@ import {
   upsertRoster,
 } from "@artflow-plus/db";
 import {
-  compileActivityDefinitionPackage,
+  buildAdoptionDefinition,
   computeRanking,
   decimalValue,
   DomainError,
-  instantiateActivityPack,
   releaseDefinition,
   RUNTIME_CONTRACT_VERSION,
 } from "@artflow-plus/domain";
@@ -45,7 +44,7 @@ import type { Kysely, Transaction } from "kysely";
 import { executeCommand } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
-import { stableHash } from "./hash.js";
+import { idFromCommand, stableHash } from "./hash.js";
 import {
   parseLegacyBundle,
   type LegacyBundle,
@@ -178,49 +177,75 @@ interface AdoptionPlan {
   readonly capabilityVersions: Readonly<Record<string, string>>;
   readonly bindings: DefinitionDraft["package"]["bindings"];
   readonly warnings: readonly string[];
+  readonly checks: readonly LegacyImportCheck[];
+  readonly rehearsalReady: boolean;
+}
+
+const ADOPTION_BLOCKING_UNSUPPORTED = new Set(["multiple_rubrics", "group_material"]);
+
+function registrationLifecycle(bundle: LegacyBundle): "draft" | "open" | "review" | "final" {
+  if (bundle.roster.status === "final") return "final";
+  return bundle.registrations.length > 0 ? "review" : "open";
 }
 
 function buildAdoptionPlan(
   bundle: LegacyBundle,
   options: LegacyAdoptionOptions,
 ): AdoptionPlan {
-  const instantiated = instantiateActivityPack(options.pack, options.registry, {
-    title: bundle.activity.title,
+  const blockingUnsupported = bundle.unsupported.filter((item) =>
+    ADOPTION_BLOCKING_UNSUPPORTED.has(item.kind),
+  );
+  if (blockingUnsupported.length > 0) {
+    throw new DomainError(
+      "LEGACY_BUNDLE_INVALID",
+      `Adoption cannot represent: ${blockingUnsupported.map((item) => item.kind).join(", ")}.`,
+    );
+  }
+  const grouping = bundle.grouping;
+  const adopted = buildAdoptionDefinition({
+    pack: options.pack,
+    registry: options.registry,
+    facts: {
+      title: bundle.activity.title,
+      questionnaire: bundle.questionnaire,
+      rounds: bundle.rounds.map((round) => ({
+        key: round.key,
+        judgeCount: round.judgeCount,
+        minimumJudges: round.minimumJudges,
+        completion: round.completion,
+        scoringMethod: round.scoringMethod,
+        advanceCount: round.advanceCount,
+      })),
+      rubric: bundle.rubric,
+      ...(grouping === undefined || grouping.length === 0
+        ? {}
+        : {
+            grouping: {
+              stageCount: grouping.length,
+              groupCount: grouping.length === 1 ? grouping[0]!.groups.length : undefined,
+            },
+          }),
+      registrationLifecycle: registrationLifecycle(bundle),
+      hasRegistrations: bundle.registrations.length > 0,
+      hasMaterials: bundle.materials.length > 0,
+      materialContentTypes: bundle.materials.map((material) => material.contentType),
+    },
     ...(options.answers === undefined ? {} : { answers: options.answers }),
     ...(options.enable === undefined ? {} : { enable: options.enable }),
     ...(options.disable === undefined ? {} : { disable: options.disable }),
   });
-  if (!instantiated.ok) {
+  if (!adopted.ok) {
     throw new DomainError(
       "LEGACY_BUNDLE_INVALID",
-      `The adoption pack is not compatible: ${instantiated.issues.map((item) => `${item.code} ${item.path}`).join(", ")}.`,
-    );
-  }
-  const composition = options.registry.validateComposition({
-    enable: instantiated.instantiation.enabledCapabilities,
-  });
-  if (!composition.ok) {
-    throw new DomainError(
-      "LEGACY_BUNDLE_INVALID",
-      `The adoption composition is invalid: ${composition.issues.map((item) => item.code).join(", ")}.`,
-    );
-  }
-  const compiled = compileActivityDefinitionPackage(
-    instantiated.instantiation.definition,
-    options.registry.compilers,
-  );
-  if (!compiled.ok) {
-    throw new DomainError(
-      "LEGACY_BUNDLE_INVALID",
-      `The adoption definition does not compile: ${compiled.issues.map((item) => `${item.code} ${item.path}`).join(", ")}.`,
+      `The adoption definition is not compatible: ${adopted.issues.map((item) => `${item.code} ${item.path}`).join(", ")}.`,
     );
   }
   const capabilityVersions: Record<string, string> = {};
-  for (const identity of composition.plan.enabledCapabilities) {
+  for (const identity of adopted.capabilities) {
     const registration = options.registry.get(identity);
     if (registration !== undefined) capabilityVersions[identity] = registration.manifest.version;
   }
-  const warnings: string[] = [];
+  const warnings: string[] = [...adopted.warnings];
   if (bundle.competition.scores.length > 0) {
     warnings.push("Legacy scores stay in v1; adoption imports preparation facts only.");
   }
@@ -230,19 +255,95 @@ function buildAdoptionPlan(
   if (bundle.results.releases.length > 0) {
     warnings.push("Legacy published results stay in v1; this adoption has no active result.");
   }
+  for (const unsupported of bundle.unsupported) {
+    if (!ADOPTION_BLOCKING_UNSUPPORTED.has(unsupported.kind)) {
+      warnings.push(`Unsupported ${unsupported.kind} stays in v1: ${unsupported.reason}`);
+    }
+  }
+
+  const questionnaireArtifact = adopted.compiled.capabilities.questionnaire?.artifact as
+    | { version?: string; schemaHash?: string; questions?: readonly { key: string }[] }
+    | undefined;
+  const competitionArtifact = adopted.compiled.capabilities.competition?.artifact as
+    | {
+        rounds?: readonly { key: string; judgeCount: number; minimumJudges: number }[];
+        rubric?: { criteria: readonly unknown[] };
+      }
+    | undefined;
+  const groupingArtifact = adopted.compiled.capabilities.grouping?.artifact as
+    | { groupCount?: number | null }
+    | undefined;
+  const registrationArtifact = adopted.compiled.capabilities.registration?.artifact as
+    | { lifecycle?: string }
+    | undefined;
+  const publishingArtifact = adopted.compiled.capabilities.publishing?.artifact as
+    | { stages?: readonly { key: string }[] }
+    | undefined;
+
+  const checks: LegacyImportCheck[] = [];
+  const questionnaireKeys = (questionnaireArtifact?.questions ?? []).map((question) => question.key).sort();
+  checks.push(check(
+    "adoption.questionnaire",
+    questionnaireKeys.join(","),
+    bundle.questionnaire.questions.map((question) => question.key).sort().join(","),
+  ));
+  const roundKeys = (competitionArtifact?.rounds ?? []).map((round) => round.key).sort();
+  checks.push(check(
+    "adoption.roundKeys",
+    roundKeys.join(","),
+    bundle.rounds.map((round) => round.key).sort().join(","),
+  ));
+  const judgeSignature = (rounds: readonly { key: string; judgeCount: number; minimumJudges: number }[]) =>
+    [...rounds].sort((left, right) => left.key.localeCompare(right.key))
+      .map((round) => `${round.key}:${round.judgeCount}/${round.minimumJudges}`).join(",");
+  checks.push(check(
+    "adoption.judgeConfig",
+    judgeSignature(competitionArtifact?.rounds ?? []),
+    judgeSignature(bundle.rounds),
+  ));
+  checks.push(check(
+    "adoption.rubric",
+    stableHash(competitionArtifact?.rubric ?? {}),
+    stableHash({ criteria: bundle.rubric.criteria }),
+  ));
+  checks.push(check(
+    "adoption.registrationLifecycle",
+    registrationArtifact?.lifecycle ?? "missing",
+    registrationLifecycle(bundle),
+  ));
+  if (grouping !== undefined && grouping.length === 1) {
+    checks.push(check(
+      "adoption.groupCount",
+      groupingArtifact?.groupCount ?? "unconstrained",
+      grouping[0]!.groups.length,
+    ));
+  }
+  const materialQuestionKeys = new Set(questionnaireKeys);
+  const missingSlots = bundle.materials
+    .map((material) => material.questionKey)
+    .filter((key) => !materialQuestionKeys.has(key));
+  checks.push(check("adoption.materialSlots", missingSlots.join(","), ""));
+  if (publishingArtifact !== undefined) {
+    const stages = (publishingArtifact.stages ?? []).length;
+    checks.push(check("adoption.publishingStages", stages > 0 ? 1 : 0, 1));
+  }
+  const rehearsalReady = checks.every((item) => item.ok);
+
   return {
-    capabilities: composition.plan.enabledCapabilities,
-    definition: instantiated.instantiation.definition,
-    compiled,
+    capabilities: adopted.capabilities,
+    definition: adopted.definition,
+    compiled: adopted.compiled,
     executionPolicy: {
-      declaredScopes: composition.plan.declaredScopes,
-      conflicts: composition.plan.scopeConflicts,
+      declaredScopes: adopted.composition.declaredScopes,
+      conflicts: adopted.composition.scopeConflicts,
       runtimeContractVersion: RUNTIME_CONTRACT_VERSION,
-      commandScopes: composition.plan.commandScopes,
+      commandScopes: adopted.composition.commandScopes,
     },
     capabilityVersions,
-    bindings: instantiated.instantiation.definition.bindings,
+    bindings: adopted.definition.bindings,
     warnings,
+    checks,
+    rehearsalReady,
   };
 }
 
@@ -691,6 +792,7 @@ async function importResults(
         sourceRevision: 1,
         inputFingerprint: bundleHash,
         dependencyIds: [],
+        dependencyRefs: [],
       },
       decisions: stage.decisions as unknown as readonly ResultDecision[],
       awards: stage.awards as unknown as readonly ResultAward[],
@@ -725,6 +827,7 @@ async function importResults(
           sourceRevision: 1,
           inputFingerprint: bundleHash,
           dependencyIds: [],
+          dependencyRefs: [],
         },
         decisions: (snapshot.decisions ?? []) as readonly ResultDecision[],
         awards: (snapshot.awards ?? []) as readonly ResultAward[],
@@ -775,7 +878,7 @@ async function importGrouping(
   prefix: string,
   stages: NonNullable<LegacyBundle["grouping"]>,
   participantKeys: ReadonlySet<string>,
-  roundIds: ReadonlySet<string>,
+  roundIdByLegacy: ReadonlyMap<number, string>,
   createdAt: string,
   notes: string[],
 ): Promise<void> {
@@ -785,11 +888,9 @@ async function importGrouping(
     const sourceRoundId =
       stage.sourceRoundLegacyId === undefined || stage.sourceRoundLegacyId === null
         ? undefined
-        : `${prefix}-round-${stage.sourceRoundLegacyId}`;
+        : roundIdByLegacy.get(stage.sourceRoundLegacyId);
     const rosterSource =
-      stage.rosterSource === "round_advanced" &&
-      sourceRoundId !== undefined &&
-      roundIds.has(sourceRoundId)
+      stage.rosterSource === "round_advanced" && sourceRoundId !== undefined
         ? "round_advanced"
         : "all_approved";
     if (stage.rosterSource === "round_advanced" && rosterSource === "all_approved") {
@@ -983,7 +1084,11 @@ async function importActivity(
     });
   }
 
-  const questionnaire = artifacts.questionnaire;
+  // Adoption registers answers against the snapshot compiled from the bundle
+  // questionnaire, not the legacy exporter's standalone hash.
+  const questionnaire = (adoption?.compiled.capabilities.questionnaire?.artifact as
+    | { version: string; schemaHash: string }
+    | undefined) ?? artifacts.questionnaire;
   const prefix = `legacy-${bundle.activity.publicCode}`;
   const allowedStatuses = new Set(["draft", "submitted", "need_supplement", "approved", "rejected", "withdrawn"]);
   for (const registration of bundle.registrations) {
@@ -1030,7 +1135,9 @@ async function importActivity(
       activityId,
       registrationId: `${prefix}-reg-${material.registrationLegacyId}`,
       questionKey: material.questionKey,
-      storageKey: `legacy:${material.legacyId}`,
+      storageKey: material.storagePath === undefined || material.storagePath === null || material.storagePath === ""
+        ? `legacy:${material.legacyId}`
+        : `legacy-file:${material.storagePath}`,
       originalName: material.originalName,
       contentType: material.contentType,
       byteLength: material.byteLength,
@@ -1047,7 +1154,11 @@ async function importActivity(
   const roundsByLegacy = new Map<number, StoredRound>();
   for (const round of bundle.rounds) {
     const stored: StoredRound = {
-      id: `${prefix}-round-${round.legacyId}`,
+      // Adoption must use the same canonical identity the resolver derives
+      // from the release round key; historical snapshots keep their own id.
+      id: adoption === undefined
+        ? `${prefix}-round-${round.legacyId}`
+        : idFromCommand("round", `${activityId}:${round.key}`),
       activityId,
       roundKey: round.key,
       releaseVersion: 1,
@@ -1074,7 +1185,9 @@ async function importActivity(
   const groupingNotes: string[] = [];
   if (bundle.grouping !== undefined && bundle.grouping.length > 0) {
     const participantKeys = new Set(bundle.registrations.map((row) => row.participantKey));
-    const roundIds = new Set([...roundsByLegacy.keys()].map((id) => `${prefix}-round-${id}`));
+    const roundIdByLegacy = new Map(
+      [...roundsByLegacy.entries()].map(([legacyId, round]) => [legacyId, round.id] as const),
+    );
     await importGrouping(
       trx,
       activityId,
@@ -1082,7 +1195,7 @@ async function importActivity(
       prefix,
       bundle.grouping,
       participantKeys,
-      roundIds,
+      roundIdByLegacy,
       deps.now(),
       groupingNotes,
     );
@@ -1197,7 +1310,7 @@ async function importActivity(
           capabilities: adoption.capabilities,
           definitionVersion: 1,
           releaseHash: adoption.compiled.contentHash,
-          rehearsalReady: true,
+          rehearsalReady: adoption.rehearsalReady,
           warnings: adoption.warnings,
         }),
   };
@@ -1236,11 +1349,11 @@ export async function adoptLegacyBundle(
         imported: plannedCounts(bundle),
         excluded: bundle.excluded,
         unsupported: bundle.unsupported,
-        checks: declaredChecks(bundle),
+        checks: [...declaredChecks(bundle), ...plan.checks],
         capabilities: plan.capabilities,
         definitionVersion: 1,
         releaseHash: plan.compiled.contentHash,
-        rehearsalReady: false,
+        rehearsalReady: plan.rehearsalReady,
         warnings: plan.warnings,
       },
     };

@@ -5,6 +5,7 @@ import { SYSTEM_ACTOR } from "@artflow-plus/domain";
 import type { ActorContext } from "@artflow-plus/domain";
 
 import { createLocalArchiveStorage, type ArchiveStorage } from "./archive-storage.js";
+import { createLocalMaterialStorage, type MaterialStorage } from "./material-storage.js";
 
 /** Injected clocks/ids keep tests deterministic without global state. */
 export interface RuntimeDeps {
@@ -21,6 +22,8 @@ export interface RuntimeDeps {
   readonly judgeSessionToken?: string;
   /** Sealed archive package storage; tests inject a temp root. */
   readonly archiveStorage?: ArchiveStorage;
+  /** Uploaded material bytes plus the read-only v1 media bridge. */
+  readonly materialStorage?: MaterialStorage;
 }
 
 export function runtimeActor(deps: RuntimeDeps): ActorContext {
@@ -39,5 +42,11 @@ export function defaultRuntimeDeps(): RuntimeDeps {
     archiveStorage: createLocalArchiveStorage(
       process.env.ARTFLOW_PLUS_ARCHIVE_DIR ?? resolve(process.cwd(), "var/archives"),
     ),
+    materialStorage: createLocalMaterialStorage({
+      root: process.env.ARTFLOW_PLUS_MEDIA_DIR ?? resolve(process.cwd(), "var/media"),
+      ...(process.env.ARTFLOW_PLUS_LEGACY_MEDIA_DIR === undefined
+        ? {}
+        : { legacyRoot: process.env.ARTFLOW_PLUS_LEGACY_MEDIA_DIR }),
+    }),
   };
 }

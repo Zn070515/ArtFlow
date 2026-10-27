@@ -1,9 +1,15 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { closeDb, createDb, migrate } from "@artflow-plus/db";
+import {
+  closeDb,
+  createDb,
+  getCurrentRankingSnapshot,
+  migrate,
+  selectPublicResults,
+} from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
-import { defaultCapabilityRegistry, SINGER_COMPETITION_PACK } from "@artflow-plus/domain";
+import { defaultCapabilityRegistry, SINGER_COMPETITION_PACK, STAGE_SHOW_PACK } from "@artflow-plus/domain";
 import type { ActorContext } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 import { Client } from "pg";
@@ -12,8 +18,20 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   activateCompetitionPanel,
   adoptLegacyBundle,
+  buildPodiumCandidate,
+  confirmStageResult,
+  getPublicActivity,
+  getRegistrationDetail,
+  lockPerformance,
+  lockRound,
+  openPerformance,
   openVoteSession,
+  recomputePodiumCandidate,
+  releaseResult,
+  resolveRound,
   startExecution,
+  startRegistration,
+  submitProxyScore,
 } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
@@ -125,7 +143,24 @@ describe.skipIf(!connectionString)("legacy operational adoption", () => {
     const rounds = await db.selectFrom("competition_round").selectAll()
       .where("activity_id", "=", activity.id).execute();
     expect(rounds).toHaveLength(1);
-    expect(rounds[0]).toMatchObject({ state: "prepared", release_version: 1 });
+    expect(rounds[0]).toMatchObject({
+      state: "prepared",
+      release_version: 1,
+      round_key: "round-21",
+    });
+
+    // The imported registration must resolve against the adopted questionnaire
+    // snapshot, and a closed registration must stay closed.
+    const importedRegistration = await db.selectFrom("registration").select("id")
+      .where("activity_id", "=", activity.id).executeTakeFirstOrThrow();
+    await expect(getRegistrationDetail(db, deps, activity.id, importedRegistration.id))
+      .resolves.toMatchObject({ registration: { id: importedRegistration.id } });
+    expect((await getPublicActivity(db, "ADOPT-1"))?.registrationOpen).toBe(false);
+    await expect(startRegistration(db, deps, {
+      commandId: "adopt-new-registration",
+      activityId: activity.id,
+      participantId: "late-participant",
+    })).rejects.toMatchObject({ code: "REGISTRATION_CLOSED" });
 
     // The old importer produced a running session that died on the first
     // command; the adopted release must execute immediately.
@@ -133,25 +168,132 @@ describe.skipIf(!connectionString)("legacy operational adoption", () => {
       commandId: "adopt-judging-start",
       activityId: activity.id,
       scope: "judging",
-      mode: "rehearsal",
+      mode: "formal",
     });
     expect(judging.status).toBe(201);
+    const roundId = rounds[0]!.id;
     const panel = await activateCompetitionPanel(db, deps, {
       commandId: "adopt-panel-activate",
       activityId: activity.id,
-      roundId: rounds[0]!.id,
+      roundId,
       scope: "judging",
       judges: [{ judgeId: "adopt-judge", seatKey: "seat-1" }],
     });
     expect(panel.status).toBe(201);
+    const seat = await db.selectFrom("judge_seat").select("id")
+      .where("panel_id", "=", panel.body.id).executeTakeFirstOrThrow();
+    const performance = await openPerformance(db, deps, {
+      commandId: "adopt-performance-open",
+      activityId: activity.id,
+      roundId,
+      contestantId: "legacy-user:1",
+      sequence: 1,
+      scope: "judging",
+    });
+    expect(performance.status).toBe(201);
+    const scored = await submitProxyScore(db, deps, {
+      commandId: "adopt-score",
+      activityId: activity.id,
+      roundId,
+      performanceId: performance.body.id,
+      panelSnapshotId: panel.body.id,
+      seatId: seat.id,
+      contextVersion: performance.body.contextVersion,
+      criteria: { 总分: 90 },
+      notes: "",
+      sourceReference: "adoption-acceptance",
+      reason: "adoption acceptance journey",
+      scope: "judging",
+    });
+    expect(scored.status).toBe(201);
+    await lockPerformance(db, deps, {
+      commandId: "adopt-performance-lock",
+      activityId: activity.id,
+      roundId,
+      performanceId: performance.body.id,
+      scope: "judging",
+    });
+    const roundRow = await db.selectFrom("competition_round").selectAll()
+      .where("id", "=", roundId).executeTakeFirstOrThrow();
+    await lockRound(db, deps, {
+      commandId: "adopt-round-lock",
+      activityId: activity.id,
+      roundId,
+      expectedRevision: roundRow.revision,
+      scope: "judging",
+    });
+    const ranking = await resolveRound(db, deps, {
+      commandId: "adopt-resolve",
+      activityId: activity.id,
+      roundId,
+      scope: "judging",
+    });
+    const lockedRound = await db.selectFrom("competition_round").selectAll()
+      .where("id", "=", roundId).executeTakeFirstOrThrow();
+    const rankingSnapshot = await getCurrentRankingSnapshot(db, roundId, "formal");
+    expect(rankingSnapshot).not.toBeNull();
+    const candidate = buildPodiumCandidate({
+      requiredRoundIds: [roundId],
+      rounds: [{
+        roundId,
+        sourceScoreVersion: lockedRound.score_version,
+        locked: true,
+        ranking: {
+          status: rankingSnapshot!.status,
+          rows: rankingSnapshot!.rows,
+          tieGroups: rankingSnapshot!.tieGroups,
+          inputFingerprint: rankingSnapshot!.inputFingerprint,
+        } as Parameters<typeof buildPodiumCandidate>[0]["rounds"][number]["ranking"],
+      }],
+    });
 
-    const voting = await startExecution(db, defaultCapabilityRegistry, deps, {
+    await startExecution(db, defaultCapabilityRegistry, deps, {
+      commandId: "adopt-publishing-start",
+      activityId: activity.id,
+      scope: "publishing",
+      mode: "formal",
+    });
+    const recomputed = await recomputePodiumCandidate(db, deps, {
+      commandId: "adopt-podium",
+      activityId: activity.id,
+      roundIds: [roundId],
+      expectedInputFingerprint: candidate.inputFingerprint,
+      scope: "publishing",
+    });
+    expect(recomputed.status).toBe(201);
+    const confirmed = await confirmStageResult(db, deps, {
+      commandId: "adopt-confirm",
+      activityId: activity.id,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedSourceRevision: recomputed.body.revision,
+      expectedInputFingerprint: recomputed.body.inputFingerprint,
+      awards: [{ award: "冠军", contestantId: "legacy-user:1" }],
+      note: "adoption acceptance",
+    });
+    expect(confirmed.status).toBe(201);
+    const released = await releaseResult(db, deps, {
+      commandId: "adopt-release",
+      activityId: activity.id,
+      stageKey: "final_podium",
+      scope: "publishing",
+      expectedCandidateRevision: confirmed.body.candidateRevision,
+      note: "adoption acceptance",
+    });
+    expect(released.status).toBe(201);
+    const publicResults = await selectPublicResults(db, "ADOPT-1");
+    expect(publicResults?.results).toHaveLength(1);
+    expect(publicResults?.results[0]?.decisions[0]).toMatchObject({
+      contestantId: "legacy-user:1",
+    });
+
+    // Voting is part of the adopted composition and can be opened immediately.
+    await startExecution(db, defaultCapabilityRegistry, deps, {
       commandId: "adopt-voting-start",
       activityId: activity.id,
       scope: "voting",
       mode: "formal",
     });
-    expect(voting.status).toBe(201);
     const opened = await openVoteSession(db, deps, {
       commandId: "adopt-vote-open",
       activityId: activity.id,
@@ -160,6 +302,20 @@ describe.skipIf(!connectionString)("legacy operational adoption", () => {
       candidateIds: ["legacy-user:1"],
     });
     expect(opened.status).toBe(201);
+  });
+
+  it("rejects a pack that cannot own the bundle facts", async () => {
+    const current = {
+      ...source,
+      activity: { ...(source.activity as Record<string, unknown>), publicCode: "ADOPT-3" },
+    };
+    await expect(adoptLegacyBundle(db, deps, {
+      commandId: "legacy-adopt-3",
+      bundle: current,
+      dryRun: false,
+      registry: defaultCapabilityRegistry,
+      pack: STAGE_SHOW_PACK,
+    })).rejects.toMatchObject({ code: "LEGACY_BUNDLE_INVALID" });
   });
 
   it("rejects adoption of an activity that already has a published result", async () => {

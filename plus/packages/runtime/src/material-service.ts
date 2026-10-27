@@ -192,6 +192,105 @@ export async function uploadMaterial(
   );
 }
 
+export interface AttachMaterialContentInput {
+  readonly commandId: string;
+  readonly activityId: string;
+  readonly materialId: string;
+  readonly bytes: Uint8Array;
+}
+
+/**
+ * Stores the actual bytes for a metadata row created by `materials.upload`.
+ * Legacy imported materials keep their read-only bridge key and cannot be
+ * overwritten here.
+ */
+export async function attachMaterialContent(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: AttachMaterialContentInput,
+): Promise<CommandOutcome<StoredMaterial>> {
+  const storage = deps.materialStorage;
+  if (storage === undefined) {
+    throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "Material storage is not configured.");
+  }
+  const actor = runtimeActor(deps);
+  let writtenKey: string | undefined;
+  try {
+    return await executeCommand(
+      db,
+      {
+        commandId: input.commandId,
+        activityId: input.activityId,
+        capability: "materials",
+        commandType: "materials.content.attach",
+        actor,
+        payload: { materialId: input.materialId, byteLength: input.bytes.byteLength },
+      },
+      async (trx) => {
+        const activity = await getActivityForUpdate(trx, input.activityId);
+        if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+        requireActive(activity);
+        const material = await getMaterialForUpdate(trx, input.materialId);
+        if (material === null || material.activityId !== input.activityId) {
+          throw new DomainError("NOT_FOUND", "Material was not found.");
+        }
+        const registration = await getRegistration(trx, material.registrationId);
+        if (registration === null || registration.activityId !== input.activityId) {
+          throw new DomainError("NOT_FOUND", "Material was not found.");
+        }
+        const staff = actor.permissions.includes("*") ||
+          actor.permissions.includes("materials.manage") ||
+          actor.permissions.includes("materials.review");
+        if (material.ownerActorId !== actor.actorId && registration.participantId !== actor.actorId && !staff) {
+          throw new DomainError("FORBIDDEN", "The actor cannot store content for this material.");
+        }
+        if (input.bytes.byteLength !== material.byteLength) {
+          throw new DomainError("MATERIAL_NOT_ALLOWED", "The uploaded content does not match the registered size.");
+        }
+        if (!material.storageKey.startsWith("private/")) {
+          throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "Legacy material bytes are read-only.");
+        }
+        await storage.put(material.storageKey, input.bytes);
+        writtenKey = material.storageKey;
+        await appendEngineEvent(trx, deps, {
+          type: "MaterialContentStored",
+          activityId: input.activityId,
+          aggregateType: "material",
+          aggregateId: material.id,
+          revision: material.revision,
+          capability: "materials",
+          payload: { materialId: material.id, byteLength: material.byteLength, storageKey: material.storageKey },
+        });
+        return { body: material, status: 201 };
+      },
+    );
+  } catch (error) {
+    if (writtenKey !== undefined) await storage.remove(writtenKey).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function readMaterialContent(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: { readonly activityId: string; readonly materialId: string; readonly actor: ReturnType<typeof runtimeActor> },
+): Promise<{ readonly material: StoredMaterial; readonly bytes: Uint8Array }> {
+  const material = await readMaterialForActor(db, {
+    activityId: input.activityId,
+    materialId: input.materialId,
+    actor: input.actor,
+  });
+  const storage = deps.materialStorage;
+  if (storage === undefined) {
+    throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "Material storage is not configured.");
+  }
+  try {
+    return { material, bytes: await storage.read(material.storageKey) };
+  } catch {
+    throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "The material bytes are not available.");
+  }
+}
+
 export interface ReviewMaterialInput {
   readonly commandId: string;
   readonly activityId: string;

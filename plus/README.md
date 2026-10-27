@@ -5,7 +5,7 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## Current state
 
-M0–M13.1 are complete. The workspace covers the full activity journey —
+M0–M13.2 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
 public vote page, and one protected realtime core. Production still runs v1 on
 `main`; the cutover code and runbooks are ready, but the domain has not been
@@ -30,6 +30,13 @@ v1 activity. Consumption is now source-aware (a confirmed result only locks the
 rounds/vote sessions it actually consumed), the public selector requires a
 confirmed, non-stale, provenance-bearing result, and runtime contract v2 refuses
 sessions on releases without command ownership.
+
+ADR-0032 makes adoption a semantic conversion: the definition is generated from
+the bundle (questionnaire, round keys and judge counts, rubric, grouping, material
+slots, registration lifecycle), adopted rounds use the resolver's canonical IDs,
+registration has its own lifecycle, and material bytes are served through a
+controlled local volume plus a read-only v1 media bridge. `rehearsalReady` is true
+only after questionnaire/round/rubric/grouping/material/lifecycle checks pass.
 
 ## First vertical slice
 

@@ -93,6 +93,8 @@ import {
   submitPaperScore,
   submitProxyScore,
   submitRapidScore,
+  attachMaterialContent,
+  readMaterialContent,
   readMaterialForActor,
   reviewMaterial,
   reviewRegistration,
@@ -187,6 +189,8 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   MATERIAL_NOT_ALLOWED: 422,
   ROSTER_UNKNOWN: 409,
   ROSTER_FINAL: 409,
+  REGISTRATION_CLOSED: 409,
+  MATERIAL_CONTENT_UNAVAILABLE: 409,
   FORMAL_FACTS_EXIST: 409,
   LEGACY_BUNDLE_INVALID: 400,
   LEGACY_ACTIVITY_EXISTS: 409,
@@ -623,6 +627,13 @@ function errorDetails(error: unknown): unknown {
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  // Material bytes are uploaded as a raw body; keep the limit aligned with the
+  // released materials policy and reject oversize bodies before the handler.
+  app.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer", bodyLimit: 26 * 1024 * 1024 },
+    (_request, body, done) => done(null, body),
+  );
   const { db } = options;
   const registry = options.registry ?? defaultCapabilityRegistry;
   const packs = options.packs ?? [
@@ -1459,6 +1470,44 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         materialId,
         actor: await requestActor(request),
       });
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/materials/:materialId/content",
+    { schema: { params: MaterialParams }, config: { access: "session" } },
+    async (request, reply) => {
+      const { id, materialId } = request.params as { id: string; materialId: string };
+      const { material, bytes } = await readMaterialContent(db, await requestDeps(request), {
+        activityId: id,
+        materialId,
+        actor: await requestActor(request),
+      });
+      return reply
+        .type(material.contentType)
+        .header("content-length", String(bytes.byteLength))
+        .header("cache-control", "private, no-store")
+        .send(Buffer.from(bytes));
+    },
+  );
+
+  app.put(
+    "/api/activities/:id/materials/:materialId/content",
+    { schema: { params: MaterialParams } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, materialId } = request.params as { id: string; materialId: string };
+      const body = request.body;
+      if (!Buffer.isBuffer(body)) {
+        throw new DomainError("INVALID_INPUT", "Material content must be sent as application/octet-stream.");
+      }
+      const outcome = await attachMaterialContent(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        materialId,
+        bytes: body,
+      });
+      return reply.status(outcome.status).send(outcome.body);
     },
   );
 

@@ -47,21 +47,24 @@ export async function requireNoConsumedRound(
 }
 
 /**
- * A grouping correction is blocked only when a confirmed result names one of
- * the participants whose membership would change.
+ * A grouping correction is blocked only when a confirmed result explicitly
+ * declared a dependency on this grouping stage. Participant overlap alone is
+ * not a dependency.
  */
 export async function requireNoConsumedGrouping(
   trx: Kysely<Database>,
   activityId: string,
-  participantIds: readonly string[],
+  groupingStageId: string,
   code: DomainErrorCode,
   message: string,
 ): Promise<void> {
-  const affected = new Set(participantIds);
+  const ref = `groupingStage:${groupingStageId}`;
   const results = await confirmedResults(trx, activityId);
-  const consumed = results.some((result) =>
-    result.decisions.some((decision) => affected.has(decision.contestantId)),
-  );
+  const consumed = results.some((result) => {
+    const refs = result.source?.dependencyRefs;
+    // Unknown dependency metadata predates typed refs; fail closed.
+    return refs === undefined || refs.includes(ref);
+  });
   if (consumed) throw new DomainError(code, message);
 }
 

@@ -575,17 +575,12 @@ export async function correctGroupingStage(
     if (stage.status !== "confirmed" && stage.status !== "frozen") {
       throw new DomainError("INVALID_TRANSITION", "Only a confirmed or frozen stage can be corrected.");
     }
-    const currentMembers = await listCurrentGroupingMemberships(trx, stage.id);
-    const affectedParticipants = [...new Set([
-      ...currentMembers.map((member) => member.participantId),
-      ...input.groups.flatMap((group) => group.participantIds),
-    ])];
     await requireNoConsumedGrouping(
       trx,
       activity.id,
-      affectedParticipants,
+      stage.id,
       "GROUPING_CONSUMED",
-      "A confirmed result names participants whose grouping would change.",
+      "A confirmed result depends on this grouping stage.",
     );
     const source = await resolveGroupingSource(trx, activity.id, stage);
     const groupCount = await compiledGroupCount(trx, activity);
@@ -660,13 +655,12 @@ export async function cancelGroupingStage(
       throw new DomainError("INVALID_TRANSITION", "A frozen stage cannot be cancelled.");
     }
     if (stage.status === "confirmed") {
-      const members = await listCurrentGroupingMemberships(trx, stage.id);
       await requireNoConsumedGrouping(
         trx,
         activity.id,
-        members.map((member) => member.participantId),
+        stage.id,
         "GROUPING_CONSUMED",
-        "A confirmed result names participants whose grouping would be cancelled.",
+        "A confirmed result depends on this grouping stage.",
       );
     }
     const saved: StoredGroupingStage = {

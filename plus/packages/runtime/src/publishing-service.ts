@@ -217,6 +217,7 @@ export async function confirmStageResult(
       sourceRevision: candidate.revision,
       inputFingerprint: candidate.inputFingerprint,
       dependencyIds: [...candidate.sourceRoundIds],
+      dependencyRefs: candidate.sourceRoundIds.map((roundId) => `round:${roundId}`),
     };
     const decisions = decisionsFromCandidate(candidate);
     validateAwards(decisions, input.awards);
@@ -446,6 +447,7 @@ export async function confirmVoteStageResult(
       sourceRevision: voteSession.revision,
       inputFingerprint: fingerprint,
       dependencyIds: [voteSession.id],
+      dependencyRefs: [`voteSession:${voteSession.id}`],
     };
     if (tally.scoreStatus === "hold") {
       throw new DomainError("NO_VALID_BALLOTS", "A voting session with no valid ballots cannot be published.");

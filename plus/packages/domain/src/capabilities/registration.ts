@@ -45,14 +45,19 @@ export interface RosterFinal {
 
 export type RosterState = RosterUnknown | RosterFinal;
 
+export type RegistrationLifecycle = "draft" | "open" | "review" | "final";
+
 export interface RegistrationDefinition {
   readonly schemaVersion: 1;
   readonly lifecycleVersion: 1;
+  /** The registration capability owns its own lifecycle, separate from Activity.status. */
+  readonly lifecycle: RegistrationLifecycle;
 }
 
 export interface CompiledRegistrationArtifact {
   readonly schemaVersion: 1;
   readonly lifecycleVersion: 1;
+  readonly lifecycle: RegistrationLifecycle;
   readonly rosterStatus: "unknown";
 }
 
@@ -75,6 +80,7 @@ export function compileRegistrationDefinition(
   const artifact: CompiledRegistrationArtifact = {
     schemaVersion: 1,
     lifecycleVersion: 1,
+    lifecycle: candidate.lifecycle ?? "open",
     rosterStatus: "unknown",
   };
   const plan: CompiledCapabilityPlan = {
@@ -91,8 +97,14 @@ export const registrationCompiler: CapabilityCompiler = {
   compile: compileRegistrationDefinition,
 };
 
+export function createRegistrationDefinition(
+  lifecycle: RegistrationLifecycle = "open",
+): CapabilityDefinition {
+  return { schemaVersion: 1, payload: { schemaVersion: 1, lifecycleVersion: 1, lifecycle } };
+}
+
 export function createEmptyRegistrationDefinition(): CapabilityDefinition {
-  return { schemaVersion: 1, payload: { schemaVersion: 1, lifecycleVersion: 1 } };
+  return createRegistrationDefinition("open");
 }
 
 export function createRegistration(input: {

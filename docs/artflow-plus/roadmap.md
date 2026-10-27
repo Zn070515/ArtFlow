@@ -1,7 +1,9 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M13.1 已完成**（2026-10-27）；生产 cutover 未执行。M13.1 补齐了
-运营接管与来源级消费；production cutover 仍需以首个活动的 adoption 彩排为准。产品与架构身份的
+状态：**M0–M13.2 已完成**（2026-10-27）；生产 cutover 未执行。M13.2 把
+operational adoption 做成语义转换（bundle 定义、canonical round id、registration
+lifecycle、媒体桥、语义 readiness）；production cutover 仍需以首个活动的真实
+adoption 彩排与 operational smoke 为准。产品与架构身份的
 权威是根目录 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）
 与证据。已完成里程碑的段落保留当时的实现描述，后续里程碑在其上覆盖。
 
@@ -312,6 +314,28 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   正式结果。
 - 出口：adoption 单测（启动 judging 会话 → 激活 panel → 开投票）、来源级消费
   测试、公开 selector 测试、全量门禁与 E2E。
+
+## M13.2 — Semantic Adoption Closure（已完成，2026-10-27）
+
+- **Adoption Definition 来自 bundle**：questionnaire、round keys/judge config/rubric、
+  grouping groupCount、materials purposes、registration lifecycle、publishing
+  stages 全部由 v1 事实生成，再走正常 Compiler → Release。
+- **Canonical round identity**：adopted round id 使用 resolver 同一套
+  `idFromCommand("round", "<activityId>:<roundKey>")`；真实 exporter 的 `round-21`
+  可直接被 Live/resolver 使用。
+- **Registration lifecycle**：release 冻结 `draft/open/review/final`；adoption 导入
+  已截止活动为 `final`，`registrationOpen=false`，新报名返回 `REGISTRATION_CLOSED`。
+- **媒体桥**：v1 exporter 记录 material 相对路径；Plus 通过只读
+  `ARTFLOW_PLUS_LEGACY_MEDIA_DIR` 提供原文件；新上传字节落在
+  `ARTFLOW_PLUS_MEDIA_DIR` 并经受控路由读取。
+- **语义 readiness**：questionnaire keys、round keys、judge config、rubric hash、
+  groupCount、material slots、registration lifecycle、publishing stages 全过的
+  `rehearsalReady` 才为 true；blocking unsupported（multiple_rubrics/group_material）
+  直接拒绝。
+- **来源依赖 refs**：`round:` / `voteSession:` / `groupingStage:`，grouping 不再用
+  参与者重合猜测消费关系；公开 selector 先按 stage 过滤再取 snapshot。
+- 出口：真实 exporter 形状 fixture 跑通 adoption → 报名详情 → judging → score →
+  lock → ranking → podium → confirm → release → public selector → 开投票。
 
 ## Definition of Done（每个 slice）
 

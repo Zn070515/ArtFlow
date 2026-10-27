@@ -104,7 +104,9 @@ export type DomainErrorCode =
   | "SOURCE_RELEASE_MISMATCH"
   | "RESULT_PROVENANCE_MISSING"
   | "RESULT_STALE"
-  | "RESULT_CONSUMED";
+  | "RESULT_CONSUMED"
+  | "REGISTRATION_CLOSED"
+  | "MATERIAL_CONTENT_UNAVAILABLE";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel

@@ -30,7 +30,7 @@
   "rounds": [
     {
       "legacyId": 21,
-      "key": "final",
+      "key": "round-21",
       "sequence": 1,
       "judgeCount": 1,
       "minimumJudges": 1,

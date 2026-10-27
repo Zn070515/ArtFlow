@@ -84,12 +84,20 @@ export async function getPublicActivity(
   const release = activity.status === "active"
     ? await getRelease(db, activity.id, activity.activeDefinitionVersion)
     : null;
-  // Mirror the start-registration gate: the command needs the registration,
-  // questionnaire, and materials capabilities plus both released snapshots.
+  // The registration capability has its own lifecycle; Activity.status alone
+  // must not reopen a closed registration after adoption.
+  const registrationArtifact = release?.capabilities.registration?.ok === true
+    ? release.capabilities.registration.artifact as { lifecycle?: string }
+    : undefined;
+  // A release written before the lifecycle existed behaves as open.
+  const registrationLifecycle = registrationArtifact?.lifecycle ?? "open";
+  const roster = release === null ? null : await getRoster(db, activity.id);
   const registrationOpen = activity.status === "active" &&
     ["registration", "questionnaire", "materials"].every((capability) =>
       activity.enabledCapabilities.includes(capability)) &&
     release !== null &&
+    registrationLifecycle === "open" &&
+    roster?.status !== "final" &&
     release.capabilities.questionnaire?.ok === true &&
     release.capabilities.materials?.ok === true;
   return {
