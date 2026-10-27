@@ -17,7 +17,7 @@
 | File | Responsibility |
 |---|---|
 | `plus/packages/db/src/outbox.ts` | `getActivityEventHead` |
-| `plus/packages/contracts/src/events.ts` | `ActivityEventsSnapshotSchema` |
+| `plus/packages/contracts/src/events.ts` | Append `ActivityEventsSnapshotSchema` to the existing event contracts |
 | `plus/apps/api/src/realtime-topics.ts` | `createActivityRealtimeTopic` |
 | `plus/apps/api/src/app.ts` | Register the topic; delete the SSE route |
 | `plus/apps/api/test/realtime-activity.test.ts` | Topic authorize/snapshot tests |
@@ -34,8 +34,8 @@
 
 **Files:**
 - Modify: `plus/packages/db/src/outbox.ts`
-- Create: `plus/packages/contracts/src/events.ts`
-- Modify: `plus/packages/contracts/src/index.ts`
+- Modify: `plus/packages/contracts/src/events.ts` (append to the existing file; it
+  already owns `DomainEventEnvelopeSchema` and is already exported from the index)
 
 - [ ] **Step 1: Add the outbox head query**
 
@@ -59,11 +59,12 @@ export async function getActivityEventHead(
 
 - [ ] **Step 2: Add the shared schema**
 
-`plus/packages/contracts/src/events.ts`:
+Append to the existing `plus/packages/contracts/src/events.ts` (it already imports
+`Type`/`Static` and exports `DomainEventEnvelopeSchema`; the index already re-exports
+this file):
 
 ```ts
-import { Type, type Static } from "@sinclair/typebox";
-
+/** The invalidation-only payload of the `activity:<id>` realtime topic. */
 export const ActivityEventsSnapshotSchema = Type.Object(
   { lastSequence: Type.Integer({ minimum: 0 }) },
   { additionalProperties: false },
@@ -72,11 +73,7 @@ export const ActivityEventsSnapshotSchema = Type.Object(
 export type ActivityEventsSnapshot = Static<typeof ActivityEventsSnapshotSchema>;
 ```
 
-Add to `plus/packages/contracts/src/index.ts`:
-
-```ts
-export * from "./events.js";
-```
+Do not overwrite the existing `DomainEventEnvelopeSchema`.
 
 - [ ] **Step 3: Typecheck**
 
