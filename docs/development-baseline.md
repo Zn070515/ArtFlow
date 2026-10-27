@@ -2,6 +2,48 @@
 
 This guide describes the repository's verified development and runtime paths. It is operational documentation, not a replacement for activity-level permission, audit, or data-retention rules.
 
+## Repository eras
+
+`main` is the 1.x production line (Django); the sections below describe it. `artflow-plus`
+is the v2 development line (ArtFlow-Plus, Node 24 + Fastify 5 + React 19 + PostgreSQL 18)
+under `plus/`. v2 is complete through M13 and cutover-ready, but production still runs
+v1.0.x. The two lines do not merge mechanically; see
+[`docs/artflow-plus/README.md`](artflow-plus/README.md).
+
+## ArtFlow-Plus (v2) baseline
+
+- **Toolchain**: Node 24, pnpm 12, TypeScript 7, Fastify 5, Kysely, PostgreSQL 18.
+  The local dev database container is `artflow-plus-postgres` on `127.0.0.1:5433`
+  (database `artflow_plus`, user `artflow`, development password `artflow_dev`).
+- **Install and typecheck**:
+
+  ```powershell
+  Set-Location plus
+  pnpm install
+  pnpm run check
+  ```
+
+- **Tests** (PostgreSQL required; `REQUIRE_DB=1` makes database tests fail instead of
+  silently skipping):
+
+  ```powershell
+  $env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+  $env:REQUIRE_DB = "1"
+  pnpm run test
+  ```
+
+- **Run locally**: `pnpm --filter @artflow-plus/api start` (migrates on start,
+  default `127.0.0.1:3000`) and `pnpm --filter @artflow-plus/web dev` (Vite proxies
+  `/api`). Set `ARTFLOW_PLUS_INLINE_RELAY=1` to run the outbox relay inside the API
+  process (single-process deployments and E2E); production keeps it in `apps/worker`.
+- **Gates**: `uv run pytest tests/gates -q` includes `GATE-PLUS-BOUNDARY-01` and
+  `GATE-REALTIME-CORE-01`; `pwsh -NoProfile -File scripts/check_docs.ps1` validates
+  user-facing docs. Browser E2E runs against the `artflow_e2e` schema with
+  `workers: 1` (`pnpm --filter @artflow-plus/web test:e2e`).
+- **Cutover**: topology and rollback in
+  [`docs/artflow-plus/cutover-runbook.md`](artflow-plus/cutover-runbook.md); rollback is
+  possible only before the first formal v2 write.
+
 ## Environments and dependencies
 
 Use Python 3.12, as selected by `.python-version`, with uv 0.11.29. The Docker image installs that same exact uv version, while the project metadata and CI also support Python 3.13. The lockfile is authoritative:

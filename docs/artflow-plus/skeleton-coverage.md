@@ -19,9 +19,13 @@ capability（命令、事件、投影、定义语言），由 Registry/Pack 组�
 | 票据/入场/签到 | `tickets/`、`entry_access/` | Ticketing / Check-in | M6 | capability token、受控入口 |
 | 结果候选/核定/发布/撤销 | `public_portal/services.py` | Publishing / Results | M7 | snapshot + release selector |
 | 归档包 | `archive/` | Archive | M7 | 冻结身份 + 文件清单 |
-| Live 状态/断线恢复 | `realtime/`、`public_portal/live_state.py` | Engine + capability projections | M3（引擎部分已完成） | outbox/投影 + SSE + HTTP 游标 |
-| 测试/正式隔离 | `core/lifecycle.py` | Engine + 各 capability | M3（分区已完成） | mode 来自 session；事件/投影按 mode 分区 |
-| 活动 Pack / 引导配置 | v1 无对应（新增能力） | Registry + Pack | M2（已完成） | 组合而不是 Activity 子类 |
+| Live 状态/断线恢复 | `realtime/`、`public_portal/live_state.py` | Engine + capability projections + realtime core | M3 / M11 / M13 | outbox/投影 + `activity:<id>` 失效主题 + HTTP 恢复 |
+| 测试/正式隔离 | `core/lifecycle.py` | Engine + 各 capability | M3 | mode 来自 session；事件/投影按 mode 分区 |
+| 活动 Pack / 引导配置 | v1 无对应（新增能力） | Registry + Pack | M2 | 组合而不是 Activity 子类 |
+| 分组合唱赛段 | `singer_contest.GroupStage` | Grouping | M9 | 四态生命周期 + append-only 成员 + 来源指纹 |
+| 投票结果公示 | v1 投票结果导出 | Publishing（vote source） | M10 | 关闭场次 tally 冻结为 stage result |
+| 观众投票入口 | v1 投票页/二维码 | Voting + Portal | M12 | `/vote/<sessionId>` 公开读 + browser 身份 |
+| 实时通道 | v1 Channels | Realtime core | M11 / M13 | 单一 WebSocket 核心；通知-only；SSE 退役 |
 
 ## M3 已经证明的部分
 
@@ -57,13 +61,25 @@ capability（命令、事件、投影、定义语言），由 Registry/Pack 组�
   winner；ranking 的 tie HOLD、explicit tie decision、advancement 和 podium candidate
   都以 frozen input fingerprint 驱动。
 
-## 仍由后续里程碑证明的部分
+## M6–M13 已经证明的部分
 
-- M6-M7 的真实 capability 命令、投影与 golden fixtures。
-- 现场旅程（报名→评审→投票→发布→归档）的端到端验证。
-- 第三个结构不同的活动在不改内核的情况下运行。
-- SSO provider 与现场旅程（报名→评审→投票→发布→归档）的端到端验证；M4 当前使用
-  本地会话，SSO 仍在 M8；不伪造身份。
+- Voting/Ticketing：场次、ballot 唯一性、票据换访问会话、tally 百分比与 mode 隔离。
+- Publishing/Archive：候选 → 核定 → release snapshot → 撤销/替代；归档包白名单与
+  受控下载；投票来源也可发布（M10）。
+- 现场旅程：报名 → 评审 → 投票 → 发布 → 归档；观众可从 `/vote/<sessionId>` 投票
+  （M12），Live 控制台通过单一实时核心失效提示（M13）。
+- 第三个结构不同的活动（review-awards）与 stage-show、vote-poll 都在不改内核的情况下
+  运行；Pack 携带默认 definition。
+- 两个实时主题（`voting:<activityId>`、`activity:<activityId>`）共用一个受保护的
+  WebSocket 核心与客户端；SSE 已退役。
+
+## 仍然开放
+
+- 票据场次的投票入口（页面明确阻断）。
+- 参与者账号认领/迁移（legacy 报名没有登录账号）。
+- 舞台类节目单公开页、bracket/对阵、XLSX 导出、现场大屏。
+- SSO provider；当前使用本地会话，不伪造身份。
+- 多实例实时广播（Redis）与权限实时撤销。
 
 ## 约束
 
@@ -71,4 +87,5 @@ capability（命令、事件、投影、定义语言），由 Registry/Pack 组�
 2. 产品面（Studio/Ops/Live/Portal）只组合公开 contract，不自行解释权威事实。
 3. 新增 capability 只需注册 manifest + compiler + handlers，不修改 Engine；M4 的
    registration/material 当前状态表仍由 capability-owned repository 管理。
-4. 结构门禁 GATE-PLUS-BOUNDARY-01 检查上述边界；`REQUIRE_DB=1` 保证数据库测试不会静默跳过。
+4. 结构门禁 `GATE-PLUS-BOUNDARY-01` 检查 capability 边界，`GATE-REALTIME-CORE-01`
+   检查实时传输独占；`REQUIRE_DB=1` 保证数据库测试不会静默跳过。

@@ -13,11 +13,17 @@ capability 拥有自己的业务语义与更丰富的生命周期。
 | Ticketing / Capabilities / Access | [tickets.md](tickets.md) | TICK-01…07 |
 | Results / Publishing / Correction | [results.md](results.md) | RES-01…08、LIFE-03/04 |
 | Archive / Retention / Export | [archive.md](archive.md) | RES-07、DEPL-06、AUTH-05 |
+| Grouping / Group Chorus | [grouping.md](grouping.md) | GRP-01…09、LIFE-03/04 |
+| Realtime（transport core） | [realtime.md](realtime.md) | RT-01…08 |
 
 `Evaluation` 是业务领域名称；当前 Plus registry 由 `competition` capability 负责
 评委席位、评分事实、排名与 podium。没有独立的 `evaluation` registry capability，
 后续拆分必须先更新 capability ownership 与 release contract。
 
+`Realtime` 不是 capability：它是所有产品面共享的传输核心，feature 只注册
+`RealtimeTopic`，不得自己建立连接。
+
 阅读顺序建议：activity → registration → evaluation → results → archive；
-voting/tickets 作为交叉 capability。Activity Pack 是这些 capability 的
-opinionated 组合，不是新的 Activity 子类。
+voting/tickets 作为交叉 capability，grouping 发生在名单与比赛轮次之后，realtime
+是横切传输核心。Activity Pack 是这些 capability 的 opinionated 组合，不是新的
+Activity 子类。

@@ -178,7 +178,7 @@ ticket redemption、ballot uniqueness、judge-seat claim 的真实 PostgreSQL �
 **出口**：归档/解归档/重归档、完整性校验、并发归档、ZIP 白名单与 legacy snapshot 全绿。
 registration/material/vote/score 的 mode 缺口留给后续 hardening。
 
-## M8 — Product Surfaces 与 Cutover（进行中）
+## M8 — Product Surfaces 与 Cutover（已完成，2026-10-26）
 
 - Studio/Ops/Live/Portal 四个产品面按 capability 贡献组装。
 - 按入口切换 v1 → v2；双环境并行验证。

@@ -20,6 +20,57 @@
 - `release/1.x` 暂不单独创建：在 `main` 仍是 1.x 生产线期间它与 `main` 重复；
   等 Plus 准备接管 `main` 时再从当时的 1.x 末端切出长期维护分支。
 
+## 当前阶段（2026-10-27）
+
+`artflow-plus` 上的 v2 已完成 **M0–M13**；`main` 仍是 1.x 生产线，**生产 cutover
+尚未执行**。逐项出口与证据在 [roadmap.md](roadmap.md)。
+
+| 里程碑 | 状态 | 主要交付 |
+|---|---|---|
+| M0 Legacy Extraction | 已完成 | 54 条不变量、497 条 fix 经验、golden fixtures、结构门禁 |
+| M1 Engine Kernel | 已完成 | 薄 Activity、definition/release、scoped execution sessions |
+| M2 Capability Composition | 已完成 | registry、Pack、组合诊断、`GATE-PLUS-BOUNDARY-01` |
+| M3 Execution Runtime | 已完成 | durable command、outbox/投影/重放、SSE + HTTP 恢复（SSE 后由 M13 退役） |
+| M4 Registration | 已完成 | 报名/问卷/材料 metadata、名单 final/unknown、legacy 报名导入 |
+| M5 Competition/Evaluation | 已完成 | 轮次/评委组/评分事实/排名/podium candidate |
+| M6 Voting/Ticketing | 已完成 | 场次/选票/票据凭证、mode 与 identity policy |
+| M7 Publishing/Archive | 已完成 | 结果核定/发布/撤销、归档包与受控下载 |
+| M8 Product Surfaces & Cutover | 已完成 | Studio/Ops/Live/Portal、v1 导入、cutover 拓扑与三类活动验证 |
+| M9 Grouping | 已完成 | `grouping` capability、Ops 三步卡片、归档与 legacy 导入 |
+| M10 Vote-Result Publishing | 已完成 | publishing 解耦 competition、投票赛果确认与百分比公示 |
+| M11 Realtime Core + Voting UI | 已完成 | `@artflow-plus/realtime`、实时投票卡片、核心门禁 |
+| M12 Participant Vote Page | 已完成 | `/vote/<sessionId>` 公开投票页与二维码 |
+| M13 Live on the Realtime Core | 已完成 | `activity:<id>` 失效主题；SSE 与 `useLiveEvents` 退役 |
+
+### v2 架构速览
+
+```text
+plus/apps/api      Fastify 5 + TypeBox；command/query 路由、cookie+CSRF、/api/realtime
+plus/apps/web      React 19 + Vite；Studio / Ops / Live / Portal / /vote/<sessionId>
+plus/apps/worker   outbox relay（250ms 循环 + pg-boss 兜底）
+plus/packages/domain    Activity、capability registry、compiler、Pack
+plus/packages/runtime   command handler、投影、各 capability 服务
+plus/packages/db        Kysely schema、module-owned migrations、repository
+plus/packages/contracts 共享 TypeBox schema
+plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
+```
+
+### 已验证的边界
+
+- 单写路径：receipt + audit + fact + outbox 同事务；replay 先于校验。
+- Release 不可变：冻结 capability 版本、scopes 与冲突策略。
+- 模式隔离：事实/选票/排名/事件/投影按 mode 分区。
+- 实时通道只做失效提示；HTTP 是恢复权威；只有 `packages/realtime` 拥有传输。
+- 已关闭的流程缺口：分组、投票结果发布、观众投票页、Live 实时迁移。
+
+### 仍开放的缺口
+
+- 票据场次的投票入口（当前页面明确阻断）。
+- 参与者账号认领/迁移（legacy 导入的报名没有登录账号）。
+- 舞台类节目单公开页、bracket/对阵、XLSX 导出、现场大屏。
+- 多实例实时广播（Redis）与权限实时撤销。
+- 生产 cutover：代码与 runbook 就绪，待执行。
+
 ## 规划基线（2026-10-19）
 
 | 内容 | 位置 |
@@ -30,7 +81,7 @@
 | 目标架构与模块边界 | [architecture/target](../architecture/target/README.md) |
 | 架构决策 | [architecture/adr](../architecture/adr/README.md) |
 | 领域模型 | [domains](../domains/) |
-| 业务不变量（54 条） | [invariants](../invariants/README.md) |
+| 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT） | [invariants](../invariants/README.md) |
 | 真实事故库 | [incidents](../incidents/) |
 | 结构门禁 | [gates](../gates/README.md) |
 | Golden fixtures | [tests/golden](../../tests/golden/README.md) |

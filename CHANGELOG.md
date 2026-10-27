@@ -1,5 +1,10 @@
 # Changelog
 
+> **时代说明（2026-10-27）：** 本文件记录 **1.x（`main`）** 的批次变更，止于 v1.0.x。
+> v2（ArtFlow-Plus，`artflow-plus`）的里程碑与出口证据见
+> [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md)；架构决策见
+> [`docs/architecture/adr/`](docs/architecture/adr/README.md)。v2 尚未切换到生产。
+
 ## 2026-10-09 (last)
 
 ### The judge entry is judged against the locked row, not against the pre-lock read

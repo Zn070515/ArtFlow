@@ -10,11 +10,13 @@
 | --- | --- | --- |
 | `AUTH-` | [authority.md](authority.md) | 写权限、所有权、媒体访问、清理 |
 | `LIFE-` | [lifecycle.md](lifecycle.md) | 状态机、冻结、解锁、纠错、归档 |
+| `GRP-` | [lifecycle.md](lifecycle.md#grp-0109-分组赛段) | 分组赛段：四态、成员完整性、来源指纹、组数、消费保护 |
 | `CONC-` | [concurrency.md](concurrency.md) | 锁、OCC、幂等、并发证据 |
 | `SCOR-` | [scoring.md](scoring.md) | 评分事实、评委组、评分门 |
 | `RES-` | [results.md](results.md) | 结果快照、公示、撤销、归档 |
 | `TICK-` | [tickets.md](tickets.md) | 票据、凭证、访问、限流 |
 | `DEPL-` | [deployment.md](deployment.md) | 发布产物一致性与部署边界 |
+| `RT-` | [realtime.md](realtime.md) | 实时核心：通知-only、版本、鉴权、有界资源、核心独占 |
 
 每条不变量的格式：
 

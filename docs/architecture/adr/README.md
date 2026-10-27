@@ -15,7 +15,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0008](0008-deployment-topology.md) | 单来源、不可变镜像、web/media/realtime 分层 | accepted |
 | [0009](0009-capability-model.md) | Capability 是模块边界，Activity 是薄容器 | accepted |
 | [0010](0010-opaque-capability-definitions.md) | Capability 定义对 Activity 编译器不透明 | accepted |
-| [0011](0011-execution-runtime.md) | durable command、outbox 投影/重放、SSE + HTTP 恢复 | accepted |
+| [0011](0011-execution-runtime.md) | durable command、outbox 投影/重放、SSE + HTTP 恢复（SSE 传输由 ADR-0029 取代） | accepted |
 | [0012](0012-actor-and-audit.md) | ActorContext 与审计是 command 的标准副产物 | accepted |
 | [0013](0013-plus-capability-ownership.md) | Competition 拥有 Evaluation；Voting 对 Ticketing 条件依赖 | accepted |
 | [0014](0014-publishing-ownership.md) | Publishing 拥有结果确认与发布 | accepted |
@@ -29,6 +29,11 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0022](0022-event-feed-authorization.md) | 运营事件流需要运营权限 | accepted |
 | [0023](0023-cutover-topology-and-rollback.md) | 主域名整体替换与首次写入前的回滚边界 | accepted |
 | [0024](0024-pack-definitions-and-shapes.md) | Pack 默认 definition 与三类活动验证 | accepted |
+| [0025](0025-grouping-capability.md) | 分组是独立 capability；四态生命周期与 append-only 成员 | accepted |
+| [0026](0026-vote-result-publishing.md) | 投票结果是 publishing 的一种来源；解耦 competition | accepted |
+| [0027](0027-realtime-core.md) | 受保护的单一实时核心（协议/服务端/客户端） | accepted |
+| [0028](0028-participant-vote-page.md) | 参与者投票页与公开读；只公开 formal 场次 | accepted |
+| [0029](0029-live-realtime-invalidation.md) | Live 失效提示迁移到实时核心，SSE 退役 | accepted |
 
 新增 ADR 的规则：
 
