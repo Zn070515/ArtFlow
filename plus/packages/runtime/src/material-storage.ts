@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
-const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
+/** Any Unicode filename is allowed; only separators, NULs, and traversal are not. */
+function safeSegment(segment: string): boolean {
+  return segment !== "" && segment !== "." && segment !== ".." && !/[/\\\u0000-\u001f]/.test(segment);
+}
 
 export interface MaterialStorage {
   put(key: string, bytes: Uint8Array): Promise<void>;
@@ -11,11 +14,9 @@ export interface MaterialStorage {
 }
 
 function safeRelativeSegments(relative: string): string[] {
-  const segments = relative.split("/");
-  if (
-    segments.length === 0 ||
-    segments.some((segment) => segment === "" || segment === "." || segment === ".." || !SAFE_SEGMENT.test(segment))
-  ) {
+  const normalized = relative.normalize("NFC");
+  const segments = normalized.split("/");
+  if (segments.length === 0 || segments.some((segment) => !safeSegment(segment))) {
     throw new Error(`Unsafe material path: ${relative}`);
   }
   return segments;

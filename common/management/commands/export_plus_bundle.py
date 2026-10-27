@@ -361,6 +361,29 @@ class Command(BaseCommand):
             key = check.question_key or check.file_purpose
             checks_by_registration.setdefault(check.singer_registration_id, {})[key] = check
 
+        material_checks = []
+        for check in MaterialCheck.objects.filter(
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=False,
+        ).select_related("singer_registration").order_by("sort_order", "pk"):
+            purposes = list(check.accepted_file_purposes or [])
+            if check.file_purpose and check.file_purpose not in purposes:
+                purposes.insert(0, check.file_purpose)
+            material_checks.append(
+                {
+                    "legacyId": check.pk,
+                    "registrationLegacyId": check.singer_registration_id,
+                    "questionKey": check.question_key or check.file_purpose or f"check-{check.pk}",
+                    "itemName": check.item_name,
+                    "filePurpose": check.file_purpose,
+                    "acceptedFilePurposes": purposes,
+                    "status": check.status,
+                    "required": check.required,
+                    "reviewNote": check.review_note,
+                    "sortOrder": check.sort_order,
+                }
+            )
+
         materials = []
         for submission in SubmissionFile.objects.filter(
             singer_registration__activity=activity,
@@ -477,6 +500,7 @@ class Command(BaseCommand):
                 "finalizedAt": activity.updated_at.isoformat() if rounds else None,
             },
             "materials": materials,
+            "materialChecks": material_checks,
             "competition": {
                 "panels": [],
                 "seats": [],
@@ -490,6 +514,7 @@ class Command(BaseCommand):
                 "registrations": formal.count(),
                 "approvedRegistrations": formal.filter(pre_status="approved").count(),
                 "materials": len(materials),
+                "materialChecks": len(material_checks),
                 "rounds": len(rounds),
                 "scores": len(scores),
                 "ballots": len(ballots),

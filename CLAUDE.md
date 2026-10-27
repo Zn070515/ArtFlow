@@ -2,7 +2,7 @@
 
 ## Project overview
 
-ArtFlow is a two-era repository. `main` is the **1.x production line** — a Django monolith serving the live v1.0.x deployment. `artflow-plus` is the **v2 development line (ArtFlow-Plus)** under `plus/` — a Node 24 / Fastify 5 / React 19 / PostgreSQL 18 workspace that is complete through M13.2 but has not cut production over. The two lines do not merge mechanically; implement v2 behavior, not v1 bug fixes, and only the deliberate cutover crosses lines.
+ArtFlow is a two-era repository. `main` is the **1.x production line** — a Django monolith serving the live v1.0.x deployment. `artflow-plus` is the **v2 development line (ArtFlow-Plus)** under `plus/` — a Node 24 / Fastify 5 / React 19 / PostgreSQL 18 workspace that is complete through M13.3 but has not cut production over. The two lines do not merge mechanically; implement v2 behavior, not v1 bug fixes, and only the deliberate cutover crosses lines.
 
 Read `GOAL.md` for product scope, [`AGENTS.md`](AGENTS.md) for the module breakdown of both lines, and [the development baseline](docs/development-baseline.md) for the current, verified operating procedures.
 

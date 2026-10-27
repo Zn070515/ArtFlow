@@ -5,7 +5,7 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## Current state
 
-M0–M13.2 are complete. The workspace covers the full activity journey —
+M0–M13.3 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
 public vote page, and one protected realtime core. Production still runs v1 on
 `main`; the cutover code and runbooks are ready, but the domain has not been
@@ -35,8 +35,15 @@ ADR-0032 makes adoption a semantic conversion: the definition is generated from
 the bundle (questionnaire, round keys and judge counts, rubric, grouping, material
 slots, registration lifecycle), adopted rounds use the resolver's canonical IDs,
 registration has its own lifecycle, and material bytes are served through a
-controlled local volume plus a read-only v1 media bridge. `rehearsalReady` is true
+controlled local volume plus a read-only v1 media bridge. `semanticReady` is true
 only after questionnaire/round/rubric/grouping/material/lifecycle checks pass.
+
+ADR-0033 closes participant and material cutover: the bundle carries
+`materialChecks` even when no file exists, adoption creates real file slots, staff
+can issue a scoped supplement capability without migrating a v1 account, and
+material bytes upload atomically (the old current survives a failed replacement).
+Production compose now mounts `plus_media_data` and the v1 `media_data` read-only,
+and media paths accept Unicode filenames.
 
 ## First vertical slice
 

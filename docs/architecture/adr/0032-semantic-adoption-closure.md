@@ -58,7 +58,7 @@ closed registration. Releases written before the field default to `open`.
 
 Adoption checks questionnaire keys, round keys, judge configuration, rubric hash,
 group count, material question slots, registration lifecycle, and publishing
-stages. `rehearsalReady` is true only when those checks pass and the unsupported
+stages. `semanticReady` is true only when those checks pass and the unsupported
 list contains no blocking kind (`multiple_rubrics`, `group_material`).
 Other unsupported kinds are reported as warnings that stay in v1.
 

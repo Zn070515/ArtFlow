@@ -39,7 +39,7 @@ adoption**:
    `runtimeContractVersion = 2`;
 4. import preparation facts only: registrations, roster, materials, grouping,
    and prepared rounds;
-5. reconcile counts and report `rehearsalReady`.
+5. reconcile counts and report `semanticReady`.
 
 Historical scores, ballots, and releases stay in v1. Adoption refuses a bundle
 that already has an ACTIVE published result; that activity belongs to historical

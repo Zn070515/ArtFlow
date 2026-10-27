@@ -38,8 +38,8 @@
    - 目标能力用 `--enable`/打包问题裁剪；院十佳通常需要
      `voting` 与 `ticketing`，至少确认 `competition`、`registration`、
      `publishing` 已启用。
-   - 要求：报告 `checks` 全部 `ok`、`rehearsalReady=true`、`capabilities` 符合
-     预期。`rehearsalReady` 只有在 questionnaire keys、round keys/judge config、
+   - 要求：报告 `checks` 全部 `ok`、`semanticReady=true`、`capabilities` 符合
+     预期。`semanticReady` 只有在 questionnaire keys、round keys/judge config、
      rubric、groupCount、material slots、registration lifecycle、publishing
      stages 全部匹配时才为 true；`multiple_rubrics` / `group_material` 会直接
      拒绝 adoption。
@@ -48,6 +48,12 @@
      `storagePath` 会以 `legacy-file:` 桥接；没有路径的历史材料保持 metadata
      并返回 `MATERIAL_CONTENT_UNAVAILABLE`。
    - 历史分数/选票/结果仍在 v1，只在 `warnings` 中列出并由负责人确认。
+   - **补交**：adoption 会导入无文件的 `MaterialCheck`（如缺交歌词）。在
+     REVIEW/FINAL 不允许重新报名，staff 用
+     `POST /api/activities/:id/registrations/:id/supplement` 签发只绑定该报名与
+     指定 slot 的补交 capability；选手通过 `/api/public/supplement/claim` 打开
+     临时链接补交，不需要迁移 v1 账号。材料字节必须先落盘再切换 current，失败的
+     替换不会移除旧文件。
 6. **Provision staff 账号**：
    ```powershell
    docker run --rm --network $network -e ARTFLOW_PLUS_DATABASE_URL="..." -e ARTFLOW_PLUS_ACCOUNT_PASSWORD="<password>" artflow-plus-tools:<sha> pnpm --filter @artflow-plus/api create-account -- --username <ops> --roles admin
@@ -77,7 +83,9 @@ $env:CUTOVER_REQUIRED_CAPABILITIES="competition,registration,publishing"
 node scripts/cutover-smoke.mjs
 ```
 
-全部 PASS 才能进入切换；任何 FAIL 都先修复，不要切换。
+operational profile 额外检查：报名详情可读、第一个材料能经受控 content 路由返回非空
+字节、active release 的 `commandScopes` 已绑定。全部 PASS 才能进入切换；任何 FAIL
+都先修复，不要切换。
 
 ## 3. Switch
 

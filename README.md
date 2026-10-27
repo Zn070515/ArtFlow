@@ -54,14 +54,14 @@ ArtFlow 是面向学院文艺部的 **EventOps 活动运行平台**：把原本�
 
 第一个生产验证场景是学院十佳歌手大赛与毕业晚会，但 ArtFlow 的目标不是「十佳算分器」，而是一套可长期运行、可复用到多类学院文艺活动的运行平台。产品目标与领域边界见 [GOAL.md](GOAL.md)。
 
-> **项目状态：** 仓库里有两条时代线。`main` 是 **1.x 生产维护线**（Django，线上 v1.0.x）；`artflow-plus` 是 **v2 开发主线 ArtFlow-Plus**，M0–M13.2 已完成，cutover 代码与手册已就绪但**尚未切换生产**。验证入口以[开发基线](docs/development-baseline.md)为准；本文不复述测试数量、commit 或 CI 结果，避免与代码漂移。
+> **项目状态：** 仓库里有两条时代线。`main` 是 **1.x 生产维护线**（Django，线上 v1.0.x）；`artflow-plus` 是 **v2 开发主线 ArtFlow-Plus**，M0–M13.3 已完成，cutover 代码与手册已就绪但**尚未切换生产**。验证入口以[开发基线](docs/development-baseline.md)为准；本文不复述测试数量、commit 或 CI 结果，避免与代码漂移。
 
 ## 两条时代线 · Two era lines
 
 | 分支 | 角色 | 技术栈 | 状态 |
 |---|---|---|---|
 | [`main`](https://github.com/Zn070515/ArtFlow/tree/main) | ArtFlow 1.x 生产维护线 | Django 6 / SQLite·PostgreSQL / TypeScript 前端入口 | 线上 v1.0.x；只接受现场与部署的最小修复 |
-| [`artflow-plus`](https://github.com/Zn070515/ArtFlow/tree/artflow-plus) | ArtFlow-Plus（v2）开发主线 | Node 24 / Fastify 5 / TypeBox / Kysely / React 19 / PostgreSQL 18 | M0–M13.2 完成；cutover 待执行 |
+| [`artflow-plus`](https://github.com/Zn070515/ArtFlow/tree/artflow-plus) | ArtFlow-Plus（v2）开发主线 | Node 24 / Fastify 5 / TypeBox / Kysely / React 19 / PostgreSQL 18 | M0–M13.3 完成；cutover 待执行 |
 
 - **不机械合并。** v1 的局部实现 bug 只修 `main`；业务不变量提炼成 v2 的 domain spec / golden / contract，用 v2 自己的实现重新满足；部署事故提炼成部署不变量。
 - **版本 tag 只从 `main` 打。** `v*` tag 是发布权威；普通 push 不构建镜像。
@@ -84,7 +84,7 @@ v2 把 v1 的「按 app 与页面切分」重写成 **薄 Activity + capability 
 
 **capability**：`registration`、`questionnaire`、`materials`、`competition`、`voting`、`ticketing`、`publishing`、`archive`、`grouping`。**Pack**：`singer-competition`、`stage-show`、`review-awards`、`vote-poll`。三种结构的活动加纯投票活动已在同一内核上验证；新增形状只改组合与默认 definition。
 
-**里程碑**：M0 Legacy Extraction → M1 Engine Kernel → M2 Capability Composition → M3 Execution Runtime → M4 Registration → M5 Competition/Evaluation → M6 Voting/Ticketing → M7 Publishing/Archive → M8 Product Surfaces 与 Cutover → M9 Grouping → M10 投票结果发布 → M11 实时核心与投票 UI → M12 参与者投票页 → M13 Live 迁移到实时核心 → M13.1 运营接管与来源级消费 → M13.2 语义接管收口。逐项出口见 [roadmap](docs/artflow-plus/roadmap.md)。
+**里程碑**：M0 Legacy Extraction → M1 Engine Kernel → M2 Capability Composition → M3 Execution Runtime → M4 Registration → M5 Competition/Evaluation → M6 Voting/Ticketing → M7 Publishing/Archive → M8 Product Surfaces 与 Cutover → M9 Grouping → M10 投票结果发布 → M11 实时核心与投票 UI → M12 参与者投票页 → M13 Live 迁移到实时核心 → M13.1 运营接管与来源级消费 → M13.3 参与者与材料接管收口。逐项出口见 [roadmap](docs/artflow-plus/roadmap.md)。
 
 **关键不变量**：单写路径（receipt + audit + fact + outbox 同事务）、release 不可变、事件/投影按 mode 分区、公开结果唯一 selector、实时通道只做失效提示（HTTP 是恢复权威）。规则全集见 [不变量索引](docs/invariants/README.md)，结构门禁见 [门禁索引](docs/gates/README.md)。
 
@@ -114,9 +114,9 @@ pnpm --filter @artflow-plus/web dev     # Vite 代理 /api 到 API
 | 文档 | 内容 |
 |---|---|
 | [`docs/artflow-plus/README.md`](docs/artflow-plus/README.md) | v2 开发主线、两条时代线与分支纪律 |
-| [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | M0–M13.2 里程碑与出口证据 |
+| [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | M0–M13.3 里程碑与出口证据 |
 | [`docs/artflow-plus/shape-validation.md`](docs/artflow-plus/shape-validation.md) | 三类活动验证与明确缺口 |
-| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0032） |
+| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0033） |
 | [`docs/invariants/`](docs/invariants/README.md) | 领域不变量（AUTH/LIFE/CONC/SCOR/RES/TICK/GRP/RT/DEPL） |
 | [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / realtime） |
 | [`docs/gates/`](docs/gates/README.md) | 结构/golden/架构门禁 |
@@ -135,7 +135,7 @@ v2 以 compose `plus` profile 与 v1 同主机并行运行，使用独立的 Pos
 | [`CLAUDE.md`](CLAUDE.md) | 编码代理的运行约定与仓库红线。 |
 | [`AGENTS.md`](AGENTS.md) | 两条线的模块划分、目录职责与贡献准则。 |
 | [`docs/development-baseline.md`](docs/development-baseline.md) | v1 与 v2 已验证的开发、运行与验收基线。 |
-| [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | v2 里程碑 M0–M13.2 与出口证据。 |
+| [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | v2 里程碑 M0–M13.3 与出口证据。 |
 | [`docs/artflow-plus/shape-validation.md`](docs/artflow-plus/shape-validation.md) | 三类活动验证与明确缺口。 |
 | [`CHANGELOG.md`](CHANGELOG.md) | v1 按批次记录的权威收敛与行为变更；v2 见 roadmap 与 ADR。 |
 | [`docs/`](docs/) | 部署、演练、备份恢复与现场运行手册。 |

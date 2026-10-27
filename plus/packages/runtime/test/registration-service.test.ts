@@ -1,5 +1,8 @@
 import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   closeDb,
@@ -18,6 +21,8 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  attachMaterialContent,
+  createLocalMaterialStorage,
   finalizeRoster,
   prepareCompetitionRound,
   reviewMaterial,
@@ -38,6 +43,7 @@ const schema = `artflow_registration_runtime_${Date.now()}_${process.pid}`;
 let db: Kysely<Database>;
 let admin: Client;
 let tick = 0;
+let materialRoot = "";
 
 const participant: ActorContext = {
   actorId: "student-1",
@@ -63,7 +69,21 @@ function deps(actor: ActorContext): RuntimeDeps {
     actor,
     now: () => new Date(Date.UTC(2026, 9, 19, 10, 0, tick++)).toISOString(),
     newEventId: () => `evt-${randomUUID()}`,
+    materialStorage: createLocalMaterialStorage({ root: materialRoot }),
   };
+}
+
+async function uploadWithContent(
+  actor: ActorContext,
+  input: Parameters<typeof uploadMaterial>[2],
+) {
+  const uploaded = await uploadMaterial(db, deps(actor), input);
+  return attachMaterialContent(db, deps(actor), {
+    commandId: `${input.commandId}-content`,
+    activityId: input.activityId,
+    materialId: uploaded.body.id,
+    bytes: new Uint8Array(input.byteLength).fill(1),
+  });
 }
 
 const questionnaireArtifact = {
@@ -134,6 +154,7 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     await admin.query(`CREATE SCHEMA "${schema}"`);
     db = createDb({ connectionString, schema });
     await migrate(db);
+    materialRoot = await mkdtemp(join(tmpdir(), "artflow-registration-material-"));
   });
 
   afterAll(async () => {
@@ -184,7 +205,7 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       questionKey: "name",
       value: "Alice",
     });
-    const uploadedMaterial = await uploadMaterial(db, deps(participant), {
+    const uploadedMaterial = await uploadWithContent(participant, {
       commandId: "upload-material-2",
       activityId,
       registrationId: started.body.id,
@@ -197,7 +218,7 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       commandId: "review-material-2",
       activityId,
       materialId: uploadedMaterial.body.id,
-      expectedRevision: 0,
+      expectedRevision: uploadedMaterial.body.revision,
       status: "approved",
       note: "clear",
     });
@@ -205,7 +226,7 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       status: "approved",
       reviewNote: "clear",
       reviewedBy: staff.actorId,
-      revision: 1,
+      revision: uploadedMaterial.body.revision + 1,
     });
     const submitted = await submitRegistration(db, deps(participant), {
       commandId: "submit-registration-2",
@@ -264,7 +285,7 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
         questionKey: "name",
         value: `name-${suffix}`,
       });
-      await uploadMaterial(db, deps(actor), {
+      await uploadWithContent(actor, {
         commandId: `upload-${suffix}`,
         activityId,
         registrationId: started.body.id,
@@ -377,7 +398,7 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       value: "Alice",
     });
     expect(answered.body.answers).toMatchObject({ name: "Alice" });
-    const uploaded = await uploadMaterial(db, deps(participant), {
+    const uploaded = await uploadWithContent(participant, {
       commandId: "upload-material-snapshot",
       activityId,
       registrationId: started.body.id,
@@ -428,7 +449,7 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       activityId,
       participantId: participant.actorId,
     });
-    const uploaded = await (await import("../src/index.js")).uploadMaterial(db, deps(participant), {
+    const uploaded = await uploadWithContent(participant, {
       commandId: "upload-material-3",
       activityId,
       registrationId: started.body.id,

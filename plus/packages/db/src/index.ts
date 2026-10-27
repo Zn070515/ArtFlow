@@ -2,6 +2,7 @@ export * from "./activity-repository.js";
 export * from "./auth-repository.js";
 export * from "./competition-repository.js";
 export * from "./material-repository.js";
+export * from "./material-check-repository.js";
 export * from "./registration-repository.js";
 export * from "./command-receipt.js";
 export * from "./db.js";
