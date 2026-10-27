@@ -272,7 +272,7 @@ async function voteResultData(
   const tally = await getClosedVoteScores(db, session.id);
   const options = await listVoteOptions(db, session.id);
   const entries = options.map((option) => ({
-    contestantId: option.candidateId,
+    contestantId: option.candidateId.trim(),
     count: tally.rawCounts[option.id] ?? 0,
     share: tally.scoreInputs?.[option.id] ?? "0",
     ordinal: option.ordinal,

@@ -45,18 +45,25 @@ export function buildVoteResultDecisions(
   if (!Array.isArray(entries) || entries.length === 0) {
     fail("INVALID_INPUT", "A vote result needs at least one candidate.");
   }
+  const seen = new Set<string>();
   for (const entry of entries) {
-    if (typeof entry.contestantId !== "string" || entry.contestantId.trim() === "") {
+    const contestantId =
+      typeof entry.contestantId === "string" ? entry.contestantId.trim() : "";
+    if (contestantId === "") {
       fail("INVALID_INPUT", "A vote result candidate is empty.");
     }
+    if (seen.has(contestantId)) {
+      fail("INVALID_INPUT", "A vote result candidate is duplicated.");
+    }
+    seen.add(contestantId);
     if (!Number.isInteger(entry.count) || entry.count < 0) {
       fail("INVALID_INPUT", "Vote counts must be non-negative integers.");
     }
     if (!Number.isInteger(entry.ordinal) || entry.ordinal < 0) {
       fail("INVALID_INPUT", "Vote option ordinals must be non-negative integers.");
     }
-    if (typeof entry.share !== "string" || entry.share.trim() === "") {
-      fail("INVALID_INPUT", "Vote shares must be non-empty strings.");
+    if (typeof entry.share !== "string" || !/^\d+(\.\d+)?$/.test(entry.share.trim())) {
+      fail("INVALID_INPUT", "Vote shares must be decimal strings.");
     }
   }
   const sorted = [...entries].sort(
