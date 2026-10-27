@@ -35,6 +35,8 @@ async function listen(options: {
   readonly topic?: RealtimeTopic;
   readonly authenticate?: () => Promise<RealtimeActor | null>;
   readonly pollIntervalMs?: number;
+  readonly heartbeatIntervalMs?: number;
+  readonly heartbeatTimeoutMs?: number;
 }) {
   const app = Fastify({ logger: false });
   const realtime = await createRealtimeServer({
@@ -42,8 +44,8 @@ async function listen(options: {
     authenticate: options.authenticate ?? (async () => actor),
     topics: [options.topic ?? fakeTopic()],
     pollIntervalMs: options.pollIntervalMs ?? 20,
-    heartbeatIntervalMs: 2000,
-    heartbeatTimeoutMs: 2000,
+    heartbeatIntervalMs: options.heartbeatIntervalMs ?? 2000,
+    heartbeatTimeoutMs: options.heartbeatTimeoutMs ?? 2000,
   });
   await app.listen({ host: "127.0.0.1", port: 0 });
   const address = app.server.address();
@@ -212,9 +214,28 @@ describe("realtime server", () => {
     } as unknown as WebSocket;
     const logger = { error: () => {}, info: () => {} };
     const hub = new RealtimeHub({ pollIntervalMs: 1000, logger });
-    const connection = new RealtimeConnection(socket, actor, new Map(), hub, logger, "c1");
+    const connection = new RealtimeConnection(socket, actor, new Map(), hub, logger, "c1", 1000);
     connection.ping();
-    connection.checkAlive();
+    // Same-tick sweep: the timeout window has not elapsed yet.
+    connection.checkAlive(Date.now() + 100);
+    expect(socket.terminate).not.toHaveBeenCalled();
+    connection.checkAlive(Date.now() + 2000);
     expect(socket.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a ponging connection alive across heartbeat sweeps", async () => {
+    const { app, realtime, url } = await listen({
+      heartbeatIntervalMs: 20,
+      heartbeatTimeoutMs: 200,
+    });
+    closers.push(async () => {
+      await realtime.close();
+      await app.close();
+    });
+    const socket = await open(url);
+    await nextMessage(socket, (m) => m.type === "hello");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    socket.close();
   });
 });

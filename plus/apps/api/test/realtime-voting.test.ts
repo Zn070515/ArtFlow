@@ -197,6 +197,52 @@ describe.skipIf(!connectionString)("realtime voting integration", () => {
     expect(snapshot?.data).toMatchObject({ activityId });
   });
 
+  it("uses the newest global event sequence across sessions", async () => {
+    const { activityId } = await seed();
+    const secondSession = `vote-${randomUUID()}`;
+    await db.insertInto("vote_session").values({
+      id: secondSession,
+      activity_id: activityId,
+      definition_version: 1,
+      mode: "formal",
+      purpose: "popularity",
+      selection_type: "single",
+      max_selections: 1,
+      identity_policy: "browser",
+      scoring_rule: JSON.stringify({ kind: "ballot_share_percent", scale: 100, decimals: 2 }),
+      status: "open",
+      revision: 0,
+      opened_at: "2026-10-27T09:05:00Z",
+      closed_at: null,
+    }).execute();
+    // lastSequence is the global bigserial outbox id, so a newer session's
+    // events always carry a larger value than an older session's.
+    await db.insertInto("live_state").values({
+      activity_id: activityId,
+      aggregate_type: "vote_session",
+      aggregate_id: secondSession,
+      last_sequence: 9,
+      state: JSON.stringify({
+        activityId,
+        sessionId: secondSession,
+        status: "open",
+        optionIds: [],
+        counts: {},
+        authoritative: false,
+        lastEventType: "VoteSessionOpened",
+      }),
+      status: "running",
+    }).execute();
+
+    const topic = createVotingRealtimeTopic(db);
+    const target = { topic: `voting:${activityId}`, activityId, aggregateId: activityId };
+    const snapshot = await topic.snapshot(target);
+    expect(snapshot?.seq).toBe(9);
+    expect(
+      (snapshot?.data as { sessions: { id: string }[] }).sessions.map((session) => session.id),
+    ).toContain(secondSession);
+  });
+
   it("returns the declared publishing stages in the state read", async () => {
     const { activityId } = await seed();
     const response = await app.inject({

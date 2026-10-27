@@ -67,6 +67,7 @@ export async function createRealtimeServer(
           hub,
           logger,
           randomUUID(),
+          options.heartbeatTimeoutMs ?? HEARTBEAT.serverPongTimeoutMs,
         );
         connections.add(connection);
         socket.once("close", () => {
