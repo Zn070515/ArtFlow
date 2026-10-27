@@ -22,8 +22,10 @@ v1 的 `GroupStage`（`singer_contest/models.py:536`、`singer_contest/group_cho
 
 ## 决策
 
-- **D1 组数校验（已定）**：聚合的确认/冻结对照当前 release 的
-  `grouping.artifact.groupCount` 校验；未声明则不限制。v1 把这件事放在消费方
+- **D1 组数校验（已定）**：聚合的确认/冻结/修正对照当前 active release 的
+  `grouping.artifact.groupCount` 校验；未声明则不限制。活动没有 active release
+  （`activeDefinitionVersion = 0`）时同样不限制，`grouping.describe` 返回
+  `groupCount: null`、`matchesGroupCount: null`。v1 把这件事放在消费方
   （2026 赛制绑定/准备轮次），v2 的 release 就是冻结赛制，因此提前到确认/冻结。
 - **D2 消费边界（已定）**：活动内只要存在任何已确认的 `stage_result`，就拒绝
   `grouping.stage.correct`（`GROUPING_CONSUMED`）。v1 的精确引用（冻结赛制绑定、
@@ -105,13 +107,13 @@ v1 的 `GroupStage`（`singer_contest/models.py:536`、`singer_contest/group_cho
 | GRP-06 | 材料窗口只在 confirmed/frozen 可设；取消时自动关闭；同值设置是 no-op |
 | GRP-07 | 组数由 release 的 `groupCount` 约束（声明了才检查）；每组人数自由 |
 | GRP-08 | `rosterSource` 创建后不可变 |
-| GRP-09 | 存在已确认 `stage_result` 时拒绝修正（D2） |
+| GRP-09 | 存在已确认 `stage_result` 时拒绝修正与取消（D2；v1 对两者都做消费保护） |
 
 ## 命令与查询
 
 | 命令 | 输入要点 | 规则 |
 |---|---|---|
-| `grouping.stage.create` | `stageKey`、`name`、`rosterSource`、`sourceRoundId?` | 活动 ACTIVE、capability 已启用；stageKey 唯一；round_advanced 必须指定同活动轮次 |
+| `grouping.stage.create` | `stageKey`、`name`、`rosterSource`、`sourceRoundId?` | 活动 ACTIVE 或 CLOSED（ARCHIVED 是终态）、capability 已启用；stageKey 唯一；round_advanced 必须指定同活动轮次 |
 | `grouping.groups.record` | `stageId`、`expectedRevision`、`groups[{name?, participantIds[]}]` | 仅 draft；整体替换组与成员；组非空、名称唯一、成员在来源名单内、一人一组 |
 | `grouping.stage.confirm` | `stageId`、`expectedRevision` | draft→confirmed；完整覆盖；来源已确定；组数校验；写指纹 |
 | `grouping.stage.freeze` | `stageId`、`expectedRevision` | confirmed→frozen；重算指纹并比对；组数校验 |
@@ -175,9 +177,14 @@ emptyDefinition: { schemaVersion: 1 }（无组数约束）
 
 ## 并发
 
-所有写命令：`executeCommand` → `getActivityForUpdate` → `requireActive` →
-`expectedRevision` CAS。与 `registration-service.ts` 完全同构，满足
+所有写命令：`executeCommand` → `getActivityForUpdate` → `requireNotArchived` →
+`expectedRevision` CAS。与 `registration-service.ts` 同构，满足
 `docs/invariants/concurrency.md` CONC-03。
+
+**活动状态**：分组写命令允许 `ACTIVE` 与 `CLOSED`，只拒绝 `ARCHIVED`。v1 的
+「phase」与「lock」是两件事；v2 的 `CLOSED` 只是阶段结束，`ARCHIVED` 才是终态。
+若照搬 registration 的 `requireActive`，活动一旦关闭就无法补冻结分组，而归档又要求
+冻结，会形成死锁。读查询在任何状态都可用。
 
 ## 归档
 
@@ -205,7 +212,8 @@ emptyDefinition: { schemaVersion: 1 }（无组数约束）
 
 ## Ops 前端（傻瓜式）
 
-活动页在 `enabledCapabilities` 含 `grouping` 时渲染一张分组卡片：
+活动页在 `enabledCapabilities` 含 `grouping` 且当前账号拥有 `grouping.manage`
+权限时渲染一张分组卡片（只有角色没有权限的账号看不到，避免点开才 403）：
 
 1. **分组**：输入组数 → 「自动平均分组」→ 组卡片预览；成员可用下拉换组；
    顶部实时显示「已分 15/15」。
@@ -227,7 +235,9 @@ emptyDefinition: { schemaVersion: 1 }（无组数约束）
 - v2 importer：按原状态导入（frozen 保持 frozen），只导 current 成员，历史不导并
   写入报告；id 派生 `legacy-<publicCode>-grouping-<id>`；与活动导入同事务 + 对账。
   `round_advanced` 赛段通过已导入的轮次映射还原来源轮次；映射不到时按
-  `all_approved` 导入，并在报告的 `lossy` 条目里写明原因。
+  `all_approved` 导入，并在报告的 `lossy` 条目里写明原因。导入不重新跑领域校验；
+  若组数与 release 的 `groupCount` 不一致，写入 `lossy` 报告而不是拒绝整个导入
+  （历史事实优先保留）。
 - 旧 bundle 没有 `grouping` 段时照常导入。
 - **部署依赖**：导出器属于 v1 代码；cutover 真正使用分组导入前，导出器变更需随
   v1 热修发布。没有该热修的 bundle 仍可导入，只是分组缺失。
@@ -235,7 +245,9 @@ emptyDefinition: { schemaVersion: 1 }（无组数约束）
 ## 测试
 
 - Domain：definition 编译（含非法 `groupCount`）、registry 组合、singer pack 的
-  guided 问题与默认 definition。
+  guided 问题与默认 definition。同步更新 `registry-packs.test.ts` 与
+  `singerRegistry()` 里写死的 capability 清单——singer pack 默认启用 grouping 会
+  打破现有的精确断言。
 - Runtime（真实 PostgreSQL 双连接）：完整生命周期；完整覆盖；指纹变化拒绝冻结；
   修正历史；取消幂等与冻结不可取消；归档阻塞；组数校验；消费保护；并发创建同
   stageKey；并发 freeze/correct。
