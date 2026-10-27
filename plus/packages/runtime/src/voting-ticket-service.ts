@@ -32,6 +32,7 @@ import {
   insertVoteRecords,
   listAvailableJudgeSeatsForUpdate,
   listVoteOptions,
+  listVoteSessionIdsForTicket,
   updateJudgeEntry,
   updateTicket,
   revokeTicketAccessSession as revokeTicketAccessSessionRow,
@@ -517,13 +518,8 @@ export async function rotateTicketCredential(
       capability: "ticketing",
       payload: { ticketId: current.id, credentialVersion: nextVersion },
     });
-    await markConsumedResultsStale(
-      trx,
-      deps,
-      input.activityId,
-      "vote_session",
-      "A ticket credential was rotated after the result was confirmed.",
-    );
+    // Rotation only applies to an issued (never redeemed) ticket, so it cannot
+    // have produced a ballot and must not invalidate a confirmed result.
     const body: IssuedTicketResult = { ticket: next, credential: rawCredential };
     return { body, persistedBody: { ticket: next, credential: null } };
   });
@@ -563,13 +559,16 @@ export async function revokeTicket(
       capability: "ticketing",
       payload: { ticketId: ticket.id, reason },
     });
-    await markConsumedResultsStale(
-      trx,
-      deps,
-      input.activityId,
-      "vote_session",
-      "A ticket was revoked after the result was confirmed.",
-    );
+    const affectedSessions = await listVoteSessionIdsForTicket(trx, input.activityId, ticket.id);
+    if (affectedSessions.length > 0) {
+      await markConsumedResultsStale(
+        trx,
+        deps,
+        input.activityId,
+        { kind: "vote_session", aggregateIds: affectedSessions },
+        "A ticket that voted in this session was revoked.",
+      );
+    }
     return { body: revoked };
   });
 }
@@ -721,13 +720,8 @@ export async function revokeTicketAccessSession(
       capability: "ticketing",
       payload: { sessionId: input.sessionId, ticketId: session.ticket_id, reason },
     });
-    await markConsumedResultsStale(
-      trx,
-      deps,
-      input.activityId,
-      "vote_session",
-      "A ticket access session was revoked after the result was confirmed.",
-    );
+    // The tally predicate only looks at ticket.state, so revoking an access
+    // session stops future use but does not re-open the historical ballots.
     return { body: { sessionId: input.sessionId, revoked: true } };
   });
 }

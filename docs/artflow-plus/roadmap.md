@@ -1,6 +1,7 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M13 已完成**（2026-10-27）；生产 cutover 未执行。产品与架构身份的
+状态：**M0–M13.1 已完成**（2026-10-27）；生产 cutover 未执行。M13.1 补齐了
+运营接管与来源级消费；production cutover 仍需以首个活动的 adoption 彩排为准。产品与架构身份的
 权威是根目录 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）
 与证据。已完成里程碑的段落保留当时的实现描述，后续里程碑在其上覆盖。
 
@@ -179,7 +180,11 @@ ticket redemption、ballot uniqueness、judge-seat claim 的真实 PostgreSQL �
 **出口**：归档/解归档/重归档、完整性校验、并发归档、ZIP 白名单与 legacy snapshot 全绿。
 registration/material/vote/score 的 mode 缺口留给后续 hardening。
 
-## M8 — Product Surfaces 与 Cutover（已完成，2026-10-26）
+## M8 — Product Surfaces 与 Cutover 拓扑（已完成，2026-10-26）
+
+> 完成的是四个产品面、切换拓扑与工具链；**生产接管流程**（v1 当前活动 →
+> Plus 可运行活动）不在 M8，见 M13.1。因此 M8“完成”不等于 production cutover
+> ready。
 
 - Studio/Ops/Live/Portal 四个产品面按 capability 贡献组装。
 - 按入口切换 v1 → v2；双环境并行验证。
@@ -287,6 +292,26 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - `activity:<activityId>` 失效主题（outbox head），Live 页面改用实时模块。
 - 删除 SSE `/stream` 与 `useLiveEvents`；保留 `/events` 作为恢复权威。
 - 出口：topic 测试、`/events` 测试、Live E2E、全量门禁全绿。
+
+## M13.1 — Cutover Adoption & Consumption Precision（已完成，2026-10-27）
+
+- **历史导入与运营接管分离**：`import:legacy --mode historical` 保持只读快照；
+  `--mode adoption --pack <id>` 走正常 Pack → Compiler → Release，冻结完整
+  capability 组合、`commandScopes` 与 runtime contract v2。
+- **接管只导入准备事实**：报名、名单、材料、分组与 prepared 回合；历史分数、
+  选票与结果留在 v1，并在报告 `warnings` 中列出。
+- **来源级消费**：评分只锁定依赖该回合的结果；票据吊销只 stale 实际投过票的
+  vote session；未使用票据轮换、access session 撤销不 stale；分组修正只在
+  结果命中受影响参与者时拒绝。
+- **公开 selector fail-closed**：ACTIVE release 必须关联 confirmed、
+  `source != null`、`stale_at == null` 的 StageResult。
+- **Runtime contract v2**：没有 command ownership 的 release 在
+  `startExecution` 直接 `RUNTIME_CONTRACT_MISMATCH`。
+- **Cutover smoke 双 profile**：`historical` 验证公开历史结果；`operational`
+  验证当前活动有 active release、capability 组合与 scopes，不要求尚未发生的
+  正式结果。
+- 出口：adoption 单测（启动 judging 会话 → 激活 panel → 开投票）、来源级消费
+  测试、公开 selector 测试、全量门禁与 E2E。
 
 ## Definition of Done（每个 slice）
 

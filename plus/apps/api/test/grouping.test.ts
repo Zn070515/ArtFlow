@@ -51,7 +51,7 @@ async function seedGroupingActivity(participants: readonly string[]): Promise<st
         artifact: { schemaVersion: 1, groupCount: 2 },
       },
     },
-    executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 1, commandScopes: {} },
+    executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 2, commandScopes: {} },
     capabilityVersions: { grouping: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",

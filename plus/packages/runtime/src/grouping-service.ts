@@ -35,7 +35,7 @@ import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand, stableHash } from "./hash.js";
-import { requireNoConfirmedResult } from "./result-consumption.js";
+import { requireNoConsumedGrouping } from "./result-consumption.js";
 
 const ROSTER_SOURCES: ReadonlySet<string> = new Set(["all_approved", "round_advanced"]);
 const WINDOWS: ReadonlySet<string> = new Set(["closed", "open", "supplement_only"]);
@@ -575,11 +575,17 @@ export async function correctGroupingStage(
     if (stage.status !== "confirmed" && stage.status !== "frozen") {
       throw new DomainError("INVALID_TRANSITION", "Only a confirmed or frozen stage can be corrected.");
     }
-    await requireNoConfirmedResult(
+    const currentMembers = await listCurrentGroupingMemberships(trx, stage.id);
+    const affectedParticipants = [...new Set([
+      ...currentMembers.map((member) => member.participantId),
+      ...input.groups.flatMap((group) => group.participantIds),
+    ])];
+    await requireNoConsumedGrouping(
       trx,
       activity.id,
+      affectedParticipants,
       "GROUPING_CONSUMED",
-      "A confirmed result already consumed this activity's grouping.",
+      "A confirmed result names participants whose grouping would change.",
     );
     const source = await resolveGroupingSource(trx, activity.id, stage);
     const groupCount = await compiledGroupCount(trx, activity);
@@ -654,11 +660,13 @@ export async function cancelGroupingStage(
       throw new DomainError("INVALID_TRANSITION", "A frozen stage cannot be cancelled.");
     }
     if (stage.status === "confirmed") {
-      await requireNoConfirmedResult(
+      const members = await listCurrentGroupingMemberships(trx, stage.id);
+      await requireNoConsumedGrouping(
         trx,
         activity.id,
+        members.map((member) => member.participantId),
         "GROUPING_CONSUMED",
-        "A confirmed result already consumed this activity's grouping.",
+        "A confirmed result names participants whose grouping would be cancelled.",
       );
     }
     const saved: StoredGroupingStage = {

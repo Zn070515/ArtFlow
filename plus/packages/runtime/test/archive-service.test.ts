@@ -149,7 +149,7 @@ async function seed(options: {
       version: 1,
       contentHash: "hash",
       capabilities: {},
-      executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
+      executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 2, commandScopes: PUBLISHING_COMMAND_SCOPES },
       capabilityVersions: {},
       bindings: [],
       releasedAt: "2026-10-20T10:00:00Z",

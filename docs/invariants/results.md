@@ -206,19 +206,26 @@ Release；旧 release 产生的候选可以被新 release 的发布会话确认�
 
 ---
 
-## RES-11 来源改变必须让 CONFIRMED 结果失效，不能静默漂移
+## RES-11 来源改变必须让 CONFIRMED 结果失效，而且只失效真正消费该来源的结果
 
-**规则**：结果消费某组事实后，上游改变必须显式影响结果。普通纠错（评分编辑、
-更正、分组修正）在存在 CONFIRMED 结果时拒绝，必须先 unlock；安全类动作（票据
-吊销/轮换）可以执行，但必须在同一事务把受影响的 CONFIRMED 结果标记 stale，并
-supersede 其 ACTIVE release。stale 结果不得发布，必须重新确认。
+**规则**：结果消费某组事实后，上游改变必须显式影响结果，但影响范围按来源交集
+计算，不是整个 Activity。`StoredResultSource.dependencyIds` 记录结果依赖的
+round / vote session。评分编辑只锁定依赖该 round 的 podium 结果；票据吊销只
+stale 该票实际投过票的 vote session 对应结果；未使用票据的轮换、access session
+撤销不 stale 任何结果（当前 tally 只看 `ticket.state`）；分组修正只在结果
+decisions 命中将被改动的参与者时拒绝。普通纠错在命中时拒绝并要求先 unlock；
+安全动作允许执行，但同事务标记受影响结果为 stale 并 supersede 其 ACTIVE release。
+stale 结果不得发布，必须重新确认。
 
-**为什么**：只读 selector 是正确的，但确认后的票据吊销会让真实 tally 从
-100/80/60 变成 99/80/60，而 StageResult 仍保留旧值；release 只检查 confirmed
-与 revision，会把过期结果正式发布。
+**为什么**：活动级“任何 CONFIRMED 结果锁全场”会让初赛结果锁死决赛评分、一个
+人气投票锁死正式评分；而“任何票据动作 stale 所有投票结果”会让一张从未使用的票
+在换二维码时下线正式公示。两者都是 correctness bug，不是安全保守。
 
-**必须攻击的形状**：确认后吊销票据、确认后改分、确认后重算候选、stale 结果仍可
-release、supersede 后旧 URL 仍可见、把安全动作也一并禁止导致现场无法吊销泄露票。
+**必须攻击的形状**：初赛已确认后给决赛打分；vote_result 已确认后继续正式评分；
+重算候选影响部分结果；未使用票据 rotate/revoke；access session revoke；确认后
+改分、重算候选、stale 结果仍可 release、supersede 后旧 URL 仍可见。
 
-**Plus 要求**：`requireNoConfirmedResult` 守卫普通纠错；安全动作调用
-`markConsumedResultsStale`；`releaseResult` 拒绝 stale 并重算来源指纹。
+**Plus 要求**：`requireNoConsumedRound` / `requireNoConsumedGrouping` 守卫普通
+纠错；安全动作调用 `markConsumedResultsStale` 并传 `aggregateIds` 或
+`dependencyIds`；无依赖元数据的结果按未知依赖保守阻断；`releaseResult` 拒绝
+stale 并重算来源指纹；公开 selector 自己要求 `source != null && stale_at == null`。

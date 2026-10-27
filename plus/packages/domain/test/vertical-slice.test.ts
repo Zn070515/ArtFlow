@@ -62,7 +62,7 @@ const RELEASE_SNAPSHOT = {
   executionPolicy: {
     declaredScopes: [] as string[],
     conflicts: {},
-    runtimeContractVersion: 1,
+    runtimeContractVersion: 2,
     commandScopes: {},
   },
   capabilityVersions: { competition: "1", registration: "1" },

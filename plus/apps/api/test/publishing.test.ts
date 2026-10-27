@@ -86,7 +86,7 @@ async function seed(activityId: string, publicCode: string): Promise<void> {
         },
       },
     },
-    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
+    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 2, commandScopes: PUBLISHING_COMMAND_SCOPES },
     capabilityVersions: { publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-19T17:00:00Z",

@@ -110,6 +110,23 @@ if (existing === null) {
       revision: 0,
     });
   });
+} else {
+  // Older E2E schemas predate result provenance; refresh the seeded result so
+  // the fail-closed public selector keeps working across repeated runs.
+  await db.updateTable("stage_result").set({
+    source: JSON.stringify({
+      kind: "legacy_import",
+      aggregateId: "stage-e2e",
+      definitionVersion: 1,
+      releaseHash: "seed-public-result",
+      mode: "formal",
+      sourceRevision: 3,
+      inputFingerprint: "fingerprint-not-public",
+      dependencyIds: [],
+    }),
+    stale_at: null,
+    stale_reason: "",
+  }).where("activity_id", "=", activityId).execute();
 }
 
 await closeDb(db);

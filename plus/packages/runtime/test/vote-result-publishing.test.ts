@@ -19,6 +19,7 @@ import {
   getVoteResultCandidate,
   releaseResult,
   revokeTicket,
+  rotateTicketCredential,
 } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
@@ -81,7 +82,7 @@ async function seed(
         },
       },
     },
-    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
+    executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 2, commandScopes: PUBLISHING_COMMAND_SCOPES },
     capabilityVersions: { publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",
@@ -307,7 +308,7 @@ describe.skipIf(!connectionString)("vote-result publishing", () => {
           },
         },
       },
-      executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 1, commandScopes: PUBLISHING_COMMAND_SCOPES },
+      executionPolicy: { declaredScopes: ["publishing"], conflicts: {}, runtimeContractVersion: 2, commandScopes: PUBLISHING_COMMAND_SCOPES },
       capabilityVersions: { publishing: "1" },
       bindings: [],
       releasedAt: "2026-10-27T10:00:00Z",
@@ -353,8 +354,26 @@ describe.skipIf(!connectionString)("vote-result publishing", () => {
       public_code: `T-${ticketId.slice(-8)}`,
       credential_digest: "d".repeat(64),
       credential_version: 1,
-      state: "issued",
+      state: "redeemed",
       issued_at: "2026-10-27T09:00:00Z",
+      redeemed_at: "2026-10-27T09:05:00Z",
+    }).execute();
+    const ticketBallotId = `ticket-ballot-${activityId}`;
+    await db.insertInto("ballot").values({
+      id: ticketBallotId,
+      activity_id: activityId,
+      session_id: sessionId,
+      identity_type: "ticket",
+      identity_digest: null,
+      ticket_id: ticketId,
+      submitted_at: "2026-10-27T09:10:00Z",
+    }).execute();
+    await db.insertInto("vote_record").values({
+      id: `ticket-record-${activityId}`,
+      activity_id: activityId,
+      session_id: sessionId,
+      ballot_id: ticketBallotId,
+      option_id: `${sessionId}-option-0`,
     }).execute();
     await revokeTicket(db, deps(), {
       commandId: `vote-ticket-revoke-${activityId}`,
@@ -376,5 +395,58 @@ describe.skipIf(!connectionString)("vote-result publishing", () => {
       expectedCandidateRevision: confirmed.body.candidateRevision,
       note: "publish",
     })).rejects.toMatchObject({ code: "RESULT_STALE" });
+  });
+
+  it("does not stale a result for an unused ticket or a credential rotation", async () => {
+    const { activityId, sessionId } = await seed();
+    const preview = await getVoteResultCandidate(db, deps(), { activityId, sessionId });
+    const confirmed = await confirmVoteStageResult(db, deps(), {
+      commandId: `vote-confirm-unused-${activityId}`,
+      activityId,
+      stageKey: "vote_result",
+      scope: "publishing",
+      voteSessionId: sessionId,
+      expectedSessionRevision: preview.sessionRevision,
+      expectedInputFingerprint: preview.inputFingerprint,
+      awards: [],
+    });
+    const ticketId = `unused-ticket-${randomUUID()}`;
+    await db.updateTable("activity").set({
+      enabled_capabilities: JSON.stringify(["voting", "publishing", "ticketing"]),
+    }).where("id", "=", activityId).execute();
+    await db.insertInto("ticket").values({
+      id: ticketId,
+      activity_id: activityId,
+      public_code: `U-${ticketId.slice(-8)}`,
+      credential_digest: "e".repeat(64),
+      credential_version: 1,
+      state: "issued",
+      issued_at: "2026-10-27T09:00:00Z",
+    }).execute();
+    await rotateTicketCredential(db, { ...deps(), credentialSecret: "test-secret-at-least-16" }, {
+      commandId: `unused-rotate-${activityId}`,
+      activityId,
+      ticketId,
+    });
+    await revokeTicket(db, deps(), {
+      commandId: `unused-revoke-${activityId}`,
+      activityId,
+      ticketId,
+      reason: "印刷错误",
+    });
+    const row = await db.selectFrom("stage_result")
+      .select(["stale_at"])
+      .where("activity_id", "=", activityId)
+      .executeTakeFirstOrThrow();
+    expect(row.stale_at).toBeNull();
+    const released = await releaseResult(db, deps(), {
+      commandId: `vote-release-unused-${activityId}`,
+      activityId,
+      stageKey: "vote_result",
+      scope: "publishing",
+      expectedCandidateRevision: confirmed.body.candidateRevision,
+      note: "publish",
+    });
+    expect(released.body.status).toBe("active");
   });
 });

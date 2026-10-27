@@ -72,7 +72,7 @@ async function seedActivity(participants: readonly string[]): Promise<string> {
         artifact: { schemaVersion: 1, groupCount: 2 },
       },
     },
-    executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 1, commandScopes: {} },
+    executionPolicy: { declaredScopes: [], conflicts: {}, runtimeContractVersion: 2, commandScopes: {} },
     capabilityVersions: { grouping: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",
@@ -375,7 +375,7 @@ describe.skipIf(!connectionString)("grouping lifecycle", () => {
       candidate_revision: 1,
       source_candidate_revision: 1,
       input_fingerprint: "fingerprint",
-      decisions: JSON.stringify([]),
+      decisions: JSON.stringify([{ rank: 1, contestantId: "p1", score: "90.00" }]),
       awards: JSON.stringify([]),
       note: "",
       revision: 1,
@@ -479,5 +479,52 @@ describe.skipIf(!connectionString)("grouping lifecycle", () => {
     expect(state.stages[0]?.groups[0]?.members).toEqual([
       { participantId: "p1", displayName: "P1" },
     ]);
+  });
+
+  it("allows correction when the confirmed result names no grouped participant", async () => {
+    const activityId = await seedActivity(["p1", "p2"]);
+    const created = await createGroupingStage(db, deps(), {
+      commandId: "create-unrelated",
+      activityId,
+      stageKey: "chorus",
+      name: "分组合唱",
+      rosterSource: "all_approved",
+    });
+    const recorded = await recordGroupingGroups(db, deps(), {
+      commandId: "record-unrelated",
+      activityId,
+      stageId: created.body.id,
+      expectedRevision: created.body.revision,
+      groups: [{ name: "A", participantIds: ["p1"] }, { name: "B", participantIds: ["p2"] }],
+    });
+    const confirmed = await confirmGroupingStage(db, deps(), {
+      commandId: "confirm-unrelated",
+      activityId,
+      stageId: created.body.id,
+      expectedRevision: recorded.body.revision,
+    });
+    await db.insertInto("stage_result").values({
+      id: "stage-result-unrelated",
+      activity_id: activityId,
+      stage_key: "final",
+      status: "confirmed",
+      candidate_revision: 1,
+      source_candidate_revision: 1,
+      input_fingerprint: "fingerprint-unrelated",
+      decisions: JSON.stringify([{ rank: 1, contestantId: "p3", score: "90.00" }]),
+      awards: JSON.stringify([]),
+      note: "",
+      revision: 1,
+      confirmed_at: new Date(),
+    }).execute();
+    const corrected = await correctGroupingStage(db, deps(), {
+      commandId: "correct-unrelated",
+      activityId,
+      stageId: created.body.id,
+      expectedRevision: confirmed.body.revision,
+      groups: [{ name: "A", participantIds: ["p2"] }, { name: "B", participantIds: ["p1"] }],
+      reason: "改",
+    });
+    expect(corrected.body.revision).toBeGreaterThan(confirmed.body.revision);
   });
 });
