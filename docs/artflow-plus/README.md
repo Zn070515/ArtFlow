@@ -91,6 +91,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 里程碑与出口条件 | [roadmap.md](roadmap.md) |
 | 目标架构与模块边界 | [architecture/target](../architecture/target/README.md) |
 | 前端视觉方向（Portal / Console 双壳） | [frontend-design-direction.md](frontend-design-direction.md) |
+| M7→M13.3 代码 review（high） | [reviews/2026-10-27-m7-m13-high-review.md](reviews/2026-10-27-m7-m13-high-review.md) |
 | 架构决策 | [architecture/adr](../architecture/adr/README.md) |
 | 领域模型 | [domains](../domains/) |
 | 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT） | [invariants](../invariants/README.md) |

@@ -302,6 +302,10 @@ new architecture.
 3. Split the frontend into the public Portal shell and the operations Console
    shell before the next UX round; the fixed direction, desktop layout and
    acceptance gates are in `docs/artflow-plus/frontend-design-direction.md`.
+4. Close the M7→M13.3 high review findings (production relay, proxy rate limits,
+   body ceilings, adopted-archive keys, historical read-only, post-confirmation
+   score correction, and the P2 items) listed in
+   `docs/artflow-plus/reviews/2026-10-27-m7-m13-high-review.md`.
 
 ## M7a publishing / results
 
