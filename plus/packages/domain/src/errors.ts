@@ -88,7 +88,16 @@ export type DomainErrorCode =
   | "ARCHIVE_NOT_FOUND"
   | "CSRF_INVALID"
   | "USERNAME_TAKEN"
-  | "RATE_LIMITED";
+  | "RATE_LIMITED"
+  | "GROUPING_STAGE_EXISTS"
+  | "GROUPING_NOT_DRAFT"
+  | "GROUPING_SOURCE_UNKNOWN"
+  | "GROUPING_INCOMPLETE"
+  | "GROUPING_SOURCE_CHANGED"
+  | "GROUPING_GROUP_COUNT"
+  | "GROUPING_CONSUMED"
+  | "GROUPING_WINDOW_INVALID"
+  | "ARCHIVE_GROUPING_NOT_FROZEN";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel
