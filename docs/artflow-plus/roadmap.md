@@ -280,6 +280,12 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - Ops 卡片提供投票链接、复制与二维码。
 - 出口：公开读测试、投票页 E2E、全量门禁全绿。
 
+## M13 — Live on the Realtime Core（已完成，2026-10-27）
+
+- `activity:<activityId>` 失效主题（outbox head），Live 页面改用实时模块。
+- 删除 SSE `/stream` 与 `useLiveEvents`；保留 `/events` 作为恢复权威。
+- 出口：topic 测试、`/events` 测试、Live E2E、全量门禁全绿。
+
 ## Definition of Done（每个 slice）
 
 1. 领域规则写入 `docs/invariants/`（新增或引用）。

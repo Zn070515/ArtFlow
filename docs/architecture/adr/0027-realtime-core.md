@@ -30,4 +30,5 @@ same transport. Ad-hoc sockets per feature would drift.
 - Feature code registers topics and never forks connection/reconnect logic.
 - Permission revocation applies on reconnect, not mid-subscription.
 - Multi-instance deployments poll independently; consistent but not coalesced.
-- The Live console keeps SSE until a separate migration.
+- The Live console now uses the `activity:<id>` invalidation topic; SSE has been
+  retired (ADR-0029).
