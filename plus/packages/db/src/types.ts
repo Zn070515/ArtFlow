@@ -520,6 +520,50 @@ export interface ArchivePackageRow {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface GroupingStageRow {
+  id: string;
+  activity_id: string;
+  stage_key: string;
+  name: string;
+  status: string;
+  roster_source: string;
+  source_round_id: string | null;
+  source_fingerprint: string;
+  material_window: string;
+  cancel_reason: string;
+  confirmed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  confirmed_by: string | null;
+  frozen_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  frozen_by: string | null;
+  cancelled_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancelled_by: string | null;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | string, Date | string>;
+}
+
+export interface GroupingGroupRow {
+  id: string;
+  stage_id: string;
+  group_order: number;
+  name: string;
+  is_active: boolean;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | string, Date | string>;
+}
+
+export interface GroupingMembershipRow {
+  id: string;
+  stage_id: string;
+  group_id: string;
+  participant_id: string;
+  is_current: boolean;
+  joined_at: ColumnType<Date, Date | string, Date | string>;
+  left_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  removed_by: string | null;
+  reason: string;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -561,4 +605,7 @@ export interface Database {
   result_publication: ResultPublicationRow;
   result_release: ResultReleaseRow;
   archive_package: ArchivePackageRow;
+  grouping_stage: GroupingStageRow;
+  grouping_group: GroupingGroupRow;
+  grouping_membership: GroupingMembershipRow;
 }
