@@ -2,6 +2,7 @@ export interface PublicDecision {
   readonly rank: number;
   readonly contestantId: string;
   readonly score: string;
+  readonly unit?: "score" | "percent";
 }
 
 export interface PublicAward {

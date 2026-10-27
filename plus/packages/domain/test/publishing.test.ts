@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildResultSnapshot,
+  buildVoteResultDecisions,
+  compileActivityDefinitionPackage,
   compilePublishingDefinition,
   createEmptyPublishingDefinition,
+  createEmptyVotingDefinition,
   createPublishingDefinition,
   defaultCapabilityRegistry,
   validateAwards,
@@ -87,5 +90,71 @@ describe("publishing capability", () => {
     expect(Object.isFrozen(snapshot.decisions)).toBe(true);
     expect(Object.isFrozen(snapshot.awards)).toBe(true);
     expect(snapshot.decisions).toHaveLength(2);
+  });
+});
+
+describe("vote result decisions", () => {
+  it("ranks by count with ties sharing a rank and ordinal stability", () => {
+    const decisions = buildVoteResultDecisions([
+      { contestantId: "a", count: 5, share: "50.00", ordinal: 0 },
+      { contestantId: "b", count: 10, share: "100.00", ordinal: 1 },
+      { contestantId: "c", count: 10, share: "100.00", ordinal: 2 },
+    ]);
+    expect(decisions).toEqual([
+      { rank: 1, contestantId: "b", score: "100.00", unit: "percent" },
+      { rank: 1, contestantId: "c", score: "100.00", unit: "percent" },
+      { rank: 3, contestantId: "a", score: "50.00", unit: "percent" },
+    ]);
+  });
+
+  it("rejects empty and malformed entries", () => {
+    expectCode(() => buildVoteResultDecisions([]), "INVALID_INPUT");
+    expectCode(
+      () => buildVoteResultDecisions([{ contestantId: "", count: 1, share: "50.00", ordinal: 0 }]),
+      "INVALID_INPUT",
+    );
+    expectCode(
+      () => buildVoteResultDecisions([{ contestantId: "a", count: -1, share: "0.00", ordinal: 0 }]),
+      "INVALID_INPUT",
+    );
+    expectCode(
+      () => buildVoteResultDecisions([{ contestantId: "a", count: 1, share: "", ordinal: 0 }]),
+      "INVALID_INPUT",
+    );
+  });
+});
+
+describe("publishing composition", () => {
+  it("requires competition or voting when publishing is enabled", () => {
+    const compiled = compileActivityDefinitionPackage(
+      {
+        schemaVersion: 1,
+        manifest: { key: "vote-only", title: "Vote" },
+        capabilities: { publishing: createEmptyPublishingDefinition() },
+        bindings: [],
+      },
+      defaultCapabilityRegistry.compilers,
+    );
+    expect(compiled.ok).toBe(false);
+    if (compiled.ok) return;
+    expect(compiled.issues.map((item) => item.code)).toContain(
+      "CAPABILITY_RESULT_SOURCE_REQUIRED",
+    );
+  });
+
+  it("compiles with voting as the result source", () => {
+    const compiled = compileActivityDefinitionPackage(
+      {
+        schemaVersion: 1,
+        manifest: { key: "vote-only", title: "Vote" },
+        capabilities: {
+          publishing: createPublishingDefinition([{ key: "vote_result", label: "投票结果" }]),
+          voting: createEmptyVotingDefinition(),
+        },
+        bindings: [],
+      },
+      defaultCapabilityRegistry.compilers,
+    );
+    expect(compiled.ok).toBe(true);
   });
 });

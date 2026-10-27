@@ -25,6 +25,57 @@ export interface ResultDecision {
   readonly rank: number;
   readonly contestantId: string;
   readonly score: string;
+  readonly unit?: "score" | "percent";
+}
+
+export interface VoteResultEntry {
+  readonly contestantId: string;
+  readonly count: number;
+  readonly share: string;
+  readonly ordinal: number;
+}
+
+/**
+ * The single authority for turning a closed vote tally into result decisions.
+ * Ties share a rank (1, 1, 3); ordinal breaks the display order.
+ */
+export function buildVoteResultDecisions(
+  entries: readonly VoteResultEntry[],
+): readonly ResultDecision[] {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    fail("INVALID_INPUT", "A vote result needs at least one candidate.");
+  }
+  for (const entry of entries) {
+    if (typeof entry.contestantId !== "string" || entry.contestantId.trim() === "") {
+      fail("INVALID_INPUT", "A vote result candidate is empty.");
+    }
+    if (!Number.isInteger(entry.count) || entry.count < 0) {
+      fail("INVALID_INPUT", "Vote counts must be non-negative integers.");
+    }
+    if (!Number.isInteger(entry.ordinal) || entry.ordinal < 0) {
+      fail("INVALID_INPUT", "Vote option ordinals must be non-negative integers.");
+    }
+    if (typeof entry.share !== "string" || entry.share.trim() === "") {
+      fail("INVALID_INPUT", "Vote shares must be non-empty strings.");
+    }
+  }
+  const sorted = [...entries].sort(
+    (left, right) => right.count - left.count || left.ordinal - right.ordinal,
+  );
+  let previousCount: number | null = null;
+  let rank = 0;
+  return deepFreeze(
+    sorted.map((entry, index) => {
+      if (previousCount === null || previousCount !== entry.count) rank = index + 1;
+      previousCount = entry.count;
+      return {
+        rank,
+        contestantId: entry.contestantId.trim(),
+        score: entry.share,
+        unit: "percent" as const,
+      };
+    }),
+  );
 }
 
 export interface ResultAward {
@@ -180,13 +231,25 @@ export function buildResultSnapshot(input: {
 export const publishingCompiler: CapabilityCompiler = {
   capabilityKey: "publishing",
   compile: compilePublishingDefinition,
+  validateComposition: ({ enabledCapabilities }) => {
+    if (enabledCapabilities.includes("competition") || enabledCapabilities.includes("voting")) {
+      return [];
+    }
+    return [
+      issue(
+        "RESULT_SOURCE_REQUIRED",
+        "Publishing needs competition or voting to produce a result.",
+        "dependencies",
+      ),
+    ];
+  },
 };
 
 export const publishingCapability: CapabilityRegistration = deepFreeze({
   manifest: {
     identity: "publishing",
     version: "1",
-    dependencies: ["competition"],
+    dependencies: [],
     conflicts: [],
     definitionSchemaVersion: 1,
     commands: [
@@ -195,8 +258,13 @@ export const publishingCapability: CapabilityRegistration = deepFreeze({
       "publishing.result.release",
       "publishing.result.revoke",
       "publishing.publication.edit",
+      "publishing.vote_result.confirm",
     ],
-    queries: ["publishing.state.read", "publishing.public_results.read"],
+    queries: [
+      "publishing.state.read",
+      "publishing.public_results.read",
+      "publishing.vote_result.preview",
+    ],
     events: [
       "StageResultConfirmed",
       "StageResultUnlocked",

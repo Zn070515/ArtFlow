@@ -43,7 +43,7 @@ definition。
 | 缺口 | 影响 | 后续 |
 | --- | --- | --- |
 | 舞台类没有“节目单/公开节目页”输出 | 观众看不到节目安排；只有报名/材料/归档 | 新 capability 或扩展 publishing 的非比赛 stage |
-| 纯观众投票活动没有发布路径 | publishing 依赖 competition，投票 tally 不能直接公开 | 新增 vote-result 输出或解耦 publishing |
+| 纯观众投票活动没有发布路径 | publishing 依赖 competition，投票 tally 不能直接公开 | 已解耦并新增投票赛果确认（M10）；投票 UI 仍待后续 slice |
 | bracket / 对阵 / 复合分 | v2 competition 只能表达 round/panel/score | 新 capability，不塞进 competition |
 | podium 首次 recompute 需要预先算出 fingerprint | 没有发布 UI；自动旅程通过 `buildPodiumCandidate` 先算 fingerprint 再调用 | 发布/确认 UI 或让 recompute 返回当前 fingerprint |
 | 参与者账号迁移/认领 | 导入的 legacy 报名没有登录账号 | 独立 slice（认领链接或账号迁移） |

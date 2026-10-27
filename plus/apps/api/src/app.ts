@@ -53,6 +53,7 @@ import {
   SINGER_COMPETITION_PACK,
   STAGE_SHOW_PACK,
   SYSTEM_ACTOR,
+  VOTE_POLL_PACK,
 } from "@artflow-plus/domain";
 import type {
   ActivityDefinitionPackage,
@@ -115,8 +116,10 @@ import {
   revokeTicketAccessSession,
   submitBallot,
   confirmStageResult,
+  confirmVoteStageResult,
   editPublication,
   getPublishingState,
+  getVoteResultCandidate,
   releaseResult,
   revokeResultRelease,
   unlockStageResult,
@@ -439,6 +442,31 @@ const GroupingWindowBody = Type.Object(
   { additionalProperties: false },
 );
 
+const VoteResultParamsSchema = Type.Object(
+  { id: Type.String({ minLength: 1 }), sessionId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+const ConfirmVoteResultBodySchema = Type.Object(
+  {
+    scope: Type.String({ minLength: 1, maxLength: 100 }),
+    voteSessionId: Type.String({ minLength: 1, maxLength: 100 }),
+    expectedSessionRevision: Type.Integer({ minimum: 1 }),
+    expectedInputFingerprint: Type.String({ minLength: 1, maxLength: 128 }),
+    awards: Type.Array(
+      Type.Object(
+        {
+          award: Type.String({ minLength: 1, maxLength: 100 }),
+          contestantId: Type.String({ minLength: 1, maxLength: 100 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    note: Type.Optional(Type.String({ maxLength: 2000 })),
+  },
+  { additionalProperties: false },
+);
+
 const AnswerBody = Type.Object(
   {
     expectedRevision: Type.Integer({ minimum: 0 }),
@@ -587,7 +615,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   const { db } = options;
   const registry = options.registry ?? defaultCapabilityRegistry;
-  const packs = options.packs ?? [SINGER_COMPETITION_PACK, STAGE_SHOW_PACK, REVIEW_AWARDS_PACK];
+  const packs = options.packs ?? [
+    SINGER_COMPETITION_PACK,
+    STAGE_SHOW_PACK,
+    REVIEW_AWARDS_PACK,
+    VOTE_POLL_PACK,
+  ];
   const baseDeps = options.deps ?? defaultRuntimeDeps();
   const rateLimiter = options.rateLimiter ?? new MemoryRateLimiter();
   const deps =
@@ -2176,6 +2209,47 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         stageKey,
         scope: body.scope,
         expectedSourceRevision: body.expectedSourceRevision,
+        expectedInputFingerprint: body.expectedInputFingerprint,
+        awards: body.awards,
+        ...(body.note === undefined ? {} : { note: body.note }),
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/publishing/vote-results/:sessionId",
+    { schema: { params: VoteResultParamsSchema } },
+    async (request) => {
+      const { id, sessionId } = request.params as { id: string; sessionId: string };
+      return getVoteResultCandidate(db, await requestDeps(request), {
+        activityId: id,
+        sessionId,
+      });
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/publishing/stage-results/:stageKey/confirm-vote",
+    { schema: { params: PublishingStageParamsSchema, body: ConfirmVoteResultBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, stageKey } = request.params as { id: string; stageKey: string };
+      const body = request.body as {
+        scope: string;
+        voteSessionId: string;
+        expectedSessionRevision: number;
+        expectedInputFingerprint: string;
+        awards: { award: string; contestantId: string }[];
+        note?: string;
+      };
+      const outcome = await confirmVoteStageResult(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        stageKey,
+        scope: body.scope,
+        voteSessionId: body.voteSessionId,
+        expectedSessionRevision: body.expectedSessionRevision,
         expectedInputFingerprint: body.expectedInputFingerprint,
         awards: body.awards,
         ...(body.note === undefined ? {} : { note: body.note }),

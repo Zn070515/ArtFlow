@@ -37,3 +37,28 @@ describe("ResultsView", () => {
     expect(formatReleasedAt("2026-10-20T18:00:00.000Z")).toContain("2026");
   });
 });
+
+it("renders a percent unit without the score suffix", () => {
+  render(
+    <ResultsView
+      data={{
+        activity: { publicCode: "VOTE-1" },
+        activityTitle: "人气投票",
+        results: [
+          {
+            releaseId: "release-1",
+            stageKey: "vote_result",
+            publicTitle: "人气投票 · 投票结果",
+            releasedAt: "2026-10-27T10:00:00Z",
+            decisions: [
+              { rank: 1, contestantId: "candidate-a", score: "66.67", unit: "percent" },
+            ],
+            awards: [],
+          },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByText("66.67%")).toBeInTheDocument();
+  expect(screen.getByText(/第 1 名.*candidate-a.*66\.67%/)).toBeInTheDocument();
+});

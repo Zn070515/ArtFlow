@@ -259,6 +259,13 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - 归档阻塞与归档包 `grouping.json`/CSV；v1 导出与导入分组。
 - 出口：domain/db/runtime/api/web E2E 全绿；GRP-01…09 写入不变量。
 
+## M10 — Vote-Result Publishing（已完成，2026-10-27）
+
+- `publishing` 解耦 competition，改为组合期要求 competition 或 voting。
+- 新增投票赛果预览与 `publishing.vote_result.confirm`；tally 在确认时冻结。
+- `vote-poll` pack；公开赛果百分比显示（`ResultDecision.unit`）。
+- 出口：domain/runtime/api/web 测试与结构门禁全绿。
+
 ## Definition of Done（每个 slice）
 
 1. 领域规则写入 `docs/invariants/`（新增或引用）。

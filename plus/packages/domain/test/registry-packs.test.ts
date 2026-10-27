@@ -11,6 +11,7 @@ import {
   REVIEW_AWARDS_PACK,
   SINGER_COMPETITION_PACK,
   STAGE_SHOW_PACK,
+  VOTE_POLL_PACK,
 } from "../src/index.js";
 import type {
   CapabilityCompiler,
@@ -374,4 +375,24 @@ it("allows browser voting without ticketing and rejects ticket voting without it
   expect(ticket.ok).toBe(false);
   if (ticket.ok) return;
   expect(ticket.issues.map((issue) => issue.code)).toContain("CAPABILITY_TICKETING_REQUIRED");
+});
+
+it("instantiates the vote-poll pack without competition", () => {
+  const result = instantiateActivityPack(VOTE_POLL_PACK, defaultCapabilityRegistry);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.instantiation.enabledCapabilities).toEqual([
+    "archive",
+    "publishing",
+    "voting",
+  ]);
+  expect(result.instantiation.enabledCapabilities).not.toContain("competition");
+  const compiled = compileActivityDefinitionPackage(
+    result.instantiation.definition,
+    defaultCapabilityRegistry.compilers,
+  );
+  expect(compiled.ok, JSON.stringify(compiled)).toBe(true);
+  expect(JSON.stringify(result.instantiation.definition.capabilities.publishing)).toContain(
+    "vote_result",
+  );
 });

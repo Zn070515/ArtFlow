@@ -1,7 +1,9 @@
 import { createCompetitionDefinition } from "./capabilities/competition.js";
 import { createGroupingDefinition } from "./capabilities/grouping.js";
 import { createMaterialsDefinition } from "./capabilities/materials.js";
+import { createPublishingDefinition } from "./capabilities/publishing.js";
 import { createQuestionnaireDefinition } from "./capabilities/questionnaire.js";
+import { createVotingDefinition } from "./capabilities/voting.js";
 import { deepFreeze } from "./model.js";
 import type { ActivityPack } from "./packs.js";
 
@@ -207,5 +209,30 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
       },
     ]),
     materials: createMaterialsDefinition(100 * 1024 * 1024, ["video", "image", "document"]),
+  },
+});
+
+export const VOTE_POLL_PACK: ActivityPack = deepFreeze({
+  identity: "vote-poll",
+  version: "1",
+  title: "Vote Poll",
+  baselineCapabilities: ["voting", "publishing"],
+  questions: [
+    {
+      id: "archive",
+      prompt: "结束后是否归档？",
+      capability: "archive",
+      default: true,
+    },
+  ],
+  definitions: {
+    voting: createVotingDefinition({
+      purpose: "popularity",
+      selectionType: "single",
+      maxSelections: 1,
+      identityPolicy: "browser",
+      scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+    }),
+    publishing: createPublishingDefinition([{ key: "vote_result", label: "投票结果" }]),
   },
 });
