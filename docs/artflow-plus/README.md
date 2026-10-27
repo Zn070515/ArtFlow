@@ -22,9 +22,10 @@
 
 ## 当前阶段（2026-10-27）
 
-`artflow-plus` 上的 v2 已完成 **M0–M13**；`main` 仍是 1.x 生产线，**生产 cutover
-尚未执行**。cutover 基础设施可用于彩排，正式切换仍取决于首个活动的 capability
-完整度与 authority 审计，而不是日期。逐项出口与证据在 [roadmap.md](roadmap.md)。
+`artflow-plus` 上的 v2 已完成 **M0–M13.1**；`main` 仍是 1.x 生产线，**生产 cutover
+尚未执行**。切换拓扑与工具链已就绪，历史导入与运营接管已分开；正式切换仍取决于
+首个活动走完 adoption 彩排、capability 完整度与 authority 审计，而不是日期。
+逐项出口与证据在 [roadmap.md](roadmap.md)。
 
 | 里程碑 | 状态 | 主要交付 |
 |---|---|---|
@@ -42,6 +43,7 @@
 | M11 Realtime Core + Voting UI | 已完成 | `@artflow-plus/realtime`、实时投票卡片、核心门禁 |
 | M12 Participant Vote Page | 已完成 | `/vote/<sessionId>` 公开投票页与二维码 |
 | M13 Live on the Realtime Core | 已完成 | `activity:<id>` 失效主题；SSE 与 `useLiveEvents` 退役 |
+| M13.1 Cutover Adoption & Consumption | 已完成 | `--mode adoption` 生成真实 Release；来源级消费；公开 selector fail-closed；runtime contract v2；smoke 双 profile |
 
 ### v2 架构速览
 
@@ -64,6 +66,9 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 - 实时通道只做失效提示；HTTP 是恢复权威；只有 `packages/realtime` 拥有传输。
 - 命令只能使用 release 为其冻结的 execution scope；结果绑定来源身份，来源改变即
   stale 并 supersede 旧 release；内部读面在启动期为每个 GET 声明权限（ADR-0030）。
+- 历史导入与运营接管分开：`--mode adoption` 走正常 Pack → Compiler → Release；
+  消费按来源交集计算；公开 selector 自己要求 confirmed/source/stale 检查；
+  runtime contract v2 拒绝无 command ownership 的旧 release（ADR-0031）。
 - 已关闭的流程缺口：分组、投票结果发布、观众投票页、Live 实时迁移；M13 之后完成
   一轮 authority closure（scope、provenance、consumption、read plane）。
 

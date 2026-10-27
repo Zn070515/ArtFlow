@@ -26,13 +26,20 @@
    ```powershell
    docker build -f deploy/plus/Dockerfile --target build -t artflow-plus-tools:<sha> .
    ```
-5. **导入 Plus**（先 dry-run，再正式；需要 Plus DB 已由 compose 启动）：
+5. **接管 Plus**（先 dry-run，再正式；需要 Plus DB 已由 compose 启动）：
    ```powershell
    $network = docker network ls --format "{{.Name}}" | Select-String artflow_internal | Select-Object -First 1
-   docker run --rm --network $network -e ARTFLOW_PLUS_DATABASE_URL="postgresql://<user>:<pass>@plus-db:5432/artflow_plus" -v "${PWD}\legacy-bundle.json:/bundle.json:ro" artflow-plus-tools:<sha> pnpm --filter @artflow-plus/api import:legacy -- /bundle.json --dry-run
-   docker run --rm --network $network -e ARTFLOW_PLUS_DATABASE_URL="..." -v "${PWD}\legacy-bundle.json:/bundle.json:ro" -v "${PWD}\import-report.json:/report.json" artflow-plus-tools:<sha> pnpm --filter @artflow-plus/api import:legacy -- /bundle.json --report /report.json
+   # 当前活动（决赛尚未开始）：运营接管，生成真正的 Plus Release
+   docker run --rm --network $network -e ARTFLOW_PLUS_DATABASE_URL="postgresql://<user>:<pass>@plus-db:5432/artflow_plus" -v "${PWD}\legacy-bundle.json:/bundle.json:ro" artflow-plus-tools:<sha> pnpm --filter @artflow-plus/api import:legacy -- /bundle.json --mode adoption --pack singer-competition --dry-run
+   docker run --rm --network $network -e ARTFLOW_PLUS_DATABASE_URL="..." -v "${PWD}\legacy-bundle.json:/bundle.json:ro" -v "${PWD}\import-report.json:/report.json" artflow-plus-tools:<sha> pnpm --filter @artflow-plus/api import:legacy -- /bundle.json --mode adoption --pack singer-competition --report /report.json
    ```
-   要求：报告 `checks` 全部 `ok`；`unsupported` 已由负责人确认可接受。
+   - **历史活动**用默认 `--mode historical`，只做只读快照；**当前接管**必须用
+     `--mode adoption --pack <packId>`，否则导入的 release 不能执行任何命令。
+   - 目标能力用 `--enable`/打包问题裁剪；院十佳通常需要
+     `voting` 与 `ticketing`，至少确认 `competition`、`registration`、
+     `publishing` 已启用。
+   - 要求：报告 `checks` 全部 `ok`、`rehearsalReady=true`、`capabilities` 符合
+     预期；`warnings` 中列出的历史分数/选票/结果已由负责人确认留在 v1。
 6. **Provision staff 账号**：
    ```powershell
    docker run --rm --network $network -e ARTFLOW_PLUS_DATABASE_URL="..." -e ARTFLOW_PLUS_ACCOUNT_PASSWORD="<password>" artflow-plus-tools:<sha> pnpm --filter @artflow-plus/api create-account -- --username <ops> --roles admin
@@ -56,6 +63,9 @@ $env:CUTOVER_PUBLIC_CODE="<canary-code>"
 $env:CUTOVER_EXPECTED_TITLE="<活动标题>"
 $env:CUTOVER_STAFF_USER="<ops>"
 $env:CUTOVER_STAFF_PASSWORD="<password>"
+# 当前活动接管用 operational；历史活动验证用 historical（默认）
+$env:CUTOVER_PROFILE="operational"
+$env:CUTOVER_REQUIRED_CAPABILITIES="competition,registration,publishing"
 node scripts/cutover-smoke.mjs
 ```
 
