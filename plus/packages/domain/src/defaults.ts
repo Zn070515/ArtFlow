@@ -6,6 +6,7 @@ import { votingCapability } from "./capabilities/voting.js";
 import { ticketingCapability } from "./capabilities/ticketing.js";
 import { publishingCapability } from "./capabilities/publishing.js";
 import { archiveCapability } from "./capabilities/archive.js";
+import { groupingCapability } from "./capabilities/grouping.js";
 import { createCapabilityRegistry } from "./registry.js";
 import type { CapabilityRegistry } from "./registry.js";
 
@@ -24,6 +25,7 @@ export function createDefaultCapabilityRegistry(): CapabilityRegistry {
     ticketingCapability,
     publishingCapability,
     archiveCapability,
+    groupingCapability,
   ]);
   if (!result.ok) {
     throw new Error(
