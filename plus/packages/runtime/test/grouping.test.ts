@@ -19,6 +19,7 @@ import {
   correctGroupingStage,
   createGroupingStage,
   freezeGroupingStage,
+  getGroupingState,
   recordGroupingGroups,
 } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
@@ -453,5 +454,30 @@ describe.skipIf(!connectionString)("grouping lifecycle", () => {
     const rejected = results.find((result) => result.status === "rejected");
     const code = rejected?.status === "rejected" ? rejected.reason.code : undefined;
     expect(code).toBe("STALE_REVISION");
+  });
+
+  it("describes stages with groups, members, and display names", async () => {
+    const activityId = await seedActivity(["p1", "p2"]);
+    const created = await createGroupingStage(db, deps(), {
+      commandId: "create-read",
+      activityId,
+      stageKey: "chorus",
+      name: "分组合唱",
+      rosterSource: "all_approved",
+    });
+    await recordGroupingGroups(db, deps(), {
+      commandId: "record-read",
+      activityId,
+      stageId: created.body.id,
+      expectedRevision: created.body.revision,
+      groups: [{ name: "A", participantIds: ["p1"] }, { name: "B", participantIds: ["p2"] }],
+    });
+    const state = await getGroupingState(db, deps(), { activityId });
+    expect(state.stages).toHaveLength(1);
+    expect(state.stages[0]?.groupCount).toBe(2);
+    expect(state.stages[0]?.matchesGroupCount).toBe(true);
+    expect(state.stages[0]?.groups[0]?.members).toEqual([
+      { participantId: "p1", displayName: "P1" },
+    ]);
   });
 });
