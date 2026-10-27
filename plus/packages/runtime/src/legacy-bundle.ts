@@ -41,6 +41,19 @@ export interface LegacyMaterialBundle {
   readonly createdAt: string;
 }
 
+export interface LegacyMaterialCheckBundle {
+  readonly legacyId: number;
+  readonly registrationLegacyId: number;
+  readonly questionKey: string;
+  readonly itemName: string;
+  readonly filePurpose: string;
+  readonly acceptedFilePurposes: readonly string[];
+  readonly status: "missing" | "uploaded" | "approved" | "needs_supplement";
+  readonly required: boolean;
+  readonly reviewNote: string;
+  readonly sortOrder: number;
+}
+
 export interface LegacyRoundBundle {
   readonly legacyId: number;
   readonly key: string;
@@ -132,6 +145,7 @@ export interface LegacyCounts {
   readonly registrations: number;
   readonly approvedRegistrations: number;
   readonly materials: number;
+  readonly materialChecks?: number;
   readonly rounds: number;
   readonly scores: number;
   readonly ballots: number;
@@ -179,6 +193,8 @@ export interface LegacyBundle {
     readonly finalizedAt: string | null;
   };
   readonly materials: readonly LegacyMaterialBundle[];
+  /** Staff-owned checks, including slots with no SubmissionFile. */
+  readonly materialChecks?: readonly LegacyMaterialCheckBundle[];
   readonly competition: {
     readonly panels: readonly LegacyPanelBundle[];
     readonly seats: readonly {
@@ -255,6 +271,7 @@ export function parseLegacyBundle(value: unknown): LegacyBundle {
   }
   requireArray(value, "registrations");
   requireArray(value, "materials");
+  if (value.materialChecks !== undefined) requireArray(value, "materialChecks");
   requireArray(value, "rounds");
   requireArray(value, "unsupported");
   if (!isRecord(value.competition)) invalid("The bundle is missing competition.");
@@ -268,8 +285,14 @@ export function parseLegacyBundle(value: unknown): LegacyBundle {
   requireArray(value.results, "stageResults");
   requireArray(value.results, "releases");
 
+  if (value.materialChecks === undefined) value.materialChecks = [];
   const bundle = value as unknown as LegacyBundle;
   const registrationIds = new Set(bundle.registrations.map((row) => row.legacyId));
+  for (const check of bundle.materialChecks ?? []) {
+    if (!registrationIds.has(check.registrationLegacyId)) {
+      invalid(`Material check ${check.legacyId} references an unknown registration.`);
+    }
+  }
   for (const material of bundle.materials) {
     if (!registrationIds.has(material.registrationLegacyId)) {
       invalid(`Material ${material.legacyId} references an unknown registration.`);

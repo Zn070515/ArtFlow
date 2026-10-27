@@ -302,8 +302,13 @@ services:
       ARTFLOW_PLUS_DATABASE_URL: postgresql://${PLUS_POSTGRES_USER}:${PLUS_POSTGRES_PASSWORD}@plus-db:5432/${PLUS_POSTGRES_DB:-artflow_plus}
       ARTFLOW_PLUS_CREDENTIAL_SECRET: ${ARTFLOW_PLUS_CREDENTIAL_SECRET:?Set ARTFLOW_PLUS_CREDENTIAL_SECRET}
       ARTFLOW_PLUS_ARCHIVE_DIR: /app/var/archives
+      ARTFLOW_PLUS_MEDIA_DIR: /app/var/media
+      # Read-only bridge to the still-authoritative v1 media volume.
+      ARTFLOW_PLUS_LEGACY_MEDIA_DIR: /app/var/legacy-media
     volumes:
       - plus_archive_data:/app/var/archives
+      - plus_media_data:/app/var/media
+      - media_data:/app/var/legacy-media:ro
     networks:
       - artflow_internal
 
@@ -375,6 +380,7 @@ volumes:
   caddy_config:
   plus_postgres_data:
   plus_archive_data:
+  plus_media_data:
 
 networks:
   artflow_frontend:

@@ -31,6 +31,11 @@ function registration(row: Selectable<RegistrationRow>): StoredRegistration {
     questionnaireHash: row.questionnaire_hash,
     status: row.status as RegistrationStatus,
     answers: objectValue(row.answers),
+    supplementKeys: Array.isArray(row.supplement_keys)
+      ? row.supplement_keys as string[]
+      : typeof row.supplement_keys === "string"
+        ? JSON.parse(row.supplement_keys) as string[]
+        : [],
     revision: row.revision,
     ...(row.review_note === null ? {} : { reviewNote: row.review_note }),
     ...(row.reviewed_by === null ? {} : { reviewedBy: row.reviewed_by }),
@@ -61,6 +66,7 @@ export async function insertRegistration(
       questionnaire_hash: value.questionnaireHash,
       status: value.status,
       answers: JSON.stringify(value.answers),
+      supplement_keys: JSON.stringify(value.supplementKeys ?? []),
       revision: value.revision,
       review_note: value.reviewNote ?? "",
       reviewed_by: value.reviewedBy ?? null,
@@ -125,6 +131,7 @@ export async function updateRegistration(
     .set({
       status: value.status,
       answers: JSON.stringify(value.answers),
+      supplement_keys: JSON.stringify(value.supplementKeys ?? []),
       revision: value.revision,
       review_note: value.reviewNote ?? "",
       reviewed_by: value.reviewedBy ?? null,

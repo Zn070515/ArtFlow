@@ -144,6 +144,7 @@ export interface RegistrationRow {
   questionnaire_hash: string;
   status: string;
   answers: ColumnType<unknown, string, string>;
+  supplement_keys: ColumnType<unknown, string | undefined, string>;
   revision: number;
   review_note: string | null;
   reviewed_by: string | null;
@@ -176,8 +177,37 @@ export interface MaterialRow {
   reviewed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   revision: number;
   current: boolean;
+  content_ready: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: ColumnType<Date, Date | undefined, never>;
   updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface MaterialCheckRow {
+  id: string;
+  activity_id: string;
+  registration_id: string;
+  slot_key: string;
+  item_name: string;
+  purpose: string;
+  accepted_purposes: ColumnType<unknown, string, string>;
+  status: string;
+  required: boolean;
+  review_note: string;
+  revision: number;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+export interface SupplementGrantRow {
+  id: string;
+  activity_id: string;
+  registration_id: string;
+  token_digest: string;
+  allowed_keys: ColumnType<unknown, string, string>;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  revoked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_by: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
 }
 
 export interface CompetitionRoundRow {
@@ -582,6 +612,8 @@ export interface Database {
   registration: RegistrationRow;
   roster: RosterRow;
   material: MaterialRow;
+  material_check: MaterialCheckRow;
+  supplement_grant: SupplementGrantRow;
   competition_round: CompetitionRoundRow;
   panel_snapshot: PanelSnapshotRow;
   panel_member: PanelMemberRow;

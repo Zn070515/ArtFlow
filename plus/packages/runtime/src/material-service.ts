@@ -2,13 +2,16 @@ import type { Database, StoredMaterial } from "@artflow-plus/db";
 import {
   getActivityForUpdate,
   findReleaseByQuestionnaireHash,
+  activateMaterialContent,
   getMaterial,
+  getMaterialByIdForUpdate,
   getMaterialForUpdate,
   getRegistration,
   getRegistrationForUpdate,
   getRelease,
   insertMaterial,
   retireCurrentMaterial,
+  updateMaterialCheckStatus,
   updateMaterialReview,
 } from "@artflow-plus/db";
 import type {
@@ -166,11 +169,11 @@ export async function uploadMaterial(
         reviewedBy: null,
         reviewedAt: null,
         revision: 0,
-        current: true,
+        // The row is a staging placeholder until its bytes are stored; the
+        // previous current material stays authoritative if the upload fails.
+        current: false,
+        contentReady: false,
       };
-      // The registration row is already locked, so replacing a slot cannot
-      // race another upload for the same participant and question.
-      await retireCurrentMaterial(trx, registration.id, input.questionKey);
       await insertMaterial(trx, material);
       await appendEngineEvent(trx, deps, {
         type: "MaterialUploaded",
@@ -230,9 +233,12 @@ export async function attachMaterialContent(
         const activity = await getActivityForUpdate(trx, input.activityId);
         if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
         requireActive(activity);
-        const material = await getMaterialForUpdate(trx, input.materialId);
+        const material = await getMaterialByIdForUpdate(trx, input.materialId);
         if (material === null || material.activityId !== input.activityId) {
           throw new DomainError("NOT_FOUND", "Material was not found.");
+        }
+        if (material.current && material.contentReady) {
+          throw new DomainError("INVALID_TRANSITION", "This material already has stored content.");
         }
         const registration = await getRegistration(trx, material.registrationId);
         if (registration === null || registration.activityId !== input.activityId) {
@@ -252,16 +258,21 @@ export async function attachMaterialContent(
         }
         await storage.put(material.storageKey, input.bytes);
         writtenKey = material.storageKey;
+        // Bytes are ready; only now does the new row replace the old current
+        // one. Both statements share this transaction.
+        await retireCurrentMaterial(trx, material.registrationId, material.questionKey);
+        const activated = await activateMaterialContent(trx, material, material.revision);
+        await updateMaterialCheckStatus(trx, material.registrationId, material.questionKey, "uploaded");
         await appendEngineEvent(trx, deps, {
           type: "MaterialContentStored",
           activityId: input.activityId,
           aggregateType: "material",
-          aggregateId: material.id,
-          revision: material.revision,
+          aggregateId: activated.id,
+          revision: activated.revision,
           capability: "materials",
-          payload: { materialId: material.id, byteLength: material.byteLength, storageKey: material.storageKey },
+          payload: { materialId: activated.id, byteLength: activated.byteLength, storageKey: activated.storageKey },
         });
-        return { body: material, status: 201 };
+        return { body: activated, status: 201 };
       },
     );
   } catch (error) {
@@ -324,6 +335,9 @@ export async function reviewMaterial(
       const material = await getMaterialForUpdate(trx, input.materialId);
       if (material === null) throw new DomainError("NOT_FOUND", `Material ${input.materialId} was not found.`);
       if (material.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The material belongs to another activity.");
+      if (input.status === "approved" && !material.contentReady) {
+        throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "Material content must be stored before approval.");
+      }
       const next: StoredMaterial = {
         ...material,
         status: input.status,
@@ -333,6 +347,13 @@ export async function reviewMaterial(
         revision: material.revision + 1,
       };
       const saved = await updateMaterialReview(trx, next, input.expectedRevision);
+      await updateMaterialCheckStatus(
+        trx,
+        saved.registrationId,
+        saved.questionKey,
+        saved.status,
+        saved.reviewNote,
+      );
       await appendEngineEvent(trx, deps, {
         type: "MaterialReviewed",
         activityId: input.activityId,

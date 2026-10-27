@@ -121,7 +121,7 @@ describe.skipIf(!connectionString)("legacy operational adoption", () => {
       enable: ["ticketing"],
     });
     expect(result.report.mode).toBe("adoption");
-    expect(result.report.rehearsalReady).toBe(true);
+    expect(result.report.semanticReady).toBe(true);
     expect(result.report.checks.every((check) => check.ok)).toBe(true);
     expect(result.report.capabilities).toEqual(
       expect.arrayContaining(["competition", "registration", "voting", "ticketing", "publishing", "grouping"]),

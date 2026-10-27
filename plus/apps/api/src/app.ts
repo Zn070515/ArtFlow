@@ -94,7 +94,11 @@ import {
   submitProxyScore,
   submitRapidScore,
   attachMaterialContent,
+  getSupplementContext,
+  issueSupplementGrant,
   readMaterialContent,
+  submitSupplement,
+  uploadSupplementMaterial,
   readMaterialForActor,
   reviewMaterial,
   reviewRegistration,
@@ -631,7 +635,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   // released materials policy and reject oversize bodies before the handler.
   app.addContentTypeParser(
     "application/octet-stream",
-    { parseAs: "buffer", bodyLimit: 26 * 1024 * 1024 },
+    // The transport limit is a global safety ceiling; the released materials
+    // policy is the authority and may allow up to 100 MiB (stage shows).
+    { parseAs: "buffer", bodyLimit: 128 * 1024 * 1024 },
     (_request, body, done) => done(null, body),
   );
   const { db } = options;
@@ -1048,6 +1054,75 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   );
 
+  app.post(
+    "/api/public/supplement/claim",
+    { schema: { body: Type.Object({ token: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, config: { access: "public" } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "supplement-claim", 20);
+      const body = request.body as { token: string };
+      const context = await getSupplementContext(db, body.token, deps.now());
+      const secure = isProduction ? "; Secure" : "";
+      reply.header(
+        "set-cookie",
+        `artflow_supplement=${body.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${secure}`,
+      );
+      reply.header("cache-control", "no-store");
+      return context;
+    },
+  );
+
+  app.get(
+    "/api/public/supplement/context",
+    { config: { access: "public" } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "supplement-context", 60);
+      const token = cookieValue(request, "artflow_supplement");
+      if (token === undefined) throw new DomainError("INVALID_SUPPLEMENT", "A supplement capability is required.");
+      reply.header("cache-control", "no-store");
+      return getSupplementContext(db, token, deps.now());
+    },
+  );
+
+  app.put(
+    "/api/public/supplement/materials/:questionKey/content",
+    { schema: { params: Type.Object({ questionKey: Type.String({ minLength: 1, maxLength: 100 }) }, { additionalProperties: false }) } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "supplement-upload", 20);
+      const token = cookieValue(request, "artflow_supplement");
+      if (token === undefined) throw new DomainError("INVALID_SUPPLEMENT", "A supplement capability is required.");
+      const { questionKey } = request.params as { questionKey: string };
+      const body = request.body;
+      if (!Buffer.isBuffer(body)) {
+        throw new DomainError("INVALID_INPUT", "Material content must be sent as application/octet-stream.");
+      }
+      const query = request.query as { name?: string; type?: string };
+      const outcome = await uploadSupplementMaterial(db, deps, {
+        token,
+        commandId: requireIdempotency(request),
+        questionKey,
+        originalName: query.name ?? questionKey,
+        contentType: query.type ?? "application/octet-stream",
+        bytes: body,
+      });
+      return reply.status(201).send(outcome);
+    },
+  );
+
+  app.post(
+    "/api/public/supplement/submit",
+    { config: { access: "public" } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "supplement-submit", 10);
+      const token = cookieValue(request, "artflow_supplement");
+      if (token === undefined) throw new DomainError("INVALID_SUPPLEMENT", "A supplement capability is required.");
+      const outcome = await submitSupplement(db, deps, {
+        token,
+        commandId: requireIdempotency(request),
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
   app.get(
     "/api/activities/:id/live",
     { schema: { params: ActivityParams }, config: { access: "session" } },
@@ -1388,6 +1463,26 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         expectedRevision: body.expectedRevision,
         status: body.status,
         note: body.note,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/registrations/:registrationId/supplement",
+    { schema: { params: RegistrationParams } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const body = request.body as { allowedKeys: string[] };
+      if (!Array.isArray(body.allowedKeys)) {
+        throw new DomainError("INVALID_INPUT", "allowedKeys must be an array.");
+      }
+      const outcome = await issueSupplementGrant(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+        allowedKeys: body.allowedKeys,
       });
       return reply.status(outcome.status).send(outcome.body);
     },

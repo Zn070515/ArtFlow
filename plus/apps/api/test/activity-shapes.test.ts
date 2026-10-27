@@ -13,7 +13,11 @@ import {
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import type { ActorContext } from "@artflow-plus/domain";
-import { buildPodiumCandidate, createLocalArchiveStorage } from "@artflow-plus/runtime";
+import {
+  buildPodiumCandidate,
+  createLocalArchiveStorage,
+  createLocalMaterialStorage,
+} from "@artflow-plus/runtime";
 import type { RuntimeDeps } from "@artflow-plus/runtime";
 import type { FastifyInstance } from "fastify";
 import { Client } from "pg";
@@ -147,6 +151,16 @@ async function registerAndApprove(shape: Shape, answers: Record<string, string>,
     const material = await postJson(participantApp,
       `/api/activities/${shape.activityId}/registrations/${registration.id}/materials`, file);
     expect(material.statusCode, JSON.stringify(material.body)).toBe(201);
+    const content = await participantApp.inject({
+      method: "PUT",
+      url: `/api/activities/${shape.activityId}/materials/${String(material.body.id)}/content`,
+      headers: {
+        "content-type": "application/octet-stream",
+        "idempotency-key": `cmd-${randomUUID()}`,
+      },
+      payload: Buffer.alloc(file.byteLength as number, 1),
+    });
+    expect(content.statusCode, content.body).toBe(201);
   }
   const submitted = await postJson(participantApp,
     `/api/activities/${shape.activityId}/registrations/${registration.id}/submit`,
@@ -256,6 +270,7 @@ describe.skipIf(!connectionString)("three activity shapes", () => {
       now: () => new Date().toISOString(),
       newEventId: () => randomUUID(),
       archiveStorage: createLocalArchiveStorage(root),
+      materialStorage: createLocalMaterialStorage({ root: join(root, "media") }),
     };
     opsApp = await buildApp({ db, deps, actor: ops });
     participantApp = await buildApp({ db, deps, actor: participant });

@@ -56,6 +56,14 @@ export interface AdoptionBundleFacts {
   readonly hasRegistrations: boolean;
   readonly hasMaterials: boolean;
   readonly materialContentTypes: readonly string[];
+  /** Staff-owned missing/supplement slots, independent of uploaded files. */
+  readonly materialChecks?: readonly {
+    readonly key: string;
+    readonly label: string;
+    readonly required: boolean;
+    readonly purposes: readonly string[];
+    readonly maxBytes?: number;
+  }[];
 }
 
 export interface BuildAdoptionDefinitionInput extends PackInstantiationInput {
@@ -79,10 +87,27 @@ function issue(code: string, message: string, path: string): RegistryIssue {
   return { code, message, path };
 }
 
+const EXTENSIONS_BY_PURPOSE: Readonly<Record<string, readonly string[]>> = {
+  audio: [".mp3", ".wav", ".m4a", ".aac", ".flac"],
+  video: [".mp4", ".mov", ".mkv", ".webm"],
+  image: [".jpg", ".jpeg", ".png", ".webp", ".gif"],
+  document: [".pdf", ".doc", ".docx", ".txt", ".zip", ".ppt", ".pptx", ".xls", ".xlsx"],
+};
+
+function acceptsFor(purposes: readonly string[]): readonly string[] {
+  const accepts = new Set<string>();
+  for (const purpose of purposes) {
+    for (const extension of EXTENSIONS_BY_PURPOSE[purpose] ?? []) accepts.add(extension);
+  }
+  if (accepts.size > 0) return [...accepts];
+  return Object.values(EXTENSIONS_BY_PURPOSE).flat();
+}
+
 function questionnaireQuestions(facts: AdoptionBundleFacts): QuestionnaireQuestion[] {
-  return facts.questionnaire.questions.map((question) => {
+  const questions = new Map<string, QuestionnaireQuestion>();
+  for (const question of facts.questionnaire.questions) {
     const isFile = question.type === "file" || question.type === "materials";
-    return {
+    questions.set(question.key, {
       key: question.key,
       label: question.label,
       type: isFile ? "file" : "text",
@@ -92,12 +117,30 @@ function questionnaireQuestions(facts: AdoptionBundleFacts): QuestionnaireQuesti
             file: {
               slot: question.key,
               purpose: "document",
-              accepts: ["*/*"],
+              accepts: acceptsFor(["document"]),
             },
           }
         : {}),
-    };
-  });
+    });
+  }
+  // Material checks are first-class slots even when no file was ever uploaded:
+  // "missing lyric" must survive adoption as a file question, not disappear.
+  for (const check of facts.materialChecks ?? []) {
+    const purposes = check.purposes.length > 0 ? check.purposes : ["document"];
+    questions.set(check.key, {
+      key: check.key,
+      label: check.label,
+      type: "file",
+      required: check.required,
+      file: {
+        slot: check.key,
+        purpose: purposes[0] ?? "document",
+        accepts: acceptsFor(purposes),
+        ...(check.maxBytes === undefined ? {} : { maxBytes: check.maxBytes }),
+      },
+    });
+  }
+  return [...questions.values()];
 }
 
 function materialPurposes(facts: AdoptionBundleFacts): readonly string[] {
@@ -107,6 +150,9 @@ function materialPurposes(facts: AdoptionBundleFacts): readonly string[] {
     else if (contentType.startsWith("video/")) purposes.add("video");
     else if (contentType.startsWith("image/")) purposes.add("image");
     else purposes.add("document");
+  }
+  for (const check of facts.materialChecks ?? []) {
+    for (const purpose of check.purposes) purposes.add(purpose);
   }
   return purposes.size === 0 ? ["audio", "video", "image", "document"] : [...purposes].sort();
 }

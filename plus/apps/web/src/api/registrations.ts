@@ -131,13 +131,32 @@ export function uploadMaterialMetadata(
     readonly contentType: string;
     readonly byteLength: number;
   },
-): Promise<unknown> {
+): Promise<{ readonly id: string }> {
   return apiFetch(
     `/api/activities/${activityId}/registrations/${registrationId}/materials`,
     {
       method: "POST",
       headers: { "idempotency-key": commandId },
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function uploadMaterialContent(
+  activityId: string,
+  materialId: string,
+  commandId: string,
+  file: File,
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/materials/${materialId}/content`,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/octet-stream",
+        "idempotency-key": commandId,
+      },
+      body: file,
     },
   );
 }

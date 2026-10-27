@@ -106,7 +106,9 @@ export type DomainErrorCode =
   | "RESULT_STALE"
   | "RESULT_CONSUMED"
   | "REGISTRATION_CLOSED"
-  | "MATERIAL_CONTENT_UNAVAILABLE";
+  | "MATERIAL_CONTENT_UNAVAILABLE"
+  | "INVALID_SUPPLEMENT"
+  | "SUPPLEMENT_CLOSED";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel

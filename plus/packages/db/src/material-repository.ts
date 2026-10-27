@@ -20,6 +20,7 @@ export interface StoredMaterial {
   readonly reviewedAt: string | null;
   readonly revision: number;
   readonly current: boolean;
+  readonly contentReady?: boolean;
 }
 
 function iso(value: Date | string | null): string | null {
@@ -44,6 +45,7 @@ function material(row: Selectable<MaterialRow>): StoredMaterial {
     reviewedAt: iso(row.reviewed_at),
     revision: row.revision,
     current: row.current,
+    contentReady: row.content_ready,
   };
 }
 
@@ -64,6 +66,7 @@ export async function insertMaterial(db: Kysely<Database>, value: StoredMaterial
     reviewed_at: value.reviewedAt,
     revision: value.revision,
     current: value.current,
+    content_ready: value.contentReady ?? true,
     created_at: new Date(),
     updated_at: new Date(),
   }).execute();
@@ -97,6 +100,34 @@ export async function getMaterialForUpdate(
 ): Promise<StoredMaterial | null> {
   const row = await trx.selectFrom("material").selectAll().where("id", "=", id).where("current", "=", true).forUpdate().executeTakeFirst();
   return row === undefined ? null : material(row);
+}
+
+/** Finds a pending (not yet current) material row by id for content attach. */
+export async function getMaterialByIdForUpdate(
+  trx: Kysely<Database>,
+  id: string,
+): Promise<StoredMaterial | null> {
+  const row = await trx.selectFrom("material").selectAll().where("id", "=", id).forUpdate().executeTakeFirst();
+  return row === undefined ? null : material(row);
+}
+
+export async function activateMaterialContent(
+  trx: Kysely<Database>,
+  value: StoredMaterial,
+  expectedRevision: number,
+): Promise<StoredMaterial> {
+  const row = await trx.updateTable("material").set({
+    current: true,
+    content_ready: true,
+    revision: value.revision + 1,
+    updated_at: new Date(),
+  }).where("id", "=", value.id).where("revision", "=", expectedRevision).returningAll().executeTakeFirst();
+  if (row === undefined) {
+    const error = new Error(`Material ${value.id} changed since it was read.`);
+    Object.assign(error, { code: "STALE_REVISION" });
+    throw error;
+  }
+  return material(row);
 }
 
 export async function listMaterials(

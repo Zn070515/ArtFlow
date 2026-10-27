@@ -3,6 +3,7 @@ import {
   insertDraft,
   insertJudgeSeat,
   insertMaterial,
+  insertMaterialCheck,
   insertPanelMember,
   insertPanelSnapshot,
   insertPerformance,
@@ -91,7 +92,7 @@ export interface LegacyImportReport {
   readonly capabilities?: readonly string[];
   readonly definitionVersion?: number;
   readonly releaseHash?: string;
-  readonly rehearsalReady?: boolean;
+  readonly semanticReady?: boolean;
   readonly warnings?: readonly string[];
 }
 
@@ -178,7 +179,7 @@ interface AdoptionPlan {
   readonly bindings: DefinitionDraft["package"]["bindings"];
   readonly warnings: readonly string[];
   readonly checks: readonly LegacyImportCheck[];
-  readonly rehearsalReady: boolean;
+  readonly semanticReady: boolean;
 }
 
 const ADOPTION_BLOCKING_UNSUPPORTED = new Set(["multiple_rubrics", "group_material"]);
@@ -227,8 +228,18 @@ function buildAdoptionPlan(
           }),
       registrationLifecycle: registrationLifecycle(bundle),
       hasRegistrations: bundle.registrations.length > 0,
-      hasMaterials: bundle.materials.length > 0,
+      hasMaterials: bundle.materials.length > 0 || (bundle.materialChecks?.length ?? 0) > 0,
       materialContentTypes: bundle.materials.map((material) => material.contentType),
+      materialChecks: (bundle.materialChecks ?? []).map((check) => ({
+        key: check.questionKey,
+        label: check.itemName,
+        required: check.required,
+        purposes: check.acceptedFilePurposes.length > 0
+          ? check.acceptedFilePurposes
+          : check.filePurpose === ""
+            ? []
+            : [check.filePurpose],
+      })),
     },
     ...(options.answers === undefined ? {} : { answers: options.answers }),
     ...(options.enable === undefined ? {} : { enable: options.enable }),
@@ -285,7 +296,8 @@ function buildAdoptionPlan(
   checks.push(check(
     "adoption.questionnaire",
     questionnaireKeys.join(","),
-    bundle.questionnaire.questions.map((question) => question.key).sort().join(","),
+    [...bundle.questionnaire.questions.map((question) => question.key),
+      ...(bundle.materialChecks ?? []).map((check) => check.questionKey)].sort().join(","),
   ));
   const roundKeys = (competitionArtifact?.rounds ?? []).map((round) => round.key).sort();
   checks.push(check(
@@ -327,7 +339,7 @@ function buildAdoptionPlan(
     const stages = (publishingArtifact.stages ?? []).length;
     checks.push(check("adoption.publishingStages", stages > 0 ? 1 : 0, 1));
   }
-  const rehearsalReady = checks.every((item) => item.ok);
+  const semanticReady = checks.every((item) => item.ok);
 
   return {
     capabilities: adopted.capabilities,
@@ -343,7 +355,7 @@ function buildAdoptionPlan(
     bindings: adopted.definition.bindings,
     warnings,
     checks,
-    rehearsalReady,
+    semanticReady,
   };
 }
 
@@ -352,6 +364,7 @@ function plannedCounts(bundle: LegacyBundle): LegacyCounts {
     registrations: bundle.registrations.length,
     approvedRegistrations: bundle.registrations.filter((row) => row.status === "approved").length,
     materials: bundle.materials.length,
+    materialChecks: bundle.materialChecks?.length ?? 0,
     rounds: bundle.rounds.length,
     scores: bundle.competition.scores.length,
     ballots: bundle.voting.ballots.length,
@@ -362,7 +375,7 @@ function plannedCounts(bundle: LegacyBundle): LegacyCounts {
 function declaredChecks(bundle: LegacyBundle): LegacyImportCheck[] {
   const planned = plannedCounts(bundle);
   return (Object.keys(planned) as (keyof LegacyCounts)[]).map((key) =>
-    check(`planned.${key}`, planned[key], bundle.counts[key]),
+    check(`planned.${key}`, planned[key] ?? 0, bundle.counts[key] ?? 0),
   );
 }
 
@@ -388,6 +401,10 @@ async function countImported(
     .select(({ fn }) => fn.countAll<number>().as("count"))
     .where("activity_id", "=", activityId)
     .executeTakeFirstOrThrow();
+  const materialChecks = await trx.selectFrom("material_check")
+    .select(({ fn }) => fn.countAll<number>().as("count"))
+    .where("activity_id", "=", activityId)
+    .executeTakeFirstOrThrow();
   const rounds = await trx.selectFrom("competition_round")
     .select(({ fn }) => fn.countAll<number>().as("count"))
     .where("activity_id", "=", activityId)
@@ -408,6 +425,7 @@ async function countImported(
     registrations: Number(registrations.count),
     approvedRegistrations: Number(approved.count),
     materials: Number(materials.count),
+    materialChecks: Number(materialChecks.count),
     rounds: Number(rounds.count),
     scores: Number(scores.count),
     ballots: Number(ballots.count),
@@ -1148,6 +1166,23 @@ async function importActivity(
       reviewedAt: null,
       revision: 1,
       current: true,
+      contentReady: material.storagePath !== undefined && material.storagePath !== null && material.storagePath !== "",
+    });
+  }
+
+  for (const check of bundle.materialChecks ?? []) {
+    await insertMaterialCheck(trx, {
+      id: `${prefix}-check-${check.legacyId}`,
+      activityId,
+      registrationId: `${prefix}-reg-${check.registrationLegacyId}`,
+      slotKey: check.questionKey,
+      itemName: check.itemName,
+      purpose: check.filePurpose,
+      acceptedPurposes: check.acceptedFilePurposes,
+      status: check.status,
+      required: check.required,
+      reviewNote: check.reviewNote,
+      revision: 1,
     });
   }
 
@@ -1210,6 +1245,7 @@ async function importActivity(
     check("registrations", imported.registrations, bundle.counts.registrations),
     check("approvedRegistrations", imported.approvedRegistrations, bundle.counts.approvedRegistrations),
     check("materials", imported.materials, bundle.counts.materials),
+    check("materialChecks", imported.materialChecks ?? 0, bundle.materialChecks?.length ?? 0),
     check("rounds", imported.rounds, bundle.counts.rounds),
   ];
   if (adoption === undefined) {
@@ -1303,14 +1339,14 @@ async function importActivity(
     imported,
     excluded: bundle.excluded,
     unsupported,
-    checks,
+    checks: adoption === undefined ? checks : [...checks, ...adoption.checks],
     ...(adoption === undefined
       ? {}
       : {
           capabilities: adoption.capabilities,
           definitionVersion: 1,
           releaseHash: adoption.compiled.contentHash,
-          rehearsalReady: adoption.rehearsalReady,
+          semanticReady: adoption.semanticReady,
           warnings: adoption.warnings,
         }),
   };
@@ -1353,7 +1389,7 @@ export async function adoptLegacyBundle(
         capabilities: plan.capabilities,
         definitionVersion: 1,
         releaseHash: plan.compiled.contentHash,
-        rehearsalReady: plan.rehearsalReady,
+        semanticReady: plan.semanticReady,
         warnings: plan.warnings,
       },
     };

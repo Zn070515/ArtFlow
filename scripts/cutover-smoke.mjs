@@ -123,6 +123,33 @@ if (profile === "historical") {
     if (!(activity.activeDefinitionVersion > 0)) throw new Error("no active definition release");
   });
 
+  await check("registration detail and material bridge are readable", async () => {
+    const token = await staffToken();
+    const listed = await activityByPublicCode(token);
+    if (listed === undefined) throw new Error("activity missing from the staff list");
+    const registrations = await fetch(`${base}/api/activities/${listed.id}/registrations`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!registrations.ok) throw new Error(`registrations status ${registrations.status}`);
+    const body = await registrations.json();
+    const first = (body.registrations ?? [])[0];
+    if (first === undefined) return;
+    const detail = await fetch(`${base}/api/activities/${listed.id}/registrations/${first.id}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!detail.ok) throw new Error(`registration detail status ${detail.status}`);
+    const material = (await detail.json()).materials?.[0];
+    if (material !== undefined) {
+      const content = await fetch(
+        `${base}/api/activities/${listed.id}/materials/${material.id}/content`,
+        { headers: { authorization: `Bearer ${token}` } },
+      );
+      if (!content.ok) throw new Error(`material content status ${content.status}`);
+      const bytes = await content.arrayBuffer();
+      if (bytes.byteLength === 0) throw new Error("material content is empty");
+    }
+  });
+
   await check("studio shows a frozen release with scopes and command ownership", async () => {
     const token = await staffToken();
     const listed = await activityByPublicCode(token);

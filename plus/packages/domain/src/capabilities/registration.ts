@@ -26,6 +26,8 @@ export interface RegistrationState {
   readonly questionnaireHash: string;
   readonly status: RegistrationStatus;
   readonly answers: Readonly<Record<string, unknown>>;
+  /** Slot keys staff explicitly opened for supplement in REVIEW/FINAL. */
+  readonly supplementKeys?: readonly string[];
   readonly revision: number;
   readonly reviewNote?: string;
   readonly reviewedBy?: string;
@@ -206,7 +208,15 @@ export const registrationCapability: CapabilityRegistration = deepFreeze({
     dependencies: ["materials", "questionnaire"],
     conflicts: [],
     definitionSchemaVersion: 1,
-    commands: ["registration.start", "registration.answer", "registration.submit", "registration.review", "registration.roster.finalize"],
+    commands: [
+      "registration.start",
+      "registration.answer",
+      "registration.submit",
+      "registration.review",
+      "registration.roster.finalize",
+      "registration.supplement.issue",
+      "registration.supplement.submit",
+    ],
     queries: ["registration.read", "registration.roster"],
     events: ["RegistrationStarted", "RegistrationSubmitted", "RegistrationReviewed", "RosterFinalized"],
     permissions: ["registration.manage", "registration.review", "registration.roster.finalize"],

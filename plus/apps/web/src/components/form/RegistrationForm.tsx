@@ -4,6 +4,7 @@ import { ApiError } from "../../api/client.js";
 import {
   saveAnswer,
   submitRegistration,
+  uploadMaterialContent,
   uploadMaterialMetadata,
   type RegistrationDetail,
 } from "../../api/registrations.js";
@@ -120,7 +121,7 @@ export function RegistrationForm({
     setFileBusy(questionKey);
     setError(null);
     try {
-      await uploadMaterialMetadata(
+      const material = await uploadMaterialMetadata(
         detail.activity.id,
         detail.registration.id,
         crypto.randomUUID(),
@@ -131,7 +132,15 @@ export function RegistrationForm({
           byteLength: file.size,
         },
       );
-      setMessage("材料信息已登记");
+      // Metadata is only a staging row; the bytes must land before the slot
+      // becomes current. A failed content write leaves the old file untouched.
+      await uploadMaterialContent(
+        detail.activity.id,
+        material.id,
+        crypto.randomUUID(),
+        file,
+      );
+      setMessage("材料已上传");
       onChanged();
     } catch (caught) {
       setError(messageFor(caught));
