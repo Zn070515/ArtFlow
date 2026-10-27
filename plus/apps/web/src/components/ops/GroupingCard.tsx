@@ -191,7 +191,17 @@ export function GroupingCard(props: { readonly activityId: string }) {
     [];
 
   const assigned = groups.reduce((total, group) => total + group.participantIds.length, 0);
+  const noGroups = groups.length === 0;
   const hasEmptyGroup = groups.some((group) => group.participantIds.length === 0);
+  const groupCountMismatch =
+    stage?.groupCount !== null &&
+    stage?.groupCount !== undefined &&
+    groups.length !== stage.groupCount;
+  // A local draft is not saved yet; confirming or freezing now would act on
+  // the previous server-side grouping.
+  const dirty = draft !== null || editing;
+  const canSave = !noGroups && !hasEmptyGroup;
+  const canConfirm = !dirty && canSave && !groupCountMismatch;
   const error =
     create.error ??
     record.error ??
@@ -290,34 +300,47 @@ export function GroupingCard(props: { readonly activityId: string }) {
             <button
               type="button"
               className="button-primary"
-              disabled={record.isPending || hasEmptyGroup}
+              disabled={record.isPending || !canSave}
               onClick={() => record.mutate(groups)}
             >
               保存分组
             </button>
           ) : null}
-          {hasEmptyGroup ? (
+          {noGroups ? (
+            <p className="state-copy">先点「自动平均分组」或手动把选手分到组里。</p>
+          ) : hasEmptyGroup ? (
             <p className="state-copy">有小组还没有成员，先调整再保存。</p>
           ) : null}
           {stage.status === "draft" ? (
             <button
               type="button"
               className="button-primary"
-              disabled={confirm.isPending}
+              disabled={confirm.isPending || !canConfirm}
               onClick={() => confirm.mutate()}
             >
               确认分组
             </button>
           ) : null}
+          {stage.status === "draft" && dirty && canSave ? (
+            <p className="state-copy">先保存当前分组，再确认。</p>
+          ) : null}
+          {groupCountMismatch && stage.groupCount !== null ? (
+            <p className="state-copy">
+              规则要求 {stage.groupCount} 组，当前是 {groups.length} 组；请调整分组或修改赛制。
+            </p>
+          ) : null}
           {stage.status === "confirmed" ? (
             <button
               type="button"
               className="button-primary"
-              disabled={freeze.isPending}
+              disabled={freeze.isPending || dirty}
               onClick={() => freeze.mutate()}
             >
               冻结分组
             </button>
+          ) : null}
+          {stage.status === "confirmed" && dirty ? (
+            <p className="state-copy">先保存当前修正，再冻结。</p>
           ) : null}
           {stage.status === "frozen" ? <p className="state-copy">分组已冻结。</p> : null}
 
@@ -362,7 +385,12 @@ export function GroupingCard(props: { readonly activityId: string }) {
                   <button
                     type="button"
                     className="button-secondary"
-                    disabled={correct.isPending}
+                    disabled={
+                      correct.isPending ||
+                      !canSave ||
+                      groupCountMismatch ||
+                      reason.trim() === ""
+                    }
                     onClick={() => correct.mutate()}
                   >
                     保存修正
@@ -385,7 +413,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                 <button
                   type="button"
                   className="button-secondary"
-                  disabled={cancel.isPending}
+                  disabled={cancel.isPending || reason.trim() === ""}
                   onClick={() => cancel.mutate()}
                 >
                   取消赛段
