@@ -1,6 +1,6 @@
 # P0 安全基线还账计划
 
-状态：**第一、二项已完成，第三项进行中**（2026-10-28）
+状态：**第一、二、三项已完成**（2026-10-28）
 前置：`artflow-plus` 已建立干净 baseline；不安排真实活动或真实角色彩排。
 
 ## 目标
@@ -19,7 +19,7 @@
 | 读权限 | GET 路由启动期必须声明 `config.access` | API read-surface tests、route hook |
 | Public credential | claim/judge/ticket 过期、撤销、重放和 token redaction 已有多处服务测试 | participant/judge/ticket tests |
 | 上传 | raw body transport ceiling + capability/material policy | registration/material tests |
-| 限流 | 可替换 `RateLimiter`，默认 memory 实现有 sweep | proxy-boundary/rate-limit tests |
+| 限流 | 开发/E2E 使用 memory；生产由 `PostgresRateLimiter` 共享 bucket，缺配置启动 fail closed | proxy-boundary/rate-limit tests |
 | 审计 | command receipt、audit、fact、outbox 同事务 | runtime command tests |
 
 ## 逐项出口
@@ -50,15 +50,18 @@ API check 通过。
 
 ### 3. Upload / rate-limit / error surface
 
-- [ ] 验证 transport ceiling 与 capability policy 不冲突，失败替换不破坏旧 current；
+- [x] 验证 transport ceiling 与 capability policy 不冲突，失败替换不破坏旧 current；
 - [x] 明确 memory limiter 只能用于单进程开发/E2E；生产没有显式共享实现时在启动期
   fail closed，不允许静默降级；
 - [x] 统一 401/403/404/429/CSRF 错误的可见信息，避免通过错误差异泄漏资源存在性；
-- [ ] 检查敏感 header、cookie、credential、raw upload 不进入日志和 trace。
+- [x] 检查敏感 header、cookie、credential、raw upload 不进入日志和 trace。
 
-出口：安全错误矩阵、生产配置 fail-closed 和上传 redaction 回归通过。当前证据：
+出口：安全错误矩阵、生产配置 fail-closed 和上传 redaction 回归通过。证据：
 `proxy-boundary.test.ts` 覆盖 production limiter fail-closed、代理来源和状态类错误消息；
-API check 通过。上传/日志 redaction 仍未关闭，不能据此宣称 P0 安全项完成。
+`rate-limit.test.ts` 覆盖两条 PostgreSQL 连接的原子共享 bucket；`material-cutover.test.ts`
+覆盖失败替换保留旧 current、raw bytes 不进入 receipt/audit/outbox；API body-limit 错误保留
+413。`0021_rate_limit_buckets` 提供生产共享存储，`main.ts` 在 production wiring
+`PostgresRateLimiter`，API check、DB migration check 与 focused tests 通过。
 
 ## 执行纪律
 

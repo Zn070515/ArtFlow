@@ -332,8 +332,10 @@ GET   /api/public/results/:publicCode
 ```
 
 The public selector is anonymous and never returns fingerprints, hashes, actors,
-notes, or editorial fields. The in-memory public rate limiter is a single-process
-IP bucket; production multi-instance deployments need a shared limiter.
+notes, or editorial fields. Development/E2E uses a swept in-memory limiter;
+production `main.ts` wires `PostgresRateLimiter` to the shared
+`rate_limit_bucket` table. If production starts without an explicit shared
+limiter, the API fails closed.
 
 Every stage has at most one ACTIVE release (`result_release_active_key` partial
 unique index). Revoke and unlock make the old URL immediately invisible; unlock
