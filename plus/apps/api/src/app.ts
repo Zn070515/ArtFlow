@@ -43,6 +43,8 @@ import {
   UnarchiveActivityBodySchema,
   RegisterParticipantBodySchema,
   ParticipantClaimConsumeBodySchema,
+  ActivityAnalyticsParamsSchema,
+  ActivityAnalyticsResponseSchema,
 } from "@artflow-plus/contracts";
 import { checkReady, getCurrentRankingSnapshot, getLiveState, getOutboxRelayHealth, getRoundByKey, getVoteSession, revokeLocalSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
@@ -163,6 +165,8 @@ import {
   setGroupingMaterialWindow,
   consumeParticipantClaim,
   issueParticipantClaim,
+  getActivityAnalytics,
+  ACTIVITY_ANALYTICS_READ_PERMISSIONS,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -805,8 +809,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   // Every GET route must declare its read surface. The default is not "public":
   // an undeclared route fails at boot, so a new endpoint cannot quietly become
   // an anonymous internal read.
-  type ReadAccess = "public" | "session" | "operations" | "studio" | "voting" | "result" | "archive";
-  const READ_ACCESS_PERMISSIONS: Readonly<Record<"voting" | "result" | "archive", readonly string[]>> = {
+  type ReadAccess = "public" | "session" | "operations" | "analytics" | "studio" | "voting" | "result" | "archive";
+  const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "voting" | "result" | "archive", readonly string[]>> = {
+    analytics: ACTIVITY_ANALYTICS_READ_PERMISSIONS,
     voting: ["voting.manage", "result.manage"],
     result: ["result.manage"],
     archive: ["archive.manage"],
@@ -843,7 +848,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (route.url === "/api/realtime") return;
     const access = (route.config as { access?: ReadAccess } | undefined)?.access;
     if (access === undefined) {
-      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, studio, voting, result, archive).`);
+      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, analytics, studio, voting, result, archive).`);
     }
     const guard = async (request: FastifyRequest): Promise<void> => {
       await requireReadAccess(request, access);
@@ -1290,6 +1295,21 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
     return activity;
   });
+
+  app.get(
+    "/api/activities/:id/operations/analytics",
+    {
+      schema: {
+        params: ActivityAnalyticsParamsSchema,
+        response: { 200: ActivityAnalyticsResponseSchema },
+      },
+      config: { access: "analytics" },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return getActivityAnalytics(db, await requestDeps(request), id);
+    },
+  );
 
   app.get("/api/operations/outbox", { config: { access: "operations" } }, async () => {
     return getOutboxRelayHealth(db);

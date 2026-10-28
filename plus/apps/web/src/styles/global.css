@@ -460,6 +460,116 @@ input {
   letter-spacing: -0.02em;
 }
 
+.activity-analytics-card {
+  grid-column: 1 / -1;
+}
+
+.activity-analytics-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.analytics-readonly {
+  padding: 6px 10px;
+  border: 1px solid rgba(232, 180, 90, 0.3);
+  border-radius: 999px;
+  color: var(--gold);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.analytics-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 1.2rem;
+}
+
+.analytics-stat {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(245, 239, 230, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.analytics-stat span,
+.analytics-stat small {
+  display: block;
+  color: var(--bone-dim);
+  font-size: 0.72rem;
+}
+
+.analytics-stat strong {
+  display: block;
+  margin: 8px 0 4px;
+  color: var(--bone);
+  font-size: 1.55rem;
+  font-weight: 600;
+}
+
+.analytics-stat small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analytics-attention {
+  margin-top: 1.4rem;
+}
+
+.analytics-attention h3 {
+  margin: 0 0 8px;
+  color: var(--bone);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.analytics-attention ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.analytics-attention li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--gold);
+  background: rgba(232, 180, 90, 0.06);
+  color: var(--bone-dim);
+  font-size: 0.82rem;
+}
+
+.analytics-attention li strong {
+  color: var(--gold);
+}
+
+.analytics-clear {
+  margin: 0;
+  color: #9ee6b0;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 1000px) {
+  .analytics-stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .analytics-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

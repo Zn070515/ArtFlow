@@ -286,7 +286,7 @@ export async function insertVoteRecords(
  * names a ticket that has not been redeemed. Shared by the Kysely selector and
  * the raw tally query so the two can never disagree.
  */
-const validBallotPredicate = sql<SqlBool>`(ballot.identity_type <> 'ticket' or ticket.state = 'redeemed')`;
+export const validBallotPredicate = sql<SqlBool>`(ballot.identity_type <> 'ticket' or ticket.state = 'redeemed')`;
 
 /** The authoritative ballot selector used by closed-session tallies. */
 function validBallots(

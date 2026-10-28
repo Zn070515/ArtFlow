@@ -24,6 +24,7 @@ vi.mock("../api/ops.js", () => ({
   fetchOpsRegistrations: vi.fn(),
   fetchOpsRoster: vi.fn(),
 }));
+vi.mock("../api/analytics.js", () => ({ fetchActivityAnalytics: vi.fn() }));
 
 vi.mock("../auth/RequireSession.js", () => ({
   RequireSession: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
@@ -40,6 +41,7 @@ vi.mock("../components/ops/RegistrationTable.js", () => ({
 }));
 vi.mock("../components/ops/RosterCard.js", () => ({ RosterCard: () => <section>名单</section> }));
 vi.mock("../components/ops/VotingCard.js", () => ({ VotingCard: () => null }));
+vi.mock("../components/ops/ActivityAnalyticsCard.js", () => ({ ActivityAnalyticsCard: () => <section>运营分析</section> }));
 
 import { OpsActivityPage } from "./opsActivity.js";
 
@@ -67,6 +69,21 @@ describe("OpsActivityPage", () => {
       .mockReturnValueOnce({ data: [], error: null, isPending: false })
       .mockReturnValueOnce({
         data: { status: "unknown", revision: 1 },
+        error: null,
+        isPending: false,
+      })
+      .mockReturnValueOnce({
+        data: {
+          activity: { id: "activity-1", title: "春季现场", status: "draft", enabledCapabilities: [] },
+          registration: { total: 0, byStatus: {} },
+          materialChecks: { total: 0, byStatus: {}, requiredNotApproved: 0 },
+          roster: { status: "unknown", approvedCount: null, revision: 1 },
+          competition: { rounds: { total: 0, byState: {}, locked: 0 }, performances: { total: 0, byState: {}, locked: 0 }, scoreFacts: { total: 0, current: 0 } },
+          voting: { sessions: { total: 0, byStatus: {} }, validBallots: 0 },
+          publishing: { stageResults: { total: 0, byStatus: {}, stale: 0, confirmedWithoutActiveRelease: 0 }, resultReleases: { total: 0, byStatus: {} } },
+          archive: { totalPackages: 0, currentPackages: 0 },
+          attention: [],
+        },
         error: null,
         isPending: false,
       });
