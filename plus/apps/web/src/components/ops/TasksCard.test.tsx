@@ -4,14 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReadinessResponse, TaskListResponse, TaskResponse } from "@artflow-plus/contracts";
 
-const fetchOpsTasksMock = vi.hoisted(() => vi.fn());
-const fetchOpsReadinessMock = vi.hoisted(() => vi.fn());
-const mutateOpsTaskMock = vi.hoisted(() => vi.fn());
+const fetchTasksMock = vi.hoisted(() => vi.fn());
+const fetchReadinessMock = vi.hoisted(() => vi.fn());
+const mutateTaskMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../api/ops.js", () => ({
-  fetchOpsTasks: fetchOpsTasksMock,
-  fetchOpsReadiness: fetchOpsReadinessMock,
-  mutateOpsTask: mutateOpsTaskMock,
+vi.mock("../../api/tasks.js", () => ({
+  fetchTasks: fetchTasksMock,
+  fetchReadiness: fetchReadinessMock,
+  mutateTask: mutateTaskMock,
 }));
 
 import { TasksCard } from "./TasksCard.js";
@@ -59,8 +59,8 @@ const readiness: ReadinessResponse = {
 
 function renderCard(canManage: boolean, taskList = list, summary = readiness): void {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  fetchOpsTasksMock.mockResolvedValue(taskList);
-  fetchOpsReadinessMock.mockResolvedValue(summary);
+  fetchTasksMock.mockResolvedValue(taskList);
+  fetchReadinessMock.mockResolvedValue(summary);
   render(
     <QueryClientProvider client={queryClient}>
       <TasksCard activityId="activity-1" canManage={canManage} />
@@ -71,7 +71,7 @@ function renderCard(canManage: boolean, taskList = list, summary = readiness): v
 describe("TasksCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mutateOpsTaskMock.mockReset();
+    mutateTaskMock.mockReset();
   });
 
   it("renders task title, source, status, assignee, due time, and reasons", async () => {
@@ -110,7 +110,7 @@ describe("TasksCard", () => {
   });
 
   it("keeps the task context and explains a stale mutation conflict", async () => {
-    mutateOpsTaskMock.mockRejectedValueOnce(new Error("任务已被其他操作员更新") );
+    mutateTaskMock.mockRejectedValueOnce(new Error("任务已被其他操作员更新") );
     const pendingTask = { ...task, status: "pending" as const, dueAt: null, blockedReason: null };
     renderCard(true, { ...list, tasks: [pendingTask] }, { ...readiness, summary: { ...readiness.summary, open: 1, blocked: 0, overdue: 0 } });
 

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ApiError } from "../../api/client.js";
-import { fetchOpsReadiness, fetchOpsTasks, mutateOpsTask } from "../../api/ops.js";
+import { fetchReadiness, fetchTasks, mutateTask } from "../../api/tasks.js";
 
 function taskStatusLabel(status: TaskResponse["status"]): string {
   return {
@@ -37,12 +37,12 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
   const [dueAt, setDueAt] = useState("");
   const tasksQuery = useQuery({
     queryKey: ["ops-tasks", activityId],
-    queryFn: () => fetchOpsTasks(activityId),
+    queryFn: () => fetchTasks(activityId),
     retry: false,
   });
   const readinessQuery = useQuery({
     queryKey: ["ops-readiness", activityId],
-    queryFn: () => fetchOpsReadiness(activityId),
+    queryFn: () => fetchReadiness(activityId),
     retry: false,
   });
   const mutation = useMutation({
@@ -52,7 +52,7 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
         : action === "block" || action === "complete" || action === "reopen"
           ? { reason: reason.trim() }
           : {};
-      return mutateOpsTask(activityId, task.id, action, task.revision, command);
+      return mutateTask(activityId, task.id, action, { expectedRevision: task.revision, ...command });
     },
     onSuccess: () => {
       setReason("");
