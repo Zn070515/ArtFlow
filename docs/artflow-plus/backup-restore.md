@@ -28,7 +28,9 @@ docker compose -f deploy/compose.production.yml --env-file .env.production --pro
 bash scripts/backup_plus.sh backups/artflow-plus
 ```
 
-也可以通过 `ARTFLOW_ENV_FILE`、`ARTFLOW_COMPOSE_PROJECT` 和 `ARTFLOW_COMPOSE_FILE` 指定部署环境。命令需要正在运行的 `plus-db` 和 `plus-api`；它从容器中读取 PostgreSQL 和两个 Plus 文件卷，输出一个新的目录：
+宿主机需要 Python 3.12+、Docker Compose 和 `sha256sum`。也可以通过
+`ARTFLOW_ENV_FILE`、`ARTFLOW_COMPOSE_PROJECT` 和 `ARTFLOW_COMPOSE_FILE` 指定部署环境。
+命令需要正在运行的 `plus-db` 和 `plus-api`；它从容器中读取 PostgreSQL 和两个 Plus 文件卷，输出一个新的目录：
 
 ```text
 backups/artflow-plus/<UTC时间>-<release-sha>/
@@ -38,7 +40,7 @@ backups/artflow-plus/<UTC时间>-<release-sha>/
 └── media.tar.gz
 ```
 
-`manifest.json` 绑定了 release SHA、数据库/API 镜像、源卷名、文件大小、普通文件数量和三个 SHA-256。数据库 dump 生成期间只会在源 `plus-db` 容器里留下一个临时文件，完成后由脚本删除；源数据库、归档卷和材料卷不会被重建或清空。
+`manifest.json` 绑定了 release SHA、数据库/API 镜像、源卷名、文件大小、普通文件数量和三个 SHA-256。备份期间脚本在数据库用户表上持有 `SHARE ROW EXCLUSIVE` 锁，允许 `pg_dump` 读取但会阻塞写入和正在获取行锁的业务事务，直到数据库 dump、两个文件卷和 manifest 全部完成；这避免数据库状态与文件卷跨时间点漂移。锁会话由脚本自己的受管管道持有，不使用 detached 容器进程或无限期 `pg_sleep`；成功和失败路径都会关闭并等待它释放锁。数据库 dump 生成期间只会在源 `plus-db` 容器里留下一个临时文件，完成后由脚本删除；源数据库、归档卷和材料卷不会被重建或清空。
 
 备份目录应按部署方的保存期限复制到独立存储。复制完成后保留 `manifest.json` 与三个文件的原始关系，不要只上传其中一个文件。
 
