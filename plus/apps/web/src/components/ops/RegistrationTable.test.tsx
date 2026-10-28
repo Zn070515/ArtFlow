@@ -16,8 +16,28 @@ describe("RegistrationTable", () => {
       <RegistrationTable
         activityId="activity-1"
         registrations={[
-          { id: "registration-1", participantId: "alice", status: "submitted", revision: 2, reviewNote: null },
-          { id: "registration-2", participantId: "bob", status: "approved", revision: 1, reviewNote: "已确认" },
+          {
+            id: "registration-1",
+            activityId: "activity-1",
+            participantId: "alice",
+            questionnaireVersion: "v1",
+            questionnaireHash: "hash-1",
+            status: "submitted",
+            answers: {},
+            revision: 2,
+            reviewNote: "",
+          },
+          {
+            id: "registration-2",
+            activityId: "activity-1",
+            participantId: "bob",
+            questionnaireVersion: "v1",
+            questionnaireHash: "hash-1",
+            status: "approved",
+            answers: {},
+            revision: 1,
+            reviewNote: "已确认",
+          },
         ]}
       />,
     );
