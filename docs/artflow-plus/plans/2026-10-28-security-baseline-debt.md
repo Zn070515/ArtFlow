@@ -1,6 +1,6 @@
 # P0 安全基线还账计划
 
-状态：**第一项已完成，第二项待实现**（2026-10-28）
+状态：**第一、二项已完成，第三项待实现**（2026-10-28）
 前置：`artflow-plus` 已建立干净 baseline；不安排真实活动或真实角色彩排。
 
 ## 目标
@@ -38,11 +38,15 @@ API check 通过。
 
 ### 2. Credential lifecycle
 
-- claim、judge entry、ticket、supplement 分别记录签发、消费、过期、撤销、重发和跨活动拒绝；
-- 对“解析成功后立即 rotate/revoke”的并发窗口做双连接测试；
-- 所有一次性原文只存在于成功响应或 URL fragment 的短暂边界，不进入数据库或日志。
+- [x] claim、judge entry、ticket、supplement 分别记录签发、消费、过期、撤销、重发和跨活动拒绝；
+- [x] 对“解析成功后立即 rotate/revoke”的并发窗口做双连接测试；
+- [x] 所有一次性原文只存在于成功响应或 URL fragment 的短暂边界，不进入数据库或日志。
 
-出口：每类 credential 都有生命周期矩阵和至少一条并发/重放回归。
+出口：每类 credential 都有生命周期矩阵和至少一条并发/重放回归。证据：
+`participant-claim-service.test.ts` 覆盖 claim 的过期、重发、重放和双消费者；
+`voting-ticket-service.test.ts` 覆盖 ticket/judge 的过期、撤销、重发、跨活动和双连接竞争；
+`material-cutover.test.ts` 覆盖 supplement 的 receipt 脱敏、重放和提交后撤销。补交能力 token
+已统一使用 `persistedBody` 脱敏，receipt/audit/event 只保留 digest 或业务标识。
 
 ### 3. Upload / rate-limit / error surface
 
