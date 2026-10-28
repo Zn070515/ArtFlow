@@ -1,6 +1,6 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M13.3 已完成**（2026-10-27）；生产 cutover 未执行。M13.3 补齐了
+状态：**M0–M14 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
 participant/material cutover：MaterialCheck 导入、补交 capability、原子上传、
 生产媒体卷与 Unicode 路径；production cutover 仍需以首个活动的真实 adoption
 彩排与 operational smoke 为准。产品与架构身份的
@@ -358,6 +358,17 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   activity acceptance journey 与 operational smoke。
 - 出口：`material-cutover.test.ts` 覆盖 legacy 伴奏下载、缺交歌词、补交 capability、
   失败替换保留旧 current、成功替换原子切换、审核、提交、重启后两文件可读。
+
+## M14 — Ticket-backed Voting（已完成，2026-10-28）
+
+- 票据场次的公开投票页支持 URL fragment 与手工 credential 输入；兑换后只保留 HttpOnly
+  ticket access session，原始 credential 不进入 ballot。
+- 公共读返回非敏感的 ticketReady，并按有效 ticket session 恢复 voted 状态；无效、过期、
+  撤销与跨活动 cookie fail closed。
+- ticket ballot 继续复用既有锁内 submitBallot、ticket 状态和唯一约束；browser/anonymous
+  投票路径保持兼容。
+- 出口：API 公共读回归、Web API 测试、票据 fragment 与手工输入 E2E、browser 投票
+  回归、Plus 类型与测试门禁通过；真实彩排留给 cutover runbook。
 
 ## Definition of Done（每个 slice）
 

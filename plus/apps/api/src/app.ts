@@ -72,6 +72,7 @@ import {
   createActivity,
   defaultRuntimeDeps,
   getActivity,
+  authenticateTicketSession,
   getExecutionState,
   listEvents,
   listExecutions,
@@ -1064,10 +1065,24 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     async (request, reply) => {
       const { sessionId } = request.params as { sessionId: string };
       await requirePublicRateLimit(request, `public-vote:${sessionId}`, 120);
+      let ticketIdentity: { readonly activityId: string; readonly ticketId: string } | undefined;
+      const ticketSessionToken = cookieValue(request, "artflow_ticket_session");
+      if (ticketSessionToken !== undefined) {
+        try {
+          ticketIdentity = await authenticateTicketSession(
+            db,
+            ticketSessionToken,
+            new Date(deps.now()),
+          );
+        } catch {
+          ticketIdentity = undefined;
+        }
+      }
       const session = await readPublicVoteSession(
         db,
         sessionId,
         cookieValue(request, "artflow_browser_id"),
+        ticketIdentity,
       );
       if (session === null) throw new DomainError("NOT_FOUND", "Voting session not found.");
       reply.header("cache-control", "no-store");

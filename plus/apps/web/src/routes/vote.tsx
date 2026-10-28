@@ -1,10 +1,22 @@
 import type { PublicVoteSession } from "@artflow-plus/contracts";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { useState } from "react";
+import { useEffect } from "react";
 
 import { ApiError } from "../api/client.js";
-import { ensureBrowserIdentity, fetchPublicVote, submitVote } from "../api/vote.js";
+import { ensureBrowserIdentity, fetchPublicVote, redeemTicket, submitVote } from "../api/vote.js";
+
+function readTicketCredential(): string {
+  if (typeof window === "undefined") return "";
+  const value = new URLSearchParams(window.location.hash.slice(1)).get("ticket");
+  return value?.trim() ?? "";
+}
+
+function clearTicketCredential(): void {
+  if (typeof window === "undefined" || window.location.hash === "") return;
+  window.history.replaceState(window.history.state, document.title, window.location.pathname + window.location.search);
+}
 
 async function loadSession(sessionId: string): Promise<PublicVoteSession> {
   const first = await fetchPublicVote(sessionId);
@@ -25,13 +37,20 @@ function errorMessage(error: unknown): string {
   if (code === "TOO_MANY_SELECTIONS") return "选择的候选超过上限。";
   if (code === "BALLOT_IDENTITY_INVALID") return "当前设备无法投票，请刷新后重试。";
   if (code === "ACTIVITY_NOT_ACTIVE") return "活动已结束。";
+  if (code === "INVALID_TICKET" || code === "TICKET_REPLAYED" || code === "TICKET_SESSION_REVOKED" || code === "TICKET_SESSION_EXPIRED") {
+    return "票据无效或已使用，请联系工作人员。";
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
 export function VotePage() {
   const { sessionId } = useParams({ from: "/vote/$sessionId" });
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [justVoted, setJustVoted] = useState(false);
+  const [ticketCredential, setTicketCredential] = useState(readTicketCredential);
+  const [fragmentCredential] = useState(readTicketCredential);
+  const [autoRedeemStarted, setAutoRedeemStarted] = useState(false);
 
   const query = useQuery({
     queryKey: ["public-vote", sessionId],
@@ -40,6 +59,26 @@ export function VotePage() {
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
+  const redeem = useMutation({
+    mutationFn: (credential: string) => redeemTicket(credential),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["public-vote", sessionId] });
+    },
+  });
+  useEffect(() => {
+    const session = query.data;
+    const credential = fragmentCredential.trim();
+    if (
+      session?.identityPolicy !== "ticket" ||
+      session.ticketReady ||
+      autoRedeemStarted ||
+      credential === ""
+    ) return;
+    setAutoRedeemStarted(true);
+    setTicketCredential("");
+    clearTicketCredential();
+    redeem.mutate(credential);
+  }, [autoRedeemStarted, fragmentCredential, query.data, redeem]);
   const submit = useMutation({
     mutationFn: () => {
       const session = query.data;
@@ -48,7 +87,11 @@ export function VotePage() {
         session.activityId,
         sessionId,
         selected,
-        session.identityPolicy === "anonymous" ? "anonymous" : "browser",
+        session.identityPolicy === "anonymous"
+          ? "anonymous"
+          : session.identityPolicy === "ticket"
+            ? "ticket"
+            : "browser",
       );
     },
     onSuccess: () => setJustVoted(true),
@@ -93,8 +136,33 @@ export function VotePage() {
             <p className="state-copy">投票成功，谢谢参与。</p>
           ) : session.status === "closed" ? (
             <p className="state-copy">投票已结束。</p>
-          ) : session.identityPolicy === "ticket" ? (
-            <p className="state-copy">本场需要现场票据，请联系工作人员。</p>
+          ) : session.identityPolicy === "ticket" && !session.ticketReady ? (
+            <>
+              <p className="state-copy">本场需要现场票据，请先验证票据。</p>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const credential = ticketCredential.trim();
+                  if (credential === "" || redeem.isPending) return;
+                  setTicketCredential("");
+                  clearTicketCredential();
+                  redeem.mutate(credential);
+                }}
+              >
+                <label>
+                  票据凭证
+                  <input
+                    aria-label="票据凭证"
+                    value={ticketCredential}
+                    onChange={(event) => setTicketCredential(event.target.value)}
+                    autoComplete="off"
+                  />
+                </label>
+                <button type="submit" className="button-primary" disabled={ticketCredential.trim() === "" || redeem.isPending}>
+                  {redeem.isPending ? "验证中…" : "验证票据"}
+                </button>
+              </form>
+            </>
           ) : voted ? (
             <p className="state-copy">你已经投过票了。</p>
           ) : (
@@ -129,8 +197,8 @@ export function VotePage() {
               </button>
             </>
           )}
-          {submit.error === null || submit.error === undefined ? null : (
-            <p className="form-error" role="alert">{errorMessage(submit.error)}</p>
+          {submit.error === null && redeem.error === null ? null : (
+            <p className="form-error" role="alert">{errorMessage(submit.error ?? redeem.error)}</p>
           )}
         </section>
       ) : null}

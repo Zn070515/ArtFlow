@@ -127,6 +127,7 @@ export const PublicVoteSessionSchema = Type.Object(
       ),
     ),
     voted: Type.Boolean(),
+    ticketReady: Type.Boolean(),
   },
   { additionalProperties: false },
 );

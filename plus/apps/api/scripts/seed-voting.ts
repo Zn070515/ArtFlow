@@ -29,7 +29,9 @@ async function seedActivity(
   activityId: string,
   publicCode: string,
   title: string,
+  identityPolicy: "browser" | "ticket" = "browser",
 ): Promise<void> {
+  const usesTicketing = identityPolicy === "ticket";
   // Reset only what this seed owns; the activity and its release are reused.
   await db.deleteFrom("result_release").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("result_publication").where("activity_id", "=", activityId).execute();
@@ -39,7 +41,9 @@ async function seedActivity(
   await db.deleteFrom("outbox").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("execution_projection").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("vote_record").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("ticket_access_session").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("ballot").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("ticket").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("vote_option").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("vote_session").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("execution_session").where("activity_id", "=", activityId).execute();
@@ -51,13 +55,17 @@ async function seedActivity(
       title,
       status: "active",
       revision: 1,
-      enabled_capabilities: JSON.stringify(["voting", "publishing"]),
+      enabled_capabilities: JSON.stringify(usesTicketing ? ["voting", "publishing", "ticketing"] : ["voting", "publishing"]),
       active_definition_version: 1,
     }).execute();
   } else {
     // Re-seeding refreshes the frozen release so a schema kept from an older
     // run cannot keep serving an outdated execution policy.
     await db.deleteFrom("definition_release").where("activity_id", "=", activityId).execute();
+    await db.updateTable("activity")
+      .set({ enabled_capabilities: JSON.stringify(usesTicketing ? ["voting", "publishing", "ticketing"] : ["voting", "publishing"]) })
+      .where("id", "=", activityId)
+      .execute();
   }
 
   await insertRelease(db, {
@@ -65,6 +73,14 @@ async function seedActivity(
     version: 1,
     contentHash: `${publicCode}-release`,
     capabilities: {
+      ...(usesTicketing ? {
+        ticketing: {
+          ok: true,
+          capabilityKey: "ticketing",
+          contentHash: publicCode + "-ticketing",
+          artifact: { schemaVersion: 1 },
+        },
+      } : {}),
       voting: {
         ok: true,
         capabilityKey: "voting",
@@ -75,7 +91,7 @@ async function seedActivity(
           purpose: "popularity",
           selectionType: "single",
           maxSelections: 1,
-          identityPolicy: "browser",
+          identityPolicy,
           scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
         },
       },
@@ -107,7 +123,9 @@ async function seedActivity(
         "publishing.vote_result.confirm": ["publishing"],
       },
     },
-    capabilityVersions: { voting: "1", publishing: "1" },
+    capabilityVersions: usesTicketing
+      ? { voting: "1", publishing: "1", ticketing: "1" }
+      : { voting: "1", publishing: "1" },
     bindings: [],
     releasedAt: "2026-10-27T09:00:00Z",
     sourceDraftRevision: 1,
@@ -116,6 +134,7 @@ async function seedActivity(
 
 await seedActivity("act_e2e_voting", "E2E-VOTING", "E2E 投票");
 await seedActivity("act_e2e_vote_page", "E2E-VOTE-PAGE", "E2E 投票页");
+await seedActivity("act_e2e_ticket_vote_page", "E2E-TICKET-VOTE", "E2E 票据投票页", "ticket");
 
 await closeDb(db);
-console.log("Seeded voting activities act_e2e_voting and act_e2e_vote_page.");
+console.log("Seeded voting activities act_e2e_voting, act_e2e_vote_page, and act_e2e_ticket_vote_page.");

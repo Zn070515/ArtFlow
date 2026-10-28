@@ -48,7 +48,7 @@ async function seed(options: {
     title: "人气投票",
     status: "active",
     revision: 1,
-    enabled_capabilities: JSON.stringify(["voting"]),
+    enabled_capabilities: JSON.stringify(identityPolicy === "ticket" ? ["voting", "ticketing"] : ["voting"]),
     active_definition_version: 1,
   }).execute();
   await insertRelease(db, {
@@ -209,6 +209,68 @@ describe.skipIf(!connectionString)("public vote session", () => {
       url: `/api/public/vote/${ticket.sessionId}`,
     });
     expect(ticketRead.json()).toMatchObject({ identityPolicy: "ticket" });
+  });
+
+  it("recognizes a valid ticket access session without exposing credential data", async () => {
+    const { activityId, sessionId } = await seed({ identityPolicy: "ticket" });
+    const ticketId = "ticket-" + randomUUID();
+    const accessToken = "AF1.S." + randomUUID();
+    await db.insertInto("ticket").values({
+      id: ticketId,
+      activity_id: activityId,
+      public_code: "T-" + ticketId.slice(-8),
+      credential_digest: stableHash("credential-" + ticketId),
+      credential_version: 1,
+      state: "redeemed",
+      issued_at: "2026-10-27T09:00:00Z",
+      redeemed_at: "2026-10-27T09:05:00Z",
+      revoked_at: null,
+    }).execute();
+    await db.insertInto("ticket_access_session").values({
+      id: "ticket-session-" + ticketId,
+      activity_id: activityId,
+      ticket_id: ticketId,
+      token_digest: stableHash(accessToken),
+      expires_at: "2026-10-29T09:00:00Z",
+      last_seen_at: null,
+      revoked_at: null,
+    }).execute();
+
+    const ready = await app.inject({
+      method: "GET",
+      url: "/api/public/vote/" + sessionId,
+      headers: { cookie: "artflow_ticket_session=" + accessToken },
+    });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toMatchObject({
+      identityPolicy: "ticket",
+      ticketReady: true,
+      voted: false,
+    });
+    expect(JSON.stringify(ready.json())).not.toMatch(/ticketId|credential|accessToken|counts/);
+
+    await db.insertInto("ballot").values({
+      id: "ballot-" + ticketId,
+      activity_id: activityId,
+      session_id: sessionId,
+      identity_type: "ticket",
+      identity_digest: null,
+      ticket_id: ticketId,
+      submitted_at: "2026-10-27T09:10:00Z",
+    }).execute();
+    const voted = await app.inject({
+      method: "GET",
+      url: "/api/public/vote/" + sessionId,
+      headers: { cookie: "artflow_ticket_session=" + accessToken },
+    });
+    expect(voted.json()).toMatchObject({ ticketReady: true, voted: true });
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: "/api/public/vote/" + sessionId,
+      headers: { cookie: "artflow_ticket_session=not-a-session" },
+    });
+    expect(invalid.json()).toMatchObject({ ticketReady: false, voted: false });
   });
 
   it("hides rehearsal and draft sessions, and unknown ids", async () => {
