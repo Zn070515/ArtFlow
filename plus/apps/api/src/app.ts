@@ -42,6 +42,7 @@ import {
   RenameActivityBodySchema,
   UnarchiveActivityBodySchema,
   RegisterParticipantBodySchema,
+  ParticipantClaimConsumeBodySchema,
 } from "@artflow-plus/contracts";
 import { checkReady, getCurrentRankingSnapshot, getLiveState, getOutboxRelayHealth, getRoundByKey, getVoteSession, revokeLocalSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
@@ -160,6 +161,8 @@ import {
   getGroupingState,
   recordGroupingGroups,
   setGroupingMaterialWindow,
+  consumeParticipantClaim,
+  issueParticipantClaim,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -297,6 +300,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   ARCHIVE_VOTE_SESSION_OPEN: 409,
   ARCHIVE_INTEGRITY_FAILED: 409,
   ARCHIVE_NOT_FOUND: 404,
+  INVALID_PARTICIPANT_CLAIM: 400,
   RATE_LIMITED: 429,
 };
 
@@ -652,6 +656,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
     trustProxy: options.trustProxy ?? parseTrustedProxy(),
+    ajv: { customOptions: { removeAdditional: false } },
   });
   // Material bytes are uploaded as a raw body; keep the limit aligned with the
   // released materials policy and reject oversize bodies before the handler.
@@ -1091,6 +1096,42 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   );
 
   app.post(
+    "/api/public/participant-claims/consume",
+    { schema: { body: ParticipantClaimConsumeBodySchema }, config: { access: "public" } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "participant-claim-consume", 10);
+      const body = request.body as {
+        token: string;
+        username?: string;
+        password?: string;
+      };
+      const session = await requestSession(request);
+      const consumeDeps: RuntimeDeps = {
+        ...deps,
+        actor: session?.actor ?? SYSTEM_ACTOR,
+      };
+      const outcome = await consumeParticipantClaim(db, consumeDeps, {
+        commandId: requireIdempotency(request),
+        token: body.token,
+        ...(body.username === undefined ? {} : { username: body.username }),
+        ...(body.password === undefined ? {} : { password: body.password }),
+      });
+      const sessionToken = sessionTokenValue(outcome.body.sessionToken);
+      let csrfToken: string | undefined;
+      if (sessionToken !== undefined && !outcome.replayed) {
+        csrfToken = csrfTokenFor(sessionToken, sessionSecret);
+        setSessionCookies(reply, sessionToken, csrfToken);
+      }
+      reply.header("cache-control", "no-store");
+      return reply.status(outcome.status).send({
+        actor: publicActor(outcome.body.actor),
+        ...(csrfToken === undefined ? {} : { csrfToken }),
+        ...(outcome.body.expiresAt === undefined ? {} : { expiresAt: outcome.body.expiresAt }),
+      });
+    },
+  );
+
+  app.post(
     "/api/public/supplement/claim",
     { schema: { body: Type.Object({ token: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, config: { access: "public" } },
     async (request, reply) => {
@@ -1426,6 +1467,22 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         activityId: id,
         participantId: body.participantId ?? actor.actorId,
       });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/registrations/:registrationId/account-claim",
+    { schema: { params: RegistrationParams, body: Type.Object({}, { additionalProperties: false }) } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const outcome = await issueParticipantClaim(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+      });
+      reply.header("cache-control", "no-store");
       return reply.status(outcome.status).send(outcome.body);
     },
   );
@@ -2817,6 +2874,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   }
 
   app.setErrorHandler((error, request, reply) => {
+    const failure = error as {
+      validation?: unknown;
+      statusCode?: number;
+      message?: string;
+    };
+    if (
+      failure.validation !== undefined ||
+      (failure.statusCode !== undefined && failure.statusCode < 500)
+    ) {
+      return reply
+        .status(400)
+        .send(errorResponse("VALIDATION_FAILED", failure.message ?? "Invalid request."));
+    }
     const code = errorCode(error);
     if (code !== null) {
       const status = STATUS_BY_CODE[code] ?? 400;
@@ -2830,19 +2900,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             details,
           ),
         );
-    }
-    const failure = error as {
-      validation?: unknown;
-      statusCode?: number;
-      message?: string;
-    };
-    if (
-      failure.validation !== undefined ||
-      (failure.statusCode !== undefined && failure.statusCode < 500)
-    ) {
-      return reply
-        .status(400)
-        .send(errorResponse("VALIDATION_FAILED", failure.message ?? "Invalid request."));
     }
     request.log.error(error as Error);
     return reply
