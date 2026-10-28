@@ -106,7 +106,7 @@ function StudioNewContent() {
       </header>
       <div className="studio-grid">
         <section className="ops-card studio-main-column">
-          <h2>Guided Mode</h2>
+          <h2 className="console-card-title">Guided Mode</h2>
           <label className="field">
             <span>活动标题</span>
             <input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -154,7 +154,7 @@ function StudioNewContent() {
         </section>
         <section className="ops-card studio-rail">
           <p className="eyebrow">PREVIEW</p>
-          <h2>生成的组合</h2>
+          <h2 className="console-card-title">生成的组合</h2>
           {preview === null ? (
             <p className="state-copy">点击“预览定义”查看 enabled capabilities 与生成的 Package。</p>
           ) : (
