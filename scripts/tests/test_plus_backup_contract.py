@@ -21,6 +21,7 @@ def test_backup_covers_plus_database_archive_and_media() -> None:
     assert 'docker_host_path "$backup_set/archives.tar.gz"' in script
     assert "--profile plus" in script
     assert "plus-db" in script and "plus-api" in script
+    assert "plus-worker" in script and "plus-web" in script
     assert "pg_dump" in script
     assert "plus_archive_data" in script
     assert "plus_media_data" in script
@@ -38,6 +39,11 @@ def test_backup_covers_plus_database_archive_and_media() -> None:
     assert "docker exec -d" not in script
     assert "mkfifo" not in script
     assert "c.relkind IN ('r', 'p')" in script
+    assert "database_table_counts" in script
+    assert "database_image_id" in script
+    assert "api_image_id" in script
+    assert "worker_image_id" in script
+    assert "web_image_id" in script
     assert "sys.version_info >= (3, 12)" in script
 
 
@@ -62,6 +68,16 @@ def test_restore_isolated_and_never_resets_source() -> None:
     assert 'filter="data"' in script
     assert "NODE_ENV=production" in script
     assert "APP_ENV=production" in script
+    assert "restore_worker_container" in script
+    assert "restore_web_container" in script
+    assert "database_table_counts" in script
+    assert "database_image_id" in script
+    assert "worker_image_id" in script
+    assert "web_image_id" in script
+    assert 'docker network create --internal "$restore_network"' in script
+    assert '"$manifest_api_image_id" main.cjs' in script
+    assert '"$manifest_worker_image_id" main.cjs' in script
+    assert '"$manifest_web_image_id"' in script
     assert "docker compose down --volumes" not in script
     assert "docker volume rm" not in script
     assert "DROP DATABASE" not in script
@@ -99,3 +115,11 @@ def test_scripts_do_not_reset_source_compose_state() -> None:
         assert "docker compose down" not in script
         assert "docker volume rm" not in script
         assert "docker system prune" not in script
+
+
+def test_plus_entrypoints_validate_release_before_migration() -> None:
+    api = read("plus/apps/api/src/main.ts")
+    worker = read("plus/apps/worker/src/main.ts")
+
+    for entrypoint in (api, worker):
+        assert entrypoint.index("assertReleaseProvenance();") < entrypoint.index("migrate(db)")

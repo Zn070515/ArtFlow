@@ -147,8 +147,8 @@ pending/发布 head 落后而 FAIL，恢复 worker 后再确认 PASS。
 1. v1 → v2 → v1（在未写入阶段）；
 2. 断开 plus-api，确认 plus-web 重启后仍能解析上游；
 3. 用过期/错误 staff 密码跑 smoke，确认 FAIL 可读；
-4. 用 `scripts/restore_plus_verify.sh` 将一份完整 Plus 备份恢复到临时数据库和临时 API，
-   确认三块 Plus 数据、release 身份和 `/readyz` 都可用；v1 备份仍按其专用流程验证。
+4. 用 `scripts/restore_plus_verify.sh` 将一份完整 Plus 备份恢复到隔离的临时数据库、Worker、API 和 Web，
+   确认三块 Plus 数据、逐表行数、release 身份、Worker 启动日志、`/readyz` 和 Web `/healthz` 都可用；v1 备份仍按其专用流程验证。
 
 以上均为自动化或隔离环境检查，不创建正式活动数据、不邀请真实参与者，也不增加额外的
 现场前置步骤。

@@ -37,8 +37,8 @@
 状态：**fixed**
 
 - 位置：`deploy/compose.production.yml:290`
-- 现状：`plus` profile 只有 `plus-db`、`plus-api`、`plus-web`；没有 worker 服务，也没有
-  `ARTFLOW_PLUS_INLINE_RELAY=1`。
+- 修复后：`plus` profile 由 `plus-db`、`plus-api`、`plus-worker`、`plus-web` 组成；API
+  明确关闭 inline relay，独立 worker 运行 outbox relay。
 - 失败场景：切换 v2 后 outbox 不被消费：
   - `execution_projection` / `live_state` 不构建；
   - 投票实时 topic 的 `seq` 一直为 0，Ops 票数不更新；

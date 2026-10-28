@@ -30,7 +30,7 @@ bash scripts/backup_plus.sh backups/artflow-plus
 
 宿主机需要 Python 3.12+、Docker Compose 和 `sha256sum`。也可以通过
 `ARTFLOW_ENV_FILE`、`ARTFLOW_COMPOSE_PROJECT` 和 `ARTFLOW_COMPOSE_FILE` 指定部署环境。
-命令需要正在运行的 `plus-db` 和 `plus-api`；它从容器中读取 PostgreSQL 和两个 Plus 文件卷，输出一个新的目录：
+命令需要正在运行的 `plus-db`、`plus-api`、`plus-worker` 和 `plus-web`；它从容器中读取 PostgreSQL 和两个 Plus 文件卷，输出一个新的目录：
 
 ```text
 backups/artflow-plus/<UTC时间>-<release-sha>/
@@ -40,7 +40,7 @@ backups/artflow-plus/<UTC时间>-<release-sha>/
 └── media.tar.gz
 ```
 
-`manifest.json` 绑定了 release SHA、数据库/API 镜像、源卷名、文件大小、普通文件数量和三个 SHA-256。备份期间脚本在数据库用户表上持有 `SHARE ROW EXCLUSIVE` 锁，允许 `pg_dump` 读取但会阻塞写入和正在获取行锁的业务事务，直到数据库 dump、两个文件卷和 manifest 全部完成；这避免数据库状态与文件卷跨时间点漂移。锁会话由脚本自己的受管管道持有，不使用 detached 容器进程或无限期 `pg_sleep`；成功和失败路径都会关闭并等待它释放锁。数据库 dump 生成期间只会在源 `plus-db` 容器里留下一个临时文件，完成后由脚本删除；源数据库、归档卷和材料卷不会被重建或清空。
+`manifest.json` 绑定了 release SHA、数据库/API/Worker/Web 镜像引用及不可变 image ID、源卷名、文件大小、普通文件数量、数据库各表行数和三个 SHA-256。备份期间脚本在数据库用户表上持有 `SHARE ROW EXCLUSIVE` 锁，允许 `pg_dump` 读取但会阻塞写入和正在获取行锁的业务事务，直到数据库 dump、两个文件卷、表行数证据和 manifest 全部完成；这避免数据库状态与文件卷跨时间点漂移。锁会话由脚本自己的受管管道持有，不使用 detached 容器进程或无限期 `pg_sleep`；成功和失败路径都会关闭并等待它释放锁。数据库 dump 生成期间只会在源 `plus-db` 容器里留下一个临时文件，完成后由脚本删除；源数据库、归档卷和材料卷不会被重建或清空。
 
 备份目录应按部署方的保存期限复制到独立存储。复制完成后保留 `manifest.json` 与三个文件的原始关系，不要只上传其中一个文件。
 
@@ -56,10 +56,11 @@ bash scripts/restore_plus_verify.sh backups/artflow-plus/<UTC时间>-<release-sh
 
 1. 校验 schema、文件名、release/image 身份、大小和三个 SHA-256；
 2. 拒绝绝对路径、`..`、symlink、hardlink、设备文件等危险 tar member，再解包到临时目录；
-3. 在 Plus 内部 Docker network 上启动一次性的 PostgreSQL 容器，把 `database.dump` 恢复进去，并检查 `kysely_migration`；
-4. 用 manifest 中的同一个 API 镜像启动一次性的 API 容器，指向临时数据库和只读解包目录，等待 `/readyz`；
-5. 对照 manifest 验证归档和材料的普通文件数量；
-6. 删除本次创建的临时数据库/API 容器与临时目录。
+3. 创建独立的 internal Docker network，使用 manifest 中锁定的 image ID 启动一次性的 PostgreSQL 容器，把 `database.dump` 恢复进去，检查 `kysely_migration`，并逐表比对数据库行数；
+4. 在同一隔离 network 上用 manifest 中锁定的 Worker 镜像启动 outbox worker，等待其启动日志；
+5. 用 manifest 中锁定的 API 镜像启动一次性的 API 容器，指向临时数据库和只读解包目录，等待 `/readyz`；再用锁定的 Web 镜像通过 `plus-api` network alias 检查 `/healthz`；
+6. 对照 manifest 验证归档和材料的普通文件数量；
+7. 删除本次创建的临时 Web/API/Worker/数据库容器、internal network 与临时目录。
 
 恢复验证不会执行 `docker compose down --volumes`、`docker volume rm`、源库 reset 或源卷删除。源 Plus 服务和三块源卷在整个过程中保持原状。任何校验或 readiness 失败都应保留日志并修复镜像、备份或部署配置后重新验证，不要用删除源数据来“排障”。
 
