@@ -53,6 +53,29 @@ function deps(actor: ActorContext = SYSTEM_ACTOR): RuntimeDeps {
   };
 }
 
+async function openTestClient(): Promise<Client> {
+  const client = new Client({ connectionString });
+  await client.connect();
+  await client.query(`set search_path to "${schema}"`);
+  return client;
+}
+
+async function waitForBlockedActivityLocks(expected: number): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await admin.query<{ count: string }>(`
+      select count(*)::text as count
+        from pg_stat_activity
+       where wait_event_type = 'Lock'
+         and query ilike '%"activity"%'
+         and query ilike '%for update%'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${expected} activity row lock waiters.`);
+}
+
 async function seedRegistration(legacyParticipantId = `legacy-user:${randomUUID()}`): Promise<{
   readonly activityId: string;
   readonly registrationId: string;
@@ -414,5 +437,80 @@ describe.skipIf(!connectionString)("participant claim service on PostgreSQL", ()
       username: `replacement-${randomUUID().slice(0, 8)}`,
       password: "claim-password-123",
     })).resolves.toMatchObject({ replayed: false });
+  });
+
+  it("reissues after an old claim has an inconsistent activity binding", async () => {
+    const seeded = await seedRegistration();
+    const alternateActivityId = `act-claim-alternate-${randomUUID()}`;
+    await db.insertInto("activity").values({
+      id: alternateActivityId,
+      public_code: `CLAIM-${randomUUID().slice(0, 8)}`,
+      title: "Participant claim alternate activity",
+      status: "active",
+      revision: 1,
+      enabled_capabilities: JSON.stringify(["registration"]),
+      active_definition_version: 1,
+    }).execute();
+    const staleToken = `AF1.CLAIM.stale-${randomUUID()}`;
+    await insertParticipantClaim(db, {
+      id: `claim-stale-binding-${randomUUID()}`,
+      activityId: alternateActivityId,
+      registrationId: seeded.registrationId,
+      legacyParticipantId: seeded.legacyParticipantId,
+      tokenDigest: stableHash(staleToken),
+      expiresAt: "2026-11-10T00:00:00.000Z",
+      consumedAt: null,
+      consumedByActorId: null,
+      issuedBy: staff.actorId,
+    });
+
+    const issued = await issueClaim(seeded.activityId, seeded.registrationId);
+    expect(issued.token).toMatch(/^AF1\.CLAIM\./);
+    await expect(getParticipantClaimByDigestForUpdate(db, stableHash(staleToken)))
+      .resolves.toMatchObject({ revokedAt: expect.any(String) });
+  });
+
+  it("keeps reissue and consume on one activity-registration-claim lock order", async () => {
+    const seeded = await seedRegistration();
+    const first = await issueClaim(seeded.activityId, seeded.registrationId);
+    const blocker = await openTestClient();
+    const pending: Promise<unknown>[] = [];
+    try {
+      await blocker.query("begin");
+      await blocker.query(
+        `select id from "activity" where id = $1 for update`,
+        [seeded.activityId],
+      );
+
+      const issuePromise = issueParticipantClaim(db, deps(staff), {
+        commandId: `issue-lock-order-${randomUUID()}`,
+        activityId: seeded.activityId,
+        registrationId: seeded.registrationId,
+      });
+      pending.push(issuePromise);
+      await waitForBlockedActivityLocks(1);
+
+      const consumePromise = consumeParticipantClaim(db, deps(), {
+        commandId: `consume-lock-order-${randomUUID()}`,
+        token: first.token,
+        username: `lock-order-${randomUUID().slice(0, 8)}`,
+        password: "claim-password-123",
+      });
+      pending.push(consumePromise);
+      await waitForBlockedActivityLocks(2);
+
+      await blocker.query("rollback");
+      const results = await Promise.allSettled([issuePromise, consumePromise]);
+
+      expect(results[0]?.status).toBe("fulfilled");
+      expect(results[1]).toMatchObject({
+        status: "rejected",
+        reason: { code: "INVALID_PARTICIPANT_CLAIM" },
+      });
+    } finally {
+      await blocker.query("rollback").catch(() => undefined);
+      await Promise.allSettled(pending);
+      await blocker.end();
+    }
   });
 });

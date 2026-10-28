@@ -79,11 +79,13 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
          and indexname in (
            'participant_claim_token_digest_key',
            'participant_claim_registration_idx',
+           'participant_claim_active_registration_key',
            'participant_identity_link_actor_key'
          )
        order by indexname
     `.execute(db);
     expect(indexes.rows.map((row) => row.indexname)).toEqual([
+      "participant_claim_active_registration_key",
       "participant_claim_registration_idx",
       "participant_claim_token_digest_key",
       "participant_identity_link_actor_key",
@@ -157,6 +159,90 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
   it("is idempotent", async () => {
     const result = await migrate(db);
     expect(result.error).toBeUndefined();
+  });
+
+  it("normalizes duplicate active claims before enforcing the registration key", async () => {
+    await migrateTo(db, "0019_participant_account_claim");
+    const activityId = `claim-migration-activity-${randomUUID()}`;
+    const alternateActivityId = `claim-migration-alternate-activity-${randomUUID()}`;
+    const registrationId = `claim-migration-registration-${randomUUID()}`;
+    const legacyParticipantId = `legacy-user:${randomUUID()}`;
+    const firstClaimId = `claim-old-${randomUUID()}`;
+    const newestClaimId = `claim-new-${randomUUID()}`;
+    await db.insertInto("activity").values([
+      {
+        id: activityId,
+        title: "Participant claim migration",
+        status: "active",
+        revision: 1,
+        enabled_capabilities: JSON.stringify([]),
+        active_definition_version: 1,
+      },
+      {
+        id: alternateActivityId,
+        title: "Participant claim migration alternate",
+        status: "active",
+        revision: 1,
+        enabled_capabilities: JSON.stringify([]),
+        active_definition_version: 1,
+      },
+    ]).execute();
+    await db.insertInto("registration").values({
+      id: registrationId,
+      activity_id: activityId,
+      participant_id: legacyParticipantId,
+      questionnaire_version: "v1",
+      questionnaire_hash: "migration-claim-hash",
+      status: "submitted",
+      answers: JSON.stringify({}),
+      supplement_keys: JSON.stringify([]),
+      revision: 1,
+      review_note: "",
+      reviewed_by: null,
+      created_at: new Date("2026-10-01T00:00:00.000Z"),
+      updated_at: new Date("2026-10-01T00:00:00.000Z"),
+    }).execute();
+    await sql`
+      insert into participant_claim (
+        id, activity_id, registration_id, legacy_participant_id,
+        token_digest, expires_at, consumed_at, consumed_by_actor_id,
+        issued_by, created_at
+      ) values
+        (
+          ${firstClaimId}, ${activityId}, ${registrationId}, ${legacyParticipantId},
+          ${`digest-${randomUUID()}`}, '2026-11-10T00:00:00.000Z', null, null,
+          'staff-migration', '2026-10-01T00:00:00.000Z'
+        ),
+        (
+          ${newestClaimId}, ${alternateActivityId}, ${registrationId}, ${legacyParticipantId},
+          ${`digest-${randomUUID()}`}, '2026-11-10T00:00:00.000Z', null, null,
+          'staff-migration', '2026-10-02T00:00:00.000Z'
+        )
+    `.execute(db);
+
+    await migrateTo(db, "0020_participant_claim_reissue");
+
+    const claims = await sql<{ id: string; revoked_at: string | null }>`
+      select id, revoked_at
+        from participant_claim
+       where registration_id = ${registrationId}
+       order by created_at
+    `.execute(db);
+    expect(claims.rows).toHaveLength(2);
+    expect(claims.rows[0]).toMatchObject({ id: firstClaimId });
+    expect(claims.rows[0]?.revoked_at).not.toBeNull();
+    expect(claims.rows[1]).toMatchObject({ id: newestClaimId, revoked_at: null });
+
+    await expect(sql`
+      insert into participant_claim (
+        id, activity_id, registration_id, legacy_participant_id,
+        token_digest, expires_at, consumed_at, consumed_by_actor_id,
+        issued_by
+      ) values (
+        ${`claim-extra-${randomUUID()}`}, ${activityId}, ${registrationId}, ${legacyParticipantId},
+        ${`digest-${randomUUID()}`}, '2026-11-10T00:00:00.000Z', null, null, 'staff-migration'
+      )
+    `.execute(db)).rejects.toThrow();
   });
 
   it("allows only one running session per activity and scope", async () => {

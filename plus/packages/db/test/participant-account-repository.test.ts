@@ -150,6 +150,7 @@ describe.skipIf(!connectionString)("participant account repositories on PostgreS
       legacyParticipantId,
       tokenDigest: digest,
       expiresAt: "2026-11-01T00:00:00.000Z",
+      revokedAt: "2026-10-31T00:00:00.000Z",
       consumedAt: null,
       consumedByActorId: null,
       issuedBy: "staff:1",

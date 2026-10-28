@@ -16,9 +16,11 @@ the cutover audit trail.
 1. Staff with registration review/management permission may issue a one-time
    claim for an adopted `legacy-user:*` registration in an active activity.
    Issuing a replacement revokes any older unconsumed claim for the same
-   registration. The API stores only a digest, binds the claim to the exact
-   activity and registration, expires it, and consumes it under row/advisory
-   locks.
+   registration; the database migration normalizes legacy duplicates and a
+   partial unique index preserves that invariant. The API stores only a
+   digest, binds the claim to the exact activity and registration, expires it,
+   and consumes it under row/advisory locks with the Activity → registration →
+   claim lock order.
 2. The claim creates a new local participant account, or links an already
    authenticated participant session. Staff sessions and other non-participant
    sessions cannot consume it. Existing passwords are never migrated or

@@ -152,9 +152,7 @@ export async function issueParticipantClaim(
     }
     const issuedAt = deps.now();
     await revokeUnconsumedParticipantClaims(trx, {
-      activityId: input.activityId,
       registrationId: registration.id,
-      legacyParticipantId: registration.participantId,
       revokedAt: issuedAt,
     });
     const claimId = idFromCommand("participant-claim", input.commandId);
@@ -239,16 +237,28 @@ export async function consumeParticipantClaim(
     actor: commandActor,
     payload: commandPayload,
   }, async (trx) => {
-    const claim = await getParticipantClaimByDigestForUpdate(trx, tokenDigest);
-    if (claim === null) invalidClaim();
-    if (claim.revokedAt !== null || claim.consumedAt !== null || Date.parse(claim.expiresAt) <= Date.parse(deps.now())) invalidClaim();
-    if (!claim.legacyParticipantId.startsWith("legacy-user:")) invalidClaim();
-    const activity = await getActivityForUpdate(trx, claim.activityId);
+    // Match the issuer's Activity → registration → claim order. The first
+    // digest lookup above only routes the command; every authorization field is
+    // re-read after the rows are locked.
+    const activity = await getActivityForUpdate(trx, candidate.activityId);
     if (activity === null) invalidClaim();
-    const registration = await getRegistrationForUpdate(trx, claim.registrationId);
-    if (registration === null || registration.activityId !== claim.activityId || registration.participantId !== claim.legacyParticipantId) {
+    const registration = await getRegistrationForUpdate(trx, candidate.registrationId);
+    if (registration === null || registration.activityId !== candidate.activityId) {
       invalidClaim();
     }
+    const claim = await getParticipantClaimByDigestForUpdate(trx, tokenDigest);
+    if (
+      claim === null ||
+      claim.activityId !== candidate.activityId ||
+      claim.registrationId !== candidate.registrationId ||
+      claim.activityId !== activity.id ||
+      claim.registrationId !== registration.id ||
+      claim.legacyParticipantId !== registration.participantId
+    ) {
+      invalidClaim();
+    }
+    if (claim.revokedAt !== null || claim.consumedAt !== null || Date.parse(claim.expiresAt) <= Date.parse(deps.now())) invalidClaim();
+    if (!claim.legacyParticipantId.startsWith("legacy-user:")) invalidClaim();
     const existingLegacyLink = await getParticipantIdentityLinkByLegacyForUpdate(trx, claim.legacyParticipantId);
     if (existingLegacyLink !== null) invalidClaim();
 
