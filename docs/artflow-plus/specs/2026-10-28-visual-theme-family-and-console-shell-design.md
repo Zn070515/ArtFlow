@@ -1,6 +1,6 @@
 # ArtFlow-Plus 视觉主题家族与 Console 壳设计
 
-状态：**Phase 4 implemented**（2026-10-28；Portal 收敛与主题扩展仍按路线推进）
+状态：**Phase 5 core implemented**（2026-10-28；后续主题 preset 仍按需求排期）
 范围：`plus/apps/web` 的主题 token、Portal / Console 壳、后续页面迁移和验收方式。
 
 相关文档：
@@ -199,7 +199,12 @@ Console 不挂 Aurora，不使用全屏 backdrop blur 或 30/90 级别的装饰�
 
 ### Phase 5：Portal 收敛与主题扩展
 
-- 清理 Portal 的硬编码颜色和未定义 class，保留 Afterglow 的品牌资产。
+- 清理 Portal 的颜色 fallback 和未定义 token，保留 Afterglow 的品牌资产；投票页使用静态
+  背景，报名、登录、Judge 和 claim 路由不加载装饰性场景。
+- 收紧 Console 的 Signal 边界：登录卡片不继承 Portal 毛玻璃，焦点、按钮、侧栏阴影和 QR
+  背景均从语义 token 取值，并用自动化对比度测试守住正文与控制项阈值。
+- 为 Ops / Studio / Live 活动表和 Ops 报名表提供稳定的搜索、状态筛选和空结果反馈；成功
+  状态提供 `aria-live`，移动侧栏支持 Escape 关闭和焦点恢复。
 - 基于实际场景决定是否加入 `daybreak`、`ember`、`quiet`。
 - 若确实存在用户需求，再增加设置层的 theme preference；不把主题选择暴露在执行关键动作的页面。
 
@@ -219,6 +224,8 @@ Console 不挂 Aurora，不使用全屏 backdrop blur 或 30/90 级别的装饰�
 为 `Signal`，本阶段不提供运行时主题切换器。Phase 1 已完成主题 token、双壳、Ops 页面；
 Phase 2 已完成 Studio 列表、新建页和活动工作区的主列 + sticky rail 迁移；Phase 3 已完成
 Live 主列 + sticky 操作栏与 Judge 720px 单列评分工作区迁移；Phase 4 已完成 Join / Registration
-的 Signal 两列表单工作区、整行文件槽，以及 Vote 的 Afterglow 双区布局与静态背景。以上页面
+的 Signal 两列表单工作区、整行文件槽，以及 Vote 的 Afterglow 双区布局与静态背景；Phase 5
+已完成路由场景边界、Signal token 收敛、Console 无障碍导航、表格操作区和反馈状态。以上页面
 迁移只改变布局、语义 class 和主题样式，未改变 authority、API、文件存储或 HTTP 完成路径。
-Portal 收敛仍按第 6 节继续推进。
+`daybreak`、`ember`、`quiet` 仍是后续可选 preset，只有出现真实的用户偏好或活动专题需求时
+才进入下一轮设计与实现。
