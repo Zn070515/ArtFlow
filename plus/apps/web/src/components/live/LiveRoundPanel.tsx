@@ -137,9 +137,9 @@ export function LiveRoundPanel({
     : liveDisplayRanks(live.ranking.rows, live.ranking.tieGroups);
 
   return (
-    <section className="ops-card" data-testid={`live-round-${config.key}`}>
+    <section className="ops-card live-round-card" data-testid={`live-round-${config.key}`}>
       <p className="eyebrow">ROUND · {config.key}</p>
-      <h2>
+      <h2 className="console-card-title">
         {config.key} · {round?.state ?? "未准备"}
       </h2>
       <p className="state-copy">

@@ -66,9 +66,9 @@ export function LiveSessionPanel({
   }
 
   return (
-    <section className="ops-card" data-testid="live-session-panel">
+    <section className="ops-card live-control-card" data-testid="live-session-panel">
       <p className="eyebrow">SESSION · 评分会话</p>
-      <h2>judging 会话</h2>
+      <h2 className="console-card-title">judging 会话</h2>
       {session === null ? (
         <div className="session-controls">
           <label className="field">
