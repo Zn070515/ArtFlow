@@ -1,6 +1,6 @@
 # M15.2 Tasks / Readiness 自建检查文档
 
-状态：设计阶段；M15.2 完成前必须逐项取得证据。
+状态：实现完成；逐项证据已在 2026-10-28 的 Docker PostgreSQL 与 Plus 验证中取得。
 范围：独立 `tasks` capability、task authority、readiness read model、Ops UI。
 明确排除：真实活动彩排、签到、排期、资源预约、班次和 incident。
 
@@ -10,20 +10,20 @@
 
 | ID | 自建责任 | 必须证明的事实 | 证据位置/命令 | 状态 |
 | --- | --- | --- | --- | --- |
-| `TASK-DEF-01` | 定义编译与 release 冻结 | 模板 key 唯一、source capability 已启用、编译结果 deterministic/deep-frozen；运行中不读当前 registry | `plus/packages/domain/test/tasks.test.ts`；`pnpm -C plus --filter @artflow-plus/domain test -- tasks.test.ts` | [ ] |
-| `TASK-AUTH-01` | capability authority 边界 | task 命令只写 `task_item`、receipt、audit、outbox，不直接修改报名/材料/比赛/投票/发布/归档事实 | `plus/packages/runtime/test/tasks-service.test.ts`；结构搜索与事务测试 | [ ] |
-| `TASK-DB-01` | schema 与类型同步 | `task_item` migration、`TaskItemRow`、repository DTO 同一变更；空库迁移可重复 | `plus/packages/db/test/tasks-repository.test.ts`；`pnpm -C plus --filter @artflow-plus/db check` | [ ] |
-| `TASK-DB-02` | 版本化同步幂等 | 同一 activity/release/template 只生成一行；重试不覆盖已有状态、负责人、截止时间或理由；不同 release 可产生新版本 | `tasks-repository.test.ts` 的 sync/unique cases；PostgreSQL `REQUIRE_DB=1` | [ ] |
-| `TASK-CONC-01` | OCC 与锁顺序 | mutation 按 Activity → task 加锁并锁后重读；旧 revision 返回 `STALE_REVISION` 且无副作用 | `tasks-service.test.ts` 的 stale/concurrency cases；双连接 PostgreSQL test（适用时） | [ ] |
-| `TASK-IDEM-01` | receipt 幂等与审计 | 相同 command id 重放原响应；payload 冲突被拒绝；receipt、audit、fact、outbox 同事务 | runtime/API command tests；`command_receipt`/`audit_entry`/outbox assertions | [ ] |
-| `TASK-STATE-01` | 显式状态机 | 只允许 spec 定义的 transition；block/complete/reopen reason 非空；非法 transition 不改变行 | `plus/packages/domain/test/tasks.test.ts` 与 runtime focused tests | [ ] |
-| `TASK-READ-01` | 自建读权限 | 每个 GET 明确声明 `config.access`；无任务读取权限返回 403；不存在 activity 返回 404 | `plus/apps/api/test/tasks.test.ts`；`pnpm -C plus --filter @artflow-plus/api test -- tasks.test.ts` | [ ] |
-| `TASK-READ-02` | 读模型最小暴露 | task/readiness 响应不含 source capability 私有答案、评审备注、token、storage key 或内部凭证 | API response assertions；TypeBox response schemas | [ ] |
-| `TASK-READY-01` | readiness 不成为第二 authority | readiness 只聚合 task rows；不会因源事实变化自动关闭任务，也不阻断源 capability command | runtime readiness tests；不变量审阅 | [ ] |
-| `TASK-UI-01` | Ops 操作面权限与冲突 | 无 `tasks.manage` 不显示 mutation controls；empty/blocked/overdue 可见；stale mutation 不静默覆盖用户状态 | `plus/apps/web/src/components/ops/TasksCard.test.tsx`、route test、Playwright smoke | [ ] |
-| `TASK-RT-01` | realtime 只做失效通知 | task mutation 通过 outbox 发 `tasks.changed`；feature code 不直接打开 socket；HTTP 可独立恢复 | outbox/realtime topic test；`GATE-REALTIME-CORE-01` | [ ] |
-| `TASK-MIG-01` | migration 与恢复安全 | migration 前进、重启、备份恢复保留 task rows；不执行 destructive reset 或 source volume 删除 | DB migration test；Plus backup/restore contract gates | [ ] |
-| `TASK-DOC-01` | 自建责任可追溯 | spec、roadmap、README、检查文档记录 authority、权限、非目标和验收证据 | `scripts/check_docs.ps1` 与文档审阅 | [ ] |
+| `TASK-DEF-01` | 定义编译与 release 冻结 | 模板 key 唯一、source capability 已启用、编译结果 deterministic/deep-frozen；四个现有 pack 默认不启用 tasks，显式启用时模板 source 全部有效；运行中不读当前 registry | `plus/packages/domain/test/tasks.test.ts`、`registry-packs.test.ts`；focused 27 passed；`pnpm -C plus --filter @artflow-plus/domain test -- tasks.test.ts registry-packs.test.ts` | [x] |
+| `TASK-AUTH-01` | capability authority 边界 | task 命令只写 `task_item`、receipt、audit、outbox，不直接修改报名/材料/比赛/投票/发布/归档事实 | `plus/packages/runtime/test/tasks-service.test.ts` 的 source-facts regression；runtime full 173 passed；`GATE-PLUS-BOUNDARY-01` | [x] |
+| `TASK-DB-01` | schema 与类型同步 | `task_item` migration、`TaskItemRow`、repository DTO 同一变更；空库迁移可重复 | `plus/packages/db/test/tasks-repository.test.ts` migration/index assertions；DB focused 5 passed、full 52 passed；DB check passed | [x] |
+| `TASK-DB-02` | 版本化同步幂等 | 同一 activity/release/template 只生成一行；重试不覆盖已有状态、负责人、截止时间或理由；不同 release 可产生新版本 | `tasks-repository.test.ts` sync/unique cases；Docker PostgreSQL + `REQUIRE_DB=1`；5 passed | [x] |
+| `TASK-CONC-01` | OCC 与锁顺序 | mutation 按 Activity → task 加锁并锁后重读；旧 revision 返回 `STALE_REVISION` 且无副作用 | `tasks-service.test.ts` stale revision/receipt assertions；focused 8 passed、full runtime 173 passed | [x] |
+| `TASK-IDEM-01` | receipt 幂等与审计 | 相同 command id 重放原响应；payload 冲突被拒绝；receipt、audit、fact、outbox 同事务 | `tasks-service.test.ts` replay/conflict and stale-no-side-effect cases；`apps/api/test/tasks.test.ts` idempotency case；API 9 focused / 102 full passed | [x] |
+| `TASK-STATE-01` | 显式状态机 | 只允许 spec 定义的 transition；block/complete/reopen reason 非空；非法 transition 不改变行 | `plus/packages/runtime/test/tasks-service.test.ts` transition/reason cases；8 focused passed | [x] |
+| `TASK-READ-01` | 自建读权限 | 每个 GET 明确声明 `config.access`；无任务读取权限返回 403；不存在 activity 返回 404 | `plus/apps/api/test/tasks.test.ts`、`read-surface.test.ts`；API focused 9 passed、full 102 passed | [x] |
+| `TASK-READ-02` | 读模型最小暴露 | task/readiness 响应不含 source capability 私有答案、评审备注、token、storage key 或内部凭证 | API response redaction assertions plus strict TypeBox response schemas；API full 102 passed | [x] |
+| `TASK-READY-01` | readiness 不成为第二 authority | readiness 只聚合 task rows；不会因源事实变化自动关闭任务，也不阻断源 capability command | `tasks-repository.test.ts` empty/source-redaction and `tasks-service.test.ts` source-facts/readiness cases；DB/runtime full passed | [x] |
+| `TASK-UI-01` | Ops 操作面权限与冲突 | 无 `tasks.manage` 不显示 mutation controls；empty/blocked/overdue 可见；stale mutation 不静默覆盖用户状态 | `TasksCard.test.tsx` 5 cases、`tasks.test.ts` 2 API client cases、route test；Web focused 9 / full 99 passed | [x] |
+| `TASK-RT-01` | realtime 只做失效通知 | task mutation 通过 outbox 发 `tasks.changed`；feature code 不直接打开 socket；HTTP 可独立恢复 | runtime outbox event assertions；`GATE-REALTIME-CORE-01`；Plus realtime full 15 passed | [x] |
+| `TASK-MIG-01` | migration 与恢复安全 | migration 前进、重启、备份恢复保留 task rows；不执行 destructive reset 或 source volume 删除 | `tasks-repository.test.ts` migration evidence；Plus backup/restore contract in gates (`test_plus_backup_contract.py`)；no source reset contract | [x] |
+| `TASK-DOC-01` | 自建责任可追溯 | spec、roadmap、README、检查文档记录 authority、权限、非目标和验收证据 | `scripts/check_docs.ps1`；`git diff --check`；本表与 roadmap/README 同步 | [x] |
 
 ## 固定执行命令
 
@@ -56,3 +56,12 @@ git diff --check
 3. 没有新增结构门禁 allowlist 例外；
 4. 没有真实活动彩排前置条件；
 5. `git status --short --branch` 干净，提交已推送到 `artflow-plus`。
+
+## 已取得的最终证据
+
+- focused：domain 27、DB 5、runtime 8、API 9、Web 9，均在 Docker PostgreSQL
+  (`REQUIRE_DB=1`) 下完成适用测试。
+- Plus full：domain 107、DB 52、runtime 173、realtime 15、contracts 12、worker 3、
+  Web 99、API 102；`pnpm -C plus run check`、`pnpm -C plus run build` 通过。
+- repository gates：`uv run pytest tests/gates -q` 与 `scripts/check_docs.ps1` 在文档提交后复跑；
+  未执行 Django 全量测试或真实活动彩排。

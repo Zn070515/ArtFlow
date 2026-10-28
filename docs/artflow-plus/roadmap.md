@@ -396,8 +396,26 @@ cutover 前置条件。
 - 出口：统计脚本单测、PostgreSQL 聚合/脱敏测试、runtime 权限测试、API 403/404 测试、
   Web 卡片测试、Plus 类型检查与全量 Plus 测试通过。
 
-后续按顺序实现 M15.2 Tasks/Checklist、M15.3 Check-in/Attendance、M15.4
-Schedule/Program Release、M15.5 Incident/Recovery/Feedback；不把真实活动彩排作为验收前置条件。
+## M15.2 — Tasks / Readiness（已完成，2026-10-28）
+
+- 新增可选、独立的 `tasks` capability：任务模板进入 Activity Definition Package，随
+  release definition version 冻结；现有四个 Pack 默认关闭，显式启用时只接受同一组合中
+  已启用的 source capability。
+- `task_item` 以 `(activity, definition version, template key)` 版本化保存任务事实；同步
+  幂等且不覆盖既有状态/负责人/截止时间/理由。任务命令沿用 receipt、Activity → task
+  锁、OCC、audit、outbox 事务链，只改变任务 authority，不写报名、材料、比赛、投票、
+  发布、归档或活动生命周期事实。
+- 新增 protected `tasks` read surface：任务列表与 readiness 只读聚合 task rows，不成为
+  第二 authority；新增 `tasks.sync/assign/start/block/complete/reopen` 命令及安全响应契约。
+- Ops 活动详情增加任务清单与准备度卡片；仅 `tasks.manage` 显示 mutation controls，空模板、
+  阻塞、逾期和 stale revision 均有明确 UI 行为。Realtime 只发失效通知，HTTP 仍是恢复权威。
+- 出口：domain/DB/runtime/API/Web focused 与 Plus full check/build/test、结构门禁、文档门禁
+  通过；没有真实活动彩排前置条件。详见
+  [`M15.2 自建检查`](checks/2026-10-28-tasks-readiness-checks.md) 与
+  [`M15.2 设计`](specs/2026-10-28-tasks-readiness-design.md)。
+
+后续按顺序实现 M15.3 Check-in/Attendance、M15.4 Schedule/Program Release、M15.5
+Incident/Recovery/Feedback；仍不把真实活动彩排作为验收前置条件。
 
 ## Definition of Done（每个 slice）
 
