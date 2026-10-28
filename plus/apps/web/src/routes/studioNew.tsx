@@ -83,7 +83,13 @@ function StudioNewContent() {
   }
 
   if (!allowed) {
-    return <p className="form-error" role="alert">当前账号缺少 studio.manage。</p>;
+    return (
+      <section className="console-state">
+        <p className="eyebrow">STUDIO</p>
+        <h1 className="console-page-title">没有 Studio 权限</h1>
+        <p className="state-copy">当前账号缺少 studio.manage。</p>
+      </section>
+    );
   }
   if (packsQuery.isPending) return <p className="auth-loading">正在加载 Pack…</p>;
   if (packsQuery.error !== null) {
@@ -92,14 +98,14 @@ function StudioNewContent() {
 
   return (
     <section className="studio-page">
-      <header className="studio-header">
+      <header className="studio-header console-page-header">
         <div>
           <p className="eyebrow">STUDIO · 新建</p>
-          <h1 className="display results-title">新建活动</h1>
+          <h1 className="console-page-title">新建活动</h1>
         </div>
       </header>
       <div className="studio-grid">
-        <section className="ops-card">
+        <section className="ops-card studio-main-column">
           <h2>Guided Mode</h2>
           <label className="field">
             <span>活动标题</span>
@@ -146,7 +152,7 @@ function StudioNewContent() {
             </button>
           </div>
         </section>
-        <section className="ops-card">
+        <section className="ops-card studio-rail">
           <p className="eyebrow">PREVIEW</p>
           <h2>生成的组合</h2>
           {preview === null ? (
