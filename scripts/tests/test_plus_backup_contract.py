@@ -68,6 +68,15 @@ def test_docs_describe_plus_media_and_isolated_restore() -> None:
     assert "真实活动彩排" not in cutover_runbook
 
 
+def test_active_plus_entry_docs_do_not_schedule_activity_rehearsal() -> None:
+    for relative_path in (
+        "docs/artflow-plus/README.md",
+        "docs/artflow-plus/roadmap.md",
+        "docs/artflow-plus/cutover-runbook.md",
+    ):
+        assert "真实活动" not in read(relative_path)
+
+
 def test_scripts_do_not_reset_source_compose_state() -> None:
     for relative_path in ("scripts/backup_plus.sh", "scripts/restore_plus_verify.sh"):
         script = read(relative_path)

@@ -2,8 +2,8 @@
 
 状态：**M0–M14.1 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
 participant/material cutover：MaterialCheck 导入、补交 capability、原子上传、
-生产媒体卷与 Unicode 路径；不再安排真实活动 adoption 彩排，production cutover 以干净
-baseline、自动化/隔离验收、operational smoke 与 owner acceptance 为准。产品与架构身份的
+生产媒体卷与 Unicode 路径；production cutover 以干净 baseline、自动化/隔离验收、
+operational smoke 与 owner acceptance 为准。产品与架构身份的
 权威是根目录 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）
 与证据。已完成里程碑的段落保留当时的实现描述，后续里程碑在其上覆盖。
 
@@ -369,7 +369,7 @@ cutover 前置条件。
 - ticket ballot 继续复用既有锁内 submitBallot、ticket 状态和唯一约束；browser/anonymous
   投票路径保持兼容。
 - 出口：API 公共读回归、Web API 测试、票据 fragment 与手工输入 E2E、browser 投票
-  回归、Plus 类型与测试门禁通过；不依赖真实活动彩排，cutover 使用自动化/隔离证据。
+  回归、Plus 类型与测试门禁通过；cutover 使用自动化/隔离证据。
 
 ## M14.1 — Participant Account Claim（已完成，2026-10-28）
 
