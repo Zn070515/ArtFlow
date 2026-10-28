@@ -24,6 +24,26 @@ describe("ticket voting client", () => {
     expect(JSON.parse(String(init.body))).toEqual({ credential: "AF1.T.PUBLIC.VERSION.SIGNATURE" });
   });
 
+  it("reuses the redemption idempotency key when the same credential is retried", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ ticketId: "ticket-1", accessToken: null }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = "AF1.T.PUBLIC.VERSION.SIGNATURE";
+
+    await redeemTicket(credential);
+    await redeemTicket(credential);
+
+    const firstInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const secondInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const firstKey = new Headers(firstInit.headers as HeadersInit).get("idempotency-key");
+    const secondKey = new Headers(secondInit.headers as HeadersInit).get("idempotency-key");
+    expect(firstKey).toBe(secondKey);
+    expect(firstKey).not.toContain(credential);
+  });
+
   it("submits ticket identity without putting the raw credential in the ballot body", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
