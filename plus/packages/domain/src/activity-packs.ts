@@ -4,6 +4,7 @@ import { createMaterialsDefinition } from "./capabilities/materials.js";
 import { createPublishingDefinition } from "./capabilities/publishing.js";
 import { createQuestionnaireDefinition } from "./capabilities/questionnaire.js";
 import { createVotingDefinition } from "./capabilities/voting.js";
+import { createTasksDefinition } from "./capabilities/tasks.js";
 import { deepFreeze } from "./model.js";
 import type { ActivityPack } from "./packs.js";
 
@@ -59,6 +60,12 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       capability: "archive",
       default: true,
     },
+    {
+      id: "tasks",
+      prompt: "是否需要运营任务清单？",
+      capability: "tasks",
+      default: false,
+    },
   ],
   definitions: {
     competition: createCompetitionDefinition(
@@ -95,6 +102,13 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
     ]),
     materials: createMaterialsDefinition(25 * 1024 * 1024, ["audio"]),
     grouping: createGroupingDefinition(5),
+    tasks: createTasksDefinition([
+      { key: "registration.review", title: "审核报名", sourceCapability: "registration", sourceKey: "review", required: true },
+      { key: "materials.audio", title: "确认音频材料", sourceCapability: "materials", sourceKey: "audio", required: true },
+      { key: "competition.roster", title: "确认参赛名单", sourceCapability: "competition", sourceKey: "roster", required: true },
+      { key: "publishing.result", title: "确认结果发布", sourceCapability: "publishing", sourceKey: "result", required: true },
+      { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
+    ]),
   },
 });
 
@@ -108,6 +122,12 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       id: "audience-voting",
       prompt: "是否需要观众投票？",
       capability: "voting",
+      default: false,
+    },
+    {
+      id: "tasks",
+      prompt: "是否需要运营任务清单？",
+      capability: "tasks",
       default: false,
     },
   ],
@@ -130,6 +150,11 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       },
     ]),
     materials: createMaterialsDefinition(100 * 1024 * 1024, ["video", "image", "document"]),
+    tasks: createTasksDefinition([
+      { key: "registration.review", title: "审核报名", sourceCapability: "registration", sourceKey: "review", required: true },
+      { key: "materials.work", title: "确认作品材料", sourceCapability: "materials", sourceKey: "work", required: true },
+      { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
+    ]),
   },
 });
 
@@ -161,6 +186,12 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
       id: "audience-voting",
       prompt: "是否需要观众投票？",
       capability: "voting",
+      default: false,
+    },
+    {
+      id: "tasks",
+      prompt: "是否需要运营任务清单？",
+      capability: "tasks",
       default: false,
     },
   ],
@@ -209,6 +240,13 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
       },
     ]),
     materials: createMaterialsDefinition(100 * 1024 * 1024, ["video", "image", "document"]),
+    tasks: createTasksDefinition([
+      { key: "registration.review", title: "审核报名", sourceCapability: "registration", sourceKey: "review", required: true },
+      { key: "materials.work", title: "确认作品材料", sourceCapability: "materials", sourceKey: "work", required: true },
+      { key: "competition.review", title: "完成评审", sourceCapability: "competition", sourceKey: "review", required: true },
+      { key: "publishing.result", title: "确认结果发布", sourceCapability: "publishing", sourceKey: "result", required: true },
+      { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
+    ]),
   },
 });
 
@@ -224,6 +262,12 @@ export const VOTE_POLL_PACK: ActivityPack = deepFreeze({
       capability: "archive",
       default: true,
     },
+    {
+      id: "tasks",
+      prompt: "是否需要运营任务清单？",
+      capability: "tasks",
+      default: false,
+    },
   ],
   definitions: {
     voting: createVotingDefinition({
@@ -234,5 +278,10 @@ export const VOTE_POLL_PACK: ActivityPack = deepFreeze({
       scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
     }),
     publishing: createPublishingDefinition([{ key: "vote_result", label: "投票结果" }]),
+    tasks: createTasksDefinition([
+      { key: "voting.ballots", title: "核对投票记录", sourceCapability: "voting", sourceKey: "ballots", required: true },
+      { key: "publishing.result", title: "确认投票结果发布", sourceCapability: "publishing", sourceKey: "vote_result", required: true },
+      { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
+    ]),
   },
 });
