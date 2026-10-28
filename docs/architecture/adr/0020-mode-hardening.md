@@ -27,9 +27,10 @@ score states, supersedes its panel, and returns the round to `prepared` so the
 formal run starts clean. It refuses when any formal fact exists. Judge entry
 seats are left claimed; the next panel activation recycles them by seat key.
 
-Registrations and materials are always formal data. Rehearsal or test entries
-belong to a separate test activity; the v1 `is_test_data` import policy is a
-separate cutover decision.
+Registrations and materials are always formal data. Test and rehearsal entries
+used for automated validation belong to isolated fixture activities; a real
+activity is never used as a rehearsal prerequisite. The v1 `is_test_data` import
+policy is a separate cutover decision.
 
 ## Alternatives rejected
 
@@ -44,8 +45,8 @@ separate cutover decision.
 
 ## Consequences
 
-- Rehearsals before the formal run can use the real activity; after formal
-  facts exist, staff must copy the activity.
+- Automated test/rehearsal modes remain available for isolated fixture
+  activities; they must not be used to rehearse a real activity.
 - `round.scoreVersion` remains shared; the guard and reset keep rehearsal data
   out of the formal version history in the supported flows.
 - Existing facts backfill to `formal`.

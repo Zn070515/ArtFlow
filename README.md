@@ -122,7 +122,7 @@ pnpm --filter @artflow-plus/web dev     # Vite 代理 /api 到 API
 | [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / realtime） |
 | [`docs/gates/`](docs/gates/README.md) | 结构/golden/架构门禁 |
 | [`docs/artflow-plus/specs/`](docs/artflow-plus/specs/) · [`plans/`](docs/artflow-plus/plans/) | 每个 slice 的设计与实现计划 |
-| [`docs/artflow-plus/cutover-runbook.md`](docs/artflow-plus/cutover-runbook.md) · [`rehearsal-runbook.md`](docs/artflow-plus/rehearsal-runbook.md) | 生产切换与现场彩排 |
+| [`docs/artflow-plus/cutover-runbook.md`](docs/artflow-plus/cutover-runbook.md) · [`shape-validation.md`](docs/artflow-plus/shape-validation.md) | 生产切换与自动化/隔离验收 |
 
 ### v2 部署与 cutover
 

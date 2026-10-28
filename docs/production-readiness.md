@@ -1,7 +1,7 @@
 # Production Readiness Evidence
 
 > 当前运行基线以 [`GOAL.md`](../GOAL.md)、代码中的 authority service 和本文件的
-> “发布门禁”/“Production Rehearsal Report”为准。下面的 M2-A、M2-B、M2-C、M2-D1
+> “发布门禁”/“Production Readiness Report”为准。下面的 M2-A、M2-B、M2-C、M2-D1
 > 段落是 **Historical Rehearsal Record**：它们保留当时的边界、证据和外部 HOLD，
 > 不代表当前 Judge、Ticket、Result 或登录流程仍处于旧的实验状态。当前实现已使用
 > recoverable ticket credential、HttpOnly Judge session、冻结规则集 authority、媒体
@@ -389,7 +389,8 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 ### 2026-09-07 本地技术彩排记录
 
 本次记录是工程技术彩排，仅作为历史证据；不再要求由真实 Admin / Staff /
-Participant / Judge / Audience 参加现场彩排来关闭当前 cutover。
+旧版门禁曾要求 Participant / Judge / Audience 参加现场彩排来关闭当前 cutover；该要求
+已被当前决策 supersede，不再执行。
 
 | 时间 | 参与者 | 场景 | 结论 | 录分到 READY 时间 | 实际恢复时间 | 已知风险 | Plan B |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -545,7 +546,7 @@ uv run python manage.py benchmark_ballot_burst --vote-session <pk> --clients 300
 - 本 harness 每客户端一个线程，比“3 个 sync worker”的 WSGI 部署更极端，因此上表是
   **服务层锁行为**的测量，不是生产吞吐预测。
 - 未覆盖：经 Caddy/Gunicorn 的 HTTP 与 worker 容量、2C4G 硬件、公网与现场网络、
-  多进程下的连接池上限。这些仍按部署前置 `HOLD` 处理，需要现场彩排的独立证据。
+  多进程下的连接池上限。这些仍按部署前置 `HOLD` 处理，需要部署方提供独立容量与边缘证据。
 
 ### 2026-10-05 媒体下载负载演练记录
 
@@ -612,6 +613,6 @@ bash scripts/build_release.sh release-artifacts
 `build_release.sh` 会以完整 Git SHA 构建并校验 OCI image revision；部署使用带该 SHA
 的预构建镜像、`ARTFLOW_RELEASE_SHA` 和生产 Compose manifest。RC 验证至少包括 Django
 check/migrations、全量 SQLite/pytest、PostgreSQL acceptance、client/e2e smoke、备份恢复
-演练和 13 人现场彩排。任何 blocker 修复都必须重新生成 RC SHA、重新执行受影响门禁并
-重新彩排；不得把彩排 SHA A 的结果带到生产 SHA B。
+演练和隔离的关键旅程验证。任何 blocker 修复都必须重新生成 RC SHA、重新执行受影响门禁并
+重新验证；不得把 SHA A 的结果带到生产 SHA B。
 

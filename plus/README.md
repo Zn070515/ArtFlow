@@ -300,11 +300,12 @@ new architecture.
 
 ## Next steps
 
-1. Cutover infrastructure is ready for rehearsal, but production cutover must be
-   driven by an `import:legacy --mode adoption --pack <id>` of the first current
-   activity followed by the operational smoke profile; it remains gated by that
-   rehearsal, activity-specific capability completeness, and the authority audit,
-   not by the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
+1. Cutover infrastructure is ready for automated and isolated acceptance, but
+   production cutover must be driven by an `import:legacy --mode adoption --pack
+   <id>` of the first current activity followed by the operational smoke profile;
+   it remains gated by clean-baseline evidence, activity-specific capability
+   completeness, and the authority audit, not by a real-activity rehearsal or
+   the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
 2. Close the remaining product gaps: a public program page for stage shows,
    bracket/composite scoring, XLSX export, on-site display, and multi-instance
    realtime broadcast.

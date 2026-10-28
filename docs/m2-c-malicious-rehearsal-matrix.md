@@ -1,8 +1,9 @@
-# M2-C 恶意彩排矩阵（Authority / 学校接入）
+# M2-C 恶意彩排矩阵（历史归档，已退役）
 
 > 这是一份**授权、隔离、限时**的防御性测试矩阵。默认目标是本机或专用验收环境，不得对学校网络、公共域名、第三方服务或未经授权的地址施压。
 >
-> 入口：[`production-rehearsal-runbook.md`](production-rehearsal-runbook.md)。本矩阵补充事件日 runbook 的 13 个基础场景，专门覆盖绕过 authority、协议边界、并发竞态、资源消耗、学校身份接入和恢复证据。
+> 本矩阵保留历史测试边界，不再作为真实活动或 production cutover 的前置；当前使用 Plus
+> 自动化关键旅程、隔离 smoke 和部署方 owner acceptance 覆盖相同风险。
 
 ## 1. 依据与测试边界
 
