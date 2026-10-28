@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 # Git Bash/MSYS rewrites Unix-looking Docker arguments as Windows host paths.
 # Container paths such as /tmp and /app must reach Docker unchanged.
@@ -21,7 +22,7 @@ docker_host_path() {
 python_bin=""
 for candidate in python3 python; do
     if command -v "$candidate" >/dev/null 2>&1 && \
-        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
         python_bin="$candidate"
         break
     fi
@@ -67,13 +68,75 @@ backup_set="$output_root/${created_at}-${git_sha}"
 mkdir -p -- "$backup_set"
 
 source_dump_path="/tmp/artflow-plus-backup-${created_at}-${RANDOM}.dump"
+barrier_log_path="$backup_set/.backup-lock.log"
+barrier_started=false
+barrier_exec_pid=""
+barrier_writer_fd=""
+
+acquire_write_barrier() {
+    coproc ARTFLOW_BACKUP_BARRIER {
+        docker exec -i "$db_container" sh -c \
+            'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+            > "$barrier_log_path" 2>&1
+    }
+    barrier_exec_pid="$ARTFLOW_BACKUP_BARRIER_PID"
+    barrier_started=true
+    barrier_writer_fd="${ARTFLOW_BACKUP_BARRIER[1]}"
+    cat <<'SQL' >&"$barrier_writer_fd"
+BEGIN;
+SELECT 'LOCK TABLE ' ||
+       string_agg(format('%I.%I', n.nspname, c.relname), ', ' ORDER BY n.nspname, c.relname) ||
+       ' IN SHARE ROW EXCLUSIVE MODE;'
+  FROM pg_class AS c
+  JOIN pg_namespace AS n ON n.oid = c.relnamespace
+ WHERE c.relkind IN ('r', 'p')
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND n.nspname NOT LIKE 'pg_toast%';
+\gexec
+SELECT 'ARTFLOW_PLUS_BACKUP_LOCKED';
+SQL
+
+    local deadline=$((SECONDS + 90))
+    while (( SECONDS < deadline )); do
+        if grep -Fq 'ARTFLOW_PLUS_BACKUP_LOCKED' "$barrier_log_path"; then
+            return 0
+        fi
+        if ! kill -0 "$barrier_exec_pid" >/dev/null 2>&1; then
+            cat "$barrier_log_path" >&2 || true
+            die 'Plus database write barrier stopped before acquiring its lock'
+        fi
+        sleep 1
+    done
+    cat "$barrier_log_path" >&2 || true
+    die 'Plus database write barrier did not acquire its lock within 90 seconds'
+}
+
+release_write_barrier() {
+    if [[ "$barrier_started" == true ]]; then
+        if [[ "$barrier_writer_fd" =~ ^[0-9]+$ ]]; then
+            eval "exec ${barrier_writer_fd}>&-" || true
+        fi
+        if [[ "$barrier_exec_pid" =~ ^[0-9]+$ ]]; then
+            for _ in {1..50}; do
+                kill -0 "$barrier_exec_pid" >/dev/null 2>&1 || break
+                sleep 0.1
+            done
+            kill "$barrier_exec_pid" >/dev/null 2>&1 || true
+            wait "$barrier_exec_pid" >/dev/null 2>&1 || true
+        fi
+    fi
+    rm -f -- "$barrier_log_path"
+}
+
 cleanup() {
+    release_write_barrier
     if [[ -n "${source_dump_path:-}" && -n "${db_container:-}" ]]; then
         docker exec "$db_container" rm -f "$source_dump_path" >/dev/null 2>&1 || true
     fi
 }
 trap cleanup EXIT
 
+acquire_write_barrier
 docker exec "$db_container" sh -c \
     'pg_dump --format=custom --no-owner --file="$1" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
     sh "$source_dump_path"

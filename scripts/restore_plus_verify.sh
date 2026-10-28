@@ -21,7 +21,7 @@ docker_host_path() {
 python_bin=""
 for candidate in python3 python; do
     if command -v "$candidate" >/dev/null 2>&1 && \
-        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
         python_bin="$candidate"
         break
     fi
@@ -272,8 +272,8 @@ docker exec "$restore_db_container" pg_restore --username postgres --exit-on-err
 
 docker run --rm --network "$network" --name "$restore_api_container" -d \
     --entrypoint node \
-    -e NODE_ENV=development \
-    -e APP_ENV=development \
+    -e NODE_ENV=production \
+    -e APP_ENV=production \
     -e HOST=0.0.0.0 \
     -e PORT=3000 \
     -e ARTFLOW_RELEASE_SHA="$manifest_git_sha" \
