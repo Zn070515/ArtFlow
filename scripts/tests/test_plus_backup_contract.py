@@ -13,6 +13,7 @@ def test_backup_covers_plus_database_archive_and_media() -> None:
     script = read("scripts/backup_plus.sh")
 
     assert script.startswith("#!/usr/bin/env bash\nset -Eeuo pipefail")
+    assert "umask 077" in script
     assert "MSYS_NO_PATHCONV" in script
     assert "docker_host_path" in script
     assert "cygpath" in script
@@ -28,12 +29,23 @@ def test_backup_covers_plus_database_archive_and_media() -> None:
     assert "archives_sha256" in script
     assert "media_sha256" in script
     assert "sha256sum" in script
+    assert "LOCK TABLE" in script
+    assert "IN SHARE ROW EXCLUSIVE MODE" in script
+    assert "ARTFLOW_PLUS_BACKUP_LOCKED" in script
+    assert "coproc ARTFLOW_BACKUP_BARRIER" in script
+    assert "barrier_exec_pid" in script
+    assert "pg_sleep" not in script
+    assert "docker exec -d" not in script
+    assert "mkfifo" not in script
+    assert "c.relkind IN ('r', 'p')" in script
+    assert "sys.version_info >= (3, 12)" in script
 
 
 def test_restore_isolated_and_never_resets_source() -> None:
     script = read("scripts/restore_plus_verify.sh")
 
     assert script.startswith("#!/usr/bin/env bash\nset -Eeuo pipefail")
+    assert "sys.version_info >= (3, 12)" in script
     assert "MSYS_NO_PATHCONV" in script
     assert "docker_host_path" in script
     assert "cygpath" in script
@@ -48,6 +60,8 @@ def test_restore_isolated_and_never_resets_source() -> None:
     assert "hardlink" in script
     assert "find_bin" in script
     assert 'filter="data"' in script
+    assert "NODE_ENV=production" in script
+    assert "APP_ENV=production" in script
     assert "docker compose down --volumes" not in script
     assert "docker volume rm" not in script
     assert "DROP DATABASE" not in script
@@ -66,6 +80,8 @@ def test_docs_describe_plus_media_and_isolated_restore() -> None:
 
     assert "真实活动彩排" not in backup_restore_doc
     assert "真实活动彩排" not in cutover_runbook
+    assert "会阻塞写入" in backup_restore_doc
+    assert "Python 3.12" in backup_restore_doc
 
 
 def test_active_plus_entry_docs_do_not_schedule_activity_rehearsal() -> None:
