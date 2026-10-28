@@ -384,7 +384,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                 editing ? (
                   <button
                     type="button"
-                     className="secondary-button"
+                    className="secondary-button"
                     disabled={
                       correct.isPending ||
                       !canSave ||
@@ -398,7 +398,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                 ) : (
                   <button
                     type="button"
-                     className="secondary-button"
+                    className="secondary-button"
                     onClick={() => {
                       setDraft(groups);
                       setEditing(true);
@@ -412,7 +412,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
               {stage.status === "draft" || stage.status === "confirmed" ? (
                 <button
                   type="button"
-                   className="secondary-button"
+                  className="secondary-button"
                   disabled={cancel.isPending || reason.trim() === ""}
                   onClick={() => cancel.mutate()}
                 >

@@ -1633,6 +1633,80 @@ a.primary-button {
   font-weight: 650;
 }
 
+.console-page .primary-button {
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  background: var(--color-accent);
+  color: var(--ink);
+  transition: background 160ms ease, border-color 160ms ease, filter 160ms ease;
+}
+
+.console-page .primary-button:hover {
+  filter: brightness(1.08);
+  transform: none;
+}
+
+.console-page .secondary-button {
+  border-color: var(--color-line-strong);
+  border-radius: 6px;
+  color: var(--color-accent-strong);
+}
+
+.console-page .secondary-button:hover {
+  background: var(--color-surface-hover);
+}
+
+.console-page .danger-button {
+  border-color: var(--color-danger);
+  border-radius: 6px;
+  color: var(--color-danger);
+}
+
+.console-page .danger-button:hover {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+
+.console-page .status-badge {
+  border-color: var(--color-line-strong);
+  color: var(--color-text-muted);
+}
+
+.console-page .status-draft {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.console-page .status-submitted {
+  border-color: var(--color-info);
+  color: var(--color-info);
+}
+
+.console-page .status-approved {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.console-page .status-need_supplement,
+.console-page .status-rejected {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.console-page .grouping-group,
+.console-page .voting-session {
+  border-color: var(--color-line);
+  background: var(--color-surface-raised);
+}
+
+.console-page .grouping-more summary {
+  color: var(--color-text-muted);
+}
+
+.console-page .voting-preview th,
+.console-page .voting-preview td {
+  border-bottom-color: var(--color-line);
+}
+
 .console-page .data-table {
   min-width: 640px;
   color: var(--color-text);
