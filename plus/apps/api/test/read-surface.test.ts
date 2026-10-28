@@ -43,6 +43,8 @@ const INTERNAL_READS = [
   "/api/activities/any/voting/sessions/any/scores",
   "/api/activities/any/voting/sessions/any/live",
   "/api/activities/any/studio",
+  "/api/activities/any/tasks",
+  "/api/activities/any/readiness",
   "/api/activities/any/publishing/state",
   "/api/activities/any/archive",
 ] as const;

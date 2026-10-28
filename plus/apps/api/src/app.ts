@@ -45,6 +45,15 @@ import {
   ParticipantClaimConsumeBodySchema,
   ActivityAnalyticsParamsSchema,
   ActivityAnalyticsResponseSchema,
+  AssignTaskBodySchema,
+  ReadinessResponseSchema,
+  TaskReasonBodySchema,
+  RevisionBodySchema as TaskRevisionBodySchema,
+  SyncTaskBodySchema,
+  TaskListResponseSchema,
+  TaskParamsSchema,
+  TaskResponseSchema,
+  TaskSyncResponseSchema,
 } from "@artflow-plus/contracts";
 import { checkReady, getCurrentRankingSnapshot, getLiveState, getOutboxRelayHealth, getRoundByKey, getVoteSession, revokeLocalSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
@@ -167,6 +176,14 @@ import {
   issueParticipantClaim,
   getActivityAnalytics,
   ACTIVITY_ANALYTICS_READ_PERMISSIONS,
+  assignTask,
+  blockTask,
+  completeTask,
+  listTasks,
+  readReadiness,
+  reopenTask,
+  startTask,
+  syncTasks,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -809,9 +826,24 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   // Every GET route must declare its read surface. The default is not "public":
   // an undeclared route fails at boot, so a new endpoint cannot quietly become
   // an anonymous internal read.
-  type ReadAccess = "public" | "session" | "operations" | "analytics" | "studio" | "voting" | "result" | "archive";
-  const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "voting" | "result" | "archive", readonly string[]>> = {
+  type ReadAccess = "public" | "session" | "operations" | "analytics" | "studio" | "tasks" | "voting" | "result" | "archive";
+  const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "tasks" | "voting" | "result" | "archive", readonly string[]>> = {
     analytics: ACTIVITY_ANALYTICS_READ_PERMISSIONS,
+    tasks: [
+      "tasks.manage",
+      "studio.manage",
+      "competition.manage",
+      "judge.manage",
+      "registration.manage",
+      "registration.review",
+      "materials.manage",
+      "materials.review",
+      "grouping.manage",
+      "voting.manage",
+      "result.manage",
+      "archive.manage",
+      "ticket.manage",
+    ],
     voting: ["voting.manage", "result.manage"],
     result: ["result.manage"],
     archive: ["archive.manage"],
@@ -848,7 +880,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (route.url === "/api/realtime") return;
     const access = (route.config as { access?: ReadAccess } | undefined)?.access;
     if (access === undefined) {
-      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, analytics, studio, voting, result, archive).`);
+      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, analytics, studio, tasks, voting, result, archive).`);
     }
     const guard = async (request: FastifyRequest): Promise<void> => {
       await requireReadAccess(request, access);
@@ -1310,6 +1342,136 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       return getActivityAnalytics(db, await requestDeps(request), id);
     },
   );
+
+  app.get(
+    "/api/activities/:id/tasks",
+    {
+      schema: { params: ActivityParams, response: { 200: TaskListResponseSchema } },
+      config: { access: "tasks" },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return listTasks(db, await requestDeps(request), id);
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/readiness",
+    {
+      schema: { params: ActivityParams, response: { 200: ReadinessResponseSchema } },
+      config: { access: "tasks" },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return readReadiness(db, await requestDeps(request), id);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/tasks/sync",
+    {
+      schema: {
+        params: ActivityParams,
+        body: SyncTaskBodySchema,
+        response: { 200: TaskSyncResponseSchema },
+      },
+      validatorCompiler: compileClosedTypeBoxSchema,
+    },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { definitionVersion: number };
+      const context = await requestDeps(request);
+      const outcome = await syncTasks(db, context, {
+        commandId,
+        activityId: id,
+        definitionVersion: body.definitionVersion,
+        actor: context.actor ?? SYSTEM_ACTOR,
+      });
+      return reply.status(200).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/tasks/:taskId/assign",
+    {
+      schema: { params: TaskParamsSchema, body: AssignTaskBodySchema, response: { 200: TaskResponseSchema } },
+      validatorCompiler: compileClosedTypeBoxSchema,
+    },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, taskId } = request.params as { id: string; taskId: string };
+      const body = request.body as {
+        expectedRevision: number;
+        assigneeActorId: string | null;
+        dueAt?: string | null;
+      };
+      const context = await requestDeps(request);
+      const outcome = await assignTask(db, context, {
+        commandId,
+        activityId: id,
+        taskId,
+        expectedRevision: body.expectedRevision,
+        assigneeActorId: body.assigneeActorId,
+        ...(body.dueAt === undefined ? {} : { dueAt: body.dueAt }),
+        actor: context.actor ?? SYSTEM_ACTOR,
+      });
+      return reply.status(200).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/tasks/:taskId/start",
+    {
+      schema: { params: TaskParamsSchema, body: TaskRevisionBodySchema, response: { 200: TaskResponseSchema } },
+      validatorCompiler: compileClosedTypeBoxSchema,
+    },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, taskId } = request.params as { id: string; taskId: string };
+      const body = request.body as { expectedRevision: number };
+      const context = await requestDeps(request);
+      const outcome = await startTask(db, context, {
+        commandId, activityId: id, taskId, expectedRevision: body.expectedRevision,
+        actor: context.actor ?? SYSTEM_ACTOR,
+      });
+      return reply.status(200).send(outcome.body);
+    },
+  );
+
+  for (const [action, bodySchema] of [
+    ["block", TaskReasonBodySchema],
+    ["complete", TaskReasonBodySchema],
+    ["reopen", TaskReasonBodySchema],
+  ] as const) {
+    app.post(
+      `/api/activities/:id/tasks/:taskId/${action}`,
+      {
+        schema: { params: TaskParamsSchema, body: bodySchema, response: { 200: TaskResponseSchema } },
+        validatorCompiler: compileClosedTypeBoxSchema,
+      },
+      async (request, reply) => {
+        const commandId = requireIdempotency(request);
+        const { id, taskId } = request.params as { id: string; taskId: string };
+        const body = request.body as { expectedRevision: number; reason: string };
+        const context = await requestDeps(request);
+        const input = {
+          commandId,
+          activityId: id,
+          taskId,
+          expectedRevision: body.expectedRevision,
+          reason: body.reason,
+          actor: context.actor ?? SYSTEM_ACTOR,
+        };
+        const outcome = action === "block"
+          ? await blockTask(db, context, input)
+          : action === "complete"
+            ? await completeTask(db, context, input)
+            : await reopenTask(db, context, input);
+        return reply.status(200).send(outcome.body);
+      },
+    );
+  }
 
   app.get("/api/operations/outbox", { config: { access: "operations" } }, async () => {
     return getOutboxRelayHealth(db);
