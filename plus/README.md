@@ -5,12 +5,20 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## Current state
 
-M0–M14.1 are complete. The workspace covers the full activity journey —
+M0–M15.1 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
 public vote page, and one protected realtime core. Production still runs v1 on
 `main`; the cutover code and runbooks are ready, but the domain has not been
 switched. Milestone exits and evidence live in
 `docs/artflow-plus/roadmap.md`.
+
+M15.1 adds a read-only activity operations analytics projection at
+`GET /api/activities/:id/operations/analytics`. It aggregates existing
+registration, materials, roster, competition, voting, publishing, and archive
+facts for the Ops detail view. It has a dedicated read surface, reuses the
+redeemed-ticket validity rule, and never becomes a second authority or returns
+row-level participant/judge credentials. The next slices are tasks/checklists,
+check-in/attendance, schedule/program release, and incident/recovery.
 
 The Live console and the voting card share the single WebSocket core in
 `packages/realtime`. Sockets only invalidate queries; HTTP remains the recovery

@@ -1,6 +1,6 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M14.1 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
+状态：**M0–M15.1 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
 participant/material cutover：MaterialCheck 导入、补交 capability、原子上传、
 生产媒体卷与 Unicode 路径；production cutover 以干净 baseline、自动化/隔离验收、
 operational smoke 与 owner acceptance 为准。产品与架构身份的
@@ -383,6 +383,21 @@ cutover 前置条件。
   导入的 `participant_id` 保持权威，不迁移旧密码、不删除 v1 源码或媒体。
 - 出口：DB/runtime/API/Web 定向测试、Claim UI 测试和独立 Ops/参与者/重放
   headless Chromium E2E 通过。详见 ADR-0035。
+
+## M15.1 — Activity Operations Analytics（已完成，2026-10-28）
+
+- 新增只读 `analytics` read surface 与
+  `GET /api/activities/:id/operations/analytics`，汇总报名、材料、名单、比赛、
+  投票、赛果发布和归档的现有权威事实。
+- 有效票数复用 ticket `redeemed` 语义；聚合查询不返回报名答案、评审备注、凭证、
+  token、storage key 或 row-level identity，不新增可写 analytics 状态。
+- Ops 活动详情增加只读准备度卡片和稳定 attention codes；提示项不参与 command gate，
+  不替代 closure/resolver/archive authority。
+- 出口：统计脚本单测、PostgreSQL 聚合/脱敏测试、runtime 权限测试、API 403/404 测试、
+  Web 卡片测试、Plus 类型检查与全量 Plus 测试通过。
+
+后续按顺序实现 M15.2 Tasks/Checklist、M15.3 Check-in/Attendance、M15.4
+Schedule/Program Release、M15.5 Incident/Recovery/Feedback；不把真实活动彩排作为验收前置条件。
 
 ## Definition of Done（每个 slice）
 
