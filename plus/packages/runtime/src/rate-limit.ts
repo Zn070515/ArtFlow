@@ -1,3 +1,7 @@
+import type { Database } from "@artflow-plus/db";
+import { sql } from "kysely";
+import type { Kysely } from "kysely";
+
 export interface RateLimitInput {
   readonly key: string;
   readonly limit: number;
@@ -43,5 +47,46 @@ export class MemoryRateLimiter implements RateLimiter {
 
   get size(): number {
     return this.counters.size;
+  }
+}
+
+/** PostgreSQL-backed fixed-window limiter for multi-process deployments. */
+export class PostgresRateLimiter implements RateLimiter {
+  private calls = 0;
+
+  constructor(private readonly db: Kysely<Database>) {}
+
+  async allow(input: RateLimitInput): Promise<boolean> {
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1) return false;
+    if (!Number.isSafeInteger(input.windowMs) || input.windowMs < 1) return false;
+
+    const nowMs = Date.now();
+    const windowStartMs = Math.floor(nowMs / input.windowMs) * input.windowMs;
+    const windowStartedAt = new Date(windowStartMs);
+    const expiresAt = new Date(windowStartMs + input.windowMs);
+    this.calls += 1;
+    if (this.calls % 256 === 0) {
+      await this.db
+        .deleteFrom("rate_limit_bucket")
+        .where("expires_at", "<=", new Date(nowMs))
+        .execute();
+    }
+
+    const row = await this.db
+      .insertInto("rate_limit_bucket")
+      .values({
+        key: input.key,
+        window_started_at: windowStartedAt,
+        window_ms: input.windowMs,
+        count: 1,
+        expires_at: expiresAt,
+      })
+      .onConflict((conflict) => conflict
+        .columns(["key", "window_started_at"])
+        .doUpdateSet({ count: sql<number>`rate_limit_bucket.count + 1` })
+        .where("rate_limit_bucket.count", "<", input.limit))
+      .returning("count")
+      .executeTakeFirst();
+    return row !== undefined;
   }
 }

@@ -432,6 +432,8 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const first = await claimJudgeSeat(db, deps(judgeA), { commandId: "m6-judge-claim-a", publicCode: "ABC123", capability: v1 });
     expect(first.body.seatKey).toBe("seat-1");
     await expect(authenticateJudgeSession(db, first.body.sessionToken ?? "", authNow())).resolves.toMatchObject({ activityId, seatId: first.body.seatId });
+    await expect(authenticateJudgeSession(db, first.body.sessionToken ?? "", new Date("2027-01-01T00:00:00Z")))
+      .rejects.toMatchObject({ code: "UNAUTHENTICATED" });
     expect(capabilityFixture.steps[0]?.expect.outcome).toBe("accepted");
     await expect(claimJudgeSeat(db, deps({ ...judgeA, actorId: "judge:unsigned" }), {
       commandId: "m6-judge-unsigned",
@@ -497,6 +499,8 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
       ticketId: ticket.body.ticket.id,
       reason: "test again",
     })).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "", new Date("2027-01-01T00:00:00Z")))
+      .rejects.toMatchObject({ code: "TICKET_SESSION_EXPIRED" });
     await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "", authNow())).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
   });
 

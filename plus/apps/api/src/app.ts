@@ -206,6 +206,17 @@ export function parseTrustedProxy(value = process.env.ARTFLOW_PLUS_TRUST_PROXY):
     .filter((entry) => entry.length > 0);
 }
 
+export function selectRateLimiter(
+  options: Pick<AppOptions, "rateLimiter">,
+  env: NodeJS.ProcessEnv = process.env,
+): RateLimiter {
+  if (options.rateLimiter !== undefined) return options.rateLimiter;
+  if (isProductionEnvironment(env)) {
+    throw new Error("A shared RateLimiter must be supplied in production.");
+  }
+  return new MemoryRateLimiter();
+}
+
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   INVALID_INPUT: 400,
   VALIDATION_FAILED: 400,
@@ -681,6 +692,15 @@ function errorDetails(error: unknown): unknown {
   return undefined;
 }
 
+export function publicErrorMessage(status: number, fallback: string): string {
+  if (status === 401) return "Authentication required.";
+  if (status === 403) return "Access denied.";
+  if (status === 404) return "The requested resource was not found.";
+  if (status === 429) return "Too many requests.";
+  if (status === 413) return "Request body too large.";
+  return fallback;
+}
+
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
@@ -704,7 +724,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     VOTE_POLL_PACK,
   ];
   const baseDeps = options.deps ?? defaultRuntimeDeps();
-  const rateLimiter = options.rateLimiter ?? new MemoryRateLimiter();
+  const rateLimiter = selectRateLimiter(options);
   const deps =
     options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
@@ -716,19 +736,22 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   if (sessionSecret === "") {
     throw new Error("ARTFLOW_PLUS_CREDENTIAL_SECRET is required in production.");
   }
-  const secureCookie = isProduction ? "; Secure" : "";
 
   function setSessionCookies(reply: FastifyReply, token: string, csrf: string): void {
+    const secure = isProductionEnvironment();
+    const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
     reply.header("set-cookie", [
-      `artflow_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${secureCookie}`,
-      `artflow_csrf=${csrf}; Path=/; SameSite=Strict; Max-Age=28800${secureCookie}`,
+      sessionCookie("artflow_session", token, expiresAt, secure),
+      sessionCookie("artflow_csrf", csrf, expiresAt, secure, { httpOnly: false }),
     ]);
   }
 
   function clearSessionCookies(reply: FastifyReply): void {
+    const secure = isProductionEnvironment();
+    const expiredAt = new Date(0).toISOString();
     reply.header("set-cookie", [
-      `artflow_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookie}`,
-      `artflow_csrf=; Path=/; SameSite=Strict; Max-Age=0${secureCookie}`,
+      sessionCookie("artflow_session", "", expiredAt, secure),
+      sessionCookie("artflow_csrf", "", expiredAt, secure, { httpOnly: false }),
     ]);
   }
 
@@ -1171,10 +1194,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       await requirePublicRateLimit(request, "supplement-claim", 20);
       const body = request.body as { token: string };
       const context = await getSupplementContext(db, body.token, deps.now());
-      const secure = isProduction ? "; Secure" : "";
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       reply.header(
         "set-cookie",
-        `artflow_supplement=${body.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${secure}`,
+        sessionCookie("artflow_supplement", body.token, expiresAt, isProduction),
       );
       reply.header("cache-control", "no-store");
       return context;
@@ -2915,13 +2938,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       statusCode?: number;
       message?: string;
     };
-    if (
-      failure.validation !== undefined ||
-      (failure.statusCode !== undefined && failure.statusCode < 500)
-    ) {
+    if (failure.validation !== undefined || (failure.statusCode !== undefined && failure.statusCode < 500)) {
+      const status = failure.validation === undefined ? failure.statusCode ?? 400 : 400;
       return reply
-        .status(400)
-        .send(errorResponse("VALIDATION_FAILED", failure.message ?? "Invalid request."));
+        .status(status)
+        .send(errorResponse("VALIDATION_FAILED", publicErrorMessage(status, failure.message ?? "Invalid request.")));
     }
     const code = errorCode(error);
     if (code !== null) {
@@ -2932,7 +2953,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         .send(
           errorResponse(
             code,
-            error instanceof Error ? error.message : "The command was refused.",
+            publicErrorMessage(
+              status,
+              error instanceof Error ? error.message : "The command was refused.",
+            ),
             details,
           ),
         );

@@ -72,8 +72,9 @@ is served through the controlled content route.
 ### Readiness naming
 
 The adoption report field is `semanticReady`, not `rehearsalReady`: it proves
-definition/fact compatibility. Production rehearsal readiness still requires the
-activity acceptance journey and the operational smoke.
+definition/fact compatibility. Production cutover uses the automated activity
+acceptance journey, isolated operational smoke, and owner acceptance; a real
+activity rehearsal is not a prerequisite.
 
 ## Consequences
 

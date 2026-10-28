@@ -1,5 +1,5 @@
 import { closeDb, createDb, migrate } from "@artflow-plus/db";
-import { relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
+import { PostgresRateLimiter, relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
 
 import { buildApp } from "./app.js";
 
@@ -15,7 +15,11 @@ async function main(): Promise<void> {
   });
   await migrate(db);
 
-  const app = await buildApp({ db });
+  const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+  const app = await buildApp({
+    db,
+    ...(isProduction ? { rateLimiter: new PostgresRateLimiter(db) } : {}),
+  });
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? "127.0.0.1";
   await app.listen({ port, host });

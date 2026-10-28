@@ -619,6 +619,14 @@ export interface GroupingMembershipRow {
   reason: string;
 }
 
+export interface RateLimitBucketRow {
+  key: string;
+  window_started_at: ColumnType<Date, Date | string, Date | string>;
+  window_ms: number;
+  count: number;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -667,4 +675,5 @@ export interface Database {
   grouping_stage: GroupingStageRow;
   grouping_group: GroupingGroupRow;
   grouping_membership: GroupingMembershipRow;
+  rate_limit_bucket: RateLimitBucketRow;
 }

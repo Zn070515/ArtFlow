@@ -33,7 +33,7 @@ export interface IssueSupplementInput {
 }
 
 export interface IssuedSupplement {
-  readonly token: string;
+  readonly token: string | null;
   readonly expiresAt: string;
   readonly allowedKeys: readonly string[];
 }
@@ -126,7 +126,11 @@ export async function issueSupplementGrant(
       capability: "registration",
       payload: { registrationId: registration.id, allowedKeys, grantId },
     });
-    return { body: { token, expiresAt, allowedKeys }, status: 201 };
+    return {
+      body: { token, expiresAt, allowedKeys },
+      persistedBody: { token: null, expiresAt, allowedKeys },
+      status: 201,
+    };
   });
 }
 

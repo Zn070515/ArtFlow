@@ -300,11 +300,12 @@ new architecture.
 
 ## Next steps
 
-1. Cutover infrastructure is ready for rehearsal, but production cutover must be
-   driven by an `import:legacy --mode adoption --pack <id>` of the first current
-   activity followed by the operational smoke profile; it remains gated by that
-   rehearsal, activity-specific capability completeness, and the authority audit,
-   not by the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
+1. Cutover infrastructure is ready for automated and isolated acceptance, but
+   production cutover must be driven by an `import:legacy --mode adoption --pack
+   <id>` of the first current activity followed by the operational smoke profile;
+   it remains gated by clean-baseline evidence, activity-specific capability
+   completeness, and the authority audit, not by a real-activity rehearsal or
+   the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
 2. Close the remaining product gaps: a public program page for stage shows,
    bracket/composite scoring, XLSX export, on-site display, and multi-instance
    realtime broadcast.
@@ -331,8 +332,10 @@ GET   /api/public/results/:publicCode
 ```
 
 The public selector is anonymous and never returns fingerprints, hashes, actors,
-notes, or editorial fields. The in-memory public rate limiter is a single-process
-IP bucket; production multi-instance deployments need a shared limiter.
+notes, or editorial fields. Development/E2E uses a swept in-memory limiter;
+production `main.ts` wires `PostgresRateLimiter` to the shared
+`rate_limit_bucket` table. If production starts without an explicit shared
+limiter, the API fails closed.
 
 Every stage has at most one ACTIVE release (`result_release_active_key` partial
 unique index). Revoke and unlock make the old URL immediately invisible; unlock

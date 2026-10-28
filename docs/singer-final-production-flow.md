@@ -1,6 +1,6 @@
 # 院十佳决赛生产流程
 
-这份说明面向操作当前学年院十佳决赛的工作人员，记录从历史模板到当年正式运行的完整路径，以及各步骤背后的权威边界。工程约定见[开发基线](development-baseline.md)，现场演练场景见[生产彩排 Runbook](production-rehearsal-runbook.md)。
+这份说明面向操作当前学年院十佳决赛的工作人员，记录从历史模板到当年正式运行的完整路径，以及各步骤背后的权威边界。工程约定见[开发基线](development-baseline.md)；验收使用自动化关键旅程、隔离 smoke 与 owner acceptance，不安排真实活动彩排。
 
 ## 活动语义
 
@@ -95,7 +95,7 @@ VoteSession（用途=成绩组成，requires_ticket=True）
   撤销后第一轮恢复解锁资格，修正成绩并重新锁定后即可重新建立会话（第一轮结果未变也可以重建），
   但只有本轮没有不可回收的正式评委组快照时才能重置轮次。
   一旦已经选人、建比赛或生成第三轮，页面不再提供撤销，须登记事故并走完整纠正流程。
-  测试活动里的评委组与踢馆会话属于彩排数据，会随测试数据清理一起删除。
+  测试活动里的评委组与踢馆会话属于隔离验证数据，会随测试数据清理一起删除。
 - 成绩组成投票必须是明确的 VoteSession 用途，并且启用入场票校验；
 - 原始票数（量纲为 votes）不能直接进入加权综合分；
 - 赛段核定要求它消费的轮次与投票场次都已锁定；
@@ -104,5 +104,4 @@ VoteSession（用途=成绩组成，requires_ticket=True）
 ## 相关文档
 
 - [开发基线](development-baseline.md)
-- [生产彩排 Runbook](production-rehearsal-runbook.md)
 - [生产就绪](production-readiness.md)

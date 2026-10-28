@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship three Guided packs with default capability definitions and prove the singer, stage-show, and review-awards shapes through automated key journeys plus a rehearsal runbook/report.
+**Goal:** Ship three Guided packs with default capability definitions and prove the singer, stage-show, and review-awards shapes through automated key journeys and an isolated validation report. A real-activity rehearsal is not part of acceptance.
 
 **Architecture:** `ActivityPack` may carry `definitions` that replace `emptyDefinition()` for a capability. The three packs compose existing capabilities; competition gets a runnable round/rubric, stage show uses registration/questionnaire/materials/archive, review-awards adds competition+publishing.
 
@@ -202,25 +202,20 @@ git commit -m "test(shapes): cover singer, stage-show, and review-awards"
 
 ---
 
-### Task 3: Rehearsal runbook and validation report
+### Task 3: Validation report
 
 **Files:**
-- Create: `docs/artflow-plus/rehearsal-runbook.md`
 - Create: `docs/artflow-plus/shape-validation.md`
 
-Runbook: pre-show checks, session/panel/open, judge connectivity, scoring
-progress, HOLD/tie, fallback (rapid/paper), lock/resolve, publish/archive,
-session close, rollback boundary; a record table.
-
-Validation report: the three packs' capability sets, the exact journeys run,
-what was configuration-only, and the gaps (public program page, vote-only
-results, bracket, participant accounts).
+Validation report: the three packs' capability sets, the exact automated journeys
+run, what was configuration-only, the isolated smoke/rollback evidence, and the
+gaps (public program page, vote-only results, bracket, participant accounts).
 
 - [ ] **Step 1: Write both documents and commit**
 
 ```powershell
-git add docs/artflow-plus/rehearsal-runbook.md docs/artflow-plus/shape-validation.md
-git commit -m "docs: record the three activity shapes and rehearsal runbook"
+git add docs/artflow-plus/shape-validation.md
+git commit -m "docs: record the three activity shapes and validation evidence"
 ```
 
 ---

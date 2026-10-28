@@ -11,7 +11,7 @@
 
 | 分支 | 角色 | 允许的改动 |
 | --- | --- | --- |
-| `main` | ArtFlow 1.x 生产维护线 | 真实彩排/现场发现的问题、部署问题、P0–P2 正确性、必要的现场 UX 修复，以及对应的回归测试 |
+| `main` | ArtFlow 1.x 生产维护线 | 生产/部署问题、P0–P2 正确性、必要的现场 UX 修复，以及对应的回归测试 |
 | `artflow-plus` | ArtFlow-Plus（v2）开发主线 | 新领域模型、新前后端架构、技术栈现代化；可以大规模重构 |
 
 - `main` 已发布到 **v1.0.2**（2026-10-19），不再接受“顺便优化”和 opportunistic refactor。
@@ -100,6 +100,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | Golden fixtures | [tests/golden](../../tests/golden/README.md) |
 | 497 条 fix 的经验 | [analysis/fix-lessons.md](analysis/fix-lessons.md) |
 | v2 架构优势与警惕债务 | [analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md](analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md) |
+| P0 安全基线还账计划 | [plans/2026-10-28-security-baseline-debt.md](plans/2026-10-28-security-baseline-debt.md) |
 | 重构前待决问题 | [open-questions.md](open-questions.md) |
 | PR 审查清单 | [review-checklist.md](review-checklist.md) |
 
