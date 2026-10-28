@@ -46,6 +46,20 @@ it("rejects duplicate task template keys and empty source fields", () => {
   );
 });
 
+it("rejects task fields that exceed their persisted column bounds", () => {
+  const result = compileTasksDefinition(createTasksDefinition([{
+    key: "k".repeat(101),
+    title: "标题",
+    sourceCapability: "materials",
+    sourceKey: "source",
+    required: true,
+  }]));
+
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.issues.map((issue) => issue.code)).toContain("KEY_INVALID");
+});
+
 it("rejects a task template whose source capability is not enabled", () => {
   const result = compileActivityDefinitionPackage(
     {

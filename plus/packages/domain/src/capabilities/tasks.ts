@@ -29,7 +29,12 @@ export interface CompiledTasksArtifact {
   readonly templates: readonly TaskTemplate[];
 }
 
-const MAX_FIELD_LENGTH = 200;
+const FIELD_LIMITS = {
+  key: 100,
+  title: 200,
+  sourceCapability: 100,
+  sourceKey: 200,
+} as const;
 
 function issue(code: string, message: string, path: string): CompileIssue {
   return { code, message, path };
@@ -50,18 +55,18 @@ function normalizeTemplate(
   }
 
   const fields = [
-    ["key", value.key, "KEY_INVALID"],
-    ["title", value.title, "TITLE_INVALID"],
-    ["sourceCapability", value.sourceCapability, "SOURCE_CAPABILITY_INVALID"],
-    ["sourceKey", value.sourceKey, "SOURCE_KEY_INVALID"],
+    ["key", value.key, "KEY_INVALID", FIELD_LIMITS.key],
+    ["title", value.title, "TITLE_INVALID", FIELD_LIMITS.title],
+    ["sourceCapability", value.sourceCapability, "SOURCE_CAPABILITY_INVALID", FIELD_LIMITS.sourceCapability],
+    ["sourceKey", value.sourceKey, "SOURCE_KEY_INVALID", FIELD_LIMITS.sourceKey],
   ] as const;
   const normalized: Record<string, string> = {};
-  for (const [field, raw, code] of fields) {
-    if (typeof raw !== "string" || raw.trim().length === 0 || raw.trim().length > MAX_FIELD_LENGTH) {
+  for (const [field, raw, code, maxLength] of fields) {
+    if (typeof raw !== "string" || raw.trim().length === 0 || raw.trim().length > maxLength) {
       issues.push(
         issue(
           code,
-          `${field} must be a non-empty string of at most ${MAX_FIELD_LENGTH} characters.`,
+          `${field} must be a non-empty string of at most ${maxLength} characters.`,
           `templates.${index}.${field}`,
         ),
       );
