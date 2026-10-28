@@ -1,3 +1,11 @@
+import type {
+  ReadinessResponse,
+  TaskAction,
+  TaskCommandBody,
+  TaskListResponse,
+  TaskResponse,
+} from "@artflow-plus/contracts";
+
 import { apiFetch } from "./client.js";
 
 export interface OpsActivitySummary {
@@ -101,6 +109,31 @@ export function issueParticipantClaim(
       method: "POST",
       headers: { "idempotency-key": commandId },
       body: "{}",
+    },
+  );
+}
+
+export function fetchOpsTasks(activityId: string): Promise<TaskListResponse> {
+  return apiFetch<TaskListResponse>(`/api/activities/${encodeURIComponent(activityId)}/tasks`);
+}
+
+export function fetchOpsReadiness(activityId: string): Promise<ReadinessResponse> {
+  return apiFetch<ReadinessResponse>(`/api/activities/${encodeURIComponent(activityId)}/readiness`);
+}
+
+export function mutateOpsTask(
+  activityId: string,
+  taskId: string,
+  action: TaskAction,
+  expectedRevision: number,
+  body: Omit<TaskCommandBody, "expectedRevision"> = {},
+): Promise<TaskResponse> {
+  return apiFetch<TaskResponse>(
+    `/api/activities/${encodeURIComponent(activityId)}/tasks/${encodeURIComponent(taskId)}/${action}`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify({ expectedRevision, ...body }),
     },
   );
 }

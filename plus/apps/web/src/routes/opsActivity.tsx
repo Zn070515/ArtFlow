@@ -10,6 +10,7 @@ import { ActivityAnalyticsCard } from "../components/ops/ActivityAnalyticsCard.j
 import { RegistrationTable } from "../components/ops/RegistrationTable.js";
 import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
+import { TasksCard } from "../components/ops/TasksCard.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
   if (permissions === undefined) return false;
@@ -119,6 +120,13 @@ function OpsActivityContent() {
               can(session?.actor.permissions, "studio.manage") ||
               can(session?.actor.permissions, "competition.manage")
             }
+          />
+        ) : null}
+        {activity?.enabledCapabilities.includes("tasks") ? (
+          <TasksCard
+            key={activityId}
+            activityId={activityId}
+            canManage={can(session?.actor.permissions, "tasks.manage")}
           />
         ) : null}
       </div>
