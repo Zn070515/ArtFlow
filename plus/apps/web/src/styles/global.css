@@ -1722,6 +1722,27 @@ a.primary-button {
   margin-bottom: 12px;
 }
 
+.console-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.console-pagination-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.console-pagination .secondary-button {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+}
+
 .console-filter-field {
   display: grid;
   gap: 6px;
@@ -1836,6 +1857,11 @@ a.primary-button {
 @media (max-width: 767px) {
   .console-table-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .console-pagination {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

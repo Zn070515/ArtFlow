@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { fetchLiveActivities } from "../api/live.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
+import { ConsolePagination } from "../components/console/ConsolePagination.js";
+
+const PAGE_SIZE = 25;
 
 export function LivePage() {
   return (
@@ -18,6 +21,8 @@ function LiveContent() {
   const { session } = useSession();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [searchTerm, statusFilter]);
   const allowed = hasLiveAccess(session);
   const query = useQuery({
     queryKey: ["live-activities"],
@@ -48,6 +53,9 @@ function LiveContent() {
       `${activity.title} ${activity.publicCode}`.toLocaleLowerCase().includes(normalizedSearch);
     return matchesSearch && (statusFilter.length === 0 || activity.status === statusFilter);
   });
+  const totalPages = Math.max(1, Math.ceil(filteredActivities.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedActivities = filteredActivities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <section className="live-page">
@@ -94,7 +102,7 @@ function LiveContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredActivities.map((activity) => (
+                  {paginatedActivities.map((activity) => (
                     <tr key={activity.id}>
                       <td>
                         <Link
@@ -114,6 +122,7 @@ function LiveContent() {
               </table>
             </div>
           )}
+          <ConsolePagination page={currentPage} totalPages={totalPages} onPageChange={setPage} />
         </>
       )}
     </section>
