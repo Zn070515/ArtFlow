@@ -12,6 +12,8 @@
   journey）为绿；生产镜像只从该 SHA 构建。
 - 已构建并固定镜像 digest：`ARTFLOW_PLUS_API_IMAGE`、`ARTFLOW_PLUS_WORKER_IMAGE`、
   `ARTFLOW_PLUS_WEB_IMAGE`。
+- 三个 Plus 镜像由同一个 `v*` tag 构建，OCI revision 与 `ARTFLOW_RELEASE_SHA` 完全一致；
+  `.env.production` 中三项必须使用 workflow 输出的 `@sha256:...`，不能填 release tag。
 - 域名/TLS 不变；Caddy 仍以 `CADDY_SITE_ADDRESS` 为唯一入口。
 - 操作人与观察人明确；回滚决定由现场负责人做出。
 
@@ -96,9 +98,11 @@ pending/发布 head 落后而 FAIL，恢复 worker 后再确认 PASS。
 ## 3. Switch
 
 1. 在 `.env.production` 设 `ARTFLOW_SITE_PROFILE=v2`。
-2. 重建 proxy：
+2. 使用 canonical production validator；它会因为 `v2` 自动启用 Compose 的 `plus` service
+   profile，校验三个 Plus digest、API/Worker 的 release SHA 和镜像 OCI revision，再启动并等待
+   全部服务：
    ```powershell
-   docker compose -f deploy/compose.production.yml --env-file .env.production up -d proxy
+   bash scripts/deploy.sh .env.production
    ```
 3. 等 Caddy 健康检查通过，然后对公网域名跑同一个 smoke（`CUTOVER_BASE_URL=https://<domain>`）。
 4. 观察 15 分钟：Caddy 5xx、plus-api `/readyz`、plus-web 日志、公开赛果页。

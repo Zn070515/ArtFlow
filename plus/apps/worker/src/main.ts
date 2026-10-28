@@ -1,5 +1,5 @@
 import { closeDb, createDb, migrate } from "@artflow-plus/db";
-import { relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
+import { assertReleaseProvenance, relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
 import { PgBoss } from "pg-boss";
 
 const RELAY_QUEUE = "outbox-relay";
@@ -16,6 +16,7 @@ async function main(): Promise<void> {
     ...(schema === undefined || schema === "" ? {} : { schema }),
   });
   await migrate(db);
+  assertReleaseProvenance();
 
   const boss = new PgBoss({ connectionString, schema: "pgboss" });
   boss.on("error", (error) => {

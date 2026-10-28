@@ -44,6 +44,33 @@ def test_publish_is_tag_only_and_bakes_the_tagged_commit() -> None:
     assert "type=sha,prefix=sha-,format=short" in text
 
 
+def test_plus_publish_builds_all_targets_from_the_tagged_commit() -> None:
+    data = _yaml(ROOT / ".github" / "workflows" / "publish.yml")
+    job = data["jobs"].get("publish-plus")
+    assert job is not None, "publish.yml must publish the Plus images"
+    builds = [
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("docker/build-push-action@")
+    ]
+    assert len(builds) == 3
+    targets = {step["with"].get("target") for step in builds}
+    assert targets == {"api", "worker", "web"}
+    for step in builds:
+        inputs = step["with"]
+        assert inputs.get("file") == "deploy/plus/Dockerfile"
+        assert "ARTFLOW_BUILD_SHA=${{ github.sha }}" in inputs.get("build-args", "")
+        assert inputs.get("provenance") == "mode=max"
+
+
+def test_plus_dockerfile_bakes_a_release_marker_in_every_target() -> None:
+    dockerfile = (ROOT / "deploy" / "plus" / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG ARTFLOW_BUILD_SHA" in dockerfile
+    assert 'org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"' in dockerfile
+    assert "/app/ARTFLOW_RELEASE_SHA" in dockerfile
+    assert "/usr/share/nginx/html/ARTFLOW_RELEASE_SHA" in dockerfile
+
+
 def test_production_manifest_has_one_origin_and_pinned_images() -> None:
     compose = _yaml(ROOT / "deploy" / "compose.production.yml")
     services = compose["services"]
@@ -52,6 +79,14 @@ def test_production_manifest_has_one_origin_and_pinned_images() -> None:
     text = (ROOT / "deploy" / "compose.production.yml").read_text(encoding="utf-8")
     assert ":latest" not in text
     assert "${ARTFLOW_WEB_IMAGE:?" in text
+
+
+def test_plus_profile_passes_the_release_sha_to_runtime_services() -> None:
+    compose = _yaml(ROOT / "deploy" / "compose.production.yml")
+    services = compose["services"]
+    expected = "${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA}"
+    assert services["plus-api"]["environment"]["ARTFLOW_RELEASE_SHA"] == expected
+    assert services["plus-worker"]["environment"]["ARTFLOW_RELEASE_SHA"] == expected
 
 
 def test_plus_profile_runs_the_outbox_relay_as_a_production_worker() -> None:

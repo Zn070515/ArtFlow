@@ -1,5 +1,5 @@
 import { closeDb, createDb, migrate } from "@artflow-plus/db";
-import { PostgresRateLimiter, relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
+import { assertReleaseProvenance, PostgresRateLimiter, relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
 
 import { buildApp } from "./app.js";
 
@@ -14,6 +14,7 @@ async function main(): Promise<void> {
     ...(schema === undefined || schema === "" ? {} : { schema }),
   });
   await migrate(db);
+  assertReleaseProvenance();
 
   const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
   const app = await buildApp({
