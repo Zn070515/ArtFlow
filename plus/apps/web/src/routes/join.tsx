@@ -18,11 +18,17 @@ export function JoinPage() {
   }
 
   return (
-    <section className="auth-page">
-      <div className="auth-card">
+    <section className="join-page">
+      <header className="console-page-header">
+        <div>
+          <p className="eyebrow">REGISTRATION · 报名</p>
+          <h1 className="console-page-title">输入活动公开码</h1>
+          <p className="state-copy">登录后填写报名表；公开码由活动主办方提供。</p>
+        </div>
+      </header>
+      <section className="ops-card join-code-card">
         <p className="eyebrow">REGISTRATION · 报名</p>
-        <h1 className="auth-title">输入活动公开码</h1>
-        <p className="auth-copy">登录后填写报名表；公开码由活动主办方提供。</p>
+        <h2 className="console-card-title">进入报名表</h2>
         <form className="auth-form" onSubmit={submit}>
           <label className="field">
             <span>活动公开码</span>
@@ -46,7 +52,7 @@ export function JoinPage() {
             继续
           </button>
         </form>
-      </div>
+      </section>
     </section>
   );
 }

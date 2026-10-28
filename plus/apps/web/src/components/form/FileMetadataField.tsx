@@ -20,11 +20,11 @@ export function FileMetadataField({
   readonly onFile: (file: File) => void;
 }) {
   return (
-    <div className="question question-file">
-      <p className="question-label">
+    <label className="field question question-file question-full-row">
+      <span className="question-label">
         {question.label}
         {question.required ? <em className="required-mark"> *</em> : null}
-      </p>
+      </span>
       <input
         type="file"
         accept={question.file?.accepts.join(",")}
@@ -41,6 +41,6 @@ export function FileMetadataField({
         </p>
       )}
       <p className="file-warning">仅登记文件信息；字节存储将在媒体切片开放。</p>
-    </div>
+    </label>
   );
 }
