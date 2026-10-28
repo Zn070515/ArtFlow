@@ -5,7 +5,7 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## Current state
 
-M0–M13.3 are complete. The workspace covers the full activity journey —
+M0–M14 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
 public vote page, and one protected realtime core. Production still runs v1 on
 `main`; the cutover code and runbooks are ready, but the domain has not been
@@ -294,11 +294,9 @@ new architecture.
    activity followed by the operational smoke profile; it remains gated by that
    rehearsal, activity-specific capability completeness, and the authority audit,
    not by the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
-2. Close the remaining product gaps: ticket-backed voting, participant account
+2. Close the remaining product gaps: participant account
    claim/migration, a public program page for stage shows, bracket/composite
    scoring, XLSX export, on-site display, and multi-instance realtime broadcast.
-   Ticket-backed voting is a cutover prerequisite whenever the first v2 activity
-   relies on real ticket-holding audience votes.
 3. Split the frontend into the public Portal shell and the operations Console
    shell before the next UX round; the fixed direction, desktop layout and
    acceptance gates are in `docs/artflow-plus/frontend-design-direction.md`.
@@ -563,7 +561,7 @@ pnpm -C plus --filter @artflow-plus/api exec vitest run test/activity-shapes.tes
 
 Known gaps (documented in `docs/artflow-plus/shape-validation.md`): no public
 program page for stage shows, no bracket/composite scoring, no participant
-account claim/migration, and no ticket-backed voting entry.
+account claim/migration. Ticket-backed voting entry is delivered by M14.
 
 ## M6 feature slice and M6.5 authority hardening complete
 
@@ -613,7 +611,7 @@ The participant vote page (M12) is public and anonymous by default:
 
 ```text
 GET /api/public/vote/:sessionId     # formal sessions only; no counts or identities
-GET /vote/<sessionId>               # web route; ticket-backed sessions are blocked
+GET /vote/<sessionId>               # web route; ticket sessions use fragment/HttpOnly exchange
 ```
 
 Realtime (M11, M13) is one protected WebSocket core:
