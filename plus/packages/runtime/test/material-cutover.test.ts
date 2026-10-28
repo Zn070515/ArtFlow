@@ -273,6 +273,8 @@ describe.skipIf(!connectionString)("material cutover", () => {
     });
     expect(submitted.body.status).toBe("submitted");
     expect((await getRegistration(db, registration.id))?.status).toBe("submitted");
+    await expect(getSupplementContext(db, grantToken, deps().now()))
+      .rejects.toMatchObject({ code: "INVALID_SUPPLEMENT" });
 
     // A fresh storage instance (the "restart" case) still serves both files.
     const restarted = createLocalMaterialStorage({ root: mediaRoot, legacyRoot });
