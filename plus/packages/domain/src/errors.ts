@@ -109,7 +109,8 @@ export type DomainErrorCode =
   | "REGISTRATION_CLOSED"
   | "MATERIAL_CONTENT_UNAVAILABLE"
   | "INVALID_SUPPLEMENT"
-  | "SUPPLEMENT_CLOSED";
+  | "SUPPLEMENT_CLOSED"
+  | "INVALID_PARTICIPANT_CLAIM";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel
