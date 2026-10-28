@@ -57,7 +57,7 @@ export function SessionPanel({
   return (
     <section className="ops-card">
       <p className="eyebrow">SESSIONS · 执行</p>
-      <h2>执行会话</h2>
+      <h2 className="console-card-title">执行会话</h2>
       {active === undefined ? (
         <p className="state-copy">先发布一个定义，才能启动会话。</p>
       ) : (

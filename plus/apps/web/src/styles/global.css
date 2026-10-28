@@ -1828,3 +1828,103 @@ a.primary-button {
     font-size: 1.45rem;
   }
 }
+
+.console-state {
+  max-width: 680px;
+  padding: 48px 0;
+}
+
+.console-page .studio-page {
+  max-width: none;
+}
+
+.console-page .studio-header {
+  margin-bottom: 24px;
+}
+
+.console-page .studio-grid {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.console-page .studio-workspace {
+  align-items: start;
+}
+
+.studio-main-column {
+  min-width: 0;
+}
+
+.studio-rail {
+  position: sticky;
+  top: 80px;
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  align-self: start;
+}
+
+.console-page .studio-rail .ops-card,
+.console-page .studio-main-column .ops-card {
+  min-width: 0;
+}
+
+.console-page .studio-editor .editor-textarea {
+  min-height: 520px;
+  border-color: var(--color-line);
+  border-radius: 6px;
+  background: var(--color-page);
+  color: var(--color-text);
+}
+
+.console-page .studio-editor .editor-textarea:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(232, 180, 90, 0.14);
+}
+
+.console-page .release-list li,
+.console-page .session-list li,
+.console-page .seat-list li {
+  border-bottom-color: var(--color-line);
+}
+
+.console-page .active-badge {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.console-page .studio-issue {
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  color: var(--color-danger);
+}
+
+.console-page .preview-json,
+.console-page .studio-card-head .state-copy {
+  color: var(--color-text-muted);
+}
+
+.console-page .pack-question {
+  border-color: var(--color-line);
+  border-radius: 6px;
+  background: var(--color-surface-raised);
+}
+
+.console-page .pack-question small {
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 1023px) {
+  .console-page .studio-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-rail {
+    position: static;
+  }
+
+  .console-page .studio-editor .editor-textarea {
+    min-height: 420px;
+  }
+}

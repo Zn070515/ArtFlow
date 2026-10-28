@@ -29,7 +29,7 @@ function GuidedSummary({ state }: { readonly state: StudioState }) {
   return (
     <section className="ops-card">
       <p className="eyebrow">GUIDED · 摘要</p>
-      <h2>组合</h2>
+      <h2 className="console-card-title">组合</h2>
       <p className="state-copy">
         已启用：{state.activity.enabledCapabilities.join(", ")}
       </p>
@@ -83,7 +83,13 @@ function StudioActivityContent() {
   }
 
   if (!allowed) {
-    return <p className="form-error" role="alert">当前账号缺少 studio.manage。</p>;
+    return (
+      <section className="console-state">
+        <p className="eyebrow">STUDIO</p>
+        <h1 className="console-page-title">没有 Studio 权限</h1>
+        <p className="state-copy">当前账号缺少 studio.manage。</p>
+      </section>
+    );
   }
   if (query.isPending) return <p className="auth-loading">正在加载 Studio 状态…</p>;
   if (query.error !== null) {
@@ -93,13 +99,13 @@ function StudioActivityContent() {
   const state = query.data;
   return (
     <section className="studio-page">
-      <header className="studio-header">
+      <header className="studio-header console-page-header">
         <div>
           <Link to="/studio" className="table-link">
             ← 返回活动列表
           </Link>
           <p className="eyebrow">STUDIO · {state.activity.status}</p>
-          <h1 className="display results-title">{state.activity.title}</h1>
+          <h1 className="console-page-title">{state.activity.title}</h1>
           <p className="state-copy">
             公开码 {state.activity.publicCode} · revision {state.activity.revision} · active release v
             {state.activity.activeDefinitionVersion}
@@ -121,13 +127,15 @@ function StudioActivityContent() {
           {error}
         </p>
       )}
-      <div className="studio-grid">
-        <DefinitionEditor state={state} onChanged={refresh} />
-        <div className="studio-side">
+      <div className="studio-grid studio-workspace">
+        <div className="studio-main-column">
+          <DefinitionEditor state={state} onChanged={refresh} />
+        </div>
+        <aside className="studio-rail" aria-label="Studio 操作栏">
           <ReleasePanel state={state} onChanged={refresh} />
           <SessionPanel state={state} onChanged={refresh} />
           <GuidedSummary state={state} />
-        </div>
+        </aside>
       </div>
     </section>
   );

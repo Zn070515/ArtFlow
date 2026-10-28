@@ -71,7 +71,7 @@ export function DefinitionEditor({
     <section className="ops-card studio-editor">
       <p className="eyebrow">DEFINITION · 定义</p>
       <div className="studio-card-head">
-        <h2>Definition Package</h2>
+        <h2 className="console-card-title">Definition Package</h2>
         <span className="state-copy">
           draft revision {state.draft?.revision ?? "—"}
           {state.compiled === null ? "" : ` · compiled ${state.compiled.contentHash.slice(0, 12)}…`}
