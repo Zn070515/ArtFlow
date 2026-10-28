@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { TaskStatus, TaskTemplate } from "@artflow-plus/domain";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -85,9 +85,21 @@ describe.skipIf(!connectionString)("task repository on PostgreSQL", () => {
     await admin.end();
   });
 
-  it("syncs one row per versioned template without overwriting existing facts", async () => {
+  it("migrates task_item and syncs each release template once", async () => {
     const activityId = `task-sync-${randomUUID()}`;
     await seedActivity(activityId);
+
+    const indexes = await sql<{ indexname: string }>`
+      select indexname
+        from pg_indexes
+       where schemaname = current_schema()
+         and indexname in ('task_item_activity_version_status_idx', 'task_item_due_at_idx')
+       order by indexname
+    `.execute(db);
+    expect(indexes.rows.map((row) => row.indexname)).toEqual([
+      "task_item_activity_version_status_idx",
+      "task_item_due_at_idx",
+    ]);
 
     const initial = await db.transaction().execute((trx) =>
       syncTaskItems(trx, activityId, 1, templates),
@@ -121,7 +133,7 @@ describe.skipIf(!connectionString)("task repository on PostgreSQL", () => {
     });
   });
 
-  it("creates independent task rows for a new definition version", async () => {
+  it("allows the same template key in a different definition version", async () => {
     const activityId = `task-version-${randomUUID()}`;
     await seedActivity(activityId);
 
@@ -159,7 +171,7 @@ describe.skipIf(!connectionString)("task repository on PostgreSQL", () => {
     )).rejects.toBeInstanceOf(StaleRevisionError);
   });
 
-  it("aggregates readiness by status, source, and unfinished due time", async () => {
+  it("summarizes required, open, blocked, done, and overdue tasks", async () => {
     const activityId = `task-summary-${randomUUID()}`;
     await seedActivity(activityId);
     const summaryTemplates: readonly TaskTemplate[] = [
@@ -201,11 +213,33 @@ describe.skipIf(!connectionString)("task repository on PostgreSQL", () => {
     });
   });
 
-  it("returns an empty readiness summary for an activity without task rows", async () => {
+  it("returns an empty aggregate without reading source capability rows", async () => {
     const activityId = `task-empty-${randomUUID()}`;
     await seedActivity(activityId);
+    await db.insertInto("registration").values({
+      id: `private-registration-${randomUUID()}`,
+      activity_id: activityId,
+      participant_id: "private-participant-id",
+      questionnaire_version: "v1",
+      questionnaire_hash: "private-hash",
+      status: "submitted",
+      answers: JSON.stringify({ answer: "private answer" }),
+      supplement_keys: JSON.stringify([]),
+      revision: 1,
+      review_note: "private review note",
+      reviewed_by: "private-reviewer",
+      created_at: new Date(),
+      updated_at: new Date(),
+    }).execute();
 
-    expect(await summarizeTaskItems(db, activityId, 1, "2026-11-01T00:00:00.000Z")).toEqual({
+    const summary = await summarizeTaskItems(db, activityId, 1, "2026-11-01T00:00:00.000Z");
+    const tasks = await listTaskItems(db, activityId, 1);
+    expect(JSON.stringify({ summary, tasks })).not.toContain("private answer");
+    expect(JSON.stringify({ summary, tasks })).not.toContain("private review note");
+    expect(JSON.stringify({ summary, tasks })).not.toContain("private-participant-id");
+    expect(JSON.stringify({ summary, tasks })).not.toContain("storage_key");
+    expect(JSON.stringify({ summary, tasks })).not.toContain("token");
+    expect(summary).toEqual({
       total: 0,
       required: 0,
       done: 0,

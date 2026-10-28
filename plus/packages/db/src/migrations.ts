@@ -1516,9 +1516,14 @@ const migrations: Record<string, Migration> = {
         )
         .execute();
       await db.schema
-        .createIndex("task_item_activity_version_idx")
+        .createIndex("task_item_activity_version_status_idx")
         .on("task_item")
-        .columns(["activity_id", "definition_version"])
+        .columns(["activity_id", "definition_version", "status"])
+        .execute();
+      await db.schema
+        .createIndex("task_item_due_at_idx")
+        .on("task_item")
+        .columns(["activity_id", "definition_version", "due_at"])
         .execute();
     },
     async down(db: Kysely<Database>): Promise<void> {
