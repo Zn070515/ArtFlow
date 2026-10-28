@@ -192,13 +192,29 @@ describe.skipIf(!connectionString)("material cutover", () => {
       allowedKeys: ["lyric"],
     });
     expect(grant.status).toBe(201);
-    const context = await getSupplementContext(db, grant.body.token, deps().now());
+    const grantToken = grant.body.token;
+    if (grantToken === null) throw new Error("The supplement grant did not return its one-time token.");
+    const grantReceipt = await db.selectFrom("command_receipt")
+      .select("result")
+      .where("command_id", "=", "material-supplement-issue")
+      .executeTakeFirstOrThrow();
+    expect(JSON.stringify(grantReceipt.result)).not.toContain(grantToken);
+    expect(grantReceipt.result).toMatchObject({ token: null });
+    const grantReplay = await issueSupplementGrant(db, deps(), {
+      commandId: "material-supplement-issue",
+      activityId: activity.id,
+      registrationId: registration.id,
+      allowedKeys: ["lyric"],
+    });
+    expect(grantReplay.replayed).toBe(true);
+    expect(grantReplay.body.token).toBeNull();
+    const context = await getSupplementContext(db, grantToken, deps().now());
     expect(context.registrationId).toBe(registration.id);
     expect(context.allowedKeys).toEqual(["lyric"]);
 
     const lyric = new TextEncoder().encode("lyric-bytes");
     const uploaded = await uploadSupplementMaterial(db, deps(), {
-      token: grant.body.token,
+      token: grantToken,
       commandId: "material-supplement-upload",
       questionKey: "lyric",
       originalName: "歌词.txt",
@@ -252,7 +268,7 @@ describe.skipIf(!connectionString)("material cutover", () => {
     });
 
     const submitted = await submitSupplement(db, deps(), {
-      token: grant.body.token,
+      token: grantToken,
       commandId: "material-supplement-submit",
     });
     expect(submitted.body.status).toBe("submitted");
