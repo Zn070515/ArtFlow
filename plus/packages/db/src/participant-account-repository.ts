@@ -68,13 +68,11 @@ export async function insertParticipantClaim(
 
 export async function revokeUnconsumedParticipantClaims(
   trx: Kysely<Database>,
-  input: { readonly activityId: string; readonly registrationId: string; readonly legacyParticipantId: string; readonly revokedAt: string },
+  input: { readonly registrationId: string; readonly revokedAt: string },
 ): Promise<void> {
   await trx.updateTable("participant_claim")
     .set({ revoked_at: input.revokedAt })
-    .where("activity_id", "=", input.activityId)
     .where("registration_id", "=", input.registrationId)
-    .where("legacy_participant_id", "=", input.legacyParticipantId)
     .where("consumed_at", "is", null)
     .where("revoked_at", "is", null)
     .execute();
