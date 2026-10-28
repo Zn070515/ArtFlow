@@ -9,6 +9,7 @@ async function main(): Promise<void> {
   if (connectionString === undefined || connectionString.trim() === "") {
     throw new Error("ARTFLOW_PLUS_DATABASE_URL is required.");
   }
+  assertReleaseProvenance();
   const schema = process.env.ARTFLOW_PLUS_DB_SCHEMA;
 
   const db = createDb({
@@ -16,7 +17,6 @@ async function main(): Promise<void> {
     ...(schema === undefined || schema === "" ? {} : { schema }),
   });
   await migrate(db);
-  assertReleaseProvenance();
 
   const boss = new PgBoss({ connectionString, schema: "pgboss" });
   boss.on("error", (error) => {
