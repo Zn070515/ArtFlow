@@ -627,6 +627,25 @@ export interface RateLimitBucketRow {
   expires_at: ColumnType<Date, Date | string, Date | string>;
 }
 
+export interface TaskItemRow {
+  id: string;
+  activity_id: string;
+  definition_version: number;
+  template_key: string;
+  title: string;
+  source_capability: string;
+  source_key: string;
+  required: boolean;
+  status: string;
+  assignee_actor_id: string | null;
+  due_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  blocked_reason: string | null;
+  completion_reason: string | null;
+  revision: number;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -676,4 +695,5 @@ export interface Database {
   grouping_group: GroupingGroupRow;
   grouping_membership: GroupingMembershipRow;
   rate_limit_bucket: RateLimitBucketRow;
+  task_item: TaskItemRow;
 }

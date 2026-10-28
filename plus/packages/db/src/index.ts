@@ -11,6 +11,7 @@ export * from "./migrations.js";
 export * from "./outbox.js";
 export * from "./projection-repository.js";
 export * from "./readiness.js";
+export * from "./task-repository.js";
 export * from "./session-repository.js";
 export * from "./score-repository.js";
 export * from "./types.js";
