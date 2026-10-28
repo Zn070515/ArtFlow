@@ -206,6 +206,17 @@ export function parseTrustedProxy(value = process.env.ARTFLOW_PLUS_TRUST_PROXY):
     .filter((entry) => entry.length > 0);
 }
 
+export function selectRateLimiter(
+  options: Pick<AppOptions, "rateLimiter">,
+  env: NodeJS.ProcessEnv = process.env,
+): RateLimiter {
+  if (options.rateLimiter !== undefined) return options.rateLimiter;
+  if (isProductionEnvironment(env)) {
+    throw new Error("A shared RateLimiter must be supplied in production.");
+  }
+  return new MemoryRateLimiter();
+}
+
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   INVALID_INPUT: 400,
   VALIDATION_FAILED: 400,
@@ -704,7 +715,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     VOTE_POLL_PACK,
   ];
   const baseDeps = options.deps ?? defaultRuntimeDeps();
-  const rateLimiter = options.rateLimiter ?? new MemoryRateLimiter();
+  const rateLimiter = selectRateLimiter(options);
   const deps =
     options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
