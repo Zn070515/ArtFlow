@@ -76,8 +76,6 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 
 ### 仍开放的缺口
 
-- 票据场次的投票入口（当前页面明确阻断）。
-- 参与者账号认领/迁移（legacy 导入的报名没有登录账号）。
 - 舞台类节目单公开页、bracket/对阵、XLSX 导出、现场大屏。
 - 多实例实时广播（Redis）与权限实时撤销。
 - 生产 cutover：代码与 runbook 就绪，待执行。
@@ -91,6 +89,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 里程碑与出口条件 | [roadmap.md](roadmap.md) |
 | 目标架构与模块边界 | [architecture/target](../architecture/target/README.md) |
 | 前端视觉方向（Portal / Console 双壳） | [frontend-design-direction.md](frontend-design-direction.md) |
+| 视觉主题家族与 Console Phase 1 | [specs/2026-10-28-visual-theme-family-and-console-shell-design.md](specs/2026-10-28-visual-theme-family-and-console-shell-design.md) |
 | M7→M13.3 代码 review（high） | [reviews/2026-10-27-m7-m13-high-review.md](reviews/2026-10-27-m7-m13-high-review.md) |
 | 架构决策 | [architecture/adr](../architecture/adr/README.md) |
 | 领域模型 | [domains](../domains/) |

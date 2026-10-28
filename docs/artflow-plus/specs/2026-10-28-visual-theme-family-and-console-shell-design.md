@@ -1,12 +1,12 @@
 # ArtFlow-Plus 视觉主题家族与 Console 壳设计
 
-状态：**Proposed**（2026-10-28）  
+状态：**Phase 1 implemented**（2026-10-28；后续页面迁移仍按路线推进）
 范围：`plus/apps/web` 的主题 token、Portal / Console 壳、后续页面迁移和验收方式。
 
 相关文档：
 
 - [前端视觉方向](../frontend-design-direction.md)
-- [ADR-0034：Portal / Console 壳拆分](../architecture/adr/0034-portal-console-shell-split.md)
+- [ADR-0034：Portal / Console 壳拆分](../../architecture/adr/0034-portal-console-shell-split.md)
 
 ## 1. 决策摘要
 
@@ -213,8 +213,8 @@ Console 不挂 Aurora，不使用全屏 backdrop blur 或 30/90 级别的装饰�
 - 交互目标最小 40px，焦点可见；正常正文和背景组合达到 4.5:1。
 - `pnpm -C plus run check`、`pnpm -C plus run test`、相关 Playwright smoke 通过；不跑 v1 全量测试。
 
-## 8. 待确认项
+## 8. 已确认项与后续边界
 
-实现前只需要确认一项产品决策：是否接受本规格中的命名和边界——`Atmospheres` 为主题家族，
-Portal 为 `Afterglow`，Console 为 `Signal`，本阶段不提供运行时主题切换器。接受后按 Phase 1
-执行；若名称需要调整，只替换主题 ID 和文案，不改变 token、壳层和迁移路线。
+已确认本规格中的命名和边界：`Atmospheres` 为主题家族，Portal 为 `Afterglow`，Console
+为 `Signal`，本阶段不提供运行时主题切换器。Phase 1 已完成主题 token、双壳、Ops 三个页面
+以及 Ops 子组件样式契约；Studio / Live / Judge / Portal 收敛仍按第 6 节继续推进。
