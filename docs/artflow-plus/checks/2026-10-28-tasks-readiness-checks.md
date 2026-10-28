@@ -1,7 +1,7 @@
 # M15.2 Tasks / Readiness 自建检查文档
 
-状态：设计阶段；M15.2 完成前必须逐项取得证据。  
-范围：独立 `tasks` capability、task authority、readiness read model、Ops UI。  
+状态：设计阶段；M15.2 完成前必须逐项取得证据。
+范围：独立 `tasks` capability、task authority、readiness read model、Ops UI。
 明确排除：真实活动彩排、签到、排期、资源预约、班次和 incident。
 
 这份文档把“自建责任”变成可执行检查。文档本身不是通过证据；每一项都必须由指定测试、门禁或审阅命令产生结果后再勾选。
