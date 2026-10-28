@@ -1125,6 +1125,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       reply.header("cache-control", "no-store");
       return reply.status(outcome.status).send({
         actor: publicActor(outcome.body.actor),
+        publicCode: outcome.body.publicCode,
         ...(csrfToken === undefined ? {} : { csrfToken }),
         ...(outcome.body.expiresAt === undefined ? {} : { expiresAt: outcome.body.expiresAt }),
       });

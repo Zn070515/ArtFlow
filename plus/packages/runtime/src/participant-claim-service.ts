@@ -56,6 +56,7 @@ export interface ConsumeParticipantClaimInput {
 
 export interface ConsumedParticipantClaim {
   readonly actor: PublicActor;
+  readonly publicCode: string;
   readonly sessionToken?: string;
   readonly expiresAt?: string;
 }
@@ -280,6 +281,12 @@ export async function consumeParticipantClaim(
     if (await getParticipantIdentityLinkByLegacyForUpdate(trx, claim.legacyParticipantId) !== null) {
       invalidClaim();
     }
+
+    const activityDetails = await trx.selectFrom("activity")
+      .select("public_code")
+      .where("id", "=", claim.activityId)
+      .executeTakeFirst();
+    if (activityDetails === undefined) invalidClaim();
     if (await getParticipantIdentityLinkByActor(trx, actor.actorId) !== null) invalidClaim();
     await insertParticipantIdentityLink(trx, {
       legacyParticipantId: claim.legacyParticipantId,
@@ -304,6 +311,7 @@ export async function consumeParticipantClaim(
     });
     const body: ConsumedParticipantClaim = {
       actor: publicActor(actor),
+      publicCode: activityDetails.public_code,
       ...(sessionToken === undefined ? {} : { sessionToken }),
       ...(expiresAt === undefined ? {} : { expiresAt }),
     };
