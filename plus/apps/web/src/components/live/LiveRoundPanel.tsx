@@ -226,48 +226,50 @@ export function LiveRoundPanel({
       ) : null}
 
       {live.performances.length === 0 ? null : (
-        <table className="data-table">
-          <caption>表演与评分进度</caption>
-          <thead>
-            <tr>
-              <th scope="col">序号</th>
-              <th scope="col">选手</th>
-              <th scope="col">状态</th>
-              <th scope="col">评分进度</th>
-              <th scope="col">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {live.performances.map((performance) => (
-              <tr key={performance.id}>
-                <td>{performance.sequence}</td>
-                <td>{performance.contestantId}</td>
-                <td>{performance.state}</td>
-                <td data-testid={`score-count-${performance.contestantId}`}>
-                  {performance.scoreCount}/{performance.expectedJudges}
-                </td>
-                <td>
-                  {performance.state === "open" ? (
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void lockOne(performance.id)}
-                    >
-                      锁表演
-                    </button>
-                  ) : (
-                    "—"
-                  )}
-                </td>
+        <div className="console-table-wrap">
+          <table className="data-table">
+            <caption>表演与评分进度</caption>
+            <thead>
+              <tr>
+                <th scope="col">序号</th>
+                <th scope="col">选手</th>
+                <th scope="col">状态</th>
+                <th scope="col">评分进度</th>
+                <th scope="col">操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {live.performances.map((performance) => (
+                <tr key={performance.id}>
+                  <td>{performance.sequence}</td>
+                  <td>{performance.contestantId}</td>
+                  <td>{performance.state}</td>
+                  <td data-testid={`score-count-${performance.contestantId}`}>
+                    {performance.scoreCount}/{performance.expectedJudges}
+                  </td>
+                  <td>
+                    {performance.state === "open" ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void lockOne(performance.id)}
+                      >
+                        锁表演
+                      </button>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {round !== null ? (
-        <div className="session-controls">
+        <div className="session-controls live-round-actions">
           <button
             className="secondary-button"
             type="button"
@@ -300,27 +302,29 @@ export function LiveRoundPanel({
       {live.ranking === null ? null : (
         <div className="ranking-block">
           <p className="eyebrow">RANKING · {live.ranking.status === "hold" ? "HOLD" : "READY"}</p>
-          <table className="data-table">
-            <caption>当前排名（revision {live.ranking.revision}）</caption>
-            <thead>
-              <tr>
-                <th scope="col">名次</th>
-                <th scope="col">选手</th>
-                <th scope="col">总分</th>
-                <th scope="col">评委数</th>
-              </tr>
-            </thead>
-            <tbody>
-              {live.ranking.rows.map((row, index) => (
-                <tr key={row.contestantId}>
-                  <td>{displayRanks[index] ?? index + 1}</td>
-                  <td>{row.contestantId}</td>
-                  <td>{row.total}</td>
-                  <td>{row.judgeCount}</td>
+          <div className="console-table-wrap">
+            <table className="data-table">
+              <caption>当前排名（revision {live.ranking.revision}）</caption>
+              <thead>
+                <tr>
+                  <th scope="col">名次</th>
+                  <th scope="col">选手</th>
+                  <th scope="col">总分</th>
+                  <th scope="col">评委数</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {live.ranking.rows.map((row, index) => (
+                  <tr key={row.contestantId}>
+                    <td>{displayRanks[index] ?? index + 1}</td>
+                    <td>{row.contestantId}</td>
+                    <td>{row.total}</td>
+                    <td>{row.judgeCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {live.ranking.tieGroups.length === 0 ? null : (
             <p className="form-error" role="alert">
               存在同分：{live.ranking.tieGroups.map((group) => group.contestants.join(" / ")).join("；")}

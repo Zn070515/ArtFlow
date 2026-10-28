@@ -1910,6 +1910,17 @@ a.primary-button {
   min-width: 0;
 }
 
+.console-page .live-round-actions {
+  position: sticky;
+  bottom: 16px;
+  z-index: 2;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-surface-raised);
+}
+
 .console-page .judge-workspace {
   display: grid;
   width: 100%;
