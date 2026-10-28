@@ -1,7 +1,6 @@
 import type {
   Database,
   ReadinessSummaryFacts,
-  StoredActivitySummary,
   StoredRelease,
   StoredTaskItem,
 } from "@artflow-plus/db";
@@ -321,22 +320,13 @@ async function readTaskContext(
   db: Kysely<Database>,
   deps: RuntimeDeps,
   activityId: string,
-): Promise<{ readonly activity: StoredActivitySummary; readonly release: StoredRelease; readonly artifact: CompiledTasksArtifact }> {
+): Promise<{ readonly release: StoredRelease; readonly artifact: CompiledTasksArtifact }> {
   const actor = runtimeActor(deps);
   requireTaskRead(actor);
   const activity = await getActivity(db, activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${activityId} was not found.`);
   const context = await currentTaskRelease(db, activity);
   return {
-    activity: {
-      id: activity.id,
-      publicCode: "",
-      title: activity.title,
-      status: activity.status,
-      revision: activity.revision,
-      enabledCapabilities: activity.enabledCapabilities,
-      activeDefinitionVersion: activity.activeDefinitionVersion,
-    },
     release: context.release,
     artifact: context.artifact,
   };
