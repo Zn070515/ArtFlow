@@ -27,4 +27,12 @@ describe("Join, Registration, and Vote layout contracts", () => {
     expect(global).toContain(".vote-credential-panel");
     expect(vote).not.toContain('className="button-primary"');
   });
+
+  it("removes obsolete pre-Console registration selectors", async () => {
+    const global = await readFile(join(sourceDirectory, "styles", "global.css"), "utf8");
+
+    expect(global).not.toMatch(/\.registration-panel(?:\s|[.{:#,])/);
+    expect(global).not.toMatch(/\.registration-head(?:\s|[.{:#,])/);
+    expect(global).not.toMatch(/\.question-list(?:\s|[.{:#,])/);
+  });
 });
