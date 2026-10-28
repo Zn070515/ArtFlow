@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
-const SAFE_SEGMENT = /^[a-z0-9_-]+$/;
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
 export interface StoredArchiveFile {
   readonly key: string;

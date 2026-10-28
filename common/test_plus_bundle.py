@@ -7,6 +7,10 @@ from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    RESULT_RELEASE_STATE,
+    RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     VOTE_BALLOT_WRITE,
     VOTE_SESSION_STATE,
     authority_write,
@@ -17,13 +21,23 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from files.models import MaterialCheck, SubmissionFile
+from public_portal.models import PublicPost, ResultRelease
+from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.group_chorus import (
     confirm_group_stage,
     create_group_stage,
     freeze_group_stage,
     record_group_stage,
 )
-from singer_contest.models import ContestRound, Judge, ScoreRecord, SingerRegistration
+from singer_contest.models import (
+    ContestRound,
+    Judge,
+    ScoreRecord,
+    SingerRegistration,
+    StageAwardDecision,
+    StageDecision,
+    StageResult,
+)
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
@@ -157,6 +171,92 @@ class ExportPlusBundleTests(TestCase):
             "vote_purpose_mapped",
             {entry["kind"] for entry in bundle["unsupported"]},
         )
+
+    def test_export_preserves_camel_case_result_snapshot_fallback_ids(self) -> None:
+        activity = self._activity()
+        singer = self._registration(activity, "Alice")
+        operator = get_user_model().objects.create_user(
+            username="result-export-operator", password="staff-password"
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=activity,
+            name="Export ruleset",
+            stage_key="final",
+        )
+        with authority_write(RULESET_FREEZE):
+            ruleset_version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition={
+                    "schema_version": 1,
+                    "nodes": [{"key": "release-stage", "type": "ASSESS", "source": "entry", "vote_source": "release-source"}],
+                },
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                authority_hash="a" * 64,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE), authority_write(STAGE_RESULT_CONFIRM):
+            stage_result = StageResult.objects.create(
+                activity=activity,
+                ruleset_version=ruleset_version,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash="a" * 64,
+                input_fingerprint="b" * 64,
+                result_version=1,
+                is_test_data=False,
+            )
+            StageDecision.objects.create(
+                stage_result=stage_result,
+                singer=singer,
+                outcome_code="finalist",
+                rank=1,
+                score="93.50",
+            )
+            StageAwardDecision.objects.create(
+                stage_result=stage_result,
+                activity=activity,
+                singer=singer,
+                name="冠军",
+            )
+            stage_result.status = StageResult.Status.CONFIRMED
+            stage_result.confirmed_at = timezone.now()
+            stage_result.confirmed_by = operator
+            stage_result.save(update_fields=["status", "confirmed_at", "confirmed_by"])
+        post = PublicPost.objects.create(
+            title="Final result",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=activity,
+            version=1,
+        )
+        with authority_write(RESULT_RELEASE_STATE):
+            ResultRelease.objects.create(
+                post=post,
+                stage_result=stage_result,
+                post_version=1,
+                result_version=1,
+                candidate_revision=stage_result.candidate_revision,
+                # The current schema normalizes a legacy NULL snapshot to the
+                # empty JSON object; the exporter must still use the fallback.
+                result_snapshot={},
+                ruleset_version=ruleset_version,
+                authority_hash="a" * 64,
+                input_fingerprint="b" * 64,
+                status=ResultRelease.Status.ACTIVE,
+                released_by=operator,
+                note="export fallback",
+            )
+        output = Path(tempfile.mkdtemp()) / "bundle.json"
+
+        call_command("export_plus_bundle", activity=activity.public_code, output=str(output))
+
+        bundle = json.loads(output.read_text(encoding="utf-8"))
+        snapshot = bundle["results"]["releases"][0]["snapshot"]
+        expected_id = f"legacy-user:{singer.user_id}"
+        self.assertEqual(snapshot["decisions"][0]["contestantId"], expected_id)
+        self.assertEqual(snapshot["awards"][0]["contestantId"], expected_id)
+        self.assertNotIn("legacy-user:None", output.read_text(encoding="utf-8"))
 
     def test_export_includes_grouping_stages(self) -> None:
         activity = self._activity()

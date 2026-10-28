@@ -141,6 +141,15 @@ describe("archive package", () => {
     await expect(storage.put("../evil/v1.zip", bytes)).rejects.toThrow(/Unsafe archive key/);
   });
 
+  it("accepts uppercase public-code segments used by imported activities", async () => {
+    const storage = createLocalArchiveStorage(root);
+    const bytes = new Uint8Array([9, 8, 7]);
+    const key = "legacy-act-AB7K2Q9Z/v1.zip";
+    await expect(storage.put(key, bytes)).resolves.toMatchObject({ key, size: 3 });
+    expect(Array.from(await storage.read(key))).toEqual([9, 8, 7]);
+    await storage.remove(key);
+  });
+
   it("builds a whitelist-only ZIP with a manifest and legacy snapshot handling", () => {
     const output = buildArchivePackage({
       packageId: "archive-1",

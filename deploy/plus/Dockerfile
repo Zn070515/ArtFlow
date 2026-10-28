@@ -1,5 +1,6 @@
 # Build context is the repository root:
 #   docker build -f deploy/plus/Dockerfile --target api -t artflow-plus-api .
+#   docker build -f deploy/plus/Dockerfile --target worker -t artflow-plus-worker .
 #   docker build -f deploy/plus/Dockerfile --target web -t artflow-plus-web .
 
 ARG NODE_IMAGE=node:24-bookworm-slim
@@ -24,6 +25,13 @@ ENV NODE_ENV=production \
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:3000/readyz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+CMD ["node", "main.cjs"]
+
+FROM ${NODE_IMAGE} AS worker
+WORKDIR /app
+COPY --from=build /src/apps/worker/dist/main.cjs ./main.cjs
+ENV NODE_ENV=production \
+    APP_ENV=production
 CMD ["node", "main.cjs"]
 
 FROM ${NGINX_IMAGE} AS web

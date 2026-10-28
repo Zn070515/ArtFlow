@@ -231,6 +231,26 @@ export function lockRound(
   );
 }
 
+export function reopenRoundForCorrection(
+  activityId: string,
+  roundKey: string,
+  expectedRevision: number,
+  reason: string,
+): Promise<LiveRoundRecord> {
+  return apiFetch<LiveRoundRecord>(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/reopen-for-correction`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        expectedRevision,
+        reason,
+      }),
+    },
+  );
+}
+
 export function resetRehearsal(
   activityId: string,
   roundKey: string,

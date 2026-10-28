@@ -297,3 +297,32 @@ export async function getActivityEventHead(
     .executeTakeFirst();
   return Number(row?.head ?? 0);
 }
+
+export interface OutboxRelayHealth {
+  readonly headSequence: number;
+  readonly publishedHeadSequence: number;
+  readonly pendingCount: number;
+}
+
+/** Read-only operational signal for verifying that the separate relay is alive. */
+export async function getOutboxRelayHealth(
+  db: Kysely<Database>,
+): Promise<OutboxRelayHealth> {
+  const row = await sql<{
+    head: string | null;
+    published_head: string | null;
+    pending: string;
+  }>`
+    select
+      max(id) as head,
+      max(id) filter (where published_at is not null) as published_head,
+      count(*) filter (where published_at is null and dead_lettered_at is null) as pending
+    from outbox
+  `.execute(db);
+  const value = row.rows[0];
+  return {
+    headSequence: Number(value?.head ?? 0),
+    publishedHeadSequence: Number(value?.published_head ?? 0),
+    pendingCount: Number(value?.pending ?? 0),
+  };
+}

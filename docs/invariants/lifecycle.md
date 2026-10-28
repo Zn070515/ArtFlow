@@ -90,8 +90,15 @@ PublicPost/ResultRelease 都曾出现“任意 ORM 写就能改状态”，随�
 - 重复开门/重复锁定；
 - 从 UI 无法完成整条恢复链。
 
-**Plus 要求**：纠错命令是显式 saga（开门 → 改 → 锁 → 重算 → 核定），每一步
-幂等、可审计、可在同一界面完成。
+**Plus 要求**：纠错命令是显式 saga（结果 unlock → round reopen-for-correction
+→ score correction → relock → recompute → reconfirm → new release），每一步
+幂等、可审计、可在同一界面完成。`competition.round.reopen_correction` 只能在
+活动/round 锁定顺序下执行，要求 formal session、原因、操作者和 expected revision，
+并拒绝仍被 confirmed result 消费的 round；普通状态写入不构成纠错 seam。
+
+历史导入不走这条 operational seam：`historical` bundle 必须落为 closed activity，
+registration capability 以 final 生命周期快照保存，公开读取仍可用但所有注册、材料、
+名册和活动写命令都 fail closed。只有 `adoption` 才能产生 active activity。
 
 ---
 

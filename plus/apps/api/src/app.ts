@@ -3,6 +3,7 @@ import {
   CloseExecutionBodySchema,
   FinalizeAdvancementBodySchema,
   LockCompetitionRoundBodySchema,
+  ReopenCompetitionRoundBodySchema,
   CompetitionRoundParamsSchema,
   CompetitionRankingQuerySchema,
   CompetitionScoreBodySchema,
@@ -42,7 +43,7 @@ import {
   UnarchiveActivityBodySchema,
   RegisterParticipantBodySchema,
 } from "@artflow-plus/contracts";
-import { checkReady, getCurrentRankingSnapshot, getLiveState, getRoundByKey, getVoteSession, revokeLocalSession, selectPublicResults, type Database } from "@artflow-plus/db";
+import { checkReady, getCurrentRankingSnapshot, getLiveState, getOutboxRelayHealth, getRoundByKey, getVoteSession, revokeLocalSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
   defaultCapabilityRegistry,
   DomainError,
@@ -80,6 +81,7 @@ import {
   editScoreFact,
   finalizeAdvancement,
   lockRound,
+  reopenRoundForCorrection,
   lockPerformance,
   openPerformance,
   openScoreCorrection,
@@ -164,7 +166,12 @@ import swagger from "@fastify/swagger";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import type { Kysely } from "kysely";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from "fastify";
 
 import { createRealtimeServer } from "@artflow-plus/realtime/server";
 
@@ -182,6 +189,16 @@ export interface AppOptions {
   readonly enableRuntimeFacts?: boolean;
   /** Gateway/app limiter seam; public capability entry fails closed if it errors. */
   readonly rateLimiter?: RateLimiter;
+  /** Explicit trusted proxy addresses/CIDRs; empty by default. */
+  readonly trustProxy?: FastifyServerOptions["trustProxy"];
+}
+
+export function parseTrustedProxy(value = process.env.ARTFLOW_PLUS_TRUST_PROXY): string[] {
+  if (value === undefined || value.trim() === "") return [];
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
@@ -226,6 +243,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   ROUND_ALREADY_PREPARED: 409,
   ROUND_NOT_PREPARED: 409,
   ROUND_LOCKED: 409,
+  ROUND_RELEASE_IMMUTABLE: 409,
   PANEL_ALREADY_ACTIVE: 409,
   PANEL_NOT_ACTIVE: 409,
   PERFORMANCE_ALREADY_OPEN: 409,
@@ -630,7 +648,10 @@ function errorDetails(error: unknown): unknown {
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: false,
+    trustProxy: options.trustProxy ?? parseTrustedProxy(),
+  });
   // Material bytes are uploaded as a raw body; keep the limit aligned with the
   // released materials policy and reject oversize bodies before the handler.
   app.addContentTypeParser(
@@ -1156,6 +1177,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       throw new DomainError("NOT_FOUND", `Activity ${id} was not found.`);
     }
     return activity;
+  });
+
+  app.get("/api/operations/outbox", { config: { access: "operations" } }, async () => {
+    return getOutboxRelayHealth(db);
   });
 
   app.get(
@@ -1782,6 +1807,26 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         roundId: round.id,
         expectedRevision: body.expectedRevision,
         scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/reopen-for-correction",
+    { schema: { params: CompetitionRoundParamsSchema, body: ReopenCompetitionRoundBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey } = request.params as { id: string; roundKey: string };
+      const body = request.body as { scope: string; expectedRevision: number; reason: string };
+      const round = await routeRound(id, roundKey);
+      const outcome = await reopenRoundForCorrection(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        expectedRevision: body.expectedRevision,
+        scope: body.scope,
+        reason: body.reason,
       });
       return reply.status(outcome.status).send(outcome.body);
     },

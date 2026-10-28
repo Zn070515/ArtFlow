@@ -9,7 +9,8 @@
 - v2 已在该活动上完成彩排（Studio/Ops/Live/公开赛果各走通一次）。
 - 源 SHA 在 `artflow-plus` 上的 Gates（Structural and golden gates + Web public
   journey）为绿；生产镜像只从该 SHA 构建。
-- 已构建并固定镜像 digest：`ARTFLOW_PLUS_API_IMAGE`、`ARTFLOW_PLUS_WEB_IMAGE`。
+- 已构建并固定镜像 digest：`ARTFLOW_PLUS_API_IMAGE`、`ARTFLOW_PLUS_WORKER_IMAGE`、
+  `ARTFLOW_PLUS_WEB_IMAGE`。
 - 域名/TLS 不变；Caddy 仍以 `CADDY_SITE_ADDRESS` 为唯一入口。
 - 操作人与观察人明确；回滚决定由现场负责人做出。
 
@@ -84,8 +85,12 @@ node scripts/cutover-smoke.mjs
 ```
 
 operational profile 额外检查：报名详情可读、第一个材料能经受控 content 路由返回非空
-字节、active release 的 `commandScopes` 已绑定。全部 PASS 才能进入切换；任何 FAIL
-都先修复，不要切换。
+字节、active release 的 `commandScopes` 已绑定、outbox 的 `pendingCount` 为 0 且
+`publishedHeadSequence` 追上 `headSequence`。可在 smoke 前记录一个已知的
+`CUTOVER_EXPECTED_OUTBOX_HEAD`，让 smoke 同时验证该事件已经被 worker 发布。
+全部 PASS 才能进入切换；任何 FAIL 都先修复，不要切换。演练 worker 故障时，先
+停止 `plus-worker`，制造一笔受控 v2 写入，再以该 head 运行 smoke；它必须因
+pending/发布 head 落后而 FAIL，恢复 worker 后再确认 PASS。
 
 ## 3. Switch
 
@@ -119,7 +124,8 @@ operational profile 额外检查：报名详情可读、第一个材料能经受
 
 - v1 容器、数据库、media 保留至少一个完整活动周期；期间只读。
 - 备份策略覆盖 `plus_postgres_data` 与 `plus_archive_data`；验证一次恢复。
-- 监控：Caddy 5xx、plus-api `/readyz`、数据库连接、公开结果页可用性。
+- 监控：Caddy 5xx、plus-api `/readyz`、数据库连接、公开结果页可用性，以及 staff
+  可读的 `/api/operations/outbox` relay head/pending 指标。
 - 记录本次切换的 bundle hash、报告、commit 时间与回滚窗口结果。
 
 ## 7. 演练

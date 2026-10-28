@@ -26,6 +26,7 @@ import {
   openScoreCorrection,
   prepareCompetitionRound,
   recalculateAfterCorrection,
+  reopenRoundForCorrection,
   resolveRound,
   submitJudgeScore,
   submitProxyScore,
@@ -511,6 +512,163 @@ describe.skipIf(!connectionString)("score fact commands on PostgreSQL", () => {
     });
     expect(ranking.body.sourceScoreVersion).toBe(3);
     expect(ranking.body.rows).toContainEqual(expect.objectContaining({ contestantId: "singer-a", total: "92.00" }));
+  });
+
+  it("reopens a locked formal round through an audited correction seam", async () => {
+    const context = await seedScoreWindow();
+    const first = await submitJudgeScore(db, deps(judge), {
+      commandId: "cmd-round-reopen-j1",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      panelSnapshotId: context.panelSnapshotId,
+      seatId: context.seatId,
+      contextVersion: 1,
+      criteria,
+      notes: "",
+      scope: "judging",
+    });
+    const seat2 = await db.selectFrom("judge_seat").selectAll()
+      .where("panel_id", "=", context.panelSnapshotId).where("judge_id", "=", "judge-2")
+      .executeTakeFirstOrThrow();
+    await submitJudgeScore(db, deps({ ...judge, actorId: "judge-2" }), {
+      commandId: "cmd-round-reopen-j2",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      panelSnapshotId: context.panelSnapshotId,
+      seatId: seat2.id,
+      contextVersion: 1,
+      criteria,
+      notes: "",
+      scope: "judging",
+    });
+    await lockPerformance(db, deps(staff), {
+      commandId: "cmd-round-reopen-performance",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      scope: "judging",
+    });
+    const current = await db.selectFrom("competition_round").selectAll()
+      .where("id", "=", context.roundId).executeTakeFirstOrThrow();
+    const locked = await lockRound(db, deps(staff), {
+      commandId: "cmd-round-reopen-lock",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      expectedRevision: current.revision,
+      scope: "judging",
+    });
+    await db.insertInto("stage_result").values({
+      id: `consuming-reopen-${context.activityId}`,
+      activity_id: context.activityId,
+      stage_key: "final",
+      status: "confirmed",
+      candidate_revision: 1,
+      source_candidate_revision: 1,
+      input_fingerprint: "fp-reopen-consumed",
+      source: JSON.stringify({
+        kind: "podium_candidate",
+        aggregateId: `podium-${context.activityId}`,
+        definitionVersion: 1,
+        releaseHash: "score-release",
+        mode: "formal",
+        sourceRevision: 1,
+        inputFingerprint: "fp-reopen-consumed",
+        dependencyIds: [context.roundId],
+      }),
+      decisions: "[]",
+      awards: "[]",
+      note: "",
+      revision: 1,
+    }).execute();
+    await expect(reopenRoundForCorrection(db, deps(staff), {
+      commandId: "cmd-round-reopen-consumed",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      expectedRevision: locked.body.revision,
+      scope: "judging",
+      reason: "不应绕过已消费结果",
+    })).rejects.toMatchObject({ code: "RESULT_CONSUMED" });
+    await db.deleteFrom("stage_result").where("id", "=", `consuming-reopen-${context.activityId}`).execute();
+    const reopened = await reopenRoundForCorrection(db, deps(staff), {
+      commandId: "cmd-round-reopen",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      expectedRevision: locked.body.revision,
+      scope: "judging",
+      reason: "发布前核对评委评分",
+    });
+    expect(reopened.body).toMatchObject({ state: "scoring", revision: locked.body.revision + 1, lockedAt: null });
+    const events = await readEventsSince(db, { activityId: context.activityId, after: 0, limit: 100 });
+    expect(events.some((event) => event.type === "CompetitionRoundReopenedForCorrection")).toBe(true);
+    const correction = await openScoreCorrection(db, deps(staff), {
+      commandId: "cmd-round-reopen-open-correction",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      scoreFactId: first.body.id,
+      panelSnapshotId: context.panelSnapshotId,
+      scope: "judging",
+      reason: "发布前核对评委评分",
+    });
+    expect(correction.body.state).toBe("open");
+    const revised = await editScoreFact(db, deps(staff), {
+      commandId: "cmd-round-reopen-edit-score",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      scoreFactId: first.body.id,
+      panelSnapshotId: context.panelSnapshotId,
+      seatId: context.seatId,
+      contextVersion: 1,
+      expectedVersion: first.body.version,
+      criteria: { technique: 96, stage: 91, emotion: 92 },
+      reason: "修正评委录入错误",
+      correctionId: correction.body.id,
+      scope: "judging",
+    });
+    const closed = await closeScoreCorrection(db, deps(staff), {
+      commandId: "cmd-round-reopen-close-correction",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      scoreFactId: first.body.id,
+      correctionId: correction.body.id,
+      panelSnapshotId: context.panelSnapshotId,
+      scope: "judging",
+    });
+    expect(closed.body.state).toBe("closed");
+    const recalculated = await recalculateAfterCorrection(db, deps(staff), {
+      commandId: "cmd-round-reopen-recalculate",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      performanceId: context.performanceId,
+      scoreFactId: first.body.id,
+      correctionId: correction.body.id,
+      panelSnapshotId: context.panelSnapshotId,
+      scope: "judging",
+    });
+    expect(recalculated.body.state).toBe("recalculated");
+    const reopenedRound = await db.selectFrom("competition_round").selectAll()
+      .where("id", "=", context.roundId).executeTakeFirstOrThrow();
+    const relocked = await lockRound(db, deps(staff), {
+      commandId: "cmd-round-reopen-relock",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      expectedRevision: reopenedRound.revision,
+      scope: "judging",
+    });
+    expect(relocked.body.state).toBe("locked");
+    const ranking = await resolveRound(db, deps(staff), {
+      commandId: "cmd-round-reopen-resolve",
+      activityId: context.activityId,
+      roundId: context.roundId,
+      scope: "judging",
+    });
+    expect(ranking.body.rows).toHaveLength(1);
+    expect(ranking.body.rows).toContainEqual(expect.objectContaining({ contestantId: "singer-a" }));
+    expect(ranking.body.sourceScoreVersion).toBeGreaterThan(2);
   });
 
   it("refuses score changes after a confirmed result consumed the activity", async () => {

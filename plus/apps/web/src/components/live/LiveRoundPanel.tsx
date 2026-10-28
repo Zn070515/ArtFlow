@@ -7,11 +7,13 @@ import {
   lockRound,
   openPerformance,
   prepareRound,
+  reopenRoundForCorrection,
   resetRehearsal,
   resolveRound,
   type LiveRound,
   type LiveState,
 } from "../../api/live.js";
+import { liveDisplayRanks } from "./ranking.js";
 
 interface JudgeDraft {
   readonly judgeId: string;
@@ -106,6 +108,16 @@ export function LiveRoundPanel({
     return run(() => resolveRound(state.activity.id, config.key).then(() => undefined), "生成排名失败。");
   }
 
+  function reopenForCorrection(): Promise<void> {
+    if (round === null) return Promise.resolve();
+    const reason = window.prompt("请输入重新打开本轮的审计原因：", "发布前核对评委评分");
+    if (reason === null || reason.trim() === "") return Promise.resolve();
+    return run(
+      () => reopenRoundForCorrection(state.activity.id, config.key, round.revision, reason).then(() => undefined),
+      "打开评分更正窗口失败。",
+    );
+  }
+
   function reset(): Promise<void> {
     if (round === null || (sessionMode !== "test" && sessionMode !== "rehearsal")) {
       return Promise.resolve();
@@ -120,6 +132,9 @@ export function LiveRoundPanel({
   const allLocked = live.performances.length > 0 &&
     live.performances.every((performance) => performance.state === "locked");
   const openPerformanceRow = live.performances.find((performance) => performance.state === "open");
+  const displayRanks = live.ranking === null
+    ? []
+    : liveDisplayRanks(live.ranking.rows, live.ranking.tieGroups);
 
   return (
     <section className="ops-card" data-testid={`live-round-${config.key}`}>
@@ -269,6 +284,16 @@ export function LiveRoundPanel({
           >
             生成排名
           </button>
+          {sessionMode === "formal" && round.state === "locked" ? (
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={busy}
+              onClick={() => void reopenForCorrection()}
+            >
+              打开评分更正窗口
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -288,7 +313,7 @@ export function LiveRoundPanel({
             <tbody>
               {live.ranking.rows.map((row, index) => (
                 <tr key={row.contestantId}>
-                  <td>{index + 1}</td>
+                  <td>{displayRanks[index] ?? index + 1}</td>
                   <td>{row.contestantId}</td>
                   <td>{row.total}</td>
                   <td>{row.judgeCount}</td>

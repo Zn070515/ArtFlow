@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "pnpm -r run build",
-    "build:prod": "pnpm --filter @artflow-plus/web build && pnpm --filter @artflow-plus/api build:bundle",
+    "build:prod": "pnpm --filter @artflow-plus/web build && pnpm --filter @artflow-plus/api build:bundle && pnpm --filter @artflow-plus/worker build:bundle",
     "check": "pnpm -r run check",
     "test": "pnpm -r run test"
   },

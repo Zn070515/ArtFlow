@@ -35,7 +35,13 @@ production still runs v1.0.x and the adoption rehearsal has not been executed. T
 - **Run locally**: `pnpm --filter @artflow-plus/api start` (migrates on start,
   default `127.0.0.1:3000`) and `pnpm --filter @artflow-plus/web dev` (Vite proxies
   `/api`). Set `ARTFLOW_PLUS_INLINE_RELAY=1` to run the outbox relay inside the API
-  process (single-process deployments and E2E); production keeps it in `apps/worker`.
+  process (single-process deployments and E2E); production uses the separately
+  built `plus-worker` image and keeps the API value at `0`.
+- **Production proxy boundary**: `ARTFLOW_PLUS_TRUST_PROXY` is an explicit,
+  comma-separated list of internal proxy IPs/CIDRs. It defaults to empty, so
+  public `X-Forwarded-For` headers cannot change rate-limit identity. The Plus
+  Nginx/Caddy transport ceiling is 128 MiB; released material policies remain the
+  domain authority below that ceiling.
 - **Gates**: `uv run pytest tests/gates -q` includes `GATE-PLUS-BOUNDARY-01` and
   `GATE-REALTIME-CORE-01`; `pwsh -NoProfile -File scripts/check_docs.ps1` validates
   user-facing docs. Browser E2E runs against the `artflow_e2e` schema with
