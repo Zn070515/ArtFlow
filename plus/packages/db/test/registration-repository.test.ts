@@ -10,6 +10,7 @@ import {
   getRoster,
   insertMaterial,
   insertRegistration,
+  getRegistrationByParticipants,
   listApprovedRegistrationCount,
   migrate,
   updateRegistration,
@@ -85,6 +86,16 @@ describe.skipIf(!connectionString)("registration persistence on PostgreSQL", () 
     await expect(updateRegistration(db, { ...first, revision: 2 }, 0)).rejects.toMatchObject({
       code: "STALE_REVISION",
     });
+  });
+
+  it("finds a registration by any ordered participant subject", async () => {
+    const activityId = await seedActivity();
+    const imported = registration(activityId, "legacy-user:1");
+    await insertRegistration(db, imported);
+
+    await expect(getRegistrationByParticipants(db, activityId, ["participant:1", "legacy-user:1"]))
+      .resolves.toMatchObject({ id: imported.id, participantId: "legacy-user:1" });
+    await expect(getRegistrationByParticipants(db, activityId, [])).resolves.toBeNull();
   });
 
   it("counts only approved registrations and keeps material ownership by slot", async () => {

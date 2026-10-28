@@ -106,6 +106,22 @@ export async function getRegistrationByParticipant(
   return row === undefined ? null : registration(row);
 }
 
+export async function getRegistrationByParticipants(
+  db: Kysely<Database>,
+  activityId: string,
+  participantIds: readonly string[],
+): Promise<StoredRegistration | null> {
+  if (participantIds.length === 0) return null;
+  const row = await db
+    .selectFrom("registration")
+    .selectAll()
+    .where("activity_id", "=", activityId)
+    .where("participant_id", "in", [...participantIds])
+    .orderBy("id")
+    .executeTakeFirst();
+  return row === undefined ? null : registration(row);
+}
+
 export async function getRegistrationByParticipantForUpdate(
   trx: Kysely<Database>,
   activityId: string,
