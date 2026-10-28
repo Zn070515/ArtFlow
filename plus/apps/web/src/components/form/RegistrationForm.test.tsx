@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/registrations.js", () => ({
@@ -22,6 +22,7 @@ const detail: RegistrationDetail = {
     status: "draft",
     answers: {},
     revision: 1,
+    reviewNote: "",
   },
   questionnaire: {
     version: "v1",
@@ -54,5 +55,14 @@ describe("RegistrationForm", () => {
     expect(document.querySelector(".registration-actions")).not.toBeNull();
     expect(screen.getByRole("button", { name: "保存草稿" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提交报名" })).toBeInTheDocument();
+    expect(document.querySelector(".review-note")).toBeNull();
+  });
+
+  it("announces save feedback to assistive technology", async () => {
+    render(<RegistrationForm detail={detail} onChanged={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+
+    expect(await screen.findByText("草稿已保存")).toHaveAttribute("aria-live", "polite");
   });
 });

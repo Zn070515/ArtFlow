@@ -1715,6 +1715,34 @@ a.primary-button {
   background: var(--color-surface);
 }
 
+.console-table-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.console-filter-field {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.console-filter-field :is(input, select) {
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-size: 0.86rem;
+  letter-spacing: normal;
+}
+
 .console-table-wrap .data-table {
   margin: 0;
 }
@@ -1802,6 +1830,12 @@ a.primary-button {
 
   .console-main {
     padding: 20px;
+  }
+}
+
+@media (max-width: 767px) {
+  .console-table-toolbar {
+    grid-template-columns: 1fr;
   }
 }
 

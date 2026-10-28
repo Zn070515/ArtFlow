@@ -172,9 +172,9 @@ export function RegistrationForm({
           </span>
         </div>
       )}
-      {detail.registration.reviewNote === undefined ? null : (
+      {detail.registration.reviewNote?.trim() ? (
         <p className="review-note">审核意见：{detail.registration.reviewNote}</p>
-      )}
+      ) : null}
       <div className="registration-question-grid">
         {detail.questionnaire.questions.map((question) => {
           if (question.type === "file") {
@@ -202,7 +202,7 @@ export function RegistrationForm({
           );
         })}
       </div>
-      {message === null ? null : <p className="form-success">{message}</p>}
+      {message === null ? null : <p className="form-success" aria-live="polite">{message}</p>}
       {error === null ? null : (
         <p className="form-error" role="alert">
           {error}

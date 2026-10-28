@@ -27,9 +27,9 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
         参与者 {detail.registration.participantId} · 状态 {detail.registration.status} · 修订{" "}
         {detail.registration.revision}
       </p>
-      {detail.registration.reviewNote === undefined ? null : (
+      {detail.registration.reviewNote?.trim() ? (
         <p className="review-note">审核意见：{detail.registration.reviewNote}</p>
-      )}
+      ) : null}
       <div className="answer-list">
         {detail.questionnaire.questions
           .filter((question) => question.type !== "notice")

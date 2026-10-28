@@ -66,6 +66,7 @@ describe("OpsRegistrationPage", () => {
           status: "submitted",
           answers: { name: "选手一" },
           revision: 1,
+          reviewNote: "",
         },
         questionnaire: {
           version: "v1",
@@ -85,5 +86,6 @@ describe("OpsRegistrationPage", () => {
     expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("console-page-title");
     expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
     expect(screen.getByRole("heading", { name: "报名信息" })).toHaveClass("console-card-title");
+    expect(document.querySelector(".review-note")).toBeNull();
   });
 });
