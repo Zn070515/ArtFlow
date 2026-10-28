@@ -41,6 +41,7 @@ const adminPermissions = [
   "competition.round.prepare",
   "competition.score.write",
   "judge.manage",
+  "ticket.manage",
   "grouping.manage",
   "voting.manage",
   "result.manage",
