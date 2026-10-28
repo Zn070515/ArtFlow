@@ -11,6 +11,7 @@ import {
   insertParticipantClaim,
   insertParticipantIdentityLink,
   markParticipantClaimConsumed,
+  revokeUnconsumedParticipantClaims,
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import {
@@ -149,10 +150,17 @@ export async function issueParticipantClaim(
     if (await getParticipantIdentityLinkByLegacyForUpdate(trx, registration.participantId) !== null) {
       invalidClaim();
     }
+    const issuedAt = deps.now();
+    await revokeUnconsumedParticipantClaims(trx, {
+      activityId: input.activityId,
+      registrationId: registration.id,
+      legacyParticipantId: registration.participantId,
+      revokedAt: issuedAt,
+    });
     const claimId = idFromCommand("participant-claim", input.commandId);
     const token = `AF1.CLAIM.${claimId}.${randomBytes(24).toString("base64url")}`;
     const expiresAt = new Date(
-      Date.parse(deps.now()) + (input.ttlMs ?? DEFAULT_PARTICIPANT_CLAIM_TTL_MS),
+      Date.parse(issuedAt) + (input.ttlMs ?? DEFAULT_PARTICIPANT_CLAIM_TTL_MS),
     ).toISOString();
     await insertParticipantClaim(trx, {
       id: claimId,
@@ -161,6 +169,7 @@ export async function issueParticipantClaim(
       legacyParticipantId: registration.participantId,
       tokenDigest: stableHash(token),
       expiresAt,
+      revokedAt: null,
       consumedAt: null,
       consumedByActorId: null,
       issuedBy: actor.actorId,
@@ -232,7 +241,7 @@ export async function consumeParticipantClaim(
   }, async (trx) => {
     const claim = await getParticipantClaimByDigestForUpdate(trx, tokenDigest);
     if (claim === null) invalidClaim();
-    if (claim.consumedAt !== null || Date.parse(claim.expiresAt) <= Date.parse(deps.now())) invalidClaim();
+    if (claim.revokedAt !== null || claim.consumedAt !== null || Date.parse(claim.expiresAt) <= Date.parse(deps.now())) invalidClaim();
     if (!claim.legacyParticipantId.startsWith("legacy-user:")) invalidClaim();
     const activity = await getActivityForUpdate(trx, claim.activityId);
     if (activity === null) invalidClaim();

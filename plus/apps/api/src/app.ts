@@ -168,7 +168,8 @@ import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
 import swagger from "@fastify/swagger";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { Type } from "@sinclair/typebox";
+import { Type, type TSchema } from "@sinclair/typebox";
+import { TypeCompiler } from "@sinclair/typebox/compiler";
 import type { Kysely } from "kysely";
 import Fastify, {
   type FastifyInstance,
@@ -417,16 +418,6 @@ const RegistrationParams = Type.Object(
   { additionalProperties: false },
 );
 
-// Fastify's default AJV mode removes additional properties. The Claim routes
-// need to reject them, so these transport schemas preserve extras for the
-// explicit boundary check in the handlers while the shared contract remains
-// closed for consumers that validate it directly.
-const ParticipantClaimConsumeRouteBodySchema = Type.Unsafe({
-  ...ParticipantClaimConsumeBodySchema,
-  additionalProperties: true,
-});
-const ParticipantClaimIssueRouteBodySchema = Type.Object({}, { additionalProperties: true });
-
 const GroupingStageParams = Type.Object(
   { id: Type.String({ minLength: 1 }), stageId: Type.String({ minLength: 1 }) },
   { additionalProperties: false },
@@ -623,21 +614,32 @@ function sessionTokenValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function rejectAdditionalBodyKeys(body: unknown, allowed: readonly string[]): void {
-  if (body === null || typeof body !== "object" || Array.isArray(body)) return;
-  const unexpected = Object.keys(body).find((key) => !allowed.includes(key));
-  if (unexpected === undefined) return;
-  const error = new Error(`body must not have additional property '${unexpected}'`);
-  Object.assign(error, {
-    validation: [{
-      keyword: "additionalProperties",
-      instancePath: "",
-      schemaPath: "#/additionalProperties",
-      params: { additionalProperty: unexpected },
-      message: "must NOT have additional properties",
-    }],
-  });
-  throw error;
+type ClosedSchemaValidationError = {
+  readonly keyword: string;
+  readonly instancePath: string;
+  readonly schemaPath: string;
+  readonly params: Record<string, unknown>;
+  readonly message?: string;
+};
+
+type ClosedSchemaValidator = ((data: unknown) => boolean) & {
+  errors?: ClosedSchemaValidationError[] | null;
+};
+
+function compileClosedTypeBoxSchema({ schema }: { readonly schema: unknown }): ClosedSchemaValidator {
+  const checker = TypeCompiler.Compile(schema as TSchema);
+  const validate = ((data: unknown): boolean => {
+    const errors = [...checker.Errors(data)].map((error) => ({
+      keyword: String(error.type),
+      instancePath: error.path,
+      schemaPath: "",
+      params: {},
+      message: error.message,
+    }));
+    validate.errors = errors;
+    return errors.length === 0;
+  }) as ClosedSchemaValidator;
+  return validate;
 }
 
 function setSessionCookie(reply: { header(name: string, value: string): unknown }, name: string, value: string, expiresAt: string): void {
@@ -1123,7 +1125,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.post(
     "/api/public/participant-claims/consume",
-    { schema: { body: ParticipantClaimConsumeRouteBodySchema }, config: { access: "public" } },
+    {
+      schema: { body: ParticipantClaimConsumeBodySchema },
+      validatorCompiler: compileClosedTypeBoxSchema,
+      config: { access: "public" },
+    },
     async (request, reply) => {
       await requirePublicRateLimit(request, "participant-claim-consume", 10);
       const body = request.body as {
@@ -1131,7 +1137,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         username?: string;
         password?: string;
       };
-      rejectAdditionalBodyKeys(body, ["token", "username", "password"]);
       const session = await requestSession(request);
       const consumeDeps: RuntimeDeps = {
         ...deps,
@@ -1501,9 +1506,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.post(
     "/api/activities/:id/registrations/:registrationId/account-claim",
-    { schema: { params: RegistrationParams, body: ParticipantClaimIssueRouteBodySchema } },
+    {
+      schema: { params: RegistrationParams, body: Type.Object({}, { additionalProperties: false }) },
+      validatorCompiler: compileClosedTypeBoxSchema,
+    },
     async (request, reply) => {
-      rejectAdditionalBodyKeys(request.body, []);
       const commandId = requireIdempotency(request);
       const { id, registrationId } = request.params as { id: string; registrationId: string };
       const outcome = await issueParticipantClaim(db, await requestDeps(request), {
