@@ -88,6 +88,15 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
       "participant_claim_token_digest_key",
       "participant_identity_link_actor_key",
     ]);
+
+    const claimColumns = await sql<{ column_name: string }>`
+      select column_name
+        from information_schema.columns
+       where table_schema = current_schema()
+         and table_name = 'participant_claim'
+         and column_name = 'revoked_at'
+    `.execute(db);
+    expect(claimColumns.rows.map((row) => row.column_name)).toEqual(["revoked_at"]);
   });
 
   it("adds the hardening columns", async () => {

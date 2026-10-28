@@ -143,6 +143,20 @@ describe.skipIf(!connectionString)("participant claim API", () => {
     expect(replay.json().token).toBeNull();
   });
 
+  it("publishes a closed public claim body schema", () => {
+    const document = app.swagger() as {
+      readonly paths: Record<string, {
+        readonly post?: {
+          readonly requestBody?: {
+            readonly content?: Record<string, { readonly schema?: { readonly additionalProperties?: boolean } }>;
+          };
+        };
+      }>;
+    };
+    const schema = document.paths["/api/public/participant-claims/consume"]?.post?.requestBody?.content?.["application/json"]?.schema;
+    expect(schema?.additionalProperties).toBe(false);
+  });
+
   it("consumes a claim into a cookie session without exposing session credentials", async () => {
     const seed = await seedRegistration();
     const issued = await issueClaim(seed);

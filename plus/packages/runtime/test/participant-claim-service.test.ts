@@ -395,4 +395,24 @@ describe.skipIf(!connectionString)("participant claim service on PostgreSQL", ()
       .where("legacy_participant_id", "=", seeded.legacyParticipantId)
       .executeTakeFirstOrThrow()).toMatchObject({ count: "1" });
   });
+
+  it("revokes an older unconsumed claim when staff issues a replacement", async () => {
+    const seeded = await seedRegistration();
+    const first = await issueClaim(seeded.activityId, seeded.registrationId);
+    const second = await issueClaim(seeded.activityId, seeded.registrationId);
+
+    await expect(consumeParticipantClaim(db, deps(), {
+      commandId: `consume-revoked-${randomUUID()}`,
+      token: first.token,
+      username: `revoked-${randomUUID().slice(0, 8)}`,
+      password: "claim-password-123",
+    })).rejects.toMatchObject({ code: "INVALID_PARTICIPANT_CLAIM" });
+
+    await expect(consumeParticipantClaim(db, deps(), {
+      commandId: `consume-replacement-${randomUUID()}`,
+      token: second.token,
+      username: `replacement-${randomUUID().slice(0, 8)}`,
+      password: "claim-password-123",
+    })).resolves.toMatchObject({ replayed: false });
+  });
 });
