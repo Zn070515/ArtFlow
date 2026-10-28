@@ -52,7 +52,7 @@ def test_docs_describe_plus_media_and_isolated_restore() -> None:
         assert "restore_plus_verify.sh" in document
 
     assert "真实活动彩排" not in backup_restore_doc
-    assert "不要求真实活动彩排" in cutover_runbook
+    assert "真实活动彩排" not in cutover_runbook
 
 
 def test_scripts_do_not_reset_source_compose_state() -> None:
