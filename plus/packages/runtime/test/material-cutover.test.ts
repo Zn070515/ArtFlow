@@ -254,6 +254,16 @@ describe.skipIf(!connectionString)("material cutover", () => {
       materialId: pending.body.id,
       bytes: new Uint8Array(5).fill(2),
     });
+    const persistedUploadEvidence = await Promise.all([
+      db.selectFrom("command_receipt").select("result")
+        .where("command_id", "=", "material-replace-ok").executeTakeFirstOrThrow(),
+      db.selectFrom("audit_entry").select("detail")
+        .where("command_id", "=", "material-replace-ok").executeTakeFirstOrThrow(),
+      db.selectFrom("outbox").select("payload")
+        .where("aggregate_id", "=", pending.body.id).execute(),
+    ]);
+    expect(JSON.stringify(persistedUploadEvidence))
+      .not.toContain(Buffer.from(new Uint8Array(5).fill(2)).toString("base64"));
     const replaced = (await listMaterials(db, registration.id))
       .find((material) => material.questionKey === "audio")!;
     expect(replaced.id).toBe(pending.body.id);
