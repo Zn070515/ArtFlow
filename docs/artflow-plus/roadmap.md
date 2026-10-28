@@ -2,8 +2,8 @@
 
 状态：**M0–M14.1 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
 participant/material cutover：MaterialCheck 导入、补交 capability、原子上传、
-生产媒体卷与 Unicode 路径；production cutover 仍需以首个活动的真实 adoption
-彩排与 operational smoke 为准。产品与架构身份的
+生产媒体卷与 Unicode 路径；不再安排真实活动 adoption 彩排，production cutover 以干净
+baseline、自动化/隔离验收、operational smoke 与 owner acceptance 为准。产品与架构身份的
 权威是根目录 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）
 与证据。已完成里程碑的段落保留当时的实现描述，后续里程碑在其上覆盖。
 
@@ -246,20 +246,20 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   （esbuild + nginx）、Compose `plus` profile、Caddy site profile 主域名整体
   替换、只读 smoke、cutover runbook、staff 账号 provision。回滚边界为首次 v2
   正式写入前；切后参与者只读。ADR-0023。
-- **M8e-4 现场彩排与三类活动验证（已完成，2026-10-26）**：新增 stage-show /
+- **M8e-4 自动化三类活动验证（已完成，2026-10-26）**：新增 stage-show /
   review-awards packs，Pack 可携带默认 capability definitions；三条关键旅程
-  （歌手赛、节目征集+归档、作品评审+发布）通过；现场彩排 runbook 与验证报告。
+  （歌手赛、节目征集+归档、作品评审+发布）通过；自动化关键旅程与验证报告。
   当时的缺口（节目单公开页、纯投票发布、bracket、参与者账号）已明确记录；
   参与者账号随后由 M14.1 完成。ADR-0024、ADR-0035。
 
-**M8 出口**：关键旅程 E2E；迁移报告；回滚演练；现场彩排通过；至少三个结构不同
+**M8 出口**：关键旅程 E2E；迁移报告；回滚演练；自动化/隔离验证通过；至少三个结构不同
 的活动（judged singing competition、stage show、另一种比赛/复杂活动）证明
 内核无需重写。
 
 M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注册/Studio/Live/
 评委/导入赛果；M8e-2 导入报告与 M8e-3 runbook 提供迁移/回滚证据；三类活动
-关键旅程见 `docs/artflow-plus/shape-validation.md`；现场彩排清单见
-`docs/artflow-plus/rehearsal-runbook.md`。
+关键旅程见 `docs/artflow-plus/shape-validation.md`。原现场彩排 runbook 已退役，不再作为
+cutover 前置条件。
 
 ## M9 — Grouping Capability（已完成，2026-10-27）
 
@@ -369,7 +369,7 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - ticket ballot 继续复用既有锁内 submitBallot、ticket 状态和唯一约束；browser/anonymous
   投票路径保持兼容。
 - 出口：API 公共读回归、Web API 测试、票据 fragment 与手工输入 E2E、browser 投票
-  回归、Plus 类型与测试门禁通过；真实彩排留给 cutover runbook。
+  回归、Plus 类型与测试门禁通过；不依赖真实活动彩排，cutover 使用自动化/隔离证据。
 
 ## M14.1 — Participant Account Claim（已完成，2026-10-28）
 

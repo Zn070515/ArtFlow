@@ -184,6 +184,18 @@ P0/P1 在 production cutover 前必须有证据；P2 可以按真实流量和业
 
 ## 5. 后续工作顺序
 
+### 5.0 干净 baseline 与逐项还账协议
+
+本项目不再安排真实活动彩排。债务还账从干净 baseline 开始，每次只处理一个主题：
+
+- baseline 必须满足：工作区无未提交改动，`artflow-plus` 与远端一致，Plus check/test、
+  headless E2E、build 和文档门禁通过；
+- 每个主题使用独立短分支和独立提交，不能把安全、schema、HTTP 拆分和行为测试混成一笔；
+- 每笔债务先写验收标准，再写回归/门禁，最后实现；合并后在干净主线复跑受影响门禁；
+- 真实活动、真实参与者和真实现场不作为验证前置。需要运行时证据时使用隔离数据库、fixture、
+  自动化关键旅程、operational smoke、备份恢复和明确的 owner acceptance；
+- 只有当前一项还账合并且 baseline 重新变绿，才开始下一项。
+
 ### 5.1 先补护栏，再扩 capability
 
 1. 建立 security baseline：认证、CSRF、session rotation、public credential、上传、限流和

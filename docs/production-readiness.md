@@ -1,4 +1,4 @@
-# Production Readiness Rehearsal
+# Production Readiness Evidence
 
 > 当前运行基线以 [`GOAL.md`](../GOAL.md)、代码中的 authority service 和本文件的
 > “发布门禁”/“Production Rehearsal Report”为准。下面的 M2-A、M2-B、M2-C、M2-D1
@@ -7,7 +7,10 @@
 > recoverable ticket credential、HttpOnly Judge session、冻结规则集 authority、媒体
 > 独立 worker pool，以及 realtime 不阻断 HTTP 的降级拓扑。
 
-ArtFlow 首次正式活动前必须完成一次完整彩排，并保留验证记录。目标不是只确认 happy path，而是确认错误、重试、并发和恢复路径不会污染正式数据。
+当前决策：不再安排真实活动或真实角色彩排。本文中的现场彩排要求与报告保留为历史记录，
+不作为 ArtFlow-Plus production cutover 的前置条件。当前 readiness 由干净 baseline、自动化
+与隔离验收、operational smoke、备份恢复证据、authority 审计和 owner acceptance 组成；
+目标仍是证明错误、重试、并发和恢复路径不会污染正式数据。
 
 ## 事件日检查矩阵
 
@@ -74,8 +77,8 @@ activity/round/kind 范围；grant/session 均可由 Staff/Admin 撤销。GET �
 grant 和 session 只在成功的签发/兑换响应中返回一次原始 token，数据库、审计记录和只读
 Admin 检查页不保存或展示原始 token。公共兑换端点是刻意的无 cookie、body-only bearer
 边界，因此不依赖 CSRF cookie；Staff 的签发和撤销仍走登录会话与 CSRF 保护。后续接入
-JudgeSeat、正式扫码页或业务工作区前，仍必须完成 PostgreSQL 并发/恢复彩排和真实角色
-流程验证；因此 M2-A 继续保持 `EXPERIMENTAL`，不会被误标为 Judge/Ticket 已上线。
+JudgeSeat、正式扫码页或业务工作区前，仍必须完成 PostgreSQL 并发/恢复验证、隔离环境凭据
+流程和 owner acceptance；因此 M2-A 继续保持 `EXPERIMENTAL`，不会被误标为 Judge/Ticket 已上线。
 
 ## Historical Rehearsal Record: M2-B Ticket / Check-in / Audience Entitlement
 
@@ -141,11 +144,11 @@ M2-D1 的本地 PASS 只证明内部 authority 闭合，不证明学校 SSO/MFA�
 
 | 能力 | 必须通过的本地/CI 门禁 | 标记 Production 前的额外场景 |
 | --- | --- | --- |
-| M2-A 临时入口基础 | `entry_access` scoped Pyright、mypy、Django/pytest、PostgreSQL 测试、Playwright runtime smoke | 真实 Staff/公共兑换彩排、撤销/重放、恢复 |
+| M2-A 临时入口基础 | `entry_access` scoped Pyright、mypy、Django/pytest、PostgreSQL 测试、Playwright runtime smoke | 隔离环境 Staff/公共兑换流程、撤销/重放、恢复 |
 | JudgeSeat / JudgeSession | TypeScript client check、Playwright 浏览器流程、PostgreSQL 并发测试 | 缺席评委、过期会话、`STAFF_PROXY`、纸笔 DR |
 | Ticket / Check-in | TypeScript client check、服务测试、operator page/issue→redeem→check-in→vote 回归 | PostgreSQL 并发、完整 Playwright 凭据流程、重复票/已检票现场演练、公共端失败 DR |
 | 电子直录分 | 类型化 payload/state client、Playwright 提交/重试流程、PostgreSQL 竞态测试 | ACK 丢失、重复命令、错误目标、panel 变化 HOLD |
-| Production 发布 | 以上全部门禁、彩排脚本、安全门禁、备份/恢复证据 | 真实角色现场彩排并保留报告 |
+| Production 发布 | 以上全部门禁、自动化 smoke、安全门禁、备份/恢复证据 | owner acceptance、部署方 TLS/WAF/IdP/留存证据 |
 
 门禁覆盖随能力推进扩大，不允许为了通过新能力而静默移除既有门禁。Playwright 初始
 检查只读的 `/healthz/`；进入 Judge/Ticket 流程后，测试必须使用可丢弃数据，携带 bearer
@@ -192,7 +195,7 @@ GitHub Actions 对该 SHA 的 CI、PostgreSQL integration、Compose acceptance�
 Security 和 Workflow lint 全部为 `success`；PostgreSQL integration 记录为
 `1176 passed, 5 skipped`，Compose acceptance 的应用测试与 backup/restore
 也通过。该证据闭合 M2-D2 spec 要求的 restore 前置条件，但不替代学校
-SSO/MFA、TLS/WAF、volumetric DDoS、数据责任、真实角色和部署 ownership 的
+SSO/MFA、TLS/WAF、volumetric DDoS、数据责任和部署 ownership 的
 外部 `HOLD`。
 
 ### M2-D2 Public Result Release Authority
@@ -366,9 +369,9 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 `psql SELECT 1` 探针；不能把临时 init server 的一次 `pg_isready` 当作最终数据库就绪。
 超时或容器提前退出时，脚本只输出容器状态和最近 80 行日志用于诊断，不输出环境变量或凭据。
 
-## Production Rehearsal Report
+## Historical Rehearsal Reports
 
-每次正式彩排（§15.2 正常 / §15.3 恶意 / §15.4 灾难）完成后，把结果追加到本节。一份报告一场演练；首次正式活动前必须至少完成一份，并把“录分到 READY 时间”和“实际恢复时间”填入。
+本节只追加历史或隔离技术演练记录，不再要求为真实活动创建新的彩排报告。
 
 | 字段 | 内容 |
 | --- | --- |
@@ -385,13 +388,13 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 
 ### 2026-09-07 本地技术彩排记录
 
-本次记录是工程技术彩排，不替代首次正式活动前由真实 Admin / Staff /
-Participant / Judge / Audience 参加的现场彩排。
+本次记录是工程技术彩排，仅作为历史证据；不再要求由真实 Admin / Staff /
+Participant / Judge / Audience 参加现场彩排来关闭当前 cutover。
 
 | 时间 | 参与者 | 场景 | 结论 | 录分到 READY 时间 | 实际恢复时间 | 已知风险 | Plan B |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase 模拟角色与恶意请求；真实参与者 0；Judge/Audience 未模拟 | 正常流程与恶意输入（容器 PostgreSQL 隔离测试库；948 tests） | PASS（技术彩排） | 未测量：本次未执行真实首张评分到最后一次自动 resolve | 不适用：无故障；完整套件 `948 tests`，`OK (skipped=3)` | 仍需真实角色在运行栈上完成登录、规则、评分、决定、投票、材料、文档和归档串联；媒体替换、大视频限制等人工步骤未执行 | 纸质评分 + Staff 工作区；锁定前人工核对缺分、结果和审计 |
-| 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase；真实参与者 0 | 灾难/恢复：web 重启、PostgreSQL 重启、应用备份恢复、PostgreSQL 隔离恢复 | PASS（技术彩排） | 未测量 | web 健康恢复 7.3s；PostgreSQL 重启后健康恢复 6.9s；应用备份恢复脚本 8.2s；PostgreSQL dump 恢复脚本 8.4s；各自恢复后健康检查/Django check 通过 | 尚未在真实域名、TLS、Caddy 和真实媒体负载下演练；生产 `.env`、DNS/ACME 和备份目标仍需活动部署方提供并验证 | 维持源库和媒体卷；切换到纸质评分/人工登记，暂停正式发布，按备份清单恢复到隔离或备用栈后由 Admin 复核再继续 |
+| 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase 模拟角色与恶意请求；真实参与者 0；Judge/Audience 未模拟 | 正常流程与恶意输入（容器 PostgreSQL 隔离测试库；948 tests） | PASS（技术彩排） | 未测量：本次未执行真实首张评分到最后一次自动 resolve | 不适用：无故障；完整套件 `948 tests`，`OK (skipped=3)` | 本次未覆盖登录、规则、评分、决定、投票、材料、文档和归档的人工串联；当前改由自动化关键旅程、隔离 smoke 和 owner acceptance 覆盖 | 纸质评分 + Staff 工作区；锁定前人工核对缺分、结果和审计 |
+| 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase；真实参与者 0 | 灾难/恢复：web 重启、PostgreSQL 重启、应用备份恢复、PostgreSQL 隔离恢复 | PASS（技术彩排） | 未测量 | web 健康恢复 7.3s；PostgreSQL 重启后健康恢复 6.9s；应用备份恢复脚本 8.2s；PostgreSQL dump 恢复脚本 8.4s；各自恢复后健康检查/Django check 通过 | 本次未覆盖真实域名、TLS、Caddy 和真实媒体负载；生产 `.env`、DNS/ACME 和备份目标由部署 owner 独立提供并验证，不通过真实活动彩排补足 | 维持源库和媒体卷；切换到纸质评分/人工登记，暂停正式发布，按备份清单恢复到隔离或备用栈后由 Admin 复核再继续 |
 
 ### 2026-09-08 M2-B 本地恶意边界彩排记录
 
@@ -399,7 +402,7 @@ Participant / Judge / Audience 参加的现场彩排。
 
 | 时间 | 参与者 | 场景 | 结论 | 录分到 READY 时间 | 实际恢复时间 | 已知风险 | Plan B |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-09-08 | 自动化 Django 测试与 Playwright 请求；真实参与者 0；Staff/Judge/Audience 未模拟 | Ticket 生命周期、authority/锁定规则、重复/跨活动/撤销/过期/换票/并发边界；公共扫描页与 body-only redeem 边界 | PASS（代码与公共边界）；完整 Staff 签发→扫码→投票浏览器流程未执行 | 未测量：本次不含评分录入 | 本地 SQLite 迁移后 Playwright 3/3 通过；完整 pytest `1045 passed, 30 skipped`；Ruff、mypy、Pyright、客户端/CSS、Django、文档与工作流门禁通过 | Docker Engine 当前不可用，PostgreSQL 并发、Compose 验收、备份/恢复未在本机重跑；完整凭据型 Staff 浏览器彩排、真实 TLS/WAF/学校网络 DDoS 演练仍为 HOLD | 票据或投票异常时暂停发布，改用纸质登记/人工核验；保留源库与媒体卷，待部署方提供可控 PostgreSQL/边缘环境后再复测 |
+| 2026-09-08 | 自动化 Django 测试与 Playwright 请求；真实参与者 0；Staff/Judge/Audience 未模拟 | Ticket 生命周期、authority/锁定规则、重复/跨活动/撤销/过期/换票/并发边界；公共扫描页与 body-only redeem 边界 | PASS（代码与公共边界）；完整 Staff 签发→扫码→投票浏览器流程未执行 | 未测量：本次不含评分录入 | 本地 SQLite 迁移后 Playwright 3/3 通过；完整 pytest `1045 passed, 30 skipped`；Ruff、mypy、Pyright、客户端/CSS、Django、文档与工作流门禁通过 | Docker Engine 当前不可用，PostgreSQL 并发、Compose 验收、备份/恢复未在本机重跑；隔离环境凭据流程、真实 TLS/WAF/学校网络 DDoS 仍由部署 owner 独立提供证据 | 票据或投票异常时暂停发布；保留源库与媒体卷，待部署方提供可控 PostgreSQL/边缘环境后再复测 |
 
 补充：首次直接在容器内运行完整测试时漏掉了验收脚本的 root-only `/app/.env`
 fixture，导致 1 个配置测试因权限失败；按现有验收脚本补齐 fixture 后，单测和完整
@@ -420,8 +423,8 @@ check 通过，且源数据库与 volumes 未被重置。当前源码临时 `800
 浏览器 smoke 为 `6 passed`。这些结果不替代学校生产接入验收：真实凭据型 Judge 流程、
 学校 IdP/SSO、MFA、TLS/WAF/DDoS、数据责任与保存期限仍为部署前置 `HOLD`。
 
-因此，M1 的代码、自动化验收和本地技术恢复彩排已完成；M1-J 的“正式现场彩排”
-仍待真实参与者、真实部署域名和人工步骤完成后才能最终关闭。
+因此，M1 的代码、自动化验收和本地技术恢复验证已完成；M1-J 的“正式现场彩排”不再是
+当前 cutover 关闭条件，剩余部署域名、人工步骤和外部责任由 owner acceptance 记录。
 
 ### 2026-09-08 M2-C2 Staff 现场评委控制面板门禁记录
 
@@ -452,9 +455,9 @@ migration 和文档检查通过。GitHub Actions 最近一次 push 的所有 job
 开始前即以 0 秒失败、没有可读取的 step 日志，属于外部 runner/account 级异常，不能被
 本地结果冒充为远端 CI 通过；修复远端 Actions 服务后必须重新观察该 Gate。
 
-本 Gate 仍不宣称学校接入完成。真实凭据型 Judge 现场流程、学校 SSO/IdP、MFA/重新认证
-批准、TLS/WAF/DDoS、数据责任与保存期限、事件联系人和正式现场彩排继续保持部署前置
-`HOLD`。
+本 Gate 仍不宣称学校接入完成。学校 SSO/IdP、MFA/重新认证批准、TLS/WAF/DDoS、数据责任
+与保存期限、事件联系人仍需部署方提供独立证据并保持 `HOLD`；真实现场彩排不再列为本项目
+前置条件。
 
 ### 2026-09-08 M2-C 恶意彩排与压力测试量化记录
 
@@ -592,7 +595,7 @@ node scripts/media_download_load_rehearsal.mjs
   池**部署；这个隔离把失败域缩小，但**不消除**它——`media` 池自身仍会被打满。真正的终局
   仍是 Phase B 的字节卸载（signed URL / 对象存储）。
 - 边界：本机回环、单容器、稀疏 payload，只测**worker 占用**，不测磁盘吞吐、公网带宽、
-  边缘层容量或多副本行为。正式活动前仍需在真实部署与现场网络上复测。
+  边缘层容量或多副本行为。若部署规模或网络边界发生变化，由部署方提供独立容量与边缘证据。
 
 ### 2026-10-06 Release Candidate 冻结流程
 

@@ -1,12 +1,13 @@
 # ArtFlow-Plus 入口切换 Runbook（M8e-3）
 
-适用范围：把一个已彩排的 v2 活动接到正式主域名，v1 保留为回滚与历史查证来源。
+适用范围：把一个已通过自动化/隔离验收的 v2 活动接到正式主域名，v1 保留为回滚与历史查证来源。
 本文只覆盖**主域名整体替换**；不包含参与者账号迁移、双写或 v2→v1 回放。
 
 ## 0. 前提
 
 - 报名已截止，v1 没有进行中的评分/投票/审核写入。
-- v2 已在该活动上完成彩排（Studio/Ops/Live/公开赛果各走通一次）。
+- v2 已通过对应 capability 的自动化关键旅程、隔离环境 operational smoke 和回滚检查
+  （Studio/Ops/Live/公开赛果均有可复现证据）；不要求真实活动彩排。
 - 源 SHA 在 `artflow-plus` 上的 Gates（Structural and golden gates + Web public
   journey）为绿；生产镜像只从该 SHA 构建。
 - 已构建并固定镜像 digest：`ARTFLOW_PLUS_API_IMAGE`、`ARTFLOW_PLUS_WORKER_IMAGE`、
@@ -128,14 +129,17 @@ pending/发布 head 落后而 FAIL，恢复 worker 后再确认 PASS。
   可读的 `/api/operations/outbox` relay head/pending 指标。
 - 记录本次切换的 bundle hash、报告、commit 时间与回滚窗口结果。
 
-## 7. 演练
+## 7. 自动化切换前检查
 
-正式活动前至少完成一次：
+切换前在隔离/预生产环境完成一次可复现检查：
 
 1. v1 → v2 → v1（在未写入阶段）；
 2. 断开 plus-api，确认 plus-web 重启后仍能解析上游；
 3. 用过期/错误 staff 密码跑 smoke，确认 FAIL 可读；
 4. 从 v1 备份恢复一次到临时库，确认备份可用。
+
+以上均为自动化或受控环境检查，不创建真实活动数据、不邀请真实参与者、不把现场彩排
+作为 production cutover 的前置条件。
 
 ## 8. 明确不做
 

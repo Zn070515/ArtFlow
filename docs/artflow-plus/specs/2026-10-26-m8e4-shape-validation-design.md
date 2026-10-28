@@ -1,8 +1,7 @@
-# ArtFlow-Plus M8e-4：三类活动验证与现场彩排
+# ArtFlow-Plus M8e-4：三类活动自动化验证
 
 状态：已确认（2026-10-26）
-范围：三个 Guided Pack、默认 capability definitions、三类活动的自动关键旅程、
-现场彩排 runbook、验证报告。
+范围：三个 Guided Pack、默认 capability definitions、三类活动的自动关键旅程和验证报告。
 非目标：新的 capability、bracket/对阵、纯投票发布、节目单公开页、参与者账号迁移。
 
 ## 决策
@@ -19,7 +18,7 @@
 - **纯投票活动**：publishing 依赖 competition，纯投票结果没有发布路径；本轮不选
   它作为第三形状，报告里记录该缺口。
 - **验收形式**：每个 pack 的 domain 编译测试 + 每个形状一条 runtime/API 关键旅程
-  + `docs/artflow-plus/shape-validation.md` 报告；现场彩排另写 runbook。
+  + `docs/artflow-plus/shape-validation.md` 报告；不要求真实活动或现场彩排。
 
 ## Pack 定义
 
@@ -65,16 +64,11 @@ pack 提供的 definition 仍走同一 compiler。
 - 反例：stage-show 不能 prepare competition round；review-awards 的 public results
   在确认前为空。
 
-## 现场彩排 Runbook
+## 已退役的现场彩排文档
 
-`docs/artflow-plus/rehearsal-runbook.md`：
-
-- 彩排前：cutover 演练通过；staff 账号/评委链接/备用录分；公开码与二维码。
-- 开演：启动 judging session、prepare/panel/open；评委连接检查。
-- 演出中：评分进度、HOLD/同分、断网退化为轮询/纸面录分。
-- 收尾：锁表演/锁轮、resolve、确认/发布、归档。
-- 异常：撤销/纠错、会话关闭、回滚边界。
-- 彩排记录表：每个检查点的负责人、时间、结果。
+`docs/artflow-plus/rehearsal-runbook.md` 仅保留历史背景，不再执行，也不再作为
+production cutover 的前置条件。当前验收使用自动化关键旅程、隔离数据库、headless
+浏览器回归、operational smoke 和备份恢复证据。
 
 ## 验证报告
 

@@ -7,7 +7,9 @@ This guide describes the repository's verified development and runtime paths. It
 `main` is the 1.x production line (Django); the sections below describe it. `artflow-plus`
 is the v2 development line (ArtFlow-Plus, Node 24 + Fastify 5 + React 19 + PostgreSQL 18)
 under `plus/`. v2 is complete through M13.3 (including semantic operational adoption), but
-production still runs v1.0.x and the adoption rehearsal has not been executed. The two lines do not merge mechanically; see
+production still runs v1.0.x. No real-activity adoption rehearsal is planned; production entry is
+based on a clean baseline, automated/isolated acceptance evidence, operational smoke and explicit
+owner acceptance. The two lines do not merge mechanically; see
 [`docs/artflow-plus/README.md`](artflow-plus/README.md).
 
 ## ArtFlow-Plus (v2) baseline

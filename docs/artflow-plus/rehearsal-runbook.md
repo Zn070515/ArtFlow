@@ -1,4 +1,8 @@
-# 现场彩排 Runbook（M8e-4）
+# 现场彩排 Runbook（已退役）
+
+> 决策（2026-10-28）：不再安排真实活动或现场角色彩排。本文件保留为历史设计记录，
+> 不得作为 production cutover 的前置条件；当前使用自动化关键旅程、隔离环境 smoke、
+> headless 浏览器回归和备份恢复证据。
 
 适用：judged singer competition 的完整彩排；同一天也可用 stage-show /
 review-awards 的简化版（无现场表演/无发布）。

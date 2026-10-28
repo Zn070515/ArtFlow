@@ -94,8 +94,9 @@ cannot receive one stage's results with another stage's activity title.
   does not carry the bundle-derived definitions or canonical round IDs.
 - Registration is closed after adoption; supplements must use a future explicit
   supplement seam rather than reopening registration.
-- Production cutover remains NO-GO until an adoption rehearsal and the
-  operational smoke pass on the real v1 export.
+- Production cutover is gated by a clean baseline, an automated/isolated adoption
+  acceptance journey, and operational smoke against the exported bundle; no real-activity
+  adoption rehearsal is required.
 
 ## Verification
 
