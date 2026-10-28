@@ -1,0 +1,68 @@
+import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+
+import { hasLiveAccess, hasOpsAccess, hasStudioAccess, useSession } from "../../auth/SessionProvider.js";
+import { AuroraScene } from "../hero/AuroraScene.js";
+import { useReducedMotion } from "../../hooks/useReducedMotion.js";
+
+export function PortalShell({ children }: { readonly children: ReactNode }) {
+  const reducedMotion = useReducedMotion();
+  const { session, logout } = useSession();
+
+  return (
+    <div className="app-shell" data-shell="portal" data-theme="afterglow">
+      <AuroraScene reducedMotion={reducedMotion} />
+      <header className="site-header">
+        <Link to="/" className="brand" aria-label="ArtFlow 赛果公示首页">
+          <span className="brand-mark" aria-hidden="true">
+            AF
+          </span>
+          <span className="brand-text">
+            ARTFLOW
+            <small>赛果公示</small>
+          </span>
+        </Link>
+        <nav className="nav-links" aria-label="主导航">
+          <Link to="/join" className="nav-link">
+            报名
+          </Link>
+          {hasOpsAccess(session) ? (
+            <Link to="/ops" className="nav-link">
+              Ops
+            </Link>
+          ) : null}
+          {hasStudioAccess(session) ? (
+            <Link to="/studio" className="nav-link">
+              Studio
+            </Link>
+          ) : null}
+          {hasLiveAccess(session) ? (
+            <Link to="/live" className="nav-link">
+              Live
+            </Link>
+          ) : null}
+          {session === null ? (
+            <Link to="/login" search={{ next: undefined }} className="nav-link">
+              登录
+            </Link>
+          ) : (
+            <button
+              className="nav-link"
+              type="button"
+              onClick={() => {
+                void logout();
+              }}
+            >
+              退出
+            </button>
+          )}
+        </nav>
+      </header>
+      <main className="site-main">{children}</main>
+      <footer className="site-footer">
+        <span>ArtFlow</span>
+        <span>活动运营平台</span>
+      </footer>
+    </div>
+  );
+}
