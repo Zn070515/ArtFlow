@@ -111,6 +111,9 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
     const raw = loggedIn.headers["set-cookie"];
     expect(JSON.stringify(raw)).toContain("HttpOnly");
     expect(JSON.stringify(raw)).toContain("SameSite=Strict");
+    const cookieHeaders = Array.isArray(raw) ? raw.map(String) : [String(raw)];
+    expect(cookieHeaders.find((cookie) => cookie.startsWith("artflow_session="))).toContain("HttpOnly");
+    expect(cookieHeaders.find((cookie) => cookie.startsWith("artflow_csrf="))).not.toContain("HttpOnly");
     // The browser login must not return the session secret to JavaScript.
     expect(loggedIn.json().token).toBeUndefined();
     expect(loggedIn.json().csrfToken).toEqual(expect.any(String));
@@ -130,6 +133,11 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
       headers: { cookie: cookies },
     });
     expect(loggedOut.statusCode).toBe(200);
+    const cleared = Array.isArray(loggedOut.headers["set-cookie"])
+      ? loggedOut.headers["set-cookie"].map(String)
+      : [String(loggedOut.headers["set-cookie"] ?? "")];
+    expect(cleared.find((cookie) => cookie.startsWith("artflow_session="))).toContain("Max-Age=0");
+    expect(cleared.find((cookie) => cookie.startsWith("artflow_csrf="))).not.toContain("HttpOnly");
     const after = await app.inject({
       method: "GET",
       url: "/api/auth/me",

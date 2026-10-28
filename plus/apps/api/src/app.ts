@@ -716,19 +716,22 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   if (sessionSecret === "") {
     throw new Error("ARTFLOW_PLUS_CREDENTIAL_SECRET is required in production.");
   }
-  const secureCookie = isProduction ? "; Secure" : "";
 
   function setSessionCookies(reply: FastifyReply, token: string, csrf: string): void {
+    const secure = isProductionEnvironment();
+    const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
     reply.header("set-cookie", [
-      `artflow_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${secureCookie}`,
-      `artflow_csrf=${csrf}; Path=/; SameSite=Strict; Max-Age=28800${secureCookie}`,
+      sessionCookie("artflow_session", token, expiresAt, secure),
+      sessionCookie("artflow_csrf", csrf, expiresAt, secure, { httpOnly: false }),
     ]);
   }
 
   function clearSessionCookies(reply: FastifyReply): void {
+    const secure = isProductionEnvironment();
+    const expiredAt = new Date(0).toISOString();
     reply.header("set-cookie", [
-      `artflow_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookie}`,
-      `artflow_csrf=; Path=/; SameSite=Strict; Max-Age=0${secureCookie}`,
+      sessionCookie("artflow_session", "", expiredAt, secure),
+      sessionCookie("artflow_csrf", "", expiredAt, secure, { httpOnly: false }),
     ]);
   }
 

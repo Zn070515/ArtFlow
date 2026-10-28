@@ -8,8 +8,14 @@ export function sessionCookie(
   value: string,
   expiresAt: string,
   secure: boolean,
+  options: { readonly httpOnly?: boolean; readonly sameSite?: "Lax" | "Strict" } = {},
   now = Date.now(),
 ): string {
-  const maxAge = Math.max(0, Math.ceil((Date.parse(expiresAt) - now) / 1000));
-  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+  const parsedExpiry = Date.parse(expiresAt);
+  const maxAge = Number.isFinite(parsedExpiry)
+    ? Math.max(0, Math.ceil((parsedExpiry - now) / 1000))
+    : 0;
+  const httpOnly = options.httpOnly ?? true;
+  const sameSite = options.sameSite ?? "Strict";
+  return `${name}=${encodeURIComponent(value)}; Path=/;${httpOnly ? " HttpOnly;" : ""} SameSite=${sameSite}; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
