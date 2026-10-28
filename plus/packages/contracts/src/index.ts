@@ -12,3 +12,4 @@ export * from "./registration.js";
 export * from "./participant-claim.js";
 export * from "./analytics.js";
 export * from "./packs.js";
+export * from "./tasks.js";

@@ -4,6 +4,10 @@
 适用范围：代码全部由 agent 编写、维护者不直接写代码的项目  
 取材：`artflow-plus` 在 `31cd3f0` 的 v2 工作区，对照同提交的 v1（Django）实现
 
+M15.2 的独立任务 capability 使用逐项检查表
+[`Tasks / Readiness checks`](checks/2026-10-28-tasks-readiness-checks.md)；该表的测试、门禁和
+PostgreSQL 证据全部取得后，才允许把任务能力标记为完成。
+
 ---
 
 ## 0. 一句话

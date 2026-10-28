@@ -5,7 +5,7 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## Current state
 
-M0–M15.1 are complete. The workspace covers the full activity journey —
+M0–M15.2 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
 public vote page, and one protected realtime core. Production still runs v1 on
 `main`; the cutover code and runbooks are ready, but the domain has not been
@@ -17,8 +17,12 @@ M15.1 adds a read-only activity operations analytics projection at
 registration, materials, roster, competition, voting, publishing, and archive
 facts for the Ops detail view. It has a dedicated read surface, reuses the
 redeemed-ticket validity rule, and never becomes a second authority or returns
-row-level participant/judge credentials. The next slices are tasks/checklists,
-check-in/attendance, schedule/program release, and incident/recovery.
+row-level participant/judge credentials. M15.2 adds an optional independent
+`tasks` capability: templates are frozen in a release, task rows are versioned
+and audited, readiness is derived only from task rows, and the Ops checklist
+shows mutation controls only for `tasks.manage`. Task commands never mutate a
+source capability. The next slices are check-in/attendance, schedule/program
+release, and incident/recovery.
 
 The Live console and the voting card share the single WebSocket core in
 `packages/realtime`. Sockets only invalidate queries; HTTP remains the recovery

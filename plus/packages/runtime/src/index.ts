@@ -39,3 +39,4 @@ export * from "./grouping-read-service.js";
 export * from "./participant-identity.js";
 export * from "./participant-claim-service.js";
 export * from "./analytics-service.js";
+export * from "./tasks-service.js";
