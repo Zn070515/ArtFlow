@@ -417,6 +417,16 @@ const RegistrationParams = Type.Object(
   { additionalProperties: false },
 );
 
+// Fastify's default AJV mode removes additional properties. The Claim routes
+// need to reject them, so these transport schemas preserve extras for the
+// explicit boundary check in the handlers while the shared contract remains
+// closed for consumers that validate it directly.
+const ParticipantClaimConsumeRouteBodySchema = Type.Unsafe({
+  ...ParticipantClaimConsumeBodySchema,
+  additionalProperties: true,
+});
+const ParticipantClaimIssueRouteBodySchema = Type.Object({}, { additionalProperties: true });
+
 const GroupingStageParams = Type.Object(
   { id: Type.String({ minLength: 1 }), stageId: Type.String({ minLength: 1 }) },
   { additionalProperties: false },
@@ -613,6 +623,23 @@ function sessionTokenValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function rejectAdditionalBodyKeys(body: unknown, allowed: readonly string[]): void {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return;
+  const unexpected = Object.keys(body).find((key) => !allowed.includes(key));
+  if (unexpected === undefined) return;
+  const error = new Error(`body must not have additional property '${unexpected}'`);
+  Object.assign(error, {
+    validation: [{
+      keyword: "additionalProperties",
+      instancePath: "",
+      schemaPath: "#/additionalProperties",
+      params: { additionalProperty: unexpected },
+      message: "must NOT have additional properties",
+    }],
+  });
+  throw error;
+}
+
 function setSessionCookie(reply: { header(name: string, value: string): unknown }, name: string, value: string, expiresAt: string): void {
   reply.header(
     "set-cookie",
@@ -656,7 +683,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
     trustProxy: options.trustProxy ?? parseTrustedProxy(),
-    ajv: { customOptions: { removeAdditional: false } },
   });
   // Material bytes are uploaded as a raw body; keep the limit aligned with the
   // released materials policy and reject oversize bodies before the handler.
@@ -1097,7 +1123,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.post(
     "/api/public/participant-claims/consume",
-    { schema: { body: ParticipantClaimConsumeBodySchema }, config: { access: "public" } },
+    { schema: { body: ParticipantClaimConsumeRouteBodySchema }, config: { access: "public" } },
     async (request, reply) => {
       await requirePublicRateLimit(request, "participant-claim-consume", 10);
       const body = request.body as {
@@ -1105,6 +1131,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         username?: string;
         password?: string;
       };
+      rejectAdditionalBodyKeys(body, ["token", "username", "password"]);
       const session = await requestSession(request);
       const consumeDeps: RuntimeDeps = {
         ...deps,
@@ -1474,8 +1501,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.post(
     "/api/activities/:id/registrations/:registrationId/account-claim",
-    { schema: { params: RegistrationParams, body: Type.Object({}, { additionalProperties: false }) } },
+    { schema: { params: RegistrationParams, body: ParticipantClaimIssueRouteBodySchema } },
     async (request, reply) => {
+      rejectAdditionalBodyKeys(request.body, []);
       const commandId = requireIdempotency(request);
       const { id, registrationId } = request.params as { id: string; registrationId: string };
       const outcome = await issueParticipantClaim(db, await requestDeps(request), {
