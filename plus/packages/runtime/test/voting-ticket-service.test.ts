@@ -268,6 +268,13 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     const receipt = await db.selectFrom("command_receipt").select("result").where("command_id", "=", "m6-redeem").executeTakeFirstOrThrow();
     expect(JSON.stringify(receipt.result)).not.toContain(redeemed.body.accessToken ?? "");
     await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "", authNow())).resolves.toMatchObject({ ticketId: ticket.body.ticket.id });
+    const replayed = await redeemTicketCredential(db, deps(judgeA), {
+      commandId: "m6-redeem",
+      credential: ticket.body.credential ?? "",
+    });
+    expect(replayed.replayed).toBe(true);
+    expect(replayed.body.accessToken).toBe(redeemed.body.accessToken);
+    await expect(authenticateTicketSession(db, replayed.body.accessToken ?? "", authNow())).resolves.toMatchObject({ ticketId: ticket.body.ticket.id });
     await expect(redeemTicketCredential(db, deps(judgeA), {
       commandId: "m6-redeem-replay",
       credential: ticket.body.credential ?? "",

@@ -38,6 +38,11 @@ export interface CommandHandlerResult<T> {
   readonly persistedBody?: unknown;
 }
 
+export interface CommandExecutionOptions<T> {
+  /** Rebuild sensitive fields that were intentionally redacted from the receipt. */
+  readonly onReplay?: (trx: Transaction<Database>, result: T) => Promise<T> | T;
+}
+
 /**
  * The single write path (AUTH-01). The receipt, the audit entry, the fact and
  * every outbox event live in one transaction; a retry with the same command id
@@ -48,6 +53,7 @@ export async function executeCommand<T>(
   db: Kysely<Database>,
   meta: CommandMeta,
   handler: (trx: Transaction<Database>) => Promise<CommandHandlerResult<T>>,
+  options: CommandExecutionOptions<T> = {},
 ): Promise<CommandOutcome<T>> {
   // The actor is checked against the stored receipt in claimCommand, not
   // hashed here: keeping the hash format stable lets receipts written before
@@ -71,8 +77,9 @@ export async function executeCommand<T>(
       actor: meta.actor,
     });
     if (claim.kind === "replay") {
+      const body = claim.result as T;
       return {
-        body: claim.result as T,
+        body: options.onReplay === undefined ? body : await options.onReplay(trx, body),
         status: claim.httpStatus,
         replayed: true,
       };

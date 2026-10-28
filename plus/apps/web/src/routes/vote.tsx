@@ -69,6 +69,7 @@ export function VotePage() {
     const session = query.data;
     const credential = fragmentCredential.trim();
     if (
+      session?.status !== "open" ||
       session?.identityPolicy !== "ticket" ||
       session.ticketReady ||
       autoRedeemStarted ||

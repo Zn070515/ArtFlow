@@ -85,6 +85,14 @@ function credential(kind: CredentialKind, publicCode: string, version: number, s
   return `AF1.${kind}.${publicCode}.${version}.${signature(kind, publicCode, version, signingSecret)}`;
 }
 
+function ticketAccessToken(sessionId: string, signingSecret: string): string {
+  const tokenSignature = createHmac("sha256", signingSecret)
+    .update(`AF1.S.${sessionId}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `AF1.S.${sessionId}.${tokenSignature}`;
+}
+
 function parseCredential(raw: unknown, kind: CredentialKind, signingSecret: string): ParsedCredential | null {
   if (typeof raw !== "string") return null;
   const parts = raw.split(".");
@@ -617,7 +625,7 @@ export async function redeemTicketCredential(
     }
     if (ticket.state === "redeemed") throw new DomainError("TICKET_REPLAYED", "The ticket credential has already been redeemed.");
     const sessionId = idFromCommand("ticket-session", input.commandId);
-    const accessToken = `AF1.S.${sessionId}.${deps.newEventId()}`;
+    const accessToken = ticketAccessToken(sessionId, signingSecret);
     const expiresAt = new Date(Date.parse(deps.now()) + (input.ttlMs ?? DEFAULT_TICKET_TTL_MS)).toISOString();
     await insertTicketAccessSession(trx, {
       id: sessionId,
@@ -642,6 +650,11 @@ export async function redeemTicketCredential(
     });
     const body: RedeemedTicketResult = { ticketId: ticket.id, activityId: candidate.activityId, sessionId, accessToken, expiresAt };
     return { body, persistedBody: { ...body, accessToken: null } };
+  }, {
+    onReplay: (_trx, result) => ({
+      ...result,
+      accessToken: ticketAccessToken(result.sessionId, signingSecret),
+    }),
   });
 }
 

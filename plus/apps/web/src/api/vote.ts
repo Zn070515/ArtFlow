@@ -10,10 +10,17 @@ export async function ensureBrowserIdentity(activityId: string): Promise<void> {
   await apiFetch(`/api/activities/${activityId}/voting/browser-identity`);
 }
 
+async function redemptionCommandId(credential: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `ticket-redeem-${hex}`;
+}
+
 export async function redeemTicket(credential: string): Promise<void> {
+  const commandId = await redemptionCommandId(credential);
   await apiFetch("/api/tickets/redeem", {
     method: "POST",
-    headers: { "idempotency-key": `ticket-redeem-${crypto.randomUUID()}` },
+    headers: { "idempotency-key": commandId },
     body: JSON.stringify({ credential }),
   });
 }
