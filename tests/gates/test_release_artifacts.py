@@ -63,6 +63,23 @@ def test_plus_publish_builds_all_targets_from_the_tagged_commit() -> None:
         assert inputs.get("provenance") == "mode=max"
 
 
+def test_plus_publish_uses_the_documented_names_and_waits_for_gates() -> None:
+    data = _yaml(ROOT / ".github" / "workflows" / "publish.yml")
+    publish_text = (ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+    for job_name in ("publish", "publish-plus"):
+        assert data["jobs"][job_name]["needs"] == "gates"
+    assert "GITHUB_REPOSITORY_OWNER,," in publish_text
+    for image_name in ("artflow-plus-api", "artflow-plus-worker", "artflow-plus-web"):
+        assert f"${{{{ env.PLUS_IMAGE_BASE }}}}/{image_name}" in publish_text
+
+    gates = _yaml(ROOT / ".github" / "workflows" / "gates.yml")
+    assert "workflow_call" in _trigger(gates)
+
+    template = (ROOT / ".env.production.example").read_text(encoding="utf-8")
+    for image_name in ("artflow-plus-api", "artflow-plus-worker", "artflow-plus-web"):
+        assert f"ghcr.io/replace-me/{image_name}@sha256:" in template
+
+
 def test_plus_dockerfile_bakes_a_release_marker_in_every_target() -> None:
     dockerfile = (ROOT / "deploy" / "plus" / "Dockerfile").read_text(encoding="utf-8")
     assert "ARG ARTFLOW_BUILD_SHA" in dockerfile

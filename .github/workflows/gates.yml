@@ -7,6 +7,7 @@ on:
     branches: [artflow-plus]
   pull_request:
     branches: [artflow-plus]
+  workflow_call:
 
 permissions:
   contents: read
