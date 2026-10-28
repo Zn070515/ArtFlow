@@ -6,6 +6,7 @@
   "main": "./src/main.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:bundle": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/main.cjs --external:pg-native",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/main.ts",
     "ops": "tsx src/ops.ts",
@@ -18,6 +19,7 @@
     "pg-boss": "12.38.0"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "tsx": "4.23.15"
   }
 }

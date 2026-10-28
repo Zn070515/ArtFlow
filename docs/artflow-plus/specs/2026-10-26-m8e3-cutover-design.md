@@ -33,6 +33,7 @@ Internet → Caddy (443, 主域名)
                               ├─ /api → plus-api:3000
                               └─ SPA 静态文件
                             plus-api → plus-db (artflow_plus)
+                            plus-worker → plus-db (outbox relay)
 ```
 
 - 两个 profile 同时留在 `deploy/compose.production.yml`；v2 服务加
@@ -45,9 +46,11 @@ Internet → Caddy (443, 主域名)
 
 `deploy/plus/Dockerfile` 多目标：
 
-- `build`：Node 24 + pnpm，安装 workspace，构建 web（`vite build`）与 API
-  （`esbuild src/main.ts --bundle --platform=node --format=cjs`）。
+- `build`：Node 24 + pnpm，安装 workspace，构建 web（`vite build`）、API 和 worker
+  （均为 Node 单文件 bundle）。
 - `api`：只含 `main.cjs`，`CMD ["node","main.cjs"]`；启动时 `migrate()`。
+- `worker`：只含 worker `main.cjs`，启动 250ms outbox relay 与 pg-boss 分钟级
+  backstop；生产 API 不开启 inline relay。
 - `web`：nginx:alpine + web dist + `deploy/plus/nginx.conf`；SPA fallback，
   `/api` 反代 plus-api，SSE 关闭 buffering，`/healthz`、`/readyz` 透传。
 
@@ -59,9 +62,11 @@ CI 的 gates job 增加该构建步骤，防止部署产物腐烂。
 `deploy/compose.production.yml` 新增（`profiles: ["plus"]`）：
 
 - `plus-db`：postgres，独立库/卷/凭据。
-- `plus-api`：`ARTFLOW_PLUS_API_IMAGE` / `ARTFLOW_PLUS_WEB_IMAGE`，env：`NODE_ENV=production`、`APP_ENV=production`、
+- `plus-api`：`ARTFLOW_PLUS_API_IMAGE`，env：`NODE_ENV=production`、`APP_ENV=production`、
   `ARTFLOW_PLUS_DATABASE_URL`、`ARTFLOW_PLUS_CREDENTIAL_SECRET`、`PORT=3000`、
-  `ARTFLOW_PLUS_ARCHIVE_DIR`；healthcheck `/readyz`。
+  `ARTFLOW_PLUS_TRUST_PROXY`、`ARTFLOW_PLUS_ARCHIVE_DIR`、`ARTFLOW_PLUS_INLINE_RELAY=0`；healthcheck `/readyz`。
+- `plus-worker`：`ARTFLOW_PLUS_WORKER_IMAGE`，只连接 `ARTFLOW_PLUS_DATABASE_URL`，负责
+  relay；worker 不存在时 `/api/operations/outbox` 会显示未发布 head/pending。
 - `plus-web`：同一镜像 target `web`，内部 8080，healthcheck `/healthz`。
 
 `proxy` 服务增加 `ARTFLOW_SITE_PROFILE`（默认 `v1`）与 `./caddy/sites` 只读挂载；
@@ -69,9 +74,9 @@ configs 指向新的 `deploy/caddy/Caddyfile.switch`。原 `deploy/Caddyfile` �
 `deploy/caddy/sites/v1.caddy`，内容不变；新增 `v2.caddy`。
 
 `.env.production.example` 增加 Plus 变量：
-`ARTFLOW_PLUS_API_IMAGE` / `ARTFLOW_PLUS_WEB_IMAGE`、`PLUS_POSTGRES_DB`、`PLUS_POSTGRES_USER`、
+`ARTFLOW_PLUS_API_IMAGE` / `ARTFLOW_PLUS_WORKER_IMAGE` / `ARTFLOW_PLUS_WEB_IMAGE`、`PLUS_POSTGRES_DB`、`PLUS_POSTGRES_USER`、
 `PLUS_POSTGRES_PASSWORD`、`ARTFLOW_PLUS_CREDENTIAL_SECRET`、
-`ARTFLOW_PLUS_ARCHIVE_DIR`、`ARTFLOW_SITE_PROFILE`。
+`ARTFLOW_PLUS_ARCHIVE_DIR`、`ARTFLOW_PLUS_TRUST_PROXY`、`ARTFLOW_SITE_PROFILE`。
 
 ## Cutover 流程（runbook）
 
@@ -95,6 +100,7 @@ configs 指向新的 `deploy/caddy/Caddyfile.switch`。原 `deploy/Caddyfile` �
 - 匿名 `GET /api/activities` 401；
 - 可选 staff 登录：`POST /api/auth/login` → `GET /api/activities` 200 → cookie
   生效；
+- operational profile 还检查 `/api/operations/outbox` 的 relay head 已追平；
 - 任一失败退出码 1，输出逐项 PASS/FAIL。
 
 ## 测试与验收

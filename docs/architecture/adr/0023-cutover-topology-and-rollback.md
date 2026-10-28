@@ -12,7 +12,8 @@ and recreating the proxy container. The v2 profile points at `plus-web:8080`,
 which serves the SPA and proxies `/api` to `plus-api:3000`.
 
 Plus runs beside v1 on the same host as a Compose profile with its own
-PostgreSQL service, database, volumes, and credential secret. v1 remains
+PostgreSQL service, database, volumes, credential secret, and a separately
+deployed `plus-worker` outbox relay. v1 remains
 running, read-only, for at least one full activity cycle after the switch; its
 database and media are backed up before the switch and are the rollback source.
 
@@ -49,6 +50,8 @@ explicitly abandoned, and that choice is recorded.
   the first write and closes rollback.
 - v1 media is not exposed through the v2 domain; media bytes remain a v1
   concern until the media gateway slice.
-- Plus images are split into `plus-api` (esbuild bundle) and `plus-web`
-  (nginx + Vite build); the workspace's TypeScript packages are not loaded at
-  runtime.
+- Plus images are split into `plus-api` and `plus-worker` (esbuild bundles) and
+  `plus-web` (nginx + Vite build); the workspace's TypeScript packages are not
+  loaded at runtime. API rate limits trust forwarded addresses only when
+  `ARTFLOW_PLUS_TRUST_PROXY` names the internal proxy, and the reverse proxy
+  body ceiling is 128 MiB while domain material policy remains authoritative.

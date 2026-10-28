@@ -301,6 +301,8 @@ services:
       PORT: "3000"
       ARTFLOW_PLUS_DATABASE_URL: postgresql://${PLUS_POSTGRES_USER}:${PLUS_POSTGRES_PASSWORD}@plus-db:5432/${PLUS_POSTGRES_DB:-artflow_plus}
       ARTFLOW_PLUS_CREDENTIAL_SECRET: ${ARTFLOW_PLUS_CREDENTIAL_SECRET:?Set ARTFLOW_PLUS_CREDENTIAL_SECRET}
+      ARTFLOW_PLUS_TRUST_PROXY: ${ARTFLOW_PLUS_TRUST_PROXY:-}
+      ARTFLOW_PLUS_INLINE_RELAY: "0"
       ARTFLOW_PLUS_ARCHIVE_DIR: /app/var/archives
       ARTFLOW_PLUS_MEDIA_DIR: /app/var/media
       # Read-only bridge to the still-authoritative v1 media volume.
@@ -309,6 +311,20 @@ services:
       - plus_archive_data:/app/var/archives
       - plus_media_data:/app/var/media
       - media_data:/app/var/legacy-media:ro
+    networks:
+      - artflow_internal
+
+  plus-worker:
+    profiles: ["plus"]
+    image: ${ARTFLOW_PLUS_WORKER_IMAGE:?Set ARTFLOW_PLUS_WORKER_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      plus-db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_ENV: production
+      ARTFLOW_PLUS_DATABASE_URL: postgresql://${PLUS_POSTGRES_USER}:${PLUS_POSTGRES_PASSWORD}@plus-db:5432/${PLUS_POSTGRES_DB:-artflow_plus}
     networks:
       - artflow_internal
 

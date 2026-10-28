@@ -11,7 +11,7 @@ http://127.0.0.1:8081 {
 
 https://{$CADDY_SITE_ADDRESS} {
 	request_body {
-		max_size 20MB
+		max_size 128MB
 	}
 	header -Server
 	reverse_proxy plus-web:8080 {

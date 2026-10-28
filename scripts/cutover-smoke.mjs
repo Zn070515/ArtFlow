@@ -17,6 +17,7 @@ const requiredCapabilities = (process.env.CUTOVER_REQUIRED_CAPABILITIES ?? "")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+const expectedOutboxHead = Number(process.env.CUTOVER_EXPECTED_OUTBOX_HEAD ?? "0");
 
 if (!base || !publicCode) {
   throw new Error("CUTOVER_BASE_URL and CUTOVER_PUBLIC_CODE are required.");
@@ -104,6 +105,22 @@ if (profile === "historical") {
     const token = await staffToken();
     const listed = await activityByPublicCode(token);
     if (listed === undefined) throw new Error("activity missing from the staff list");
+  });
+
+  await check("the outbox relay is caught up", async () => {
+    const token = await staffToken();
+    const response = await fetch(`${base}/api/operations/outbox`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error(`outbox status ${response.status}`);
+    const relay = await response.json();
+    if (relay.pendingCount !== 0) throw new Error(`pending outbox events: ${relay.pendingCount}`);
+    if (relay.publishedHeadSequence < relay.headSequence) {
+      throw new Error(`published head ${relay.publishedHeadSequence} is behind ${relay.headSequence}`);
+    }
+    if (expectedOutboxHead > 0 && relay.publishedHeadSequence < expectedOutboxHead) {
+      throw new Error(`published head ${relay.publishedHeadSequence} is below expected ${expectedOutboxHead}`);
+    }
   });
 
   await check("activity has an active released definition", async () => {
