@@ -1,6 +1,6 @@
 # ArtFlow-Plus 视觉主题家族与 Console 壳设计
 
-状态：**Phase 2 implemented**（2026-10-28；Live / Judge / Portal 收敛仍按路线推进）
+状态：**Phase 3 implemented**（2026-10-28；Portal 收敛与主题扩展仍按路线推进）
 范围：`plus/apps/web` 的主题 token、Portal / Console 壳、后续页面迁移和验收方式。
 
 相关文档：
@@ -217,5 +217,6 @@ Console 不挂 Aurora，不使用全屏 backdrop blur 或 30/90 级别的装饰�
 
 已确认本规格中的命名和边界：`Atmospheres` 为主题家族，Portal 为 `Afterglow`，Console
 为 `Signal`，本阶段不提供运行时主题切换器。Phase 1 已完成主题 token、双壳、Ops 页面；
-Phase 2 已完成 Studio 列表、新建页和活动工作区的主列 + sticky rail 迁移。Live / Judge /
-Portal 收敛仍按第 6 节继续推进。
+Phase 2 已完成 Studio 列表、新建页和活动工作区的主列 + sticky rail 迁移；Phase 3 已完成
+Live 主列 + sticky 操作栏与 Judge 720px 单列评分工作区迁移。以上页面迁移只改变布局、语义
+class 和 Signal 样式，未改变 authority、realtime 或 HTTP 完成路径。Portal 收敛仍按第 6 节继续推进。

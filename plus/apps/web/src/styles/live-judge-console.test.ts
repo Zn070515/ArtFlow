@@ -13,6 +13,7 @@ describe("Live and Judge Console layout styles", () => {
     expect(global).toContain(".live-control-rail");
     expect(global).toContain("grid-template-columns: minmax(0, 1fr) 360px");
     expect(global).toContain("position: sticky");
+    expect(global).toContain(".live-round-card");
   });
 
   it("declares a focused 720px Judge workspace and mobile fallback", async () => {
@@ -23,5 +24,6 @@ describe("Live and Judge Console layout styles", () => {
     expect(global).toContain("max-width: 720px");
     expect(global).toContain("@media (max-width: 1023px)");
     expect(global).toContain("grid-template-columns: 1fr");
+    expect(global).toContain(".judge-status-panel");
   });
 });

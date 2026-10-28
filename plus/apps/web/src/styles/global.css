@@ -1883,6 +1883,46 @@ a.primary-button {
   box-shadow: 0 0 0 3px rgba(232, 180, 90, 0.14);
 }
 
+.console-page .live-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.console-page .live-main-column,
+.console-page .live-round-card,
+.console-page .live-control-card,
+.console-page .live-roster-card {
+  min-width: 0;
+}
+
+.console-page .live-control-rail {
+  position: sticky;
+  top: 80px;
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  align-self: start;
+}
+
+.console-page .live-round-card .data-table {
+  min-width: 0;
+}
+
+.console-page .judge-workspace {
+  display: grid;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  gap: 16px;
+}
+
+.console-page .judge-score-column,
+.console-page .judge-status-panel {
+  min-width: 0;
+}
+
 .console-page .release-list li,
 .console-page .session-list li,
 .console-page .seat-list li {
@@ -1918,6 +1958,14 @@ a.primary-button {
 @media (max-width: 1023px) {
   .console-page .studio-grid {
     grid-template-columns: 1fr;
+  }
+
+  .console-page .live-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .console-page .live-control-rail {
+    position: static;
   }
 
   .studio-rail {
