@@ -9,10 +9,14 @@ export function PortalShell({ children }: { readonly children: ReactNode }) {
   const reducedMotion = useReducedMotion();
   const { pathname } = useLocation();
   const { session, logout } = useSession();
+  const showAurora = pathname === "/" || pathname === "/results" || pathname.startsWith("/results/");
+  const showStaticBackdrop = pathname.startsWith("/vote/");
 
   return (
     <div className="app-shell" data-shell="portal" data-theme="afterglow">
-      <AuroraScene reducedMotion={reducedMotion || pathname.startsWith("/vote/")} />
+      {showAurora || showStaticBackdrop ? (
+        <AuroraScene reducedMotion={reducedMotion || showStaticBackdrop} />
+      ) : null}
       <header className="site-header">
         <Link to="/" className="brand" aria-label="ArtFlow 赛果公示首页">
           <span className="brand-mark" aria-hidden="true">

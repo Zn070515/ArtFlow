@@ -1,8 +1,7 @@
 import type { PublicVoteSession } from "@artflow-plus/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { useState } from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/client.js";
 import { ensureBrowserIdentity, fetchPublicVote, redeemTicket, submitVote } from "../api/vote.js";
@@ -49,7 +48,7 @@ export function VotePage() {
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [justVoted, setJustVoted] = useState(false);
   const [ticketCredential, setTicketCredential] = useState(readTicketCredential);
-  const [fragmentCredential] = useState(readTicketCredential);
+  const [fragmentCredential, setFragmentCredential] = useState(readTicketCredential);
   const [autoRedeemStarted, setAutoRedeemStarted] = useState(false);
 
   const query = useQuery({
@@ -98,6 +97,14 @@ export function VotePage() {
     onSuccess: () => setJustVoted(true),
   });
 
+  useEffect(() => {
+    setSelected([]);
+    setJustVoted(false);
+    setTicketCredential(readTicketCredential());
+    setFragmentCredential(readTicketCredential());
+    setAutoRedeemStarted(false);
+  }, [sessionId]);
+
   const session = query.data;
   const voted = justVoted || session?.voted === true;
 
@@ -134,7 +141,7 @@ export function VotePage() {
       {session !== undefined ? (
         <section className="vote-card">
           {justVoted ? (
-            <p className="state-copy">投票成功，谢谢参与。</p>
+            <p className="state-copy" aria-live="polite">投票成功，谢谢参与。</p>
           ) : session.status === "closed" ? (
             <p className="state-copy">投票已结束。</p>
           ) : session.identityPolicy === "ticket" && !session.ticketReady ? (
@@ -166,7 +173,7 @@ export function VotePage() {
               </form>
             </>
           ) : voted ? (
-            <p className="state-copy">你已经投过票了。</p>
+            <p className="state-copy" aria-live="polite">你已经投过票了。</p>
           ) : (
             <div className="vote-workspace">
               <div className="vote-selection">

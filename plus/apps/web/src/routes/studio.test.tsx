@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +36,15 @@ describe("StudioPage", () => {
           enabledCapabilities: ["registration"],
           activeDefinitionVersion: 1,
         },
+        {
+          id: "activity-2",
+          title: "夏季决赛",
+          publicCode: "SUMMER-2",
+          status: "draft",
+          revision: 1,
+          enabledCapabilities: [],
+          activeDefinitionVersion: null,
+        },
       ],
       error: null,
       isPending: false,
@@ -48,5 +57,16 @@ describe("StudioPage", () => {
     expect(screen.getByRole("heading", { name: "活动" })).toHaveClass("console-page-title");
     expect(screen.getByRole("heading", { name: "活动" })).not.toHaveClass("results-title");
     expect(document.querySelector(".console-table-wrap")).not.toBeNull();
+  });
+
+  it("filters activities by status", () => {
+    render(<StudioPage />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "按状态筛选" }), {
+      target: { value: "draft" },
+    });
+
+    expect(screen.getByRole("link", { name: "夏季决赛" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "春季现场" })).not.toBeInTheDocument();
   });
 });

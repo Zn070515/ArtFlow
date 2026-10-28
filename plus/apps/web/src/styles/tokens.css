@@ -31,6 +31,7 @@
   --color-line-strong: rgba(245, 239, 230, 0.24);
   --color-accent: var(--gold);
   --color-accent-strong: var(--gold-bright);
+  --color-accent-contrast: #160f05;
   --color-focus: var(--gold-bright);
   --color-success: #9ee6b0;
   --color-warning: #ffb37a;
@@ -38,6 +39,8 @@
   --color-info: var(--cool);
   --color-neutral: var(--bone-dim);
   --font-console: var(--sans);
+  --color-qr-background: #ffffff;
+  --shadow-sidebar: 16px 0 40px rgba(0, 0, 0, 0.35);
 }
 
 [data-theme="signal"] {
@@ -53,11 +56,14 @@
   --color-line-strong: #46515f;
   --color-accent: #e8b45a;
   --color-accent-strong: #ffe3a3;
+  --color-accent-contrast: #090b0f;
   --color-focus: #ffe3a3;
   --color-success: #7ddba2;
   --color-warning: #f4c96c;
   --color-danger: #ff927f;
   --color-info: #75c9ed;
   --color-neutral: #aab3bf;
-  --font-console: "Space Grotesk Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-console: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --color-qr-background: #ffffff;
+  --shadow-sidebar: 16px 0 40px rgba(0, 0, 0, 0.35);
 }
