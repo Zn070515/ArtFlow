@@ -47,11 +47,14 @@ and media paths accept Unicode filenames.
 
 ADR-0035 closes the imported-participant account gap without rewriting imported
 IDs or migrating passwords. Staff issue a one-time `/claim#...` fragment for an
-adopted `legacy-user:*` registration; the participant creates a new account or
-binds an existing participant session, and the registration/material ownership
-checks resolve the linked legacy identity. The fragment is removed from the
-address bar immediately; raw claim/session credentials stay out of durable
-responses and audit records. This does not authorize deleting v1 source or media.
+adopted `legacy-user:*` registration; issuing a replacement revokes the prior
+unconsumed claim. The participant creates a new account or binds an existing
+participant session, and the registration/material ownership checks resolve the
+linked legacy identity. The Claim page also accepts a manually pasted token,
+and Ops copy falls back to selection-based copying when Clipboard API access is
+unavailable. The fragment is removed from the address bar immediately; raw
+claim/session credentials stay out of durable responses and audit records. This
+does not authorize deleting v1 source or media.
 
 ## First vertical slice
 

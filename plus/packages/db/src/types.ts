@@ -217,6 +217,7 @@ export interface ParticipantClaimRow {
   legacy_participant_id: string;
   token_digest: string;
   expires_at: ColumnType<Date, Date | string, Date | string>;
+  revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   consumed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   consumed_by_actor_id: string | null;
   issued_by: string;

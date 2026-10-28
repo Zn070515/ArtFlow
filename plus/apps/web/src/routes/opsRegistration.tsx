@@ -8,6 +8,7 @@ import { fetchRegistrationDetail, type RegistrationDetail } from "../api/registr
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { ReviewPanel } from "../components/ops/ReviewPanel.js";
+import { copyClaimLink } from "./claim.js";
 
 export function OpsRegistrationPage() {
   return (
@@ -90,8 +91,14 @@ function ParticipantClaimPanel({ detail }: { readonly detail: RegistrationDetail
   async function copyLink(): Promise<void> {
     if (claim?.token === null || claim?.token === undefined) return;
     const link = `${window.location.origin}/claim#${encodeURIComponent(claim.token)}`;
-    await navigator.clipboard.writeText(link);
-    setCopied(true);
+    setError(null);
+    try {
+      await copyClaimLink(link);
+      setCopied(true);
+    } catch (caught) {
+      setCopied(false);
+      setError(caught instanceof Error ? caught.message : "复制失败，请手动复制链接。");
+    }
   }
 
   return (

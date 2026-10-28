@@ -1411,6 +1411,20 @@ const migrations: Record<string, Migration> = {
       await db.schema.dropTable("participant_claim").ifExists().execute();
     },
   },
+  "0020_participant_claim_reissue": {
+    async up(db: Kysely<Database>): Promise<void> {
+      await db.schema
+        .alterTable("participant_claim")
+        .addColumn("revoked_at", "timestamptz")
+        .execute();
+    },
+    async down(db: Kysely<Database>): Promise<void> {
+      await db.schema
+        .alterTable("participant_claim")
+        .dropColumn("revoked_at")
+        .execute();
+    },
+  },
 };
 
 class StaticMigrationProvider implements MigrationProvider {

@@ -15,8 +15,10 @@ the cutover audit trail.
 
 1. Staff with registration review/management permission may issue a one-time
    claim for an adopted `legacy-user:*` registration in an active activity.
-   The API stores only a digest, binds the claim to the exact activity and
-   registration, expires it, and consumes it under row/advisory locks.
+   Issuing a replacement revokes any older unconsumed claim for the same
+   registration. The API stores only a digest, binds the claim to the exact
+   activity and registration, expires it, and consumes it under row/advisory
+   locks.
 2. The claim creates a new local participant account, or links an already
    authenticated participant session. Staff sessions and other non-participant
    sessions cannot consume it. Existing passwords are never migrated or
@@ -26,11 +28,12 @@ the cutover audit trail.
    Registration and material authorization resolves the actor plus its linked
    legacy subject, while the imported participant ID remains the authoritative
    registration value.
-4. Staff deliver the opaque credential in a URL fragment (`/claim#...`). The
-   browser removes the fragment from the address bar immediately. The raw
-   claim token is not placed in the path, receipt, audit, outbox, or API JSON
-   response; a successful new-account claim sets the normal HttpOnly session
-   cookie and readable CSRF cookie.
+4. Staff normally deliver the opaque credential in a URL fragment
+   (`/claim#...`), with a manual token field available when the fragment or
+   clipboard cannot be used. The browser removes the fragment from the
+   address bar immediately. The raw claim token is not placed in the path,
+   receipt, audit, outbox, or API JSON response; a successful new-account
+   claim sets the normal HttpOnly session cookie and readable CSRF cookie.
 5. The successful response includes only the non-secret activity public code
    needed to resume the participant portal. Invalid, expired, consumed, and
    malformed claims share one generic error; public consumption is rate-limited.

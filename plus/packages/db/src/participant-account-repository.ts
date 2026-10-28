@@ -21,13 +21,16 @@ export interface StoredParticipantClaim {
   readonly legacyParticipantId: string;
   readonly tokenDigest: string;
   readonly expiresAt: string;
+  readonly revokedAt: string | null;
   readonly consumedAt: string | null;
   readonly consumedByActorId: string | null;
   readonly issuedBy: string;
   readonly createdAt: string;
 }
 
-export type NewParticipantClaim = Omit<StoredParticipantClaim, "createdAt">;
+export type NewParticipantClaim = Omit<StoredParticipantClaim, "createdAt" | "revokedAt"> & {
+  readonly revokedAt?: string | null;
+};
 
 function participantClaim(row: Selectable<ParticipantClaimRow>): StoredParticipantClaim {
   return {
@@ -37,6 +40,7 @@ function participantClaim(row: Selectable<ParticipantClaimRow>): StoredParticipa
     legacyParticipantId: row.legacy_participant_id,
     tokenDigest: row.token_digest,
     expiresAt: iso(row.expires_at),
+    revokedAt: nullableIso(row.revoked_at),
     consumedAt: nullableIso(row.consumed_at),
     consumedByActorId: row.consumed_by_actor_id,
     issuedBy: row.issued_by,
@@ -55,10 +59,25 @@ export async function insertParticipantClaim(
     legacy_participant_id: value.legacyParticipantId,
     token_digest: value.tokenDigest,
     expires_at: value.expiresAt,
+    revoked_at: value.revokedAt ?? null,
     consumed_at: value.consumedAt,
     consumed_by_actor_id: value.consumedByActorId,
     issued_by: value.issuedBy,
   }).execute();
+}
+
+export async function revokeUnconsumedParticipantClaims(
+  trx: Kysely<Database>,
+  input: { readonly activityId: string; readonly registrationId: string; readonly legacyParticipantId: string; readonly revokedAt: string },
+): Promise<void> {
+  await trx.updateTable("participant_claim")
+    .set({ revoked_at: input.revokedAt })
+    .where("activity_id", "=", input.activityId)
+    .where("registration_id", "=", input.registrationId)
+    .where("legacy_participant_id", "=", input.legacyParticipantId)
+    .where("consumed_at", "is", null)
+    .where("revoked_at", "is", null)
+    .execute();
 }
 
 export async function getParticipantClaimByDigestForUpdate(
