@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError } from "../api/client.js";
@@ -27,6 +28,7 @@ function displayError(error: unknown): string {
 
 export function ClaimPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { session, isLoading } = useSession();
   const [token] = useState(readClaimToken);
   const [username, setUsername] = useState("");
@@ -60,6 +62,7 @@ export function ClaimPage() {
         crypto.randomUUID(),
         session === null ? { username: username.trim(), password } : undefined,
       );
+      await queryClient.refetchQueries({ queryKey: ["me"], type: "active" });
       await navigate({ to: "/join/$publicCode", params: { publicCode: result.publicCode } });
     } catch (caught) {
       setError(displayError(caught));

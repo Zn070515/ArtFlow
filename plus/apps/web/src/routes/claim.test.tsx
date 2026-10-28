@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,7 +46,12 @@ describe("ClaimPage", () => {
   });
 
   it("clears the fragment and consumes a new participant claim", async () => {
-    render(<ClaimPage />);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ClaimPage />
+      </QueryClientProvider>,
+    );
 
     expect(window.location.hash).toBe("");
     fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "claim-user" } });
@@ -66,12 +72,21 @@ describe("ClaimPage", () => {
 
   it("shows validation for a missing token and mismatched passwords", async () => {
     window.history.replaceState(window.history.state, document.title, "/claim");
-    const { unmount } = render(<ClaimPage />);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <ClaimPage />
+      </QueryClientProvider>,
+    );
     expect(await screen.findByRole("alert")).toHaveTextContent("认领链接无效或已过期");
     unmount();
 
     window.history.replaceState(window.history.state, document.title, "/claim#AF1.CLAIM.claim-1.secret");
-    render(<ClaimPage />);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ClaimPage />
+      </QueryClientProvider>,
+    );
     fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "claim-user" } });
     fireEvent.change(screen.getByLabelText("密码"), { target: { value: "claim-password-123" } });
     fireEvent.change(screen.getByLabelText("确认密码"), { target: { value: "different-password-123" } });
