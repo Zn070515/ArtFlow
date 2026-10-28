@@ -52,29 +52,31 @@ function OpsActivityContent() {
 
   return (
     <section className="ops-page">
-      <header className="ops-header">
+      <header className="ops-header console-page-header">
         <div>
           <Link to="/ops" className="table-link">
             ← 返回活动列表
           </Link>
           <p className="eyebrow">OPS · {activity?.status ?? "ACTIVITY"}</p>
-          <h1 className="display results-title">{activity?.title ?? activityId}</h1>
+          <h1 className="console-page-title">{activity?.title ?? activityId}</h1>
           {activity === undefined ? null : <p className="state-copy">公开码 {activity.publicCode}</p>}
         </div>
       </header>
       <div className="ops-grid">
         <section className="ops-card">
           <p className="eyebrow">REGISTRATIONS · 报名</p>
-          <h2>报名</h2>
+          <h2 className="console-card-title">报名</h2>
           {registrations.isPending ? (
             <p className="auth-loading">正在加载报名…</p>
           ) : registrations.error !== null ? (
             <p className="form-error" role="alert">报名列表暂时无法加载。</p>
           ) : (
-            <RegistrationTable
-              activityId={activityId}
-              registrations={registrations.data ?? []}
-            />
+            <div className="console-table-wrap">
+              <RegistrationTable
+                activityId={activityId}
+                registrations={registrations.data ?? []}
+              />
+            </div>
           )}
         </section>
         {roster.isPending ? (

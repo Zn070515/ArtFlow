@@ -39,42 +39,44 @@ function OpsContent() {
 
   return (
     <section className="ops-page">
-      <header className="ops-header">
+      <header className="ops-header console-page-header">
         <div>
           <p className="eyebrow">OPS · 运营</p>
-          <h1 className="display results-title">活动</h1>
+          <h1 className="console-page-title">活动</h1>
         </div>
       </header>
       {query.data.length === 0 ? (
         <p className="state-copy">还没有活动。</p>
       ) : (
-        <table className="data-table">
-          <caption>活动列表</caption>
-          <thead>
-            <tr>
-              <th scope="col">活动</th>
-              <th scope="col">公开码</th>
-              <th scope="col">状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            {query.data.map((activity) => (
-              <tr key={activity.id}>
-                <td>
-                  <Link
-                    to="/ops/$activityId"
-                    params={{ activityId: activity.id }}
-                    className="table-link"
-                  >
-                    {activity.title}
-                  </Link>
-                </td>
-                <td>{activity.publicCode}</td>
-                <td>{activity.status}</td>
+        <div className="console-table-wrap">
+          <table className="data-table">
+            <caption>活动列表</caption>
+            <thead>
+              <tr>
+                <th scope="col">活动</th>
+                <th scope="col">公开码</th>
+                <th scope="col">状态</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {query.data.map((activity) => (
+                <tr key={activity.id}>
+                  <td>
+                    <Link
+                      to="/ops/$activityId"
+                      params={{ activityId: activity.id }}
+                      className="table-link"
+                    >
+                      {activity.title}
+                    </Link>
+                  </td>
+                  <td>{activity.publicCode}</td>
+                  <td>{activity.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

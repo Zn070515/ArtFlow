@@ -52,6 +52,7 @@ function VoteLink({ sessionId }: { readonly sessionId: string }) {
       <a href={url} target="_blank" rel="noreferrer">{url}</a>
       <button
         type="button"
+        className="secondary-button"
         onClick={() => {
           void navigator.clipboard?.writeText(url);
         }}
@@ -195,9 +196,15 @@ export function VotingCard(props: {
               <span>{session === undefined ? "未启动" : "运行中"}</span>
               {props.canManageSessions ? (
                 session === undefined ? (
-                  <button type="button" onClick={() => start.mutate(scope)}>启动</button>
+                  <button type="button" className="secondary-button" onClick={() => start.mutate(scope)}>
+                    启动
+                  </button>
                 ) : (
-                  <button type="button" onClick={() => closeExecutionMutation.mutate(session)}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => closeExecutionMutation.mutate(session)}
+                  >
                     关闭会话
                   </button>
                 )
@@ -218,6 +225,7 @@ export function VotingCard(props: {
         </label>
         <button
           type="button"
+          className="primary-button"
           disabled={voteSession === undefined || open.isPending || candidateText.trim() === ""}
           onClick={() => open.mutate()}
         >
@@ -249,11 +257,11 @@ export function VotingCard(props: {
             ) : null}
             <div className="voting-actions">
               {session.status === "open" ? (
-                <button type="button" onClick={() => closeSession.mutate(session)}>
+                <button type="button" className="secondary-button" onClick={() => closeSession.mutate(session)}>
                   关闭场次
                 </button>
               ) : (
-                <button type="button" onClick={() => loadPreview.mutate(session.id)}>
+                <button type="button" className="secondary-button" onClick={() => loadPreview.mutate(session.id)}>
                   预览结果
                 </button>
               )}
@@ -298,6 +306,7 @@ export function VotingCard(props: {
               </label>
               <button
                 type="button"
+                className="primary-button"
                 disabled={confirm.isPending || publishingSession === undefined || preview.status === "hold"}
                 onClick={() => confirm.mutate(preview)}
               >
@@ -309,6 +318,7 @@ export function VotingCard(props: {
               </label>
               <button
                 type="button"
+                className="primary-button"
                 disabled={release.isPending || note.trim() === "" || confirm.data === undefined}
                 onClick={() =>
                   confirm.data === undefined ? undefined : release.mutate(confirm.data.candidateRevision)

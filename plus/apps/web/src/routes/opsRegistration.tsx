@@ -22,7 +22,7 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
   return (
     <section className="ops-card">
       <p className="eyebrow">REGISTRATION · 报名</p>
-      <h1 className="display results-title">{detail.activity.title}</h1>
+      <h2 className="console-card-title">报名信息</h2>
       <p className="state-copy">
         参与者 {detail.registration.participantId} · 状态 {detail.registration.status} · 修订{" "}
         {detail.registration.revision}
@@ -154,9 +154,18 @@ function OpsRegistrationContent() {
 
   return (
     <section className="ops-page">
-      <Link to="/ops/$activityId" params={{ activityId }} className="table-link">
-        ← 返回活动
-      </Link>
+      <header className="console-page-header">
+        <div>
+          <Link to="/ops/$activityId" params={{ activityId }} className="table-link">
+            ← 返回活动
+          </Link>
+          <p className="eyebrow">OPS · REGISTRATION</p>
+          <h1 className="console-page-title">{query.data.activity.title}</h1>
+          <p className="state-copy">
+            {query.data.registration.participantId} · 状态 {query.data.registration.status}
+          </p>
+        </div>
+      </header>
       <div className="ops-grid">
         <DetailView detail={query.data} />
         <ParticipantClaimPanel detail={query.data} />
