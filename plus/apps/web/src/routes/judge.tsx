@@ -66,26 +66,28 @@ export function JudgePage() {
   });
 
   if (claim.status === "claiming") {
-    return <p className="auth-loading">正在认领评委席位…</p>;
+    return <p className="console-state auth-loading">正在认领评委席位…</p>;
   }
   if (claim.status === "failed") {
     return (
-      <section className="result-state">
+      <section className="console-state">
         <p className="eyebrow">JUDGE</p>
-        <h1 className="state-title">入口不可用</h1>
+        <h1 className="console-page-title">入口不可用</h1>
         <p className="form-error" role="alert">
           {claim.message}
         </p>
       </section>
     );
   }
-  if (context.isPending) return <p className="auth-loading">正在加载评委上下文…</p>;
+  if (context.isPending) {
+    return <p className="console-state auth-loading">正在加载评委上下文…</p>;
+  }
   if (context.error !== null) {
     const unauthenticated = context.error instanceof ApiError && context.error.status === 401;
     return (
-      <section className="result-state">
+      <section className="console-state">
         <p className="eyebrow">JUDGE</p>
-        <h1 className="state-title">{unauthenticated ? "需要评委入口链接" : "评委上下文不可用"}</h1>
+        <h1 className="console-page-title">{unauthenticated ? "需要评委入口链接" : "评委上下文不可用"}</h1>
         <p className="state-copy">
           {unauthenticated
             ? "请使用工作人员刚生成的评委入口链接打开本页。"
@@ -113,22 +115,24 @@ function JudgeContent({
   readonly onScored: () => void;
 }) {
   return (
-    <section className="studio-page judge-page">
-      <header className="studio-header">
+    <section className="judge-page">
+      <header className="console-page-header">
         <div>
           <p className="eyebrow">JUDGE · 评委评分</p>
-          <h1 className="display results-title">{context.activity.title}</h1>
+          <h1 className="console-page-title">{context.activity.title}</h1>
           <p className="state-copy">
             公开码 {context.activity.publicCode} · 座位 {context.seat.seatKey}
             {context.seat.judgeId === null ? "" : ` · 评委 ${context.seat.judgeId}`}
           </p>
         </div>
       </header>
-      <div className="studio-grid">
-        <ScoreCard context={context} onScored={onScored} />
-        <section className="ops-card">
+      <div className="judge-workspace">
+        <div className="judge-score-column">
+          <ScoreCard context={context} onScored={onScored} />
+        </div>
+        <section className="ops-card judge-status-panel">
           <p className="eyebrow">STATUS · 状态</p>
-          <h2>本轮</h2>
+          <h2 className="console-card-title">本轮</h2>
           <p className="state-copy">
             回合 {context.round?.roundKey ?? "—"} · 评委组 {context.panel?.id.slice(0, 12) ?? "—"}
           </p>
@@ -214,27 +218,27 @@ function ScoreCard({
 
   if (context.performance === null) {
     return (
-      <section className="ops-card" data-testid="judge-score-card">
+      <section className="ops-card judge-score-card" data-testid="judge-score-card">
         <p className="eyebrow">SCORE · 评分</p>
-        <h2>等待选手</h2>
+        <h2 className="console-card-title">等待选手</h2>
         <p className="state-copy">工作人员开表演后会自动出现评分表。</p>
       </section>
     );
   }
   if (target === null) {
     return (
-      <section className="ops-card" data-testid="judge-score-card">
+      <section className="ops-card judge-score-card" data-testid="judge-score-card">
         <p className="eyebrow">SCORE · 评分</p>
-        <h2>席位未就绪</h2>
+        <h2 className="console-card-title">席位未就绪</h2>
         <p className="state-copy">本轮评委组尚未就绪，请等待工作人员处理。</p>
       </section>
     );
   }
   if (context.existingScore !== null) {
     return (
-      <section className="ops-card" data-testid="judge-score-card">
+      <section className="ops-card judge-score-card" data-testid="judge-score-card">
         <p className="eyebrow">SCORE · 评分</p>
-        <h2>已提交 · {context.existingScore.total}</h2>
+        <h2 className="console-card-title">已提交 · {context.existingScore.total}</h2>
         <p className="state-copy" data-testid="judge-submitted">
           {context.performance.contestantId} 已评分，等待下一位选手。
         </p>
@@ -251,9 +255,9 @@ function ScoreCard({
   }
 
   return (
-    <section className="ops-card" data-testid="judge-score-card">
+    <section className="ops-card judge-score-card" data-testid="judge-score-card">
       <p className="eyebrow">SCORE · 评分</p>
-      <h2>{context.performance.contestantId}</h2>
+      <h2 className="console-card-title">{context.performance.contestantId}</h2>
       <p className="state-copy">第 {context.performance.sequence} 位 · 三项满分制</p>
       <form
         className="auth-form"

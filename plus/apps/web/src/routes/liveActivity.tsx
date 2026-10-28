@@ -42,25 +42,27 @@ function LiveActivityContent() {
   }
 
   if (!allowed) {
-    return <p className="form-error" role="alert">当前账号缺少 competition.manage 或 judge.manage。</p>;
+    return <p className="console-state form-error" role="alert">当前账号缺少 competition.manage 或 judge.manage。</p>;
   }
-  if (query.isPending) return <p className="auth-loading">正在加载 Live 状态…</p>;
+  if (query.isPending) {
+    return <p className="console-state auth-loading">正在加载 Live 状态…</p>;
+  }
   if (query.error !== null) {
-    return <p className="form-error" role="alert">Live 状态暂时无法加载。</p>;
+    return <p className="console-state form-error" role="alert">Live 状态暂时无法加载。</p>;
   }
 
   const state = query.data;
   const hasTicketing = state.activity.enabledCapabilities.includes("ticketing");
 
   return (
-    <section className="studio-page">
-      <header className="studio-header">
+    <section className="live-page">
+      <header className="console-page-header">
         <div>
           <Link to="/live" className="table-link">
             ← 返回活动列表
           </Link>
           <p className="eyebrow">LIVE · {state.activity.status}</p>
-          <h1 className="display results-title">{state.activity.title}</h1>
+          <h1 className="console-page-title">{state.activity.title}</h1>
           <p className="state-copy">
             公开码 {state.activity.publicCode} · release v{state.activity.activeDefinitionVersion} ·
             {fallback ? " 5s 轮询" : " 实时推送"}
@@ -72,8 +74,8 @@ function LiveActivityContent() {
           )}
         </div>
       </header>
-      <div className="studio-grid">
-        <div className="live-rounds">
+      <div className="live-workspace">
+        <div className="live-main-column live-rounds">
           {state.rounds.map((live) => (
             <LiveRoundPanel
               key={live.config.key}
@@ -84,11 +86,11 @@ function LiveActivityContent() {
             />
           ))}
         </div>
-        <div className="studio-side">
+        <aside className="live-control-rail">
           <LiveSessionPanel state={state} onChanged={refresh} />
-          <section className="ops-card">
+          <section className="ops-card live-roster-card">
             <p className="eyebrow">ROSTER · 选手</p>
-            <h2>最终名单</h2>
+            <h2 className="console-card-title">最终名单</h2>
             {state.participantIds.length === 0 ? (
               <p className="state-copy">尚未有最终名单。</p>
             ) : (
@@ -99,7 +101,7 @@ function LiveActivityContent() {
               </ul>
             )}
           </section>
-        </div>
+        </aside>
       </div>
     </section>
   );
