@@ -13,7 +13,7 @@ export function QuestionField({
 }) {
   if (question.type === "notice") {
     return (
-      <div className="question question-notice">
+      <div className="question question-notice question-full-row">
         <p>{question.label}</p>
       </div>
     );

@@ -51,4 +51,31 @@ describe("VotePage", () => {
     expect(await screen.findByText("投票已结束。")).toBeInTheDocument();
     await waitFor(() => expect(redeemTicketMock).not.toHaveBeenCalled());
   });
+
+  it("uses a two-area Portal workspace for an open ballot", async () => {
+    fetchPublicVoteMock.mockResolvedValue({
+      activityId: "activity-1",
+      activityTitle: "Open ticket vote",
+      sessionId: "vote-open",
+      status: "open",
+      selectionType: "single",
+      maxSelections: 1,
+      identityPolicy: "anonymous",
+      candidates: [{ optionId: "option-1", candidateId: "alice" }],
+      voted: false,
+      ticketReady: true,
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <VotePage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("radio", { name: "alice" })).toBeInTheDocument();
+    expect(document.querySelector(".vote-workspace")).not.toBeNull();
+    expect(document.querySelector(".vote-action-panel")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "投票" })).toHaveClass("primary-button");
+    expect(screen.getByRole("button", { name: "投票" })).not.toHaveClass("button-primary");
+  });
 });

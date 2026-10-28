@@ -23,7 +23,9 @@ vi.mock("../../auth/SessionProvider.js", () => ({
 }));
 
 vi.mock("../hero/AuroraScene.js", () => ({
-  AuroraScene: () => <div aria-hidden="true" data-testid="aurora-scene" />,
+  AuroraScene: ({ reducedMotion }: { readonly reducedMotion: boolean }) => (
+    <div aria-hidden="true" data-testid={reducedMotion ? "static-backdrop" : "aurora-scene"} />
+  ),
 }));
 
 vi.mock("../../hooks/useReducedMotion.js", () => ({
@@ -69,5 +71,19 @@ describe("PortalShell and ConsoleShell", () => {
     expect(screen.getByRole("link", { name: "报名" })).toBeInTheDocument();
     expect(screen.getByTestId("aurora-scene")).toBeInTheDocument();
     expect(screen.getByText("public page")).toBeInTheDocument();
+  });
+
+  it("uses a static Portal background for Vote routes", () => {
+    locationMock.mockReturnValue({ pathname: "/vote/session-1" });
+
+    render(
+      <PortalShell>
+        <p>vote page</p>
+      </PortalShell>,
+    );
+
+    expect(document.querySelector('[data-theme="afterglow"]')).not.toBeNull();
+    expect(screen.getByTestId("static-backdrop")).toBeInTheDocument();
+    expect(screen.queryByTestId("aurora-scene")).not.toBeInTheDocument();
   });
 });

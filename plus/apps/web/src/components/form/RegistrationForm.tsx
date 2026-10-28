@@ -39,9 +39,11 @@ function messageFor(error: unknown): string {
 
 export function RegistrationForm({
   detail,
+  showHeader = true,
   onChanged,
 }: {
   readonly detail: RegistrationDetail;
+  readonly showHeader?: boolean;
   readonly onChanged: () => void;
 }) {
   const editable =
@@ -150,21 +152,30 @@ export function RegistrationForm({
   }
 
   return (
-    <section className="registration-panel">
-      <div className="registration-head">
-        <div>
-          <p className="eyebrow">REGISTRATION · 报名</p>
-          <h1 className="display results-title">{detail.activity.title}</h1>
-          <p className="state-copy">参与者 {detail.registration.participantId}</p>
+    <section className="registration-workspace">
+      {showHeader ? (
+        <header className="registration-header">
+          <div>
+            <p className="eyebrow">REGISTRATION · 报名</p>
+            <h1 className="console-page-title">{detail.activity.title}</h1>
+            <p className="state-copy">参与者 {detail.registration.participantId}</p>
+          </div>
+          <span className={`status-badge status-${detail.registration.status}`}>
+            {STATUS_LABELS[detail.registration.status] ?? detail.registration.status}
+          </span>
+        </header>
+      ) : null}
+      {showHeader ? null : (
+        <div className="registration-header registration-header-compact">
+          <span className={`status-badge status-${detail.registration.status}`}>
+            {STATUS_LABELS[detail.registration.status] ?? detail.registration.status}
+          </span>
         </div>
-        <span className={`status-badge status-${detail.registration.status}`}>
-          {STATUS_LABELS[detail.registration.status] ?? detail.registration.status}
-        </span>
-      </div>
+      )}
       {detail.registration.reviewNote === undefined ? null : (
         <p className="review-note">审核意见：{detail.registration.reviewNote}</p>
       )}
-      <div className="question-list">
+      <div className="registration-question-grid">
         {detail.questionnaire.questions.map((question) => {
           if (question.type === "file") {
             return (
@@ -198,7 +209,7 @@ export function RegistrationForm({
         </p>
       )}
       {editable ? (
-        <div className="form-actions">
+        <div className="form-actions registration-actions">
           <button className="secondary-button" type="button" disabled={busy} onClick={() => void save()}>
             保存草稿
           </button>
