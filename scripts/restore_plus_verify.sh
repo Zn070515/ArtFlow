@@ -1,10 +1,32 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Git Bash/MSYS rewrites Unix-looking Docker arguments as Windows host paths.
+# Container paths such as /tmp and /app must reach Docker unchanged.
+export MSYS_NO_PATHCONV=1
+
 die() {
     printf 'Plus restore verification: %s\n' "$1" >&2
     exit 64
 }
+
+docker_host_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w -- "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+python_bin=""
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && \
+        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+        python_bin="$candidate"
+        break
+    fi
+done
+[[ -n "$python_bin" ]] || die 'a working Python 3 interpreter is required'
 
 if (( $# != 1 )); then
     die 'usage: restore_plus_verify.sh BACKUP_SET'
@@ -22,14 +44,18 @@ restore_database="${ARTFLOW_RESTORE_DATABASE:-artflow_plus_restore}"
 [[ -f "$compose_file" ]] || die "Compose file does not exist: $compose_file"
 [[ -f "$env_file" ]] || die "environment file does not exist: $env_file"
 command -v docker >/dev/null 2>&1 || die 'docker is required'
-command -v python3 >/dev/null 2>&1 || die 'python3 is required to validate the manifest'
 command -v sha256sum >/dev/null 2>&1 || die 'sha256sum is required'
-command -v find >/dev/null 2>&1 || die 'find is required'
+if [[ -x /usr/bin/find ]]; then
+    find_bin=/usr/bin/find
+else
+    find_bin="$(command -v find)"
+fi
+[[ -x "$find_bin" ]] || die 'find is required'
 
 manifest="$backup_set/manifest.json"
 [[ -f "$manifest" ]] || die 'backup set is missing manifest.json'
 
-mapfile -t manifest_values < <(python3 - "$manifest" <<'PY'
+mapfile -t manifest_values < <("$python_bin" - "$(docker_host_path "$manifest")" <<'PY'
 import json
 import re
 import sys
@@ -89,6 +115,9 @@ print(value["archive_regular_files"])
 print(value["media_regular_files"])
 PY
 )
+for index in "${!manifest_values[@]}"; do
+    manifest_values[$index]="${manifest_values[$index]%$'\r'}"
+done
 (( ${#manifest_values[@]} == 15 )) || die 'manifest validation failed'
 manifest_git_sha="${manifest_values[0]}"
 expected_database_sha256="${manifest_values[1]}"
@@ -122,7 +151,7 @@ sha256_of() {
 [[ "$(wc -c < "$backup_set/$archives_file" | tr -d '[:space:]')" == "$expected_archives_bytes" ]] || die 'archives byte count does not match'
 [[ "$(wc -c < "$backup_set/$media_file" | tr -d '[:space:]')" == "$expected_media_bytes" ]] || die 'media byte count does not match'
 
-compose=(docker compose --env-file "$env_file" -p "$compose_project" -f "$compose_file" --profile plus)
+compose=(docker compose --env-file "$(docker_host_path "$env_file")" -p "$compose_project" -f "$(docker_host_path "$compose_file")" --profile plus)
 source_db_container="$("${compose[@]}" ps -q plus-db)"
 source_api_container="$("${compose[@]}" ps -q plus-api)"
 [[ -n "$source_db_container" ]] || die 'the Compose plus-db service is not running'
@@ -157,7 +186,7 @@ trap cleanup EXIT
 extract_safe() {
     local archive="$1"
     local destination="$2"
-    python3 - "$archive" "$destination" <<'PY'
+    "$python_bin" - "$(docker_host_path "$archive")" "$(docker_host_path "$destination")" <<'PY'
 import sys
 import tarfile
 from pathlib import Path, PurePosixPath
@@ -183,14 +212,14 @@ with tarfile.open(archive_path, mode="r:gz") as tar:
         except ValueError as error:
             raise SystemExit(f"archive path escapes destination: {name!r}") from error
     for member in members:
-        tar.extract(member, path=destination, set_attrs=False)
+        tar.extract(member, path=destination, set_attrs=False, filter="data")
 PY
 }
 
 extract_safe "$backup_set/$archives_file" "$archive_extract_dir"
 extract_safe "$backup_set/$media_file" "$media_extract_dir"
-archive_files="$(find "$archive_extract_dir" -type f -print | wc -l | tr -d '[:space:]')"
-media_files="$(find "$media_extract_dir" -type f -print | wc -l | tr -d '[:space:]')"
+archive_files="$("$find_bin" "$archive_extract_dir" -type f -print | wc -l | tr -d '[:space:]')"
+media_files="$("$find_bin" "$media_extract_dir" -type f -print | wc -l | tr -d '[:space:]')"
 [[ "$archive_files" == "$expected_archive_files" ]] || die 'archive regular-file count does not match'
 [[ "$media_files" == "$expected_media_files" ]] || die 'media regular-file count does not match'
 
@@ -233,7 +262,7 @@ wait_for_restore_database() {
 
 restore_database_container
 wait_for_restore_database
-docker cp "$backup_set/$database_file" "$restore_db_container:/tmp/artflow-plus-restore.dump"
+docker cp "$(docker_host_path "$backup_set/$database_file")" "$restore_db_container:/tmp/artflow-plus-restore.dump"
 docker exec "$restore_db_container" pg_restore --list /tmp/artflow-plus-restore.dump >/dev/null
 docker exec "$restore_db_container" pg_restore --username postgres --exit-on-error --no-owner \
     --dbname "$restore_database" /tmp/artflow-plus-restore.dump >/dev/null
@@ -253,8 +282,8 @@ docker run --rm --network "$network" --name "$restore_api_container" -d \
     -e ARTFLOW_PLUS_INLINE_RELAY=0 \
     -e ARTFLOW_PLUS_ARCHIVE_DIR=/app/var/archives \
     -e ARTFLOW_PLUS_MEDIA_DIR=/app/var/media \
-    --mount "type=bind,source=$archive_extract_dir,target=/app/var/archives,readonly" \
-    --mount "type=bind,source=$media_extract_dir,target=/app/var/media,readonly" \
+    --mount "type=bind,source=$(docker_host_path "$archive_extract_dir"),target=/app/var/archives,readonly" \
+    --mount "type=bind,source=$(docker_host_path "$media_extract_dir"),target=/app/var/media,readonly" \
     "$manifest_api_image" main.cjs >/dev/null
 
 api_diagnostics() {

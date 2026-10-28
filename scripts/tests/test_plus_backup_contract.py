@@ -13,6 +13,11 @@ def test_backup_covers_plus_database_archive_and_media() -> None:
     script = read("scripts/backup_plus.sh")
 
     assert script.startswith("#!/usr/bin/env bash\nset -Eeuo pipefail")
+    assert "MSYS_NO_PATHCONV" in script
+    assert "docker_host_path" in script
+    assert "cygpath" in script
+    assert "python_bin" in script
+    assert 'docker_host_path "$backup_set/archives.tar.gz"' in script
     assert "--profile plus" in script
     assert "plus-db" in script and "plus-api" in script
     assert "pg_dump" in script
@@ -29,12 +34,20 @@ def test_restore_isolated_and_never_resets_source() -> None:
     script = read("scripts/restore_plus_verify.sh")
 
     assert script.startswith("#!/usr/bin/env bash\nset -Eeuo pipefail")
+    assert "MSYS_NO_PATHCONV" in script
+    assert "docker_host_path" in script
+    assert "cygpath" in script
+    assert "python_bin" in script
+    assert 'docker_host_path "$manifest"' in script
+    assert "manifest_values[$index]" in script
     assert "--profile plus" in script
     assert "pg_restore" in script
     assert "kysely_migration" in script
     assert "tarfile" in script
     assert "symlink" in script
     assert "hardlink" in script
+    assert "find_bin" in script
+    assert 'filter="data"' in script
     assert "docker compose down --volumes" not in script
     assert "docker volume rm" not in script
     assert "DROP DATABASE" not in script

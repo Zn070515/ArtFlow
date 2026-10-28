@@ -1,10 +1,32 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Git Bash/MSYS rewrites Unix-looking Docker arguments as Windows host paths.
+# Container paths such as /tmp and /app must reach Docker unchanged.
+export MSYS_NO_PATHCONV=1
+
 die() {
     printf 'Plus backup: %s\n' "$1" >&2
     exit 64
 }
+
+docker_host_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w -- "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+python_bin=""
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && \
+        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+        python_bin="$candidate"
+        break
+    fi
+done
+[[ -n "$python_bin" ]] || die 'a working Python 3 interpreter is required'
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 output_root="${1:-$repository_root/backups/artflow-plus}"
@@ -16,11 +38,10 @@ env_file="${ARTFLOW_ENV_FILE:-$repository_root/.env.production}"
 [[ -f "$compose_file" ]] || die "Compose file does not exist: $compose_file"
 [[ -f "$env_file" ]] || die "environment file does not exist: $env_file"
 command -v docker >/dev/null 2>&1 || die 'docker is required'
-command -v python3 >/dev/null 2>&1 || die 'python3 is required to write the manifest'
 command -v sha256sum >/dev/null 2>&1 || die 'sha256sum is required'
 mkdir -p -- "$output_root"
 
-compose=(docker compose --env-file "$env_file" -p "$compose_project" -f "$compose_file" --profile plus)
+compose=(docker compose --env-file "$(docker_host_path "$env_file")" -p "$compose_project" -f "$(docker_host_path "$compose_file")" --profile plus)
 db_container="$("${compose[@]}" ps -q plus-db)"
 api_container="$("${compose[@]}" ps -q plus-api)"
 [[ -n "$db_container" ]] || die 'the Compose plus-db service is not running'
@@ -56,7 +77,7 @@ trap cleanup EXIT
 docker exec "$db_container" sh -c \
     'pg_dump --format=custom --no-owner --file="$1" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
     sh "$source_dump_path"
-docker cp "$db_container:$source_dump_path" "$backup_set/database.dump"
+docker cp "$db_container:$source_dump_path" "$(docker_host_path "$backup_set/database.dump")"
 
 docker run --rm \
     --mount "type=volume,source=$archive_volume,target=/data,readonly" \
@@ -76,7 +97,7 @@ database_bytes="$(wc -c < "$backup_set/database.dump" | tr -d '[:space:]')"
 archives_bytes="$(wc -c < "$backup_set/archives.tar.gz" | tr -d '[:space:]')"
 media_bytes="$(wc -c < "$backup_set/media.tar.gz" | tr -d '[:space:]')"
 
-archive_regular_files="$(python3 - "$backup_set/archives.tar.gz" <<'PY'
+archive_regular_files="$("$python_bin" - "$(docker_host_path "$backup_set/archives.tar.gz")" <<'PY'
 import sys
 import tarfile
 
@@ -84,7 +105,7 @@ with tarfile.open(sys.argv[1], mode="r:gz") as archive:
     print(sum(member.isfile() for member in archive.getmembers()))
 PY
 )"
-media_regular_files="$(python3 - "$backup_set/media.tar.gz" <<'PY'
+media_regular_files="$("$python_bin" - "$(docker_host_path "$backup_set/media.tar.gz")" <<'PY'
 import sys
 import tarfile
 
@@ -108,7 +129,8 @@ PLUS_BACKUP_ARCHIVES_BYTES="$archives_bytes" \
 PLUS_BACKUP_MEDIA_BYTES="$media_bytes" \
 PLUS_BACKUP_ARCHIVE_FILES="$archive_regular_files" \
 PLUS_BACKUP_MEDIA_FILES="$media_regular_files" \
-python3 - "$backup_set/manifest.json.tmp" "$backup_set/manifest.json" <<'PY'
+"$python_bin" - "$(docker_host_path "$backup_set/manifest.json.tmp")" \
+    "$(docker_host_path "$backup_set/manifest.json")" <<'PY'
 import json
 import os
 import sys
