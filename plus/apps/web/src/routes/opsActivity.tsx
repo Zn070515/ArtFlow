@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 
+import { fetchActivityAnalytics } from "../api/analytics.js";
 import { fetchOpsActivities, fetchOpsRegistrations, fetchOpsRoster } from "../api/ops.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { GroupingCard } from "../components/ops/GroupingCard.js";
+import { ActivityAnalyticsCard } from "../components/ops/ActivityAnalyticsCard.js";
 import { RegistrationTable } from "../components/ops/RegistrationTable.js";
 import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
@@ -44,6 +46,12 @@ function OpsActivityContent() {
     enabled: allowed,
     retry: false,
   });
+  const analytics = useQuery({
+    queryKey: ["ops-analytics", activityId],
+    queryFn: () => fetchActivityAnalytics(activityId),
+    enabled: allowed,
+    retry: false,
+  });
 
   if (!allowed) {
     return <p className="form-error" role="alert">当前账号不能访问 Ops。</p>;
@@ -63,6 +71,13 @@ function OpsActivityContent() {
         </div>
       </header>
       <div className="ops-grid">
+        {analytics.isPending ? (
+          <section className="ops-card"><p className="auth-loading">正在加载运营分析…</p></section>
+        ) : analytics.error !== null ? (
+          <section className="ops-card"><p className="form-error" role="alert">运营分析暂时无法加载。</p></section>
+        ) : analytics.data === undefined ? null : (
+          <ActivityAnalyticsCard analytics={analytics.data} />
+        )}
         <section className="ops-card">
           <p className="eyebrow">REGISTRATIONS · 报名</p>
           <h2 className="console-card-title">报名</h2>

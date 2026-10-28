@@ -20,3 +20,4 @@ export * from "./publishing-repository.js";
 export * from "./archive-repository.js";
 export * from "./grouping-repository.js";
 export * from "./participant-account-repository.js";
+export * from "./analytics-repository.js";
