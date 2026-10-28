@@ -677,3 +677,17 @@ export async function hasBallotForIdentity(
     .executeTakeFirst();
   return row !== undefined;
 }
+
+export async function hasBallotForTicket(
+  db: Kysely<Database>,
+  sessionId: string,
+  ticketId: string,
+): Promise<boolean> {
+  const row = await db.selectFrom("ballot")
+    .select("id")
+    .where("session_id", "=", sessionId)
+    .where("identity_type", "=", "ticket")
+    .where("ticket_id", "=", ticketId)
+    .executeTakeFirst();
+  return row !== undefined;
+}

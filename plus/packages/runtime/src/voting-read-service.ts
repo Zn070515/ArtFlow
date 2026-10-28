@@ -4,6 +4,7 @@ import {
   getLiveState,
   getVoteSession,
   hasBallotForIdentity,
+  hasBallotForTicket,
   listVoteOptions,
   listVoteSessionsForActivity,
 } from "@artflow-plus/db";
@@ -11,6 +12,7 @@ import type { Kysely } from "kysely";
 
 import { stableHash } from "./hash.js";
 import type { VotingLiveState } from "./live-projection.js";
+import type { AuthenticatedTicketSession } from "./voting-ticket-service.js";
 
 export interface VotingSessionsState {
   readonly activityId: string;
@@ -83,6 +85,7 @@ export interface PublicVoteSessionState {
     readonly candidateId: string;
   }[];
   readonly voted: boolean;
+  readonly ticketReady: boolean;
 }
 
 /** A formal session that can be shared publicly; never exposes tallies or identities. */
@@ -90,6 +93,7 @@ export async function readPublicVoteSession(
   db: Kysely<Database>,
   sessionId: string,
   browserFingerprint?: string,
+  ticketIdentity?: Pick<AuthenticatedTicketSession, "activityId" | "ticketId">,
 ): Promise<PublicVoteSessionState | null> {
   const session = await getVoteSession(db, sessionId);
   // Only formal sessions that have actually been opened or closed are public;
@@ -107,6 +111,11 @@ export async function readPublicVoteSession(
   ) {
     voted = await hasBallotForIdentity(db, sessionId, stableHash(browserFingerprint));
   }
+  const ticketReady = session.identityPolicy === "ticket" &&
+    ticketIdentity?.activityId === activity.id;
+  if (ticketReady) {
+    voted = await hasBallotForTicket(db, sessionId, ticketIdentity.ticketId);
+  }
   return {
     activityId: activity.id,
     activityTitle: activity.title,
@@ -120,5 +129,6 @@ export async function readPublicVoteSession(
       candidateId: option.candidateId,
     })),
     voted,
+    ticketReady,
   };
 }
