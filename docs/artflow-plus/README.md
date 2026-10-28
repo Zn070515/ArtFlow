@@ -98,6 +98,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 结构门禁 | [gates](../gates/README.md) |
 | Golden fixtures | [tests/golden](../../tests/golden/README.md) |
 | 497 条 fix 的经验 | [analysis/fix-lessons.md](analysis/fix-lessons.md) |
+| v2 架构优势与警惕债务 | [analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md](analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md) |
 | 重构前待决问题 | [open-questions.md](open-questions.md) |
 | PR 审查清单 | [review-checklist.md](review-checklist.md) |
 
