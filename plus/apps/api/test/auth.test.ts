@@ -36,6 +36,15 @@ function setCookies(response: { headers: Record<string, unknown> }): string {
   return values.map((value) => String(value).split(";")[0]).join("; ");
 }
 
+function cookieValue(cookies: string, name: string): string {
+  const encoded = cookies
+    .split("; ")
+    .find((cookie) => cookie.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+  if (encoded === undefined) throw new Error(`${name} cookie was not set.`);
+  return decodeURIComponent(encoded);
+}
+
 async function login(username: string, password: string) {
   const response = await app.inject({
     method: "POST",
@@ -190,6 +199,45 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
       payload: { expectedRevision: 1 },
     });
     expect(bearer.statusCode).toBe(200);
+  });
+
+  it("rejects an incorrect CSRF token and expires the session at the database boundary", async () => {
+    const loggedIn = await login("auth-staff", "staff-password");
+    const cookies = setCookies(loggedIn);
+    const activityId = await seedActivity();
+    const incorrect = await app.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/close`,
+      headers: headers({
+        "idempotency-key": `close-wrong-csrf-${activityId}`,
+        cookie: cookies,
+        "x-csrf-token": "wrong-csrf-token",
+      }),
+      payload: { expectedRevision: 1 },
+    });
+    expect(incorrect.statusCode).toBe(403);
+    expect(incorrect.json().code).toBe("CSRF_INVALID");
+
+    const sessionToken = cookieValue(cookies, "artflow_session");
+    await db.updateTable("local_session")
+      .set({ expires_at: new Date(Date.now() - 1_000) })
+      .where("token", "=", sessionToken)
+      .execute();
+    const expired = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: cookies },
+    });
+    expect(expired.statusCode).toBe(401);
+  });
+
+  it("rotates the browser session and CSRF token on a second login", async () => {
+    const first = await login("auth-staff", "staff-password");
+    const second = await login("auth-staff", "staff-password");
+    const firstCookies = setCookies(first);
+    const secondCookies = setCookies(second);
+    expect(cookieValue(secondCookies, "artflow_session")).not.toBe(cookieValue(firstCookies, "artflow_session"));
+    expect(second.json().csrfToken).not.toBe(first.json().csrfToken);
   });
 
   it("requires a lifecycle permission to close an activity", async () => {
