@@ -374,9 +374,11 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 ## M14.1 — Participant Account Claim（已完成，2026-10-28）
 
 - Staff 可为 active activity 中的 `legacy-user:*` 导入报名生成一次性认领链接；
-  token 只存 digest，并受活动、报名、过期时间和一对一 identity link 约束。
-- 参与者通过 `/claim#...` 创建新账号或绑定已有参与者 session；fragment 会立即从地址栏
-  移除，原始 token、session token 和 `authContext` 不进入 JSON、receipt、audit 或 outbox。
+  token 只存 digest，并受活动、报名、过期时间和一对一 identity link 约束；重新生成时
+  撤销同一报名尚未消费的旧 token。
+- 参与者通过 `/claim#...` 或手工粘贴 token 创建新账号或绑定已有参与者 session；fragment
+  会立即从地址栏移除，原始 token、session token 和 `authContext` 不进入 JSON、receipt、audit
+  或 outbox。复制链接在 Clipboard API 不可用时降级为选中文本复制。
 - registration/material 的所有权解析同时支持本地 actor 与其唯一 legacy identity；
   导入的 `participant_id` 保持权威，不迁移旧密码、不删除 v1 源码或媒体。
 - 出口：DB/runtime/API/Web 定向测试、Claim UI 测试和独立 Ops/参与者/重放
