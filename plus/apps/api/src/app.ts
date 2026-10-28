@@ -604,7 +604,7 @@ function cookieValue(request: FastifyRequest, name: string): string | undefined 
   return undefined;
 }
 
-/** Replays persist redacted one-time fields as null; never cookie those. */
+/** Responses redact one-time fields; replay-aware services may restore them only for cookie setting. */
 function sessionTokenValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
