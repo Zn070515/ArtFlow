@@ -36,7 +36,7 @@ export function ReleasePanel({
   return (
     <section className="ops-card">
       <p className="eyebrow">RELEASE · 发布</p>
-      <h2>定义发布</h2>
+      <h2 className="console-card-title">定义发布</h2>
       {state.releases.length === 0 ? (
         <p className="state-copy">还没有发布版本。</p>
       ) : (
