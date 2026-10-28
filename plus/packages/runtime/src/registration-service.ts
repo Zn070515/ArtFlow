@@ -20,7 +20,6 @@ import type {
   RosterFinal,
 } from "@artflow-plus/domain";
 import {
-  canActFor,
   createRegistration,
   DomainError,
   finalizeRoster as finalizeRosterDomain,
@@ -35,6 +34,7 @@ import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand } from "./hash.js";
+import { requireParticipantOwnership } from "./participant-identity.js";
 
 function activeCapability<T>(
   activity: { readonly enabledCapabilities: readonly string[] },
@@ -124,13 +124,18 @@ async function requireRegistrationOpen(
   }
 }
 
-function requireOwnerOrManager(
-  actor: Parameters<typeof canActFor>[0],
+async function requireOwnerOrManager(
+  db: Kysely<Database>,
+  actor: ReturnType<typeof runtimeActor>,
   participantId: string,
-): void {
-  if (!canActFor(actor, participantId, "registration.manage")) {
-    throw new DomainError("FORBIDDEN", "The actor cannot act for this participant.");
-  }
+): Promise<void> {
+  await requireParticipantOwnership(
+    db,
+    actor,
+    participantId,
+    "registration.manage",
+    "The actor cannot act for this participant.",
+  );
 }
 
 export interface StartRegistrationInput {
@@ -156,7 +161,7 @@ export async function startRegistration(
       payload: { participantId: input.participantId },
     },
     async (trx) => {
-      requireOwnerOrManager(actor, input.participantId);
+      await requireOwnerOrManager(trx, actor, input.participantId);
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
@@ -230,7 +235,7 @@ export async function saveRegistrationAnswer(
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
-      requireOwnerOrManager(actor, registration.participantId);
+      await requireOwnerOrManager(trx, actor, registration.participantId);
       const { questionnaire } = await releasedArtifacts(trx, activity, registration.questionnaireHash);
       const question = questionFor(questionnaire, input.questionKey);
       if (question.type === "file") {
@@ -294,7 +299,7 @@ export async function submitRegistration(
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
-      requireOwnerOrManager(actor, registration.participantId);
+      await requireOwnerOrManager(trx, actor, registration.participantId);
       const questionnaire = (await releasedArtifacts(trx, activity, registration.questionnaireHash)).questionnaire;
       const materials = await listMaterials(trx, registration.id);
       for (const question of questionnaire.questions) {
