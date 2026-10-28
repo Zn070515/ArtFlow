@@ -23,7 +23,9 @@ vi.mock("../../auth/SessionProvider.js", () => ({
 }));
 
 vi.mock("../hero/AuroraScene.js", () => ({
-  AuroraScene: () => <div aria-hidden="true" data-testid="aurora-scene" />,
+  AuroraScene: ({ reducedMotion }: { readonly reducedMotion: boolean }) => (
+    <div aria-hidden="true" data-testid={reducedMotion ? "static-backdrop" : "aurora-scene"} />
+  ),
 }));
 
 vi.mock("../../hooks/useReducedMotion.js", () => ({

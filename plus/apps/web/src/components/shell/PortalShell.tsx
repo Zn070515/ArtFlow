@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { hasLiveAccess, hasOpsAccess, hasStudioAccess, useSession } from "../../auth/SessionProvider.js";
@@ -7,11 +7,12 @@ import { useReducedMotion } from "../../hooks/useReducedMotion.js";
 
 export function PortalShell({ children }: { readonly children: ReactNode }) {
   const reducedMotion = useReducedMotion();
+  const { pathname } = useLocation();
   const { session, logout } = useSession();
 
   return (
     <div className="app-shell" data-shell="portal" data-theme="afterglow">
-      <AuroraScene reducedMotion={reducedMotion} />
+      <AuroraScene reducedMotion={reducedMotion || pathname.startsWith("/vote/")} />
       <header className="site-header">
         <Link to="/" className="brand" aria-label="ArtFlow 赛果公示首页">
           <span className="brand-mark" aria-hidden="true">

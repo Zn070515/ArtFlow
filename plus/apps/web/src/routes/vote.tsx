@@ -141,6 +141,7 @@ export function VotePage() {
             <>
               <p className="state-copy">本场需要现场票据，请先验证票据。</p>
               <form
+                className="vote-credential-panel"
                 onSubmit={(event) => {
                   event.preventDefault();
                   const credential = ticketCredential.trim();
@@ -159,7 +160,7 @@ export function VotePage() {
                     autoComplete="off"
                   />
                 </label>
-                <button type="submit" className="button-primary" disabled={ticketCredential.trim() === "" || redeem.isPending}>
+                <button type="submit" className="primary-button" disabled={ticketCredential.trim() === "" || redeem.isPending}>
                   {redeem.isPending ? "验证中…" : "验证票据"}
                 </button>
               </form>
@@ -167,36 +168,42 @@ export function VotePage() {
           ) : voted ? (
             <p className="state-copy">你已经投过票了。</p>
           ) : (
-            <>
-              <ul className="vote-candidates">
-                {session.candidates.map((candidate) => (
-                  <li key={candidate.optionId}>
-                    <label className="vote-candidate">
-                      <input
-                        type={session.selectionType === "single" ? "radio" : "checkbox"}
-                        name="candidate"
-                        checked={selected.includes(candidate.optionId)}
-                        onChange={() => toggle(candidate.optionId)}
-                      />
-                      <span>{candidate.candidateId}</span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-              {session.selectionType === "multi" ? (
-                <p className="state-copy">
-                  最多选择 {session.maxSelections} 个，已选 {selected.length} 个。
-                </p>
-              ) : null}
-              <button
-                type="button"
-                className="button-primary"
-                disabled={selected.length === 0 || submit.isPending}
-                onClick={() => submit.mutate()}
-              >
-                投票
-              </button>
-            </>
+            <div className="vote-workspace">
+              <div className="vote-selection">
+                <ul className="vote-candidates">
+                  {session.candidates.map((candidate) => (
+                    <li key={candidate.optionId}>
+                      <label className="vote-candidate">
+                        <input
+                          type={session.selectionType === "single" ? "radio" : "checkbox"}
+                          name="candidate"
+                          checked={selected.includes(candidate.optionId)}
+                          onChange={() => toggle(candidate.optionId)}
+                        />
+                        <span>{candidate.candidateId}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <aside className="vote-action-panel">
+                {session.selectionType === "multi" ? (
+                  <p className="state-copy">
+                    最多选择 {session.maxSelections} 个，已选 {selected.length} 个。
+                  </p>
+                ) : (
+                  <p className="state-copy">选择一位候选后提交你的投票。</p>
+                )}
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={selected.length === 0 || submit.isPending}
+                  onClick={() => submit.mutate()}
+                >
+                  投票
+                </button>
+              </aside>
+            </div>
           )}
           {submit.error === null && redeem.error === null ? null : (
             <p className="form-error" role="alert">{errorMessage(submit.error ?? redeem.error)}</p>
