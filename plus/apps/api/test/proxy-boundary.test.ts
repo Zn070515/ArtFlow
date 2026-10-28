@@ -29,6 +29,7 @@ describe("Plus proxy boundary", () => {
     expect(publicErrorMessage(403, "permission detail")).toBe("Access denied.");
     expect(publicErrorMessage(404, "database detail")).toBe("The requested resource was not found.");
     expect(publicErrorMessage(429, "limiter detail")).toBe("Too many requests.");
+    expect(publicErrorMessage(413, "body detail")).toBe("Request body too large.");
     expect(publicErrorMessage(409, "state detail")).toBe("state detail");
   });
 

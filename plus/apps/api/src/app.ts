@@ -697,6 +697,7 @@ export function publicErrorMessage(status: number, fallback: string): string {
   if (status === 403) return "Access denied.";
   if (status === 404) return "The requested resource was not found.";
   if (status === 429) return "Too many requests.";
+  if (status === 413) return "Request body too large.";
   return fallback;
 }
 
@@ -2937,13 +2938,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       statusCode?: number;
       message?: string;
     };
-    if (
-      failure.validation !== undefined ||
-      (failure.statusCode !== undefined && failure.statusCode < 500)
-    ) {
+    if (failure.validation !== undefined || (failure.statusCode !== undefined && failure.statusCode < 500)) {
+      const status = failure.validation === undefined ? failure.statusCode ?? 400 : 400;
       return reply
-        .status(400)
-        .send(errorResponse("VALIDATION_FAILED", failure.message ?? "Invalid request."));
+        .status(status)
+        .send(errorResponse("VALIDATION_FAILED", publicErrorMessage(status, failure.message ?? "Invalid request.")));
     }
     const code = errorCode(error);
     if (code !== null) {
