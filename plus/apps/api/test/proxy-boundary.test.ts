@@ -3,7 +3,7 @@ import type { RateLimitInput, RateLimiter } from "@artflow-plus/runtime";
 import type { Kysely } from "kysely";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildApp, parseTrustedProxy, selectRateLimiter } from "../src/app.js";
+import { buildApp, parseTrustedProxy, publicErrorMessage, selectRateLimiter } from "../src/app.js";
 
 const originalTrustProxy = process.env.ARTFLOW_PLUS_TRUST_PROXY;
 
@@ -22,6 +22,14 @@ describe("Plus proxy boundary", () => {
   it("accepts an explicitly supplied limiter in production", () => {
     const rateLimiter: RateLimiter = { allow: () => true };
     expect(selectRateLimiter({ rateLimiter }, { NODE_ENV: "production" })).toBe(rateLimiter);
+  });
+
+  it("uses status-class messages for security-sensitive HTTP errors", () => {
+    expect(publicErrorMessage(401, "session detail")).toBe("Authentication required.");
+    expect(publicErrorMessage(403, "permission detail")).toBe("Access denied.");
+    expect(publicErrorMessage(404, "database detail")).toBe("The requested resource was not found.");
+    expect(publicErrorMessage(429, "limiter detail")).toBe("Too many requests.");
+    expect(publicErrorMessage(409, "state detail")).toBe("state detail");
   });
 
   it("defaults to trusting no forwarded proxy", () => {

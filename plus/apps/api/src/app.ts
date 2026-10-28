@@ -692,6 +692,14 @@ function errorDetails(error: unknown): unknown {
   return undefined;
 }
 
+export function publicErrorMessage(status: number, fallback: string): string {
+  if (status === 401) return "Authentication required.";
+  if (status === 403) return "Access denied.";
+  if (status === 404) return "The requested resource was not found.";
+  if (status === 429) return "Too many requests.";
+  return fallback;
+}
+
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
@@ -1185,10 +1193,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       await requirePublicRateLimit(request, "supplement-claim", 20);
       const body = request.body as { token: string };
       const context = await getSupplementContext(db, body.token, deps.now());
-      const secure = isProduction ? "; Secure" : "";
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       reply.header(
         "set-cookie",
-        `artflow_supplement=${body.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${secure}`,
+        sessionCookie("artflow_supplement", body.token, expiresAt, isProduction),
       );
       reply.header("cache-control", "no-store");
       return context;
@@ -2946,7 +2954,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         .send(
           errorResponse(
             code,
-            error instanceof Error ? error.message : "The command was refused.",
+            publicErrorMessage(
+              status,
+              error instanceof Error ? error.message : "The command was refused.",
+            ),
             details,
           ),
         );
