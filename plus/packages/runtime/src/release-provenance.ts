@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 
+const FULL_RELEASE_SHA = /^[0-9a-f]{40}$/i;
+
 export interface ReleaseProvenanceOptions {
   readonly releaseFile?: string;
   readonly env?: NodeJS.ProcessEnv;
@@ -7,6 +9,14 @@ export interface ReleaseProvenanceOptions {
 
 function isProductionEnvironment(env: NodeJS.ProcessEnv): boolean {
   return env.NODE_ENV === "production" || env.APP_ENV === "production";
+}
+
+function normalizeProductionSha(value: string, label: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!FULL_RELEASE_SHA.test(normalized)) {
+    throw new Error(`${label} must be a 40-character Git commit SHA.`);
+  }
+  return normalized;
 }
 
 function bakedReleaseSha(releaseFile: string | undefined): string {
@@ -38,7 +48,13 @@ export function assertReleaseProvenance(options: ReleaseProvenanceOptions = {}):
   if (baked === "") {
     throw new Error("The image is missing /app/ARTFLOW_RELEASE_SHA.");
   }
-  if (configured !== baked) {
+  const normalizedConfigured = production
+    ? normalizeProductionSha(configured, "ARTFLOW_RELEASE_SHA")
+    : configured;
+  const normalizedBaked = production
+    ? normalizeProductionSha(baked, "The image release marker")
+    : baked;
+  if (normalizedConfigured !== normalizedBaked) {
     throw new Error("ARTFLOW_RELEASE_SHA does not match the image release marker.");
   }
 }

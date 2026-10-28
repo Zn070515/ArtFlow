@@ -8,13 +8,13 @@ async function main(): Promise<void> {
   if (connectionString === undefined || connectionString.trim() === "") {
     throw new Error("ARTFLOW_PLUS_DATABASE_URL is required.");
   }
+  assertReleaseProvenance();
   const schema = process.env.ARTFLOW_PLUS_DB_SCHEMA;
   const db = createDb({
     connectionString,
     ...(schema === undefined || schema === "" ? {} : { schema }),
   });
   await migrate(db);
-  assertReleaseProvenance();
 
   const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
   const app = await buildApp({

@@ -47,13 +47,35 @@ db_container="$("${compose[@]}" ps -q plus-db)"
 api_container="$("${compose[@]}" ps -q plus-api)"
 [[ -n "$db_container" ]] || die 'the Compose plus-db service is not running'
 [[ -n "$api_container" ]] || die 'the Compose plus-api service is not running'
+worker_container="$("${compose[@]}" ps -q plus-worker)"
+web_container="$("${compose[@]}" ps -q plus-web)"
+[[ -n "$worker_container" ]] || die 'the Compose plus-worker service is not running'
+[[ -n "$web_container" ]] || die 'the Compose plus-web service is not running'
 [[ "$(docker inspect -f '{{.State.Running}}' "$db_container")" == 'true' ]] || die 'the Compose plus-db service is not running'
 [[ "$(docker inspect -f '{{.State.Running}}' "$api_container")" == 'true' ]] || die 'the Compose plus-api service is not running'
+[[ "$(docker inspect -f '{{.State.Running}}' "$worker_container")" == 'true' ]] || die 'the Compose plus-worker service is not running'
+[[ "$(docker inspect -f '{{.State.Running}}' "$web_container")" == 'true' ]] || die 'the Compose plus-web service is not running'
 
 db_image="$(docker inspect -f '{{.Config.Image}}' "$db_container")"
 api_image="$(docker inspect -f '{{.Config.Image}}' "$api_container")"
+worker_image="$(docker inspect -f '{{.Config.Image}}' "$worker_container")"
+web_image="$(docker inspect -f '{{.Config.Image}}' "$web_container")"
+db_image_id="$(docker inspect -f '{{.Image}}' "$db_container")"
+api_image_id="$(docker inspect -f '{{.Image}}' "$api_container")"
+worker_image_id="$(docker inspect -f '{{.Image}}' "$worker_container")"
+web_image_id="$(docker inspect -f '{{.Image}}' "$web_container")"
 git_sha="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$api_container" | sed -n 's/^ARTFLOW_RELEASE_SHA=//p' | head -n 1)"
 [[ "$git_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die 'running plus-api has no valid ARTFLOW_RELEASE_SHA'
+for runtime_container in "$worker_container" "$web_container"; do
+    runtime_sha="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$runtime_container" | sed -n 's/^ARTFLOW_RELEASE_SHA=//p' | head -n 1)"
+    if [[ -n "$runtime_sha" && "$runtime_sha" != "$git_sha" ]]; then
+        die 'Plus runtime services do not share the same ARTFLOW_RELEASE_SHA'
+    fi
+done
+for runtime_container in "$api_container" "$worker_container" "$web_container"; do
+    runtime_revision="$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$runtime_container")"
+    [[ "$runtime_revision" == "$git_sha" ]] || die 'Plus runtime image revision does not match ARTFLOW_RELEASE_SHA'
+done
 
 # These are the two Plus file surfaces. The read-only v1 media bridge is deliberately
 # excluded: it belongs to the v1 backup and is not authoritative Plus material.
@@ -69,6 +91,7 @@ mkdir -p -- "$backup_set"
 
 source_dump_path="/tmp/artflow-plus-backup-${created_at}-${RANDOM}.dump"
 barrier_log_path="$backup_set/.backup-lock.log"
+database_counts_path="$backup_set/.database-row-counts"
 barrier_started=false
 barrier_exec_pid=""
 barrier_writer_fd=""
@@ -133,6 +156,7 @@ cleanup() {
     if [[ -n "${source_dump_path:-}" && -n "${db_container:-}" ]]; then
         docker exec "$db_container" rm -f "$source_dump_path" >/dev/null 2>&1 || true
     fi
+    rm -f -- "$database_counts_path"
 }
 trap cleanup EXIT
 
@@ -141,6 +165,40 @@ docker exec "$db_container" sh -c \
     'pg_dump --format=custom --no-owner --file="$1" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
     sh "$source_dump_path"
 docker cp "$db_container:$source_dump_path" "$(docker_host_path "$backup_set/database.dump")"
+docker exec -i "$db_container" sh -c \
+    'exec psql -X -qAt -F "|" -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+    > "$database_counts_path" <<'SQL'
+CREATE TEMP TABLE _artflow_plus_table_counts (
+    table_name text NOT NULL,
+    row_count bigint NOT NULL
+);
+DO $$
+DECLARE
+    table_record record;
+    table_count bigint;
+BEGIN
+    FOR table_record IN
+        SELECT n.nspname, c.relname
+          FROM pg_class AS c
+          JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         WHERE c.relkind IN ('r', 'p')
+           AND NOT c.relispartition
+           AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+           AND n.nspname NOT LIKE 'pg_toast%'
+           AND n.nspname NOT LIKE 'pg_temp_%'
+         ORDER BY n.nspname, c.relname
+    LOOP
+        EXECUTE format('SELECT count(*) FROM %I.%I', table_record.nspname, table_record.relname)
+           INTO table_count;
+        INSERT INTO _artflow_plus_table_counts(table_name, row_count)
+        VALUES (format('%I.%I', table_record.nspname, table_record.relname), table_count);
+    END LOOP;
+END
+$$;
+SELECT table_name, row_count
+  FROM _artflow_plus_table_counts
+ ORDER BY table_name;
+SQL
 
 docker run --rm \
     --mount "type=volume,source=$archive_volume,target=/data,readonly" \
@@ -182,6 +240,12 @@ PLUS_BACKUP_GIT_SHA="$git_sha" \
 PLUS_BACKUP_COMPOSE_PROJECT="$compose_project" \
 PLUS_BACKUP_DATABASE_IMAGE="$db_image" \
 PLUS_BACKUP_API_IMAGE="$api_image" \
+PLUS_BACKUP_WORKER_IMAGE="$worker_image" \
+PLUS_BACKUP_WEB_IMAGE="$web_image" \
+PLUS_BACKUP_DATABASE_IMAGE_ID="$db_image_id" \
+PLUS_BACKUP_API_IMAGE_ID="$api_image_id" \
+PLUS_BACKUP_WORKER_IMAGE_ID="$worker_image_id" \
+PLUS_BACKUP_WEB_IMAGE_ID="$web_image_id" \
 PLUS_BACKUP_ARCHIVE_VOLUME="$archive_volume" \
 PLUS_BACKUP_MEDIA_VOLUME="$media_volume" \
 PLUS_BACKUP_DATABASE_SHA256="$database_sha256" \
@@ -192,8 +256,9 @@ PLUS_BACKUP_ARCHIVES_BYTES="$archives_bytes" \
 PLUS_BACKUP_MEDIA_BYTES="$media_bytes" \
 PLUS_BACKUP_ARCHIVE_FILES="$archive_regular_files" \
 PLUS_BACKUP_MEDIA_FILES="$media_regular_files" \
-"$python_bin" - "$(docker_host_path "$backup_set/manifest.json.tmp")" \
-    "$(docker_host_path "$backup_set/manifest.json")" <<'PY'
+    "$python_bin" - "$(docker_host_path "$backup_set/manifest.json.tmp")" \
+    "$(docker_host_path "$backup_set/manifest.json")" \
+    "$(docker_host_path "$database_counts_path")" <<'PY'
 import json
 import os
 import sys
@@ -205,6 +270,12 @@ manifest = {
     "compose_project": os.environ["PLUS_BACKUP_COMPOSE_PROJECT"],
     "database_image": os.environ["PLUS_BACKUP_DATABASE_IMAGE"],
     "api_image": os.environ["PLUS_BACKUP_API_IMAGE"],
+    "worker_image": os.environ["PLUS_BACKUP_WORKER_IMAGE"],
+    "web_image": os.environ["PLUS_BACKUP_WEB_IMAGE"],
+    "database_image_id": os.environ["PLUS_BACKUP_DATABASE_IMAGE_ID"],
+    "api_image_id": os.environ["PLUS_BACKUP_API_IMAGE_ID"],
+    "worker_image_id": os.environ["PLUS_BACKUP_WORKER_IMAGE_ID"],
+    "web_image_id": os.environ["PLUS_BACKUP_WEB_IMAGE_ID"],
     "archive_volume": os.environ["PLUS_BACKUP_ARCHIVE_VOLUME"],
     "media_volume": os.environ["PLUS_BACKUP_MEDIA_VOLUME"],
     "database_file": "database.dump",
@@ -219,6 +290,16 @@ manifest = {
     "archive_regular_files": int(os.environ["PLUS_BACKUP_ARCHIVE_FILES"]),
     "media_regular_files": int(os.environ["PLUS_BACKUP_MEDIA_FILES"]),
 }
+table_counts = {}
+with open(sys.argv[3], encoding="utf-8") as counts_file:
+    for line in counts_file:
+        table, separator, count = line.rstrip("\r\n").partition("|")
+        if separator != "|" or not table or not count.isdigit():
+            raise SystemExit("database table-count evidence is invalid")
+        table_counts[table] = int(count)
+if not table_counts:
+    raise SystemExit("database table-count evidence is empty")
+manifest["database_table_counts"] = table_counts
 with open(sys.argv[1], "w", encoding="utf-8") as manifest_file:
     json.dump(manifest, manifest_file, ensure_ascii=False, indent=2, sort_keys=True)
     manifest_file.write("\n")

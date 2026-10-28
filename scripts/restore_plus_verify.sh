@@ -94,9 +94,30 @@ for field in (
     if not isinstance(value.get(field), int) or value[field] < 0:
         raise SystemExit(f"manifest {field} is invalid")
 
-for field in ("database_image", "api_image", "compose_project"):
+for field in (
+    "database_image",
+    "api_image",
+    "worker_image",
+    "web_image",
+    "database_image_id",
+    "api_image_id",
+    "worker_image_id",
+    "web_image_id",
+    "compose_project",
+):
     if not isinstance(value.get(field), str) or not value[field]:
         raise SystemExit(f"manifest {field} is invalid")
+for field in ("database_image_id", "api_image_id", "worker_image_id", "web_image_id"):
+    if not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", value[field]):
+        raise SystemExit(f"manifest {field} is invalid")
+table_counts = value.get("database_table_counts")
+if not isinstance(table_counts, dict) or not table_counts:
+    raise SystemExit("manifest database_table_counts is invalid")
+if any(
+    not isinstance(table, str) or not table or not isinstance(count, int) or count < 0
+    for table, count in table_counts.items()
+):
+    raise SystemExit("manifest database_table_counts is invalid")
 
 print(value["git_sha"].lower())
 print(value["database_sha256"].lower())
@@ -104,6 +125,12 @@ print(value["archives_sha256"].lower())
 print(value["media_sha256"].lower())
 print(value["database_image"])
 print(value["api_image"])
+print(value["worker_image"])
+print(value["web_image"])
+print(value["database_image_id"])
+print(value["api_image_id"])
+print(value["worker_image_id"])
+print(value["web_image_id"])
 print(value["compose_project"])
 print(value["database_file"])
 print(value["archives_file"])
@@ -113,27 +140,35 @@ print(value["archives_bytes"])
 print(value["media_bytes"])
 print(value["archive_regular_files"])
 print(value["media_regular_files"])
+print(json.dumps(table_counts, separators=(",", ":"), sort_keys=True))
 PY
 )
 for index in "${!manifest_values[@]}"; do
     manifest_values[$index]="${manifest_values[$index]%$'\r'}"
 done
-(( ${#manifest_values[@]} == 15 )) || die 'manifest validation failed'
+(( ${#manifest_values[@]} == 22 )) || die 'manifest validation failed'
 manifest_git_sha="${manifest_values[0]}"
 expected_database_sha256="${manifest_values[1]}"
 expected_archives_sha256="${manifest_values[2]}"
 expected_media_sha256="${manifest_values[3]}"
 manifest_database_image="${manifest_values[4]}"
 manifest_api_image="${manifest_values[5]}"
-manifest_compose_project="${manifest_values[6]}"
-database_file="${manifest_values[7]}"
-archives_file="${manifest_values[8]}"
-media_file="${manifest_values[9]}"
-expected_database_bytes="${manifest_values[10]}"
-expected_archives_bytes="${manifest_values[11]}"
-expected_media_bytes="${manifest_values[12]}"
-expected_archive_files="${manifest_values[13]}"
-expected_media_files="${manifest_values[14]}"
+manifest_worker_image="${manifest_values[6]}"
+manifest_web_image="${manifest_values[7]}"
+manifest_database_image_id="${manifest_values[8]}"
+manifest_api_image_id="${manifest_values[9]}"
+manifest_worker_image_id="${manifest_values[10]}"
+manifest_web_image_id="${manifest_values[11]}"
+manifest_compose_project="${manifest_values[12]}"
+database_file="${manifest_values[13]}"
+archives_file="${manifest_values[14]}"
+media_file="${manifest_values[15]}"
+expected_database_bytes="${manifest_values[16]}"
+expected_archives_bytes="${manifest_values[17]}"
+expected_media_bytes="${manifest_values[18]}"
+expected_archive_files="${manifest_values[19]}"
+expected_media_files="${manifest_values[20]}"
+manifest_database_table_counts="${manifest_values[21]}"
 [[ "$manifest_compose_project" == "$compose_project" ]] || die 'backup belongs to a different Compose project'
 
 for required in "$database_file" "$archives_file" "$media_file"; do
@@ -154,34 +189,65 @@ sha256_of() {
 compose=(docker compose --env-file "$(docker_host_path "$env_file")" -p "$compose_project" -f "$(docker_host_path "$compose_file")" --profile plus)
 source_db_container="$("${compose[@]}" ps -q plus-db)"
 source_api_container="$("${compose[@]}" ps -q plus-api)"
+source_worker_container="$("${compose[@]}" ps -q plus-worker)"
+source_web_container="$("${compose[@]}" ps -q plus-web)"
 [[ -n "$source_db_container" ]] || die 'the Compose plus-db service is not running'
 [[ -n "$source_api_container" ]] || die 'the Compose plus-api service is not running'
+[[ -n "$source_worker_container" ]] || die 'the Compose plus-worker service is not running'
+[[ -n "$source_web_container" ]] || die 'the Compose plus-web service is not running'
 [[ "$(docker inspect -f '{{.State.Running}}' "$source_db_container")" == 'true' ]] || die 'the Compose plus-db service is not running'
 [[ "$(docker inspect -f '{{.State.Running}}' "$source_api_container")" == 'true' ]] || die 'the Compose plus-api service is not running'
+[[ "$(docker inspect -f '{{.State.Running}}' "$source_worker_container")" == 'true' ]] || die 'the Compose plus-worker service is not running'
+[[ "$(docker inspect -f '{{.State.Running}}' "$source_web_container")" == 'true' ]] || die 'the Compose plus-web service is not running'
 
 source_db_image="$(docker inspect -f '{{.Config.Image}}' "$source_db_container")"
 source_api_image="$(docker inspect -f '{{.Config.Image}}' "$source_api_container")"
+source_worker_image="$(docker inspect -f '{{.Config.Image}}' "$source_worker_container")"
+source_web_image="$(docker inspect -f '{{.Config.Image}}' "$source_web_container")"
+source_db_image_id="$(docker inspect -f '{{.Image}}' "$source_db_container")"
+source_api_image_id="$(docker inspect -f '{{.Image}}' "$source_api_container")"
+source_worker_image_id="$(docker inspect -f '{{.Image}}' "$source_worker_container")"
+source_web_image_id="$(docker inspect -f '{{.Image}}' "$source_web_container")"
 source_api_revision="$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$source_api_container")"
+source_worker_revision="$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$source_worker_container")"
+source_web_revision="$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$source_web_container")"
 source_release_sha="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$source_api_container" | sed -n 's/^ARTFLOW_RELEASE_SHA=//p' | head -n 1)"
+source_worker_release_sha="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$source_worker_container" | sed -n 's/^ARTFLOW_RELEASE_SHA=//p' | head -n 1)"
 [[ "$source_db_image" == "$manifest_database_image" ]] || die 'running plus-db image does not match the backup manifest'
 [[ "$source_api_image" == "$manifest_api_image" ]] || die 'running plus-api image does not match the backup manifest'
+[[ "$source_worker_image" == "$manifest_worker_image" ]] || die 'running plus-worker image does not match the backup manifest'
+[[ "$source_web_image" == "$manifest_web_image" ]] || die 'running plus-web image does not match the backup manifest'
+[[ "$source_db_image_id" == "$manifest_database_image_id" ]] || die 'running plus-db image ID does not match the backup manifest'
+[[ "$source_api_image_id" == "$manifest_api_image_id" ]] || die 'running plus-api image ID does not match the backup manifest'
+[[ "$source_worker_image_id" == "$manifest_worker_image_id" ]] || die 'running plus-worker image ID does not match the backup manifest'
+[[ "$source_web_image_id" == "$manifest_web_image_id" ]] || die 'running plus-web image ID does not match the backup manifest'
 [[ "$source_api_revision" == "$manifest_git_sha" ]] || die 'running plus-api OCI revision does not match the backup manifest'
+[[ "$source_worker_revision" == "$manifest_git_sha" ]] || die 'running plus-worker OCI revision does not match the backup manifest'
+[[ "$source_web_revision" == "$manifest_git_sha" ]] || die 'running plus-web OCI revision does not match the backup manifest'
 [[ "$source_release_sha" == "$manifest_git_sha" ]] || die 'running plus-api release SHA does not match the backup manifest'
-
-network="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$source_api_container" | grep -E '(^|_)artflow_internal$' | head -n 1 || true)"
-[[ -n "$network" ]] || die 'could not find the Plus internal Docker network'
+[[ "$source_worker_release_sha" == "$manifest_git_sha" ]] || die 'running plus-worker release SHA does not match the backup manifest'
 
 archive_extract_dir="$(mktemp -d)"
 media_extract_dir="$(mktemp -d)"
+restore_counts_path="$(mktemp)"
+restore_network="${compose_project}-plus-restore-network-${RANDOM}${RANDOM}"
 restore_db_container="${compose_project}-plus-restore-db-${RANDOM}${RANDOM}"
+restore_worker_container="${compose_project}-plus-restore-worker-${RANDOM}${RANDOM}"
 restore_api_container="${compose_project}-plus-restore-api-${RANDOM}${RANDOM}"
+restore_web_container="${compose_project}-plus-restore-web-${RANDOM}${RANDOM}"
 
 cleanup() {
+    docker rm -f "$restore_web_container" >/dev/null 2>&1 || true
     docker rm -f "$restore_api_container" >/dev/null 2>&1 || true
+    docker rm -f "$restore_worker_container" >/dev/null 2>&1 || true
     docker rm -f "$restore_db_container" >/dev/null 2>&1 || true
+    docker network rm "$restore_network" >/dev/null 2>&1 || true
     rm -rf -- "$archive_extract_dir" "$media_extract_dir"
+    rm -f -- "$restore_counts_path"
 }
 trap cleanup EXIT
+
+docker network create --internal "$restore_network" >/dev/null
 
 extract_safe() {
     local archive="$1"
@@ -224,11 +290,11 @@ media_files="$("$find_bin" "$media_extract_dir" -type f -print | wc -l | tr -d '
 [[ "$media_files" == "$expected_media_files" ]] || die 'media regular-file count does not match'
 
 restore_database_container() {
-    docker run --rm --network "$network" --name "$restore_db_container" -d \
+    docker run --rm --network "$restore_network" --name "$restore_db_container" -d \
         -e POSTGRES_USER=postgres \
         -e POSTGRES_PASSWORD=restore-only \
         -e POSTGRES_DB="$restore_database" \
-        "$manifest_database_image" >/dev/null
+        "$manifest_database_image_id" >/dev/null
 }
 
 restore_database_diagnostics() {
@@ -270,7 +336,121 @@ docker exec "$restore_db_container" pg_restore --username postgres --exit-on-err
     -c "SELECT to_regclass('public.kysely_migration') IS NOT NULL;" | tr -d '[:space:]')" == 't' ]] || \
     die 'restored database does not contain kysely_migration'
 
-docker run --rm --network "$network" --name "$restore_api_container" -d \
+docker exec -i "$restore_db_container" sh -c \
+    'exec psql -X -qAt -F "|" -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+    > "$restore_counts_path" <<'SQL'
+CREATE TEMP TABLE _artflow_plus_table_counts (
+    table_name text NOT NULL,
+    row_count bigint NOT NULL
+);
+DO $$
+DECLARE
+    table_record record;
+    table_count bigint;
+BEGIN
+    FOR table_record IN
+        SELECT n.nspname, c.relname
+          FROM pg_class AS c
+          JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         WHERE c.relkind IN ('r', 'p')
+           AND NOT c.relispartition
+           AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+           AND n.nspname NOT LIKE 'pg_toast%'
+           AND n.nspname NOT LIKE 'pg_temp_%'
+         ORDER BY n.nspname, c.relname
+    LOOP
+        EXECUTE format('SELECT count(*) FROM %I.%I', table_record.nspname, table_record.relname)
+           INTO table_count;
+        INSERT INTO _artflow_plus_table_counts(table_name, row_count)
+        VALUES (format('%I.%I', table_record.nspname, table_record.relname), table_count);
+    END LOOP;
+END
+$$;
+SELECT table_name, row_count
+  FROM _artflow_plus_table_counts
+ ORDER BY table_name;
+SQL
+
+"$python_bin" - "$(docker_host_path "$manifest")" "$(docker_host_path "$restore_counts_path")" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest_file:
+    expected = json.load(manifest_file)["database_table_counts"]
+
+actual = {}
+with open(sys.argv[2], encoding="utf-8") as counts_file:
+    for raw_line in counts_file:
+        line = raw_line.rstrip("\r\n")
+        table, separator, count = line.partition("|")
+        if not separator or not table or not count.isdigit():
+            raise SystemExit("restored database table counts are malformed")
+        actual[table] = int(count)
+
+if actual != expected:
+    print(
+        json.dumps(
+            {
+                "expected_only": {key: expected[key] for key in expected.keys() - actual.keys()},
+                "actual_only": {key: actual[key] for key in actual.keys() - expected.keys()},
+                "different": {
+                    key: {"expected": expected[key], "actual": actual[key]}
+                    for key in expected.keys() & actual.keys()
+                    if expected[key] != actual[key]
+                },
+            },
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
+    raise SystemExit("restored database table counts do not match manifest")
+PY
+
+restore_worker_container() {
+    docker run --rm --network "$restore_network" --name "$restore_worker_container" -d \
+        -e NODE_ENV=production \
+        -e APP_ENV=production \
+        -e ARTFLOW_RELEASE_SHA="$manifest_git_sha" \
+        -e ARTFLOW_PLUS_DATABASE_URL="postgresql://postgres:restore-only@${restore_db_container}:5432/${restore_database}" \
+        -e ARTFLOW_PLUS_CREDENTIAL_SECRET=restore-only-secret \
+        -e ARTFLOW_PLUS_INLINE_RELAY=0 \
+        -e ARTFLOW_PLUS_ARCHIVE_DIR=/app/var/archives \
+        -e ARTFLOW_PLUS_MEDIA_DIR=/app/var/media \
+        --mount "type=bind,source=$(docker_host_path "$archive_extract_dir"),target=/app/var/archives,readonly" \
+        --mount "type=bind,source=$(docker_host_path "$media_extract_dir"),target=/app/var/media,readonly" \
+        --entrypoint node \
+        "$manifest_worker_image_id" main.cjs >/dev/null
+}
+
+worker_diagnostics() {
+    printf 'isolated worker status: %s\n' "$restore_worker_container" >&2
+    docker inspect -f '{{.State.Status}}' "$restore_worker_container" >&2 2>/dev/null || true
+    docker logs --tail 120 "$restore_worker_container" >&2 2>/dev/null || true
+}
+
+wait_for_restore_worker() {
+    local deadline=$((SECONDS + 90))
+    local state
+    while (( SECONDS < deadline )); do
+        state="$(docker inspect -f '{{.State.Status}}' "$restore_worker_container" 2>/dev/null || true)"
+        if [[ "$state" == 'exited' || "$state" == 'dead' ]]; then
+            worker_diagnostics
+            die 'isolated Plus worker stopped before becoming ready'
+        fi
+        if [[ "$state" == 'running' ]] && \
+            docker logs "$restore_worker_container" 2>/dev/null | grep -Fq 'ArtFlow-Plus worker started.'; then
+            return 0
+        fi
+        sleep 1
+    done
+    worker_diagnostics
+    die 'isolated Plus worker did not become ready within 90 seconds'
+}
+
+restore_worker_container
+wait_for_restore_worker
+
+docker run --rm --network "$restore_network" --network-alias plus-api --name "$restore_api_container" -d \
     --entrypoint node \
     -e NODE_ENV=production \
     -e APP_ENV=production \
@@ -284,7 +464,7 @@ docker run --rm --network "$network" --name "$restore_api_container" -d \
     -e ARTFLOW_PLUS_MEDIA_DIR=/app/var/media \
     --mount "type=bind,source=$(docker_host_path "$archive_extract_dir"),target=/app/var/archives,readonly" \
     --mount "type=bind,source=$(docker_host_path "$media_extract_dir"),target=/app/var/media,readonly" \
-    "$manifest_api_image" main.cjs >/dev/null
+    "$manifest_api_image_id" main.cjs >/dev/null
 
 api_diagnostics() {
     printf 'isolated API status: %s\n' "$restore_api_container" >&2
@@ -303,8 +483,8 @@ wait_for_restore_api() {
             api_diagnostics
             die 'isolated Plus API stopped before becoming ready'
         fi
-        if [[ "$state" == 'running' ]] && docker run --rm --network "$network" --entrypoint node \
-            "$manifest_api_image" -e "$probe" >/dev/null 2>&1; then
+        if [[ "$state" == 'running' ]] && docker run --rm --network "$restore_network" --entrypoint node \
+            "$manifest_api_image_id" -e "$probe" >/dev/null 2>&1; then
             return 0
         fi
         sleep 1
@@ -314,4 +494,39 @@ wait_for_restore_api() {
 }
 
 wait_for_restore_api
+
+restore_web_container() {
+    docker run --rm --network "$restore_network" --name "$restore_web_container" -d \
+        "$manifest_web_image_id" >/dev/null
+}
+
+web_diagnostics() {
+    printf 'isolated web status: %s\n' "$restore_web_container" >&2
+    docker inspect -f '{{.State.Status}}' "$restore_web_container" >&2 2>/dev/null || true
+    docker logs --tail 120 "$restore_web_container" >&2 2>/dev/null || true
+}
+
+wait_for_restore_web() {
+    local deadline=$((SECONDS + 90))
+    local state
+    local probe='fetch("http://PLACEHOLDER:8080/healthz").then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));'
+    probe="${probe/PLACEHOLDER/$restore_web_container}"
+    while (( SECONDS < deadline )); do
+        state="$(docker inspect -f '{{.State.Status}}' "$restore_web_container" 2>/dev/null || true)"
+        if [[ "$state" == 'exited' || "$state" == 'dead' ]]; then
+            web_diagnostics
+            die 'isolated Plus web stopped before becoming ready'
+        fi
+        if [[ "$state" == 'running' ]] && docker run --rm --network "$restore_network" --entrypoint node \
+            "$manifest_api_image_id" -e "$probe" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    web_diagnostics
+    die 'isolated Plus web did not become ready within 90 seconds'
+}
+
+restore_web_container
+wait_for_restore_web
 printf 'Plus backup restore verification passed; source services and volumes were not reset.\n'
