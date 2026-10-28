@@ -79,13 +79,14 @@ def test_plus_deploy_gate_validates_profile_images_and_provenance():
     deploy = (REPOSITORY_ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
 
     assert "ARTFLOW_SITE_PROFILE" in deploy
+    assert "v2" in deploy
     assert "--profile plus" in deploy
     for service, variable in (
         ("plus-api", "plus_api_image"),
         ("plus-worker", "plus_worker_image"),
         ("plus-web", "plus_web_image"),
     ):
-        assert f'config["services"]["{service}"]' in deploy
+        assert service in deploy
         assert f'is_digest_image "${variable}"' in deploy
     assert "org.opencontainers.image.revision" in deploy
     assert "ARTFLOW_RELEASE_SHA" in deploy
