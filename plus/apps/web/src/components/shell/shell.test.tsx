@@ -70,4 +70,18 @@ describe("PortalShell and ConsoleShell", () => {
     expect(screen.getByTestId("aurora-scene")).toBeInTheDocument();
     expect(screen.getByText("public page")).toBeInTheDocument();
   });
+
+  it("uses a static Portal background for Vote routes", () => {
+    locationMock.mockReturnValue({ pathname: "/vote/session-1" });
+
+    render(
+      <PortalShell>
+        <p>vote page</p>
+      </PortalShell>,
+    );
+
+    expect(document.querySelector('[data-theme="afterglow"]')).not.toBeNull();
+    expect(screen.getByTestId("static-backdrop")).toBeInTheDocument();
+    expect(screen.queryByTestId("aurora-scene")).not.toBeInTheDocument();
+  });
 });
