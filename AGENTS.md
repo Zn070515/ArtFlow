@@ -1,3 +1,4 @@
+@docs\artflow-plus\self-build-checklist.md
 # Repository Guidelines
 
 ## Project Structure & Module Organization
