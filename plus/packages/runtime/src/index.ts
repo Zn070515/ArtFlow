@@ -36,3 +36,4 @@ export * from "./voting-read-service.js";
 export * from "./relay-loop.js";
 export * from "./grouping-read-service.js";
 export * from "./participant-identity.js";
+export * from "./participant-claim-service.js";

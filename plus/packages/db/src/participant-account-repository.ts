@@ -73,6 +73,17 @@ export async function getParticipantClaimByDigestForUpdate(
   return row === undefined ? null : participantClaim(row);
 }
 
+export async function getParticipantClaimByDigest(
+  db: Kysely<Database>,
+  digest: string,
+): Promise<StoredParticipantClaim | null> {
+  const row = await db.selectFrom("participant_claim")
+    .selectAll()
+    .where("token_digest", "=", digest)
+    .executeTakeFirst();
+  return row === undefined ? null : participantClaim(row);
+}
+
 export async function markParticipantClaimConsumed(
   trx: Kysely<Database>,
   id: string,
@@ -148,6 +159,7 @@ export async function insertParticipantIdentityLink(
   await trx.insertInto("participant_identity_link").values({
     legacy_participant_id: value.legacyParticipantId,
     actor_id: value.actorId,
+    linked_at: new Date(),
     linked_by: value.linkedBy,
     claim_id: value.claimId,
   }).execute();
