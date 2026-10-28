@@ -4,7 +4,7 @@ import type { Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { closeDb, createDb, migrate } from "@artflow-plus/db";
+import { closeDb, createDb, insertRound, migrate } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import {
   capabilityDefinitionHash,
@@ -230,6 +230,42 @@ describe.skipIf(!connectionString)("execution runtime on PostgreSQL", () => {
       activityId,
       expectedDraftRevision: compiled.body.draftRevision,
     })).rejects.toMatchObject({ code: "ACTIVITY_HAS_RUNNING_SESSIONS" });
+  });
+
+  it("does not release a definition after a competition round exists", async () => {
+    const activityId = await createReleasedActivity();
+    await insertRound(db, {
+      id: `round-${activityId}`,
+      activityId,
+      roundKey: "round-1",
+      releaseVersion: 1,
+      state: "prepared",
+      revision: 0,
+      scoreVersion: 0,
+      minimumJudges: 1,
+      judgeCount: 1,
+      completionMode: "minimum_valid",
+      scoringMethod: "average",
+      advanceCount: 0,
+      currentPanelId: null,
+      lockedAt: null,
+    });
+    const compiled = await compileDefinition(db, registry, deps, {
+      commandId: `compile-round-release-${randomUUID()}`,
+      activityId,
+      expectedDraftRevision: 1,
+      package: {
+        schemaVersion: 1,
+        manifest: { key: "pkg-round-release", title: "round release" },
+        capabilities: { competition: createEmptyCompetitionDefinition() },
+        bindings: [],
+      },
+    });
+    await expect(releaseDefinitionCommand(db, registry, deps, {
+      commandId: `release-round-existing-${randomUUID()}`,
+      activityId,
+      expectedDraftRevision: compiled.body.draftRevision,
+    })).rejects.toMatchObject({ code: "ROUND_RELEASE_IMMUTABLE" });
   });
 
   it("starts non-conflicting scopes in parallel and closes with OCC", async () => {

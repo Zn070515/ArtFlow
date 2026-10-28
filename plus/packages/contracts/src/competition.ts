@@ -90,6 +90,12 @@ export const LockCompetitionRoundBodySchema = Type.Object({
   expectedRevision: Type.Integer({ minimum: 0 }),
 }, { additionalProperties: false });
 
+export const ReopenCompetitionRoundBodySchema = Type.Object({
+  scope: ScopeSchema,
+  expectedRevision: Type.Integer({ minimum: 0 }),
+  reason: Type.String({ minLength: 1, maxLength: 2000 }),
+}, { additionalProperties: false });
+
 export const FinalizeAdvancementBodySchema = Type.Object({
   scope: ScopeSchema,
   expectedRankingRevision: Type.Integer({ minimum: 0 }),

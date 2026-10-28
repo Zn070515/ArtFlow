@@ -6,6 +6,7 @@ import {
   insertCompiled,
   insertDraft,
   insertRelease,
+  listRoundsForActivity,
   listRunningSessions,
   updateActivity,
   updateDraft,
@@ -203,6 +204,12 @@ export async function releaseDefinitionCommand(
       }
       if ((await listRunningSessions(trx, input.activityId)).length > 0) {
         throw new DomainError("ACTIVITY_HAS_RUNNING_SESSIONS", "A definition release cannot change while an execution session is running.");
+      }
+      if ((await listRoundsForActivity(trx, input.activityId)).length > 0) {
+        throw new DomainError(
+          "ROUND_RELEASE_IMMUTABLE",
+          "A definition release cannot change after a competition round has been created.",
+        );
       }
       const stored = await getDraft(trx, input.activityId);
       if (stored === null) {
