@@ -1,6 +1,6 @@
 # M7 → M13.3 代码 Review（high，2026-10-27）
 
-状态：**Open — 待下一轮修复**
+状态：**Closed — 2026-10-28 修复已验证**
 范围：`7ef3a58^1..HEAD`（M7a 合并前的最后一个提交到当前 M13.3），169 个实现提交；
 纯文档提交不参与 review。审查强度：high。
 审查方式：逐层对照实现、测试、部署 manifest 与 runbook；关键项已回读源码抽查。
@@ -34,6 +34,8 @@
 
 ## P1-1 生产 compose 没有启动 outbox relay
 
+状态：**fixed**
+
 - 位置：`deploy/compose.production.yml:290`
 - 现状：`plus` profile 只有 `plus-db`、`plus-api`、`plus-web`；没有 worker 服务，也没有
   `ARTFLOW_PLUS_INLINE_RELAY=1`。
@@ -50,6 +52,8 @@
 
 ## P1-2 反向代理后 rate limit 变成全站共享
 
+状态：**fixed**
+
 - 位置：`plus/apps/api/src/app.ts:633`
 - 现状：`Fastify({ logger: false })` 没有 `trustProxy`；`request.ip` 在 nginx/Caddy
   后面永远是反代地址。
@@ -65,6 +69,8 @@
 
 ## P1-3 nginx/Caddy 的 20MB 上限小于材料策略
 
+状态：**fixed**
+
 - 位置：`deploy/plus/nginx.conf:7`，`deploy/caddy/sites/v2.caddy:14`
 - 现状：反代 `client_max_body_size 20m` / `max_size 20MB`；API octet-stream 解析是
   128MiB；默认材料策略是 25MB，stage-show 是 100MiB。
@@ -75,6 +81,8 @@
 - 验收：真实 21MB 文件经 Caddy + nginx + API 成功 attach；超 policy 文件被领域拒绝。
 
 ## P1-4 adopted legacy 活动无法归档
+
+状态：**fixed**
 
 - 位置：`plus/packages/runtime/src/archive-storage.ts:27`
 - 现状：archive key 的 activity 段要求 `^[a-z0-9_-]+$`；adoption 的 activity id 是
@@ -87,6 +95,8 @@
 - 验收：adopt 后 archive/unarchive/download 全程成功，路径穿越仍被拒绝。
 
 ## P1-5 Historical import 不是只读，并会重新开放报名
+
+状态：**fixed**
 
 - 位置：`plus/packages/runtime/src/legacy-import-service.ts:1001`
 - 现状：没有 active result 时 historical import 把活动置为 `active`；synthetic
@@ -103,6 +113,8 @@
   全部返回领域错误；reading/detail 仍正常。
 
 ## P1-6 结果确认后，评分实际上无法更正
+
+状态：**fixed**
 
 - 位置：`plus/packages/runtime/src/score-service.ts:146`、`:473`
 - 现状：正式 round 没有 unlock/reopen 命令，一旦 `locked` 永远不能回到 `scoring`；
@@ -122,6 +134,8 @@
 
 ## P2-1 有回合时发布新 definition 会把活动卡死
 
+状态：**fixed**
+
 - 位置：`plus/packages/runtime/src/definition-service.ts:204`
 - 现状：只拒绝 running execution session；prepared/scoring/locked 的 round 会留在旧
   `releaseVersion`，没有迁移命令。
@@ -138,6 +152,8 @@
 
 ## P2-2 Exporter fallback 把获奖者写成 `legacy-user:None`
 
+状态：**fixed**
+
 - 位置：`common/management/commands/export_plus_bundle.py:313`（awards 在 `:325`）
 - 现状：没有 `result_snapshot` 时，fallback 使用 camelCase 的 decisions/awards，但只读
   `contestant_id` / `contestant`，取不到 `contestantId`。
@@ -150,6 +166,8 @@
 
 ## P2-3 Archive 只读 100k 事件，静默截断
 
+状态：**fixed**
+
 - 位置：`plus/packages/runtime/src/archive-service.ts:157-160`
 - 现状：`readEventsSince` 只取 100,000 条，未检查 `nextCursor`；截断后的历史被当作
   完整包封存。
@@ -160,6 +178,8 @@
 - 验收：>100k 事件的归档要么完整，要么明确失败；不存在无标记的静默截断。
 
 ## P2-4 Live 排名把并列显示成不同名次
+
+状态：**fixed**
 
 - 位置：`plus/apps/web/src/components/live/LiveRoundPanel.tsx:291`
 - 现状：用 `index + 1` 渲染名次，而 ranking snapshot 的 tie group / 公开结果使用并列
@@ -180,3 +200,18 @@
 - P1-1 fixed: <commit>; gate: <command>; evidence: <run/日志>
 - P2-3 superseded: <原因>
 ```
+
+## 2026-10-28 修复记录
+
+- P1-1 fixed: `b170858`; `plus-worker`、生产 API 的 `ARTFLOW_PLUS_INLINE_RELAY=0`、outbox operational smoke 已加入；gate: `pnpm -C plus run test`、`uv run pytest tests/gates -q`。
+- P1-2 fixed: `b170858`; trusted proxy 默认为空，并增加可信代理边界回归；evidence: `plus/apps/api/test/proxy-boundary.test.ts`。
+- P1-3 fixed: `b170858`; Caddy/Nginx/API transport ceiling 统一为 128 MiB；gate: `tests/gates/test_release_artifacts.py`、Plus build。
+- P1-4 fixed: `87e0e79`; archive activity segment 支持大小写且仍拒绝路径穿越；evidence: `plus/packages/runtime/test/archive-package.test.ts`。
+- P1-5 fixed: `87e0e79`; historical import 固定为 closed、registration lifecycle 为 final，注册/材料/名册/活动写命令 fail closed；evidence: `plus/packages/runtime/test/legacy-import.test.ts`。
+- P1-6 fixed: `bb4f971`; 增加 formal round reopen-for-correction，并串联 score correction、relock、recompute/resolve 的审计与消费检查；evidence: `plus/packages/runtime/test/score-service.test.ts`、`publishing-service.test.ts`。
+- P2-1 fixed: `bb4f971`; 有已创建 round 时 definition release 返回 `ROUND_RELEASE_IMMUTABLE`；evidence: `plus/packages/runtime/test/runtime.test.ts`。
+- P2-2 fixed: `87e0e79`; exporter 兼容 `contestantId`、`contestant_id`、`contestant`、`singer_id`，缺失身份直接失败；evidence: `common/test_plus_bundle.py`。
+- P2-3 fixed: `87e0e79`; archive events 改为 10,000 分页读取并检测 cursor 不前进；evidence: `plus/packages/runtime/test/archive-service.test.ts` 覆盖 100,001 events。
+- P2-4 fixed: `bb4f971`; Live 名次按 tie group 使用 competition rank；evidence: `plus/apps/web/src/components/live/ranking.test.ts`。
+
+合并提交：`a95c622`（`artflow-plus`，已推送）。本轮验证：Plus PostgreSQL 全量测试通过、`pnpm -C plus run check` 通过、`uv run pytest tests/gates -q` 为 28 passed、Pyright 0 errors、客户端/E2E 类型检查通过、Docker API/Worker/Web 三个目标构建通过。
