@@ -1,5 +1,5 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { hasLiveAccess, hasOpsAccess, hasStudioAccess, useSession } from "../../auth/SessionProvider.js";
 
@@ -14,6 +14,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
   const { pathname } = useLocation();
   const { session, logout } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const items: readonly ConsoleNavItem[] = [
     { label: "Ops", to: "/ops", prefix: "/ops", visible: hasOpsAccess(session) },
     { label: "Studio", to: "/studio", prefix: "/studio", visible: hasStudioAccess(session) },
@@ -24,6 +25,37 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
   function closeMenu(): void {
     setMobileOpen(false);
   }
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      setMobileOpen(false);
+      menuButtonRef.current?.focus();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileOpen]);
+
+  const contextLabel = pathname.startsWith("/ops")
+    ? "Ops · 运营"
+    : pathname.startsWith("/studio")
+      ? "Studio · 规则"
+      : pathname.startsWith("/live")
+        ? "Live · 现场"
+        : pathname.startsWith("/judge")
+          ? "Judge · 评分"
+          : pathname.startsWith("/join")
+            ? "报名 · 参与者"
+            : pathname.startsWith("/login")
+              ? "登录"
+              : "工作区";
 
   return (
     <div className="console-shell" data-shell="console" data-theme="signal">
@@ -38,7 +70,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
           </span>
         </Link>
         <span className="console-context" aria-label="当前工作区">
-          {pathname.startsWith("/ops") ? "Ops · 运营" : pathname.startsWith("/studio") ? "Studio · 规则" : pathname.startsWith("/live") ? "Live · 现场" : "工作区"}
+          {contextLabel}
         </span>
         <div className="console-topbar-actions">
           {session === null ? (
@@ -57,6 +89,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
             </button>
           )}
           <button
+            ref={menuButtonRef}
             className="console-menu-toggle"
             type="button"
             aria-expanded={mobileOpen}

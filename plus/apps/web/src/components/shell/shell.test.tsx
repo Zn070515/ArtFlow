@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -60,6 +60,8 @@ describe("PortalShell and ConsoleShell", () => {
   });
 
   it("keeps Portal branding and exposes the public navigation", () => {
+    locationMock.mockReturnValue({ pathname: "/" });
+
     render(
       <PortalShell>
         <p>public page</p>
@@ -85,5 +87,49 @@ describe("PortalShell and ConsoleShell", () => {
     expect(document.querySelector('[data-theme="afterglow"]')).not.toBeNull();
     expect(screen.getByTestId("static-backdrop")).toBeInTheDocument();
     expect(screen.queryByTestId("aurora-scene")).not.toBeInTheDocument();
+  });
+
+  it("does not mount a decorative scene for participant claim routes", () => {
+    locationMock.mockReturnValue({ pathname: "/claim" });
+
+    render(
+      <PortalShell>
+        <p>claim page</p>
+      </PortalShell>,
+    );
+
+    expect(screen.queryByTestId("aurora-scene")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("static-backdrop")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["/judge/public-code", "Judge · 评分"],
+    ["/join", "报名 · 参与者"],
+    ["/login", "登录"],
+  ])("labels %s as %s", (pathname, label) => {
+    locationMock.mockReturnValue({ pathname });
+
+    render(
+      <ConsoleShell>
+        <p>page</p>
+      </ConsoleShell>,
+    );
+
+    expect(screen.getByLabelText("当前工作区")).toHaveTextContent(label);
+  });
+
+  it("closes the mobile navigation with Escape and restores trigger focus", () => {
+    render(
+      <ConsoleShell>
+        <p>page</p>
+      </ConsoleShell>,
+    );
+
+    const toggle = screen.getByRole("button", { name: "打开 Console 导航" });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(document.activeElement).toBe(toggle);
   });
 });
