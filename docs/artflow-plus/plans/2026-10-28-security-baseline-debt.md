@@ -1,6 +1,6 @@
 # P0 安全基线还账计划
 
-状态：**第一项待实现**（2026-10-28）  
+状态：**第一项已完成，第二项待实现**（2026-10-28）
 前置：`artflow-plus` 已建立干净 baseline；不安排真实活动或真实角色彩排。
 
 ## 目标
@@ -26,13 +26,15 @@
 
 ### 1. Session / cookie / CSRF 生命周期（第一笔）
 
-- 统一 cookie 序列化，不让 `cookies.ts` 与 `app.ts` 各自维护属性；
-- 覆盖登录、注册、logout、过期 session、session rotation、CSRF 缺失/错误/正确、bearer
+- [x] 统一 cookie 序列化，不让 `cookies.ts` 与 `app.ts` 各自维护属性；
+- [x] 覆盖登录、注册、logout、过期 session、session rotation、CSRF 缺失/错误/正确、bearer
   请求和 cookie 请求的矩阵；
-- 明确生产 `Secure`、`HttpOnly`、`SameSite`、`Path`、Max-Age 和 logout 清理必须一致；
-- 禁止响应、receipt、audit、错误日志和前端 JSON 泄漏 session secret。
+- [x] 明确生产 `Secure`、`HttpOnly`、`SameSite`、`Path`、Max-Age 和 logout 清理必须一致；
+- [x] 禁止响应、receipt、audit、错误日志和前端 JSON 泄漏 session secret。
 
-出口：API focused security tests 通过，且可证明 cookie 与 bearer 两种入口的权限语义一致。
+出口：API focused security tests 通过，且可证明 cookie 与 bearer 两种入口的权限语义一致。证据：
+`pnpm -C plus/apps/api test -- test/auth.test.ts test/cookies.test.ts`（12 tests）以及
+API check 通过。
 
 ### 2. Credential lifecycle
 
