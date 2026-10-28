@@ -77,4 +77,25 @@ describe("OpsPage", () => {
     expect(screen.getByRole("link", { name: "夏季决赛" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "春季现场" })).not.toBeInTheDocument();
   });
+
+  it("paginates long activity lists", () => {
+    useQueryMock.mockReturnValue({
+      data: Array.from({ length: 26 }, (_, index) => ({
+        id: `activity-${index + 1}`,
+        title: `活动 ${index + 1}`,
+        publicCode: `CODE-${index + 1}`,
+        status: "draft",
+        revision: 1,
+        enabledCapabilities: [],
+      })),
+      error: null,
+      isPending: false,
+    });
+    render(<OpsPage />);
+
+    expect(screen.getByRole("link", { name: "活动 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "活动 26" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByRole("link", { name: "活动 26" })).toBeInTheDocument();
+  });
 });

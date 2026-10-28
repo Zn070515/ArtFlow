@@ -203,8 +203,8 @@ Console 不挂 Aurora，不使用全屏 backdrop blur 或 30/90 级别的装饰�
   背景，报名、登录、Judge 和 claim 路由不加载装饰性场景。
 - 收紧 Console 的 Signal 边界：登录卡片不继承 Portal 毛玻璃，焦点、按钮、侧栏阴影和 QR
   背景均从语义 token 取值，并用自动化对比度测试守住正文与控制项阈值。
-- 为 Ops / Studio / Live 活动表和 Ops 报名表提供稳定的搜索、状态筛选和空结果反馈；成功
-  状态提供 `aria-live`，移动侧栏支持 Escape 关闭和焦点恢复。
+- 为 Ops / Studio / Live 活动表和 Ops 报名表提供稳定的搜索、状态筛选、分页和空结果反馈；
+  成功状态提供 `aria-live`，移动侧栏支持 Escape 关闭和焦点恢复。
 - 基于实际场景决定是否加入 `daybreak`、`ember`、`quiet`。
 - 若确实存在用户需求，再增加设置层的 theme preference；不把主题选择暴露在执行关键动作的页面。
 

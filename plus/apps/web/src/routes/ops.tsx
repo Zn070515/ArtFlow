@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { fetchOpsActivities } from "../api/ops.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
+import { ConsolePagination } from "../components/console/ConsolePagination.js";
+
+const PAGE_SIZE = 25;
 
 export function OpsPage() {
   return (
@@ -18,6 +21,8 @@ function OpsContent() {
   const { session } = useSession();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [searchTerm, statusFilter]);
   const allowed = hasOpsAccess(session);
   const query = useQuery({
     queryKey: ["ops-activities"],
@@ -46,6 +51,9 @@ function OpsContent() {
       `${activity.title} ${activity.publicCode}`.toLocaleLowerCase().includes(normalizedSearch);
     return matchesSearch && (statusFilter.length === 0 || activity.status === statusFilter);
   });
+  const totalPages = Math.max(1, Math.ceil(filteredActivities.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedActivities = filteredActivities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <section className="ops-page">
@@ -91,7 +99,7 @@ function OpsContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredActivities.map((activity) => (
+                  {paginatedActivities.map((activity) => (
                     <tr key={activity.id}>
                       <td>
                         <Link
@@ -110,6 +118,7 @@ function OpsContent() {
               </table>
             </div>
           )}
+          <ConsolePagination page={currentPage} totalPages={totalPages} onPageChange={setPage} />
         </>
       )}
     </section>
