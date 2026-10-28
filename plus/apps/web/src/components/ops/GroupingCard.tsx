@@ -217,7 +217,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
       <h2>第一轮分组</h2>
 
       {stage === undefined ? (
-        <button type="button" className="button-primary" onClick={() => create.mutate()}>
+        <button type="button" className="primary-button" onClick={() => create.mutate()}>
           创建分组赛段
         </button>
       ) : (
@@ -240,7 +240,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
               </label>
               <button
                 type="button"
-                className="button-secondary"
+                className="secondary-button"
                 disabled={participants.isPending}
                 onClick={() =>
                   setDraft(
@@ -299,7 +299,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
           {stage.status === "draft" ? (
             <button
               type="button"
-              className="button-primary"
+              className="primary-button"
               disabled={record.isPending || !canSave}
               onClick={() => record.mutate(groups)}
             >
@@ -314,7 +314,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
           {stage.status === "draft" ? (
             <button
               type="button"
-              className="button-primary"
+              className="primary-button"
               disabled={confirm.isPending || !canConfirm}
               onClick={() => confirm.mutate()}
             >
@@ -332,7 +332,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
           {stage.status === "confirmed" ? (
             <button
               type="button"
-              className="button-primary"
+              className="primary-button"
               disabled={freeze.isPending || dirty}
               onClick={() => freeze.mutate()}
             >
@@ -362,7 +362,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                   </label>
                   <button
                     type="button"
-                    className="button-secondary"
+                    className="secondary-button"
                     disabled={changeWindow.isPending}
                     onClick={() => changeWindow.mutate()}
                   >
@@ -384,7 +384,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                 editing ? (
                   <button
                     type="button"
-                    className="button-secondary"
+                     className="secondary-button"
                     disabled={
                       correct.isPending ||
                       !canSave ||
@@ -398,7 +398,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                 ) : (
                   <button
                     type="button"
-                    className="button-secondary"
+                     className="secondary-button"
                     onClick={() => {
                       setDraft(groups);
                       setEditing(true);
@@ -412,7 +412,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
               {stage.status === "draft" || stage.status === "confirmed" ? (
                 <button
                   type="button"
-                  className="button-secondary"
+                   className="secondary-button"
                   disabled={cancel.isPending || reason.trim() === ""}
                   onClick={() => cancel.mutate()}
                 >
