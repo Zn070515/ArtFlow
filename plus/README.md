@@ -5,7 +5,7 @@ root is the frozen v1 reference implementation; nothing here imports it.
 
 ## Current state
 
-M0–M14 are complete. The workspace covers the full activity journey —
+M0–M14.1 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
 public vote page, and one protected realtime core. Production still runs v1 on
 `main`; the cutover code and runbooks are ready, but the domain has not been
@@ -44,6 +44,14 @@ can issue a scoped supplement capability without migrating a v1 account, and
 material bytes upload atomically (the old current survives a failed replacement).
 Production compose now mounts `plus_media_data` and the v1 `media_data` read-only,
 and media paths accept Unicode filenames.
+
+ADR-0035 closes the imported-participant account gap without rewriting imported
+IDs or migrating passwords. Staff issue a one-time `/claim#...` fragment for an
+adopted `legacy-user:*` registration; the participant creates a new account or
+binds an existing participant session, and the registration/material ownership
+checks resolve the linked legacy identity. The fragment is removed from the
+address bar immediately; raw claim/session credentials stay out of durable
+responses and audit records. This does not authorize deleting v1 source or media.
 
 ## First vertical slice
 
@@ -294,9 +302,9 @@ new architecture.
    activity followed by the operational smoke profile; it remains gated by that
    rehearsal, activity-specific capability completeness, and the authority audit,
    not by the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
-2. Close the remaining product gaps: participant account
-   claim/migration, a public program page for stage shows, bracket/composite
-   scoring, XLSX export, on-site display, and multi-instance realtime broadcast.
+2. Close the remaining product gaps: a public program page for stage shows,
+   bracket/composite scoring, XLSX export, on-site display, and multi-instance
+   realtime broadcast.
 3. Split the frontend into the public Portal shell and the operations Console
    shell before the next UX round; the fixed direction, desktop layout and
    acceptance gates are in `docs/artflow-plus/frontend-design-direction.md`.
@@ -560,8 +568,9 @@ pnpm -C plus --filter @artflow-plus/api exec vitest run test/activity-shapes.tes
 ```
 
 Known gaps (documented in `docs/artflow-plus/shape-validation.md`): no public
-program page for stage shows, no bracket/composite scoring, no participant
-account claim/migration. Ticket-backed voting entry is delivered by M14.
+program page for stage shows, no bracket/composite scoring, no XLSX export,
+on-site display, or multi-instance realtime broadcast. Participant account
+claim is delivered by M14.1; ticket-backed voting entry is delivered by M14.
 
 ## M6 feature slice and M6.5 authority hardening complete
 

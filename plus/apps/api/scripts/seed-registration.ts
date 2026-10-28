@@ -4,6 +4,7 @@ import {
   getActivity,
   getLocalAccount,
   insertRelease,
+  insertRegistration,
   migrate,
 } from "@artflow-plus/db";
 import { createLocalAccount } from "@artflow-plus/runtime";
@@ -69,6 +70,16 @@ const activityId = "act-e2e-registration";
 await db.transaction().execute(async (trx) => {
   // The E2E schema is disposable; reset only the command-owned registration data.
   await trx.deleteFrom("material").where("activity_id", "=", activityId).execute();
+  const claims = await trx.selectFrom("participant_claim")
+    .select("id")
+    .where("activity_id", "=", activityId)
+    .execute();
+  if (claims.length > 0) {
+    await trx.deleteFrom("participant_identity_link")
+      .where("claim_id", "in", claims.map((claim) => claim.id))
+      .execute();
+  }
+  await trx.deleteFrom("participant_claim").where("activity_id", "=", activityId).execute();
   await trx.deleteFrom("registration").where("activity_id", "=", activityId).execute();
   await trx.deleteFrom("roster").where("activity_id", "=", activityId).execute();
 });
@@ -131,6 +142,22 @@ if ((await getActivity(db, activityId)) === null) {
     });
   });
 }
+
+await insertRegistration(db, {
+  id: "zz-e2e-legacy-registration",
+  activityId,
+  participantId: "legacy-user:e2e",
+  questionnaireVersion: "e2e-v1",
+  questionnaireHash: "e2e-reg-hash",
+  status: "submitted",
+  answers: {
+    name: "Legacy Alice",
+    song: "导入的旧曲目",
+    intro: "这是一条用于认领流程的历史报名。",
+  },
+  supplementKeys: [],
+  revision: 1,
+});
 
 await closeDb(db);
 console.log("Seeded registration E2E activity and Ops account");

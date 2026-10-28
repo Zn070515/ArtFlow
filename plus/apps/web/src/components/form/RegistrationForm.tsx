@@ -155,6 +155,7 @@ export function RegistrationForm({
         <div>
           <p className="eyebrow">REGISTRATION · 报名</p>
           <h1 className="display results-title">{detail.activity.title}</h1>
+          <p className="state-copy">参与者 {detail.registration.participantId}</p>
         </div>
         <span className={`status-badge status-${detail.registration.status}`}>
           {STATUS_LABELS[detail.registration.status] ?? detail.registration.status}

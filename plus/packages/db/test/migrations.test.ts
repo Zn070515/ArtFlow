@@ -59,6 +59,37 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
     ]);
   });
 
+  it("creates participant claim and identity-link tables", async () => {
+    const tables = await sql<{ table_name: string }>`
+      select table_name
+        from information_schema.tables
+       where table_schema = current_schema()
+         and table_name in ('participant_claim', 'participant_identity_link')
+       order by table_name
+    `.execute(db);
+    expect(tables.rows.map((row) => row.table_name)).toEqual([
+      "participant_claim",
+      "participant_identity_link",
+    ]);
+
+    const indexes = await sql<{ indexname: string }>`
+      select indexname
+        from pg_indexes
+       where schemaname = current_schema()
+         and indexname in (
+           'participant_claim_token_digest_key',
+           'participant_claim_registration_idx',
+           'participant_identity_link_actor_key'
+         )
+       order by indexname
+    `.execute(db);
+    expect(indexes.rows.map((row) => row.indexname)).toEqual([
+      "participant_claim_registration_idx",
+      "participant_claim_token_digest_key",
+      "participant_identity_link_actor_key",
+    ]);
+  });
+
   it("adds the hardening columns", async () => {
     const result = await sql<{ table_name: string; column_name: string }>`
       select table_name, column_name

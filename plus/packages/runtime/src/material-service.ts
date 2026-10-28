@@ -20,7 +20,6 @@ import type {
   QuestionnaireFileSlot,
 } from "@artflow-plus/domain";
 import {
-  canActFor,
   DomainError,
   requirePermission,
 } from "@artflow-plus/domain";
@@ -30,6 +29,7 @@ import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
 import { idFromCommand } from "./hash.js";
+import { canActForParticipant } from "./participant-identity.js";
 
 function requireActive(activity: { readonly status: string }): void {
   if (activity.status !== "active") {
@@ -148,7 +148,7 @@ export async function uploadMaterial(
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
-      if (!canActFor(actor, registration.participantId, "materials.manage")) {
+      if (!(await canActForParticipant(trx, actor, registration.participantId, "materials.manage"))) {
         throw new DomainError("FORBIDDEN", "The actor cannot upload material for this registration.");
       }
       const { questionnaire, materials } = await releasedMaterialRules(trx, activity, registration.questionnaireHash);
@@ -247,7 +247,11 @@ export async function attachMaterialContent(
         const staff = actor.permissions.includes("*") ||
           actor.permissions.includes("materials.manage") ||
           actor.permissions.includes("materials.review");
-        if (material.ownerActorId !== actor.actorId && registration.participantId !== actor.actorId && !staff) {
+        if (
+          material.ownerActorId !== actor.actorId &&
+          !(await canActForParticipant(trx, actor, registration.participantId, "materials.manage")) &&
+          !staff
+        ) {
           throw new DomainError("FORBIDDEN", "The actor cannot store content for this material.");
         }
         if (input.bytes.byteLength !== material.byteLength) {
@@ -393,7 +397,7 @@ export async function readMaterialForActor(
     input.actor.permissions.includes("materials.manage");
   if (
     material.ownerActorId !== input.actor.actorId &&
-    registration.participantId !== input.actor.actorId &&
+    !(await canActForParticipant(db, input.actor, registration.participantId, "materials.manage")) &&
     !staffRead
   ) {
     throw new DomainError("NOT_FOUND", "Material was not found.");

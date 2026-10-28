@@ -11,7 +11,7 @@ import {
   getActivitySummary,
   getRegistration,
   getRelease,
-  getRegistrationByParticipant,
+  getRegistrationByParticipants,
   getRoster,
   listActivities,
   listMaterials,
@@ -25,6 +25,7 @@ import type {
 import type { Kysely } from "kysely";
 
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
+import { canActForParticipant, participantSubjectIds } from "./participant-identity.js";
 
 export interface PublicActivity {
   readonly id: string;
@@ -129,7 +130,7 @@ export async function getMyRegistration(
   activityId: string,
 ): Promise<StoredRegistration | null> {
   const actor = runtimeActor(deps);
-  return getRegistrationByParticipant(db, activityId, actor.actorId);
+  return getRegistrationByParticipants(db, activityId, await participantSubjectIds(db, actor));
 }
 
 function materialDto(material: StoredMaterial): RegistrationMaterialDto {
@@ -156,9 +157,8 @@ export async function getRegistrationDetail(
     throw new DomainError("NOT_FOUND", "The registration was not found.");
   }
   const allowed =
-    actor.actorId === registration.participantId ||
-    hasPermission(actor, "registration.review") ||
-    hasPermission(actor, "registration.manage");
+    await canActForParticipant(db, actor, registration.participantId, "registration.manage") ||
+    hasPermission(actor, "registration.review");
   if (!allowed) throw new DomainError("FORBIDDEN", "The actor cannot read this registration.");
   const activity = await getActivitySummary(db, activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");

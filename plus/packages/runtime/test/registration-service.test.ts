@@ -7,6 +7,9 @@ import { join } from "node:path";
 import {
   closeDb,
   createDb,
+  insertParticipantClaim,
+  insertParticipantIdentityLink,
+  insertRegistration,
   insertRelease,
   insertSession,
   listApprovedParticipantIds,
@@ -24,6 +27,7 @@ import {
   attachMaterialContent,
   createLocalMaterialStorage,
   finalizeRoster,
+  getMyRegistration,
   prepareCompetitionRound,
   reviewMaterial,
   reviewRegistration,
@@ -469,5 +473,77 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       materialId: uploaded.body.id,
       actor: staff,
     })).resolves.toMatchObject({ id: uploaded.body.id, storageKey: uploaded.body.storageKey });
+  });
+
+  it("lets a linked participant answer and submit the imported registration", async () => {
+    const activityId = await seedActivity();
+    const legacyParticipantId = `legacy-user:${randomUUID()}`;
+    const registrationId = `legacy-registration-${randomUUID()}`;
+    const claimId = `claim-${randomUUID()}`;
+    await insertRegistration(db, {
+      id: registrationId,
+      activityId,
+      participantId: legacyParticipantId,
+      questionnaireVersion: "v1",
+      questionnaireHash: "questionnaire-hash",
+      status: "draft",
+      answers: {},
+      revision: 0,
+    });
+    await insertParticipantClaim(db, {
+      id: claimId,
+      activityId,
+      registrationId,
+      legacyParticipantId,
+      tokenDigest: `digest-${randomUUID()}`,
+      expiresAt: "2026-11-01T00:00:00.000Z",
+      consumedAt: null,
+      consumedByActorId: null,
+      issuedBy: staff.actorId,
+    });
+    await insertParticipantIdentityLink(db, {
+      legacyParticipantId,
+      actorId: participant.actorId,
+      linkedBy: staff.actorId,
+      claimId,
+    });
+
+    await expect(getMyRegistration(db, deps(participant), activityId)).resolves.toMatchObject({
+      id: registrationId,
+      participantId: legacyParticipantId,
+    });
+    const answered = await saveRegistrationAnswer(db, deps(participant), {
+      commandId: `linked-answer-${randomUUID()}`,
+      activityId,
+      registrationId,
+      expectedRevision: 0,
+      questionKey: "name",
+      value: "Linked participant",
+    });
+    await uploadWithContent(participant, {
+      commandId: `linked-upload-${randomUUID()}`,
+      activityId,
+      registrationId,
+      questionKey: "audio",
+      originalName: "linked.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 100,
+    });
+    await expect(submitRegistration(db, deps(participant), {
+      commandId: `linked-submit-${randomUUID()}`,
+      activityId,
+      registrationId,
+      expectedRevision: answered.body.revision,
+    })).resolves.toMatchObject({ body: { status: "submitted", participantId: legacyParticipantId } });
+
+    const outsider: ActorContext = { ...participant, actorId: `student-outsider-${randomUUID()}` };
+    await expect(saveRegistrationAnswer(db, deps(outsider), {
+      commandId: `unlinked-answer-${randomUUID()}`,
+      activityId,
+      registrationId,
+      expectedRevision: 2,
+      questionKey: "name",
+      value: "Should fail",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

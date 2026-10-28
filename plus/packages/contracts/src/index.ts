@@ -9,4 +9,5 @@ export * from "./voting.js";
 export * from "./publishing.js";
 export * from "./archive.js";
 export * from "./registration.js";
+export * from "./participant-claim.js";
 export * from "./packs.js";

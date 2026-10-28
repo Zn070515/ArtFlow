@@ -46,9 +46,13 @@ definition。
 | 纯观众投票活动没有发布路径 | publishing 依赖 competition，投票 tally 不能直接公开 | 已解耦并新增投票赛果确认与 Ops 投票卡片（M10） |
 | bracket / 对阵 / 复合分 | v2 competition 只能表达 round/panel/score | 新 capability，不塞进 competition |
 | podium 首次 recompute 需要预先算出 fingerprint | 没有发布 UI；自动旅程通过 `buildPodiumCandidate` 先算 fingerprint 再调用 | 发布/确认 UI 或让 recompute 返回当前 fingerprint |
-| 参与者账号迁移/认领 | 导入的 legacy 报名没有登录账号 | 独立 slice（认领链接或账号迁移） |
 | 分组/合唱阶段 | v1 的 GroupStage 无 v2 表达 | 已由 `grouping` capability 承载（M9）；组材料文件仍归媒体 slice |
 | 参与者投票页缺失 | v2 只有 ballot 写接口，观众没有投票入口 | 已由 M12 的 `/vote/<sessionId>` 关闭；M14 已补齐票据 fragment/手工兑换入口 |
+
+导入的 `legacy-user:*` 报名现在通过 ADR-0035 的一次性 `/claim#...` fragment
+完成账号认领。认领不会改写权威 `participant_id`，也不会迁移 v1 密码；注册和材料
+所有权通过一对一 identity link 同时解析本地 actor 与 legacy subject。v1 源码和媒体
+仍保留在只读 cutover 边界内。
 
 ## 复现
 

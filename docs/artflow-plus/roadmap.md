@@ -1,6 +1,6 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M14 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
+状态：**M0–M14.1 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
 participant/material cutover：MaterialCheck 导入、补交 capability、原子上传、
 生产媒体卷与 Unicode 路径；production cutover 仍需以首个活动的真实 adoption
 彩排与 operational smoke 为准。产品与架构身份的
@@ -249,7 +249,8 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
 - **M8e-4 现场彩排与三类活动验证（已完成，2026-10-26）**：新增 stage-show /
   review-awards packs，Pack 可携带默认 capability definitions；三条关键旅程
   （歌手赛、节目征集+归档、作品评审+发布）通过；现场彩排 runbook 与验证报告。
-  缺口（节目单公开页、纯投票发布、bracket、参与者账号）已明确记录。ADR-0024。
+  当时的缺口（节目单公开页、纯投票发布、bracket、参与者账号）已明确记录；
+  参与者账号随后由 M14.1 完成。ADR-0024、ADR-0035。
 
 **M8 出口**：关键旅程 E2E；迁移报告；回滚演练；现场彩排通过；至少三个结构不同
 的活动（judged singing competition、stage show、另一种比赛/复杂活动）证明
@@ -369,6 +370,17 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   投票路径保持兼容。
 - 出口：API 公共读回归、Web API 测试、票据 fragment 与手工输入 E2E、browser 投票
   回归、Plus 类型与测试门禁通过；真实彩排留给 cutover runbook。
+
+## M14.1 — Participant Account Claim（已完成，2026-10-28）
+
+- Staff 可为 active activity 中的 `legacy-user:*` 导入报名生成一次性认领链接；
+  token 只存 digest，并受活动、报名、过期时间和一对一 identity link 约束。
+- 参与者通过 `/claim#...` 创建新账号或绑定已有参与者 session；fragment 会立即从地址栏
+  移除，原始 token、session token 和 `authContext` 不进入 JSON、receipt、audit 或 outbox。
+- registration/material 的所有权解析同时支持本地 actor 与其唯一 legacy identity；
+  导入的 `participant_id` 保持权威，不迁移旧密码、不删除 v1 源码或媒体。
+- 出口：DB/runtime/API/Web 定向测试、Claim UI 测试和独立 Ops/参与者/重放
+  headless Chromium E2E 通过。详见 ADR-0035。
 
 ## Definition of Done（每个 slice）
 

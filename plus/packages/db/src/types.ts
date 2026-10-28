@@ -210,6 +210,27 @@ export interface SupplementGrantRow {
   created_at: ColumnType<Date, Date | undefined, never>;
 }
 
+export interface ParticipantClaimRow {
+  id: string;
+  activity_id: string;
+  registration_id: string;
+  legacy_participant_id: string;
+  token_digest: string;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  consumed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  consumed_by_actor_id: string | null;
+  issued_by: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+export interface ParticipantIdentityLinkRow {
+  legacy_participant_id: string;
+  actor_id: string;
+  linked_at: ColumnType<Date, Date | string, Date | string>;
+  linked_by: string;
+  claim_id: string;
+}
+
 export interface CompetitionRoundRow {
   id: string;
   activity_id: string;
@@ -614,6 +635,8 @@ export interface Database {
   material: MaterialRow;
   material_check: MaterialCheckRow;
   supplement_grant: SupplementGrantRow;
+  participant_claim: ParticipantClaimRow;
+  participant_identity_link: ParticipantIdentityLinkRow;
   competition_round: CompetitionRoundRow;
   panel_snapshot: PanelSnapshotRow;
   panel_member: PanelMemberRow;

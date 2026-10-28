@@ -1,6 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { useState } from "react";
 
+import { ApiError } from "../api/client.js";
+import { issueParticipantClaim, type ParticipantClaimIssue } from "../api/ops.js";
 import { fetchRegistrationDetail, type RegistrationDetail } from "../api/registrations.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
@@ -52,6 +55,74 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
   );
 }
 
+function ParticipantClaimPanel({ detail }: { readonly detail: RegistrationDetail }) {
+  const [claim, setClaim] = useState<ParticipantClaimIssue | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const eligible = detail.registration.participantId.startsWith("legacy-user:");
+
+  if (!eligible) return null;
+
+  async function issue(): Promise<void> {
+    setBusy(true);
+    setCopied(false);
+    setError(null);
+    try {
+      const result = await issueParticipantClaim(
+        detail.activity.id,
+        detail.registration.id,
+        crypto.randomUUID(),
+      );
+      if (result.token === null) {
+        setClaim(null);
+        setError("这次请求是一次性响应的重放，未返回新链接；请使用新的操作请求重新生成。");
+      } else {
+        setClaim(result);
+      }
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "认领链接生成失败，请稍后重试。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyLink(): Promise<void> {
+    if (claim?.token === null || claim?.token === undefined) return;
+    const link = `${window.location.origin}/claim#${encodeURIComponent(claim.token)}`;
+    await navigator.clipboard.writeText(link);
+    setCopied(true);
+  }
+
+  return (
+    <section className="ops-card claim-panel">
+      <p className="eyebrow">ACCOUNT CLAIM · 账号认领</p>
+      <h2>生成参与者认领链接</h2>
+      <p className="state-copy">导入身份 {detail.registration.participantId} 可绑定到一个新的参与者账号。</p>
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void issue()}>
+        {busy ? "正在生成…" : "生成参与者认领链接"}
+      </button>
+      {claim?.token === null || claim?.token === undefined ? null : (
+        <div className="claim-result">
+          <label className="field">
+            <span>一次性链接</span>
+            <input
+              readOnly
+              value={`${window.location.origin}/claim#${encodeURIComponent(claim.token)}`}
+              aria-label="一次性认领链接"
+            />
+          </label>
+          <button className="secondary-button" type="button" onClick={() => void copyLink()}>
+            {copied ? "已复制" : "复制链接"}
+          </button>
+          <p className="state-copy">有效期至 {new Date(claim.expiresAt).toLocaleString()}</p>
+        </div>
+      )}
+      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
+    </section>
+  );
+}
+
 function OpsRegistrationContent() {
   const { activityId, registrationId } = useParams({
     from: "/ops/$activityId/registrations/$registrationId",
@@ -81,6 +152,7 @@ function OpsRegistrationContent() {
       </Link>
       <div className="ops-grid">
         <DetailView detail={query.data} />
+        <ParticipantClaimPanel detail={query.data} />
         <ReviewPanel
           detail={query.data}
           onReviewed={() => {

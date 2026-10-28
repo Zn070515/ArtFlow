@@ -42,6 +42,7 @@ import {
   RenameActivityBodySchema,
   UnarchiveActivityBodySchema,
   RegisterParticipantBodySchema,
+  ParticipantClaimConsumeBodySchema,
 } from "@artflow-plus/contracts";
 import { checkReady, getCurrentRankingSnapshot, getLiveState, getOutboxRelayHealth, getRoundByKey, getVoteSession, revokeLocalSession, selectPublicResults, type Database } from "@artflow-plus/db";
 import {
@@ -160,6 +161,8 @@ import {
   getGroupingState,
   recordGroupingGroups,
   setGroupingMaterialWindow,
+  consumeParticipantClaim,
+  issueParticipantClaim,
 } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
 import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
@@ -297,6 +300,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   ARCHIVE_VOTE_SESSION_OPEN: 409,
   ARCHIVE_INTEGRITY_FAILED: 409,
   ARCHIVE_NOT_FOUND: 404,
+  INVALID_PARTICIPANT_CLAIM: 400,
   RATE_LIMITED: 429,
 };
 
@@ -412,6 +416,16 @@ const RegistrationParams = Type.Object(
   { id: Type.String({ minLength: 1 }), registrationId: Type.String({ minLength: 1 }) },
   { additionalProperties: false },
 );
+
+// Fastify's default AJV mode removes additional properties. The Claim routes
+// need to reject them, so these transport schemas preserve extras for the
+// explicit boundary check in the handlers while the shared contract remains
+// closed for consumers that validate it directly.
+const ParticipantClaimConsumeRouteBodySchema = Type.Unsafe({
+  ...ParticipantClaimConsumeBodySchema,
+  additionalProperties: true,
+});
+const ParticipantClaimIssueRouteBodySchema = Type.Object({}, { additionalProperties: true });
 
 const GroupingStageParams = Type.Object(
   { id: Type.String({ minLength: 1 }), stageId: Type.String({ minLength: 1 }) },
@@ -607,6 +621,23 @@ function cookieValue(request: FastifyRequest, name: string): string | undefined 
 /** Responses redact one-time fields; replay-aware services may restore them only for cookie setting. */
 function sessionTokenValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function rejectAdditionalBodyKeys(body: unknown, allowed: readonly string[]): void {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return;
+  const unexpected = Object.keys(body).find((key) => !allowed.includes(key));
+  if (unexpected === undefined) return;
+  const error = new Error(`body must not have additional property '${unexpected}'`);
+  Object.assign(error, {
+    validation: [{
+      keyword: "additionalProperties",
+      instancePath: "",
+      schemaPath: "#/additionalProperties",
+      params: { additionalProperty: unexpected },
+      message: "must NOT have additional properties",
+    }],
+  });
+  throw error;
 }
 
 function setSessionCookie(reply: { header(name: string, value: string): unknown }, name: string, value: string, expiresAt: string): void {
@@ -1091,6 +1122,44 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   );
 
   app.post(
+    "/api/public/participant-claims/consume",
+    { schema: { body: ParticipantClaimConsumeRouteBodySchema }, config: { access: "public" } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "participant-claim-consume", 10);
+      const body = request.body as {
+        token: string;
+        username?: string;
+        password?: string;
+      };
+      rejectAdditionalBodyKeys(body, ["token", "username", "password"]);
+      const session = await requestSession(request);
+      const consumeDeps: RuntimeDeps = {
+        ...deps,
+        actor: session?.actor ?? SYSTEM_ACTOR,
+      };
+      const outcome = await consumeParticipantClaim(db, consumeDeps, {
+        commandId: requireIdempotency(request),
+        token: body.token,
+        ...(body.username === undefined ? {} : { username: body.username }),
+        ...(body.password === undefined ? {} : { password: body.password }),
+      });
+      const sessionToken = sessionTokenValue(outcome.body.sessionToken);
+      let csrfToken: string | undefined;
+      if (sessionToken !== undefined && !outcome.replayed) {
+        csrfToken = csrfTokenFor(sessionToken, sessionSecret);
+        setSessionCookies(reply, sessionToken, csrfToken);
+      }
+      reply.header("cache-control", "no-store");
+      return reply.status(outcome.status).send({
+        actor: publicActor(outcome.body.actor),
+        publicCode: outcome.body.publicCode,
+        ...(csrfToken === undefined ? {} : { csrfToken }),
+        ...(outcome.body.expiresAt === undefined ? {} : { expiresAt: outcome.body.expiresAt }),
+      });
+    },
+  );
+
+  app.post(
     "/api/public/supplement/claim",
     { schema: { body: Type.Object({ token: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, config: { access: "public" } },
     async (request, reply) => {
@@ -1426,6 +1495,23 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         activityId: id,
         participantId: body.participantId ?? actor.actorId,
       });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/registrations/:registrationId/account-claim",
+    { schema: { params: RegistrationParams, body: ParticipantClaimIssueRouteBodySchema } },
+    async (request, reply) => {
+      rejectAdditionalBodyKeys(request.body, []);
+      const commandId = requireIdempotency(request);
+      const { id, registrationId } = request.params as { id: string; registrationId: string };
+      const outcome = await issueParticipantClaim(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        registrationId,
+      });
+      reply.header("cache-control", "no-store");
       return reply.status(outcome.status).send(outcome.body);
     },
   );
@@ -2817,6 +2903,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   }
 
   app.setErrorHandler((error, request, reply) => {
+    const failure = error as {
+      validation?: unknown;
+      statusCode?: number;
+      message?: string;
+    };
+    if (
+      failure.validation !== undefined ||
+      (failure.statusCode !== undefined && failure.statusCode < 500)
+    ) {
+      return reply
+        .status(400)
+        .send(errorResponse("VALIDATION_FAILED", failure.message ?? "Invalid request."));
+    }
     const code = errorCode(error);
     if (code !== null) {
       const status = STATUS_BY_CODE[code] ?? 400;
@@ -2830,19 +2929,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             details,
           ),
         );
-    }
-    const failure = error as {
-      validation?: unknown;
-      statusCode?: number;
-      message?: string;
-    };
-    if (
-      failure.validation !== undefined ||
-      (failure.statusCode !== undefined && failure.statusCode < 500)
-    ) {
-      return reply
-        .status(400)
-        .send(errorResponse("VALIDATION_FAILED", failure.message ?? "Invalid request."));
     }
     request.log.error(error as Error);
     return reply
