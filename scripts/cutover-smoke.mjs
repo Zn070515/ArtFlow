@@ -7,6 +7,8 @@
 //   operational - the activity is a current v1 activity adopted by Plus; there
 //                 may be no published result yet, but it must have a real
 //                 release, composition, and authority to run.
+import { missingCutoverCommandScopes } from "./cutover-contract.mjs";
+
 const base = process.env.CUTOVER_BASE_URL;
 const publicCode = process.env.CUTOVER_PUBLIC_CODE;
 const expectedTitle = process.env.CUTOVER_EXPECTED_TITLE ?? "";
@@ -184,9 +186,9 @@ if (profile === "historical") {
     if (Object.keys(active[0].capabilityVersions ?? {}).length === 0) {
       throw new Error("the active release freezes no capability versions");
     }
-    const commandScopes = active[0].commandScopes ?? {};
-    if (!commandScopes["competition.round.prepare"] || !commandScopes["voting.ballot.submit"]) {
-      throw new Error("the active release does not bind execution commands to scopes");
+    const missingCommands = missingCutoverCommandScopes(activity.enabledCapabilities, active[0].commandScopes ?? {});
+    if (missingCommands.length > 0) {
+      throw new Error(`the active release does not bind execution commands to scopes: ${missingCommands.join(", ")}`);
     }
   });
 }
