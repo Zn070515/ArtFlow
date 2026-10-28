@@ -94,7 +94,7 @@ ballot identity、文件存储路径、staff notes、registration/material/vote 
 - `ArchiveStorage` 接口：`put(key, bytes)`、`read(key)`、`remove(key)`；
   本地卷实现从 `ARTFLOW_PLUS_ARCHIVE_DIR` 读根目录，key 为
   `{activityId}/v{version}.zip`。
-- key 只允许 `[a-z0-9_-]` 段；resolve 后必须仍在根目录内。
+- key 的 activity 段只允许 `[A-Za-z0-9_-]` 段，以兼容历史导入的大小写 public code；resolve 后必须仍在根目录内。
 - `put` 写临时文件 → fsync → 删除旧同名文件 → rename；返回 size 与 SHA-256。
 - 归档命令在 DB 事务内写文件；命令失败或 commit 失败时删除已写文件（反向补偿）。
   进程在 rename 与 commit 之间崩溃可能留下孤儿文件；下次归档同版本会覆盖它。

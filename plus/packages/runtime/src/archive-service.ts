@@ -34,7 +34,7 @@ import {
   requirePermission,
   unarchiveActivity as unarchiveActivityDomain,
 } from "@artflow-plus/domain";
-import type { Activity, ArchiveSummary } from "@artflow-plus/domain";
+import type { Activity, ArchiveSummary, RuntimeEvent } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
 import { buildArchivePackage } from "./archive-package.js";
@@ -154,12 +154,24 @@ export async function archiveActivity(
       const packageId = idFromCommand("archive", input.commandId);
       const releases: readonly StoredResultRelease[] = await listResultReleases(trx, activity.id);
       const stageResults: readonly StoredStageResult[] = await listStageResults(trx, activity.id);
-      const events = await readEventsSince(trx, {
-        activityId: activity.id,
-        after: 0,
-        limit: 100_000,
-        mode: "formal",
-      });
+      const events: RuntimeEvent[] = [];
+      let eventCursor = 0;
+      const eventPageSize = 10_000;
+      for (;;) {
+        const page = await readEventsSince(trx, {
+          activityId: activity.id,
+          after: eventCursor,
+          limit: eventPageSize,
+          mode: "formal",
+        });
+        events.push(...page);
+        if (page.length < eventPageSize) break;
+        const nextCursor = page.at(-1)?.sequence;
+        if (nextCursor === undefined || nextCursor <= eventCursor) {
+          throw new DomainError("ARCHIVE_INTEGRITY_FAILED", "The event history did not advance while archiving.");
+        }
+        eventCursor = nextCursor;
+      }
       const groupingStages = activity.enabledCapabilities.includes("grouping")
         ? await listGroupingStages(trx, activity.id)
         : [];

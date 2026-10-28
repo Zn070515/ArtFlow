@@ -13,7 +13,16 @@ import type { Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { importLegacyBundle } from "../src/index.js";
+import {
+  closeActivity,
+  finalizeRoster,
+  getPublicActivity,
+  importLegacyBundle,
+  saveRegistrationAnswer,
+  startRegistration,
+  submitRegistration,
+  uploadMaterial,
+} from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
@@ -136,6 +145,88 @@ describe.skipIf(!connectionString)("legacy import", () => {
     expect(rankings[0]?.rows).toMatchObject([
       { contestantId: "legacy-user:1", total: "91.50", judgeCount: 1 },
     ]);
+  });
+
+  it("imports history without reopening any write path", async () => {
+    const historical = {
+      ...bundle,
+      activity: { ...(bundle.activity as Record<string, unknown>), publicCode: "LEG-HISTORY" },
+      source: { ...(bundle.source as Record<string, unknown>), publicCode: "LEG-HISTORY" },
+      results: { stageResults: [], releases: [] },
+      voting: { sessions: [], ballots: [] },
+      counts: {
+        ...(bundle.counts as Record<string, unknown>),
+        ballots: 0,
+        releases: 0,
+        stageResults: 0,
+      },
+    };
+    const result = await importLegacyBundle(db, deps, {
+      commandId: "legacy-import-history-read-only",
+      bundle: historical,
+      dryRun: false,
+    });
+    const activity = await db.selectFrom("activity").select(["id", "status"])
+      .where("id", "=", result.report.activityId).executeTakeFirstOrThrow();
+    expect(activity.status).toBe("closed");
+    await expect(getPublicActivity(db, "LEG-HISTORY")).resolves.toMatchObject({
+      status: "closed",
+      registrationOpen: false,
+    });
+
+    const readonlyDeps: RuntimeDeps = {
+      ...deps,
+      actor: {
+        actorId: "history-operator",
+        actorType: "user",
+        roles: ["admin"],
+        permissions: ["registration.manage", "registration.roster.finalize", "materials.manage", "studio.manage"],
+      },
+    };
+    const registrationId = "legacy-LEG-HISTORY-reg-1";
+    const failedWrites = [
+      () => startRegistration(db, readonlyDeps, {
+        commandId: "history-start",
+        activityId: result.report.activityId,
+        participantId: "legacy-user:1",
+      }),
+      () => saveRegistrationAnswer(db, readonlyDeps, {
+        commandId: "history-answer",
+        activityId: result.report.activityId,
+        registrationId,
+        expectedRevision: 1,
+        questionKey: "name",
+        value: "blocked",
+      }),
+      () => submitRegistration(db, readonlyDeps, {
+        commandId: "history-submit",
+        activityId: result.report.activityId,
+        registrationId,
+        expectedRevision: 1,
+      }),
+      () => uploadMaterial(db, readonlyDeps, {
+        commandId: "history-upload",
+        activityId: result.report.activityId,
+        registrationId,
+        questionKey: "file",
+        originalName: "blocked.txt",
+        contentType: "text/plain",
+        byteLength: 1,
+      }),
+      () => finalizeRoster(db, readonlyDeps, {
+        commandId: "history-finalize",
+        activityId: result.report.activityId,
+        expectedRevision: 1,
+      }),
+      () => closeActivity(db, readonlyDeps, {
+        commandId: "history-close",
+        activityId: result.report.activityId,
+        expectedRevision: 1,
+      }),
+    ];
+    for (const write of failedWrites) {
+      await expect(write()).rejects.toMatchObject({ code: expect.any(String) });
+    }
   });
 
   it("keeps only the latest stage result when v1 has several versions", async () => {

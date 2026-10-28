@@ -300,19 +300,40 @@ class Command(BaseCommand):
             )
         stage_results_by_key = {row["stageKey"]: row for row in stage_results}
 
+        def contestant_id(value: Any) -> str:
+            if value is None or value == "":
+                raise CommandError("A result decision or award is missing its contestant identity.")
+            if isinstance(value, str) and value.startswith("legacy-user:"):
+                return value
+            mapped = participant_by_singer.get(value)
+            if mapped is None and isinstance(value, str) and value.isdigit():
+                mapped = participant_by_singer.get(int(value))
+            return mapped or f"legacy-user:{value}"
+
+        def raw_contestant(row: dict[str, Any]) -> Any:
+            for key in ("contestantId", "contestant_id", "contestant", "singer_id"):
+                if key in row:
+                    return row[key]
+            return None
+
         def v2_snapshot(release) -> dict[str, Any]:
             raw = release.result_snapshot or {}
             stage_key = release.stage_result.stage_key
             fallback = stage_results_by_key.get(stage_key, {})
-            raw_decisions = raw.get("decisions") if isinstance(raw.get("decisions"), list) else fallback.get("decisions", [])
-            raw_awards = raw.get("awards") if isinstance(raw.get("awards"), list) else fallback.get("awards", [])
+            raw_decisions_value = raw.get("decisions")
+            fallback_decisions = fallback.get("decisions")
+            raw_decisions = raw_decisions_value if isinstance(raw_decisions_value, list) else (
+                fallback_decisions if isinstance(fallback_decisions, list) else []
+            )
+            raw_awards_value = raw.get("awards")
+            fallback_awards = fallback.get("awards")
+            raw_awards = raw_awards_value if isinstance(raw_awards_value, list) else (
+                fallback_awards if isinstance(fallback_awards, list) else []
+            )
             decisions = [
                 {
                     "rank": decision.get("rank"),
-                    "contestantId": participant_by_singer.get(
-                        decision.get("contestant_id", decision.get("contestant")),
-                        f"legacy-user:{decision.get('contestant_id', decision.get('contestant'))}",
-                    ),
+                    "contestantId": contestant_id(raw_contestant(decision)),
                     "score": str(decision["score"]) if decision.get("score") is not None else "0.00",
                 }
                 for decision in raw_decisions
@@ -321,10 +342,7 @@ class Command(BaseCommand):
             awards = [
                 {
                     "award": award.get("award", award.get("name", "")),
-                    "contestantId": participant_by_singer.get(
-                        award.get("contestant_id", award.get("contestant")),
-                        f"legacy-user:{award.get('contestant_id', award.get('contestant'))}",
-                    ),
+                    "contestantId": contestant_id(raw_contestant(award)),
                 }
                 for award in raw_awards
             ]
@@ -358,7 +376,9 @@ class Command(BaseCommand):
             singer_registration__activity=activity,
             singer_registration__is_test_data=False,
         ):
-            key = check.question_key or check.file_purpose
+            if check.singer_registration_id is None:
+                raise CommandError(f"Material check {check.pk} has no registration identity.")
+            key = check.question_key or check.file_purpose or f"check-{check.pk}"
             checks_by_registration.setdefault(check.singer_registration_id, {})[key] = check
 
         material_checks = []
@@ -390,7 +410,9 @@ class Command(BaseCommand):
             singer_registration__is_test_data=False,
             is_current=True,
         ).select_related("singer_registration").order_by("pk"):
-            question_key = submission.question_key or submission.file_purpose
+            if submission.singer_registration_id is None:
+                raise CommandError(f"Submission file {submission.pk} has no registration identity.")
+            question_key = submission.question_key or submission.file_purpose or f"file-{submission.pk}"
             check = checks_by_registration.get(submission.singer_registration_id, {}).get(question_key)
             status = check.status if check is not None and check.status in (
                 "uploaded", "approved", "needs_supplement"

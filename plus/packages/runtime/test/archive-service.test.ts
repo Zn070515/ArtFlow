@@ -20,6 +20,7 @@ import type { Database } from "@artflow-plus/db";
 import type { ActorContext, ExecutionSession } from "@artflow-plus/domain";
 import { Client } from "pg";
 import { strFromU8, unzipSync } from "fflate";
+import { sql } from "kysely";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -307,6 +308,48 @@ describe.skipIf(!connectionString)("archive service", () => {
     const audits = await db.selectFrom("audit_entry").select(["command_id"]).where("activity_id", "=", activityId).execute();
     expect(audits.map((row) => row.command_id)).toContain("archive-once");
   });
+
+  it("packages every formal event beyond the legacy page size", async () => {
+    const activityId = await seed();
+    const eventCount = 100_001;
+    await sql`
+      insert into outbox (
+        event_id, event_type, occurred_at, activity_id, aggregate_type,
+        aggregate_id, capability, revision, mode, scope, actor_id,
+        actor_type, payload, attempts, last_error
+      )
+      select
+        'archive-page-' || g,
+        'ArchivePageEvent',
+        now(),
+        ${activityId},
+        'archive_test',
+        'aggregate-' || g,
+        'archive',
+        g,
+        'formal',
+        'publishing',
+        'archive-test',
+        'user',
+        '{}'::jsonb,
+        0,
+        null
+      from generate_series(1, ${eventCount}) as g
+    `.execute(db);
+
+    const archived = await archiveActivity(db, deps(), {
+      commandId: "archive-more-than-one-page",
+      activityId,
+      expectedRevision: 1,
+      note: "all events",
+    });
+    expect(archived.body.package.manifest.counts.events).toBe(eventCount);
+    const file = await readArchiveFile(db, deps(), { activityId });
+    const manifest = JSON.parse(strFromU8(unzipSync(file.bytes)["manifest.json"] ?? new Uint8Array())) as {
+      counts: { events: number };
+    };
+    expect(manifest.counts.events).toBe(eventCount);
+  }, 120_000);
 
   it("fails closed without an active release or with an open vote session", async () => {
     const noRelease = await seed({ withRelease: false });

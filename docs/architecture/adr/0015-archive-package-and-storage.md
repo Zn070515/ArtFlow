@@ -20,6 +20,11 @@ fact tables have no mode column yet; the package carries activity identity,
 publishing stage results/releases, formal execution sessions, and an event
 summary.
 
+The activity segment of the storage key accepts `[A-Za-z0-9_-]` so historical
+imports whose public codes contain uppercase letters remain downloadable. The
+two-segment shape, versioned ZIP filename, and root-containment check remain
+mandatory.
+
 The file write happens inside the command transaction with reverse compensation:
 if the command or commit fails, the written file is removed. A crash between
 rename and commit may leave an orphan; a retry computes the same version and

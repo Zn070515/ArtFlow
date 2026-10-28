@@ -998,11 +998,10 @@ async function importActivity(
   const enabledCapabilities = adoption?.capabilities ?? (hasGrouping
     ? [...LEGACY_CAPABILITIES, "grouping"]
     : [...LEGACY_CAPABILITIES]);
-  const status = adoption !== undefined
-    ? "active"
-    : bundle.results.releases.some((release) => release.status === "active")
-      ? "closed"
-      : "active";
+  // Historical imports are durable snapshots, not an alternate bootstrap path.
+  // They must remain closed even when the legacy export has no active result;
+  // operational adoption is the only mode that creates an active activity.
+  const status = adoption !== undefined ? "active" : "closed";
   await trx.insertInto("activity").values({
     id: activityId,
     public_code: bundle.activity.publicCode,
@@ -1052,6 +1051,12 @@ async function importActivity(
     });
     await updateActivity(trx, released.activity, 1);
   } else {
+    const registrationArtifact = {
+      schemaVersion: 1,
+      lifecycleVersion: 1,
+      lifecycle: "final",
+      rosterStatus: "unknown",
+    } as const;
     const capabilityEntries = {
       questionnaire: artifacts.capabilityPlan(
         "questionnaire",
@@ -1063,11 +1068,11 @@ async function importActivity(
         artifacts.competition,
         artifacts.contentHashes.competition,
       ),
-      registration: artifacts.capabilityPlan("registration", {
-        schemaVersion: 1,
-        lifecycleVersion: 1,
-        rosterStatus: "unknown",
-      }, stableHash({ registration: 1 })),
+      registration: artifacts.capabilityPlan(
+        "registration",
+        registrationArtifact,
+        stableHash(registrationArtifact),
+      ),
       materials: artifacts.capabilityPlan("materials", {
         schemaVersion: 1,
         maxBytes: 25_000_000,
