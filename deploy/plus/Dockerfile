@@ -23,7 +23,7 @@ ARG ARTFLOW_BUILD_SHA
 WORKDIR /app
 LABEL org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"
 COPY --from=build /src/apps/api/dist/main.cjs ./main.cjs
-COPY --from=build /src/ARTFLOW_RELEASE_SHA ./ARTFLOW_RELEASE_SHA
+COPY --from=build /src/ARTFLOW_RELEASE_SHA /app/ARTFLOW_RELEASE_SHA
 ENV NODE_ENV=production \
     APP_ENV=production \
     HOST=0.0.0.0 \
@@ -38,7 +38,7 @@ ARG ARTFLOW_BUILD_SHA
 WORKDIR /app
 LABEL org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"
 COPY --from=build /src/apps/worker/dist/main.cjs ./main.cjs
-COPY --from=build /src/ARTFLOW_RELEASE_SHA ./ARTFLOW_RELEASE_SHA
+COPY --from=build /src/ARTFLOW_RELEASE_SHA /app/ARTFLOW_RELEASE_SHA
 ENV NODE_ENV=production \
     APP_ENV=production
 CMD ["node", "main.cjs"]
