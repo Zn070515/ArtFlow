@@ -7,7 +7,7 @@
 
 - 报名已截止，v1 没有进行中的评分/投票/审核写入。
 - v2 已通过对应 capability 的自动化关键旅程、隔离环境 operational smoke 和回滚检查
-  （Studio/Ops/Live/公开赛果均有可复现证据）；不要求真实活动彩排。
+  （Studio/Ops/Live/公开赛果均有可复现证据）。
 - 源 SHA 在 `artflow-plus` 上的 Gates（Structural and golden gates + Web public
   journey）为绿；生产镜像只从该 SHA 构建。
 - 已构建并固定镜像 digest：`ARTFLOW_PLUS_API_IMAGE`、`ARTFLOW_PLUS_WORKER_IMAGE`、
@@ -128,7 +128,14 @@ pending/发布 head 落后而 FAIL，恢复 worker 后再确认 PASS。
 ## 6. Post-cutover
 
 - v1 容器、数据库、media 保留至少一个完整活动周期；期间只读。
-- 备份策略覆盖 `plus_postgres_data` 与 `plus_archive_data`；验证一次恢复。
+- Plus 备份策略覆盖 `plus_postgres_data`、`plus_archive_data` 与 `plus_media_data`；使用
+  [Plus 备份与隔离恢复](backup-restore.md) 完成一次恢复验证：
+  ```powershell
+  bash scripts/backup_plus.sh backups/artflow-plus
+  bash scripts/restore_plus_verify.sh backups/artflow-plus/<UTC时间>-<release-sha>
+  ```
+- 备份目录连同 `manifest.json`、`database.dump`、`archives.tar.gz` 和 `media.tar.gz`
+  一起复制到独立存储；v1 的 `media_data` 只读桥接仍按 v1 备份策略处理。
 - 监控：Caddy 5xx、plus-api `/readyz`、数据库连接、公开结果页可用性，以及 staff
   可读的 `/api/operations/outbox` relay head/pending 指标。
 - 记录本次切换的 bundle hash、报告、commit 时间与回滚窗口结果。
@@ -140,10 +147,11 @@ pending/发布 head 落后而 FAIL，恢复 worker 后再确认 PASS。
 1. v1 → v2 → v1（在未写入阶段）；
 2. 断开 plus-api，确认 plus-web 重启后仍能解析上游；
 3. 用过期/错误 staff 密码跑 smoke，确认 FAIL 可读；
-4. 从 v1 备份恢复一次到临时库，确认备份可用。
+4. 用 `scripts/restore_plus_verify.sh` 将一份完整 Plus 备份恢复到临时数据库和临时 API，
+   确认三块 Plus 数据、release 身份和 `/readyz` 都可用；v1 备份仍按其专用流程验证。
 
-以上均为自动化或受控环境检查，不创建真实活动数据、不邀请真实参与者、不把现场彩排
-作为 production cutover 的前置条件。
+以上均为自动化或隔离环境检查，不创建正式活动数据、不邀请真实参与者，也不增加额外的
+现场前置步骤。
 
 ## 8. 明确不做
 

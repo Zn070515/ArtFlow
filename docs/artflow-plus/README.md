@@ -23,9 +23,9 @@
 ## 当前阶段（2026-10-27）
 
 `artflow-plus` 上的 v2 已完成 **M0–M13.3**；`main` 仍是 1.x 生产线，**生产 cutover
-尚未执行**。切换拓扑与工具链已就绪，历史导入与运营接管已分开；不再安排真实活动 adoption
-彩排，正式切换依据干净 baseline、自动化/隔离验收、operational smoke、capability 完整度
-与 authority 审计，而不是日期。
+尚未执行**。切换拓扑与工具链已就绪，历史导入与运营接管已分开；正式切换依据干净
+baseline、自动化/隔离验收、operational smoke、capability 完整度与 authority 审计，而不是
+日期或额外活动步骤。
 逐项出口与证据在 [roadmap.md](roadmap.md)。
 
 | 里程碑 | 状态 | 主要交付 |
