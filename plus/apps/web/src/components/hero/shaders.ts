@@ -14,6 +14,7 @@ export const auroraFragment = /* glsl */ `
   uniform vec3 uGold;
   uniform vec3 uEmber;
   uniform vec3 uInk;
+  uniform vec3 uCool;
   varying vec2 vUv;
 
   float hash(vec2 p) {
@@ -55,7 +56,7 @@ export const auroraFragment = /* glsl */ `
 
     vec3 col = mix(uInk, uEmber * 0.42, ridge * 0.52);
     col = mix(col, uGold * 0.92, pow(ridge, 2.3) * 0.68);
-    col += vec3(0.09, 0.18, 0.24) * pow(ridge, 3.8);
+    col += uCool * 0.2 * pow(ridge, 3.8);
 
     vec2 pointer = (uPointer - 0.5) * vec2(aspect, 1.0);
     float glow = exp(-length(p - pointer) * 3.1);

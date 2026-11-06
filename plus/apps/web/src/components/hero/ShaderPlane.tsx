@@ -2,6 +2,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
+import { themeColor } from "./palette.js";
 import { auroraFragment, auroraVertex } from "./shaders.js";
 
 export function ShaderPlane() {
@@ -13,12 +14,20 @@ export function ShaderPlane() {
       uTime: { value: 0 },
       uPointer: { value: new THREE.Vector2(0.5, 0.55) },
       uResolution: { value: new THREE.Vector2(1, 1) },
-      uGold: { value: new THREE.Color("#E8B45A") },
-      uEmber: { value: new THREE.Color("#C2410C") },
-      uInk: { value: new THREE.Color("#07070A") },
+      uGold: { value: themeColor("--gold", "#E8B45A") },
+      uEmber: { value: themeColor("--ember", "#C2410C") },
+      uInk: { value: themeColor("--ink", "#07070A") },
+      uCool: { value: themeColor("--cool", "#7DD3FC") },
     }),
     [],
   );
+
+  useEffect(() => {
+    uniforms.uGold.value.copy(themeColor("--gold", "#E8B45A"));
+    uniforms.uEmber.value.copy(themeColor("--ember", "#C2410C"));
+    uniforms.uInk.value.copy(themeColor("--ink", "#07070A"));
+    uniforms.uCool.value.copy(themeColor("--cool", "#7DD3FC"));
+  }, [uniforms]);
 
   useEffect(() => {
     const onMove = (event: PointerEvent): void => {
