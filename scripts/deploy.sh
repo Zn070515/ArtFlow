@@ -28,9 +28,22 @@ is_release_image() {
 }
 
 compose=(docker compose --env-file "$env_file" -p "$compose_project" -f "$compose_file")
+base_rendered="$("${compose[@]}" config --format json)"
+site_profile="$(printf '%s' "$base_rendered" | python3 -c '
+import json
+import sys
+
+config = json.load(sys.stdin)
+print(config["services"]["proxy"]["environment"].get("ARTFLOW_SITE_PROFILE", "v1"))
+')"
+case "$site_profile" in
+    v1) ;;
+    v2) compose+=(--profile plus) ;;
+    *) die 'ARTFLOW_SITE_PROFILE must be v1 or v2' ;;
+esac
 "${compose[@]}" config --quiet
 rendered="$("${compose[@]}" config --format json)"
-read -r release_sha site_address web_image postgres_image caddy_image redis_image < <(
+read -r release_sha site_address web_image postgres_image caddy_image redis_image rendered_profile plus_api_image plus_worker_image plus_web_image plus_api_release plus_worker_release < <(
     printf '%s' "$rendered" | python3 -c '
 import json
 import sys
@@ -40,6 +53,13 @@ web = config["services"]["web"]
 proxy = config["services"]["proxy"]
 db = config["services"]["db"]
 redis = config["services"]["redis"]
+plus_api = config["services"].get("plus-api", {})
+plus_worker = config["services"].get("plus-worker", {})
+plus_web = config["services"].get("plus-web", {})
+
+def environment(service):
+    return service.get("environment", {})
+
 print(
     web["environment"]["ARTFLOW_RELEASE_SHA"],
     proxy["environment"]["CADDY_SITE_ADDRESS"],
@@ -47,9 +67,16 @@ print(
     db["image"],
     proxy["image"],
     redis["image"],
+    proxy["environment"].get("ARTFLOW_SITE_PROFILE", "v1"),
+    plus_api.get("image", ""),
+    plus_worker.get("image", ""),
+    plus_web.get("image", ""),
+    environment(plus_api).get("ARTFLOW_RELEASE_SHA", ""),
+    environment(plus_worker).get("ARTFLOW_RELEASE_SHA", ""),
 )
 '
 )
+[[ "$rendered_profile" == "$site_profile" ]] || die 'rendered site profile does not match the selected deployment profile'
 [[ "$release_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die 'production build must use a full ARTFLOW_RELEASE_SHA'
 python3 "$hostname_validator" "$site_address" \
     || die 'CADDY_SITE_ADDRESS must be a hostname without a scheme, port, or path'
@@ -63,6 +90,22 @@ is_digest_image "$redis_image" || die 'ARTFLOW_REDIS_IMAGE must use a verified d
 web_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$web_image" 2>/dev/null)" \
     || die 'the prebuilt web image is not loaded locally'
 [[ "$web_revision" == "$release_sha" ]] || die 'prebuilt web image revision does not match ARTFLOW_RELEASE_SHA'
+
+if [[ "$site_profile" == "v2" ]]; then
+    is_digest_image "$plus_api_image" || die 'ARTFLOW_PLUS_API_IMAGE must use a verified digest'
+    is_digest_image "$plus_worker_image" || die 'ARTFLOW_PLUS_WORKER_IMAGE must use a verified digest'
+    is_digest_image "$plus_web_image" || die 'ARTFLOW_PLUS_WEB_IMAGE must use a verified digest'
+    [[ "$plus_api_release" == "$release_sha" ]] \
+        || die 'plus-api ARTFLOW_RELEASE_SHA does not match the deployment SHA'
+    [[ "$plus_worker_release" == "$release_sha" ]] \
+        || die 'plus-worker ARTFLOW_RELEASE_SHA does not match the deployment SHA'
+    for plus_image in "$plus_api_image" "$plus_worker_image" "$plus_web_image"; do
+        plus_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$plus_image" 2>/dev/null)" \
+            || die "Plus image is not loaded locally: $plus_image"
+        [[ "$plus_revision" == "$release_sha" ]] \
+            || die "Plus image revision does not match ARTFLOW_RELEASE_SHA: $plus_image"
+    done
+fi
 
 "${compose[@]}" up --no-build --pull never --wait
 "${compose[@]}" exec -T web python manage.py doctor --require-access-keys

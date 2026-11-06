@@ -5,6 +5,9 @@
 .superpowers/
 .venv/
 node_modules/
+**/node_modules/
+plus/apps/*/dist/
+plus/packages/*/dist/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -14,6 +17,7 @@ __pycache__/
 db.sqlite3
 media/
 staticfiles/
+**/var/archives/
 backups/
 logs/
 test-results/
