@@ -38,6 +38,9 @@ Plus runs through `deploy/compose.production.yml` with the `plus` profile. Three
 - Preserve the single write path: receipt, audit, fact, and outbox in one transaction.
 - Keep releases immutable and partition facts, events, and projections by mode.
 - Route internal files through the controlled material/archive APIs; never expose private media directly.
+- **HTTP routes live in `plus/apps/api/src/routes/<surface>.ts`.** Each module exports `registerXRoutes(ctx: ApiContext)`; `app.ts` is composition only (construction, hooks, CSRF, error mapping, realtime server). Never register a route directly in `app.ts`; `tests/gates/test_plus_route_modules.py` rejects it, unreferenced modules, duplicate method+URL pairs, and a module growing past 900 lines.
+- **`db/src/types.ts` and `db/src/migrations.ts` describe one schema.** Any migration, column, or nullability change must update both and pass `pnpm -C plus run schema:check` against PostgreSQL. The gate compares every table/column and nullable flag; adding a column to one side only is a CI failure. `ColumnType<unknown, …>` is treated as nullability-indeterminate.
+- **Worker changes must preserve drained shutdown and bounded retry.** Keep the ready file for the compose healthcheck, the dead-letter queue, and the `startRelayLoop` drain; run `pnpm -C plus --filter @artflow-plus/worker test`.
 - Do not commit `.env`, secrets, uploads, exports, archives, or generated media.
 - Run `pwsh -NoProfile -File scripts/check_docs.ps1` after user-facing documentation changes.
 - After each change round, sweep the configuration files for anything that change made stale: the pyright/ruff/mypy lists, the `tsconfig*.json` `include` lists, the Tailwind `content` globs, the `.env` templates, `.dockerignore`, and `dependabot.yml`. A file that exists but appears in no list is checked by nothing.

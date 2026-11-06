@@ -36,7 +36,8 @@ v2 已完成 **M0–M15.2**（含 M13.1–M13.3、票据投票、运营分析与
 ### v2 架构速览
 
 ```text
-plus/apps/api      Fastify 5 + TypeBox；command/query 路由、cookie+CSRF、/api/realtime
+plus/apps/api      Fastify 5 + TypeBox；app.ts 只做组合，路由在 src/routes/<surface>.ts
+plus/apps/api/src/routes  system/auth/public/activity/tasks/registration/grouping/competition/voting/archive/publishing
 plus/apps/web      React 19 + Vite；Studio / Ops / Live / Portal / /vote/<sessionId>
 plus/apps/worker   outbox relay（250ms 循环 + pg-boss 兜底）
 plus/packages/domain    Activity、capability registry、compiler、Pack

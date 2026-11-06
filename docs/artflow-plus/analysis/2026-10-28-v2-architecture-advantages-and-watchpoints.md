@@ -84,6 +84,14 @@ contract、receipt/audit、outbox/replay 和 HTTP 恢复路径，就不应被视
 
 ## 3. 必须警惕的架构债务
 
+> **2026-11-06 更新：** 3.1 与 3.3 的护栏已落地。`app.ts` 从 3,105 行降到 469 行，
+> 115 条路由拆入 `plus/apps/api/src/routes/` 的 11 个 surface 模块，每个模块导出
+> `registerXRoutes(ctx)`；`tests/gates/test_plus_route_modules.py` 禁止把路由写回
+> `app.ts`、禁止未注册模块、重复 method+URL 和单模块超过 900 行。Schema drift 由
+> `plus/packages/db/test/schema-drift.test.ts` + `pnpm -C plus run schema:check` 阻断，
+> 首次运行发现并修正了 `registration.review_note` 的可空性漂移。Wire 上仍保留
+> §3.2、§3.4 与 §3.5 的债务。
+
 ### 3.1 HTTP 边缘仍是单文件单体
 
 `app.ts` 目前承载约 110 条路由和大量认证、查询、命令编排。它与 v1 的
@@ -172,8 +180,8 @@ v1 的回归用例应按不变量迁移为 Plus golden/contract/integration/conc
 | 优先级 | 风险 | 现在的护栏 | 下一出口 |
 | --- | --- | --- | --- |
 | P0 | auth/CSRF/credential 自建安全面 | cookie、权限和 capability 检查分散在 API/runtime | security baseline + 定向攻击回归 + credential 生命周期矩阵 |
-| P1 | HTTP route monolith | onRoute 缺权限启动即失败 | capability/表面 route modules + route registry gate |
-| P1 | migrations/types 漂移 | TypeScript 编译、REQUIRE_DB 测试 | PostgreSQL schema snapshot/drift gate |
+| P1 | ~~HTTP route monolith~~ **已处理（2026-11-06）** | `app.ts` 469 行；11 个 route surface 模块 | `tests/gates/test_plus_route_modules.py` |
+| P1 | ~~migrations/types 漂移~~ **已处理（2026-11-06）** | `schema:check` 对比表/列/可空性 | `plus/packages/db/test/schema-drift.test.ts` |
 | P1 | v1 行为边界未完全迁移 | golden、domain tests、结构门禁 | capability 行为矩阵和并发/恢复证据 |
 | P2 | 手写迁移回滚与恢复风险 | module-owned migrations、backup rehearsal | expand/contract 规范、shadow DB、恢复演练 |
 | P2 | SPA/three/realtime 成本扩大 | Portal/Console 分壳、realtime core gate | 页面预算、部署规模触发条件、HTTP fallback 回归 |
