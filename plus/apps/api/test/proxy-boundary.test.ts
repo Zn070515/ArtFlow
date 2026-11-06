@@ -3,7 +3,8 @@ import type { RateLimitInput, RateLimiter } from "@artflow-plus/runtime";
 import type { Kysely } from "kysely";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildApp, parseTrustedProxy, publicErrorMessage, selectRateLimiter } from "../src/app.js";
+import { buildApp, parseTrustedProxy, selectRateLimiter } from "../src/app.js";
+import { publicErrorMessage } from "../src/http/helpers.js";
 
 const originalTrustProxy = process.env.ARTFLOW_PLUS_TRUST_PROXY;
 
