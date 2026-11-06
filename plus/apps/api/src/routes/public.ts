@@ -35,6 +35,7 @@ export function registerPublicRoutes(ctx: ApiContext): void {
   app.get(
     "/api/public/vote/:sessionId",
     { schema: { params: PublicVoteParams }, config: { access: "public" } },
+    // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
     async (request, reply) => {
       const { sessionId } = request.params as { sessionId: string };
       await requirePublicRateLimit(request, `public-vote:${sessionId}`, 120);

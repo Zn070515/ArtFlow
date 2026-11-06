@@ -20,8 +20,10 @@ export function bearerToken(request: FastifyRequest): string | undefined {
   const header = request.headers.authorization;
   const value = Array.isArray(header) ? header[0] : header;
   if (typeof value !== "string") return undefined;
-  const match = /^Bearer\s+(.+)$/i.exec(value.trim());
-  return match?.[1];
+  const trimmed = value.trim();
+  if (!trimmed.toLowerCase().startsWith("bearer ")) return undefined;
+  const token = trimmed.slice("bearer ".length).trim();
+  return token === "" ? undefined : token;
 }
 
 export function cookieValue(request: FastifyRequest, name: string): string | undefined {
