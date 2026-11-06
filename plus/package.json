@@ -10,7 +10,8 @@
     "build": "pnpm -r run build",
     "build:prod": "pnpm --filter @artflow-plus/web build && pnpm --filter @artflow-plus/api build:bundle && pnpm --filter @artflow-plus/worker build:bundle",
     "check": "pnpm -r run check",
-    "test": "pnpm -r run test"
+    "test": "pnpm -r run test",
+    "schema:check": "pnpm --filter @artflow-plus/db run schema:check"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

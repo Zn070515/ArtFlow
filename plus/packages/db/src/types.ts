@@ -146,7 +146,7 @@ export interface RegistrationRow {
   answers: ColumnType<unknown, string, string>;
   supplement_keys: ColumnType<unknown, string | undefined, string>;
   revision: number;
-  review_note: string | null;
+  review_note: ColumnType<string, string | undefined, string>;
   reviewed_by: string | null;
   created_at: ColumnType<Date, Date | undefined, never>;
   updated_at: ColumnType<Date, Date | undefined, Date>;
