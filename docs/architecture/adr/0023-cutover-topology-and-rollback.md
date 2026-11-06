@@ -1,6 +1,6 @@
 # ADR-0023: Main-domain replacement and the rollback boundary
 
-- **Status**: accepted
+- **Status**: superseded by ADR-0036
 - **Date**: 2026-10-26
 
 ## Decision

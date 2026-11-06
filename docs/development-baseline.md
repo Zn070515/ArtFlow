@@ -2,15 +2,14 @@
 
 This guide describes the repository's verified development and runtime paths. It is operational documentation, not a replacement for activity-level permission, audit, or data-retention rules.
 
-## Repository eras
+## Single repository line
 
-`main` is the 1.x production line (Django); the sections below describe it. `artflow-plus`
-is the v2 development line (ArtFlow-Plus, Node 24 + Fastify 5 + React 19 + PostgreSQL 18)
-under `plus/`. v2 is complete through M13.3 (including semantic operational adoption), but
-production still runs v1.0.x. No real-activity adoption rehearsal is planned; production entry is
-based on a clean baseline, automated/isolated acceptance evidence, operational smoke and explicit
-owner acceptance. The two lines do not merge mechanically; see
-[`docs/artflow-plus/README.md`](artflow-plus/README.md).
+`main` carries ArtFlow-Plus (v2, Node 24 + Fastify 5 + React 19 + PostgreSQL 18) under
+`plus/`. The 1.x Django monolith is retained only until external review and the v1→v2
+coverage audit close; it is no longer maintained or deployed. Vintage v1 compatibility
+(legacy bundle import, operational adoption, participant claim, legacy media bridge) has
+been removed. See [`docs/artflow-plus/README.md`](artflow-plus/README.md) and the
+[coverage audit](artflow-plus/skeleton-coverage.md).
 
 ## ArtFlow-Plus (v2) baseline
 
@@ -48,9 +47,15 @@ owner acceptance. The two lines do not merge mechanically; see
   `GATE-REALTIME-CORE-01`; `pwsh -NoProfile -File scripts/check_docs.ps1` validates
   user-facing docs. Browser E2E runs against the `artflow_e2e` schema with
   `workers: 1` (`pnpm --filter @artflow-plus/web test:e2e`).
-- **Cutover**: topology and rollback in
-  [`docs/artflow-plus/cutover-runbook.md`](artflow-plus/cutover-runbook.md); rollback is
-  possible only before the first formal v2 write.
+- **Deployment**: `deploy/compose.production.yml` (`plus` profile) with the three
+  digest-pinned Plus images; backups and restores follow
+  [`docs/artflow-plus/backup-restore.md`](artflow-plus/backup-restore.md).
+
+## Retained 1.x source (frozen)
+
+The rest of this document describes the Django 1.x source that remains in the tree for
+external review. It is not a delivery path and must not receive new features; it will be
+deleted after review.
 
 ## Environments and dependencies
 
@@ -282,4 +287,4 @@ Without the fixture the staff pages are skipped; public pages are still measured
 
 Never commit `.env`, production credentials, database files, uploads, exports, archives, or generated media. Examples use placeholders only; replace them locally or through deployment secret management. Keep internal submission files behind controlled access views, and do not put sensitive configuration in `doctor`, health, CI, or container logs.
 
-Create a short-lived branch from the clean, updated base of the line you are changing — `main` for 1.x fixes, `artflow-plus` for v2 work; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into that same line after verification. Never merge across lines. See [repository instructions](../AGENTS.md) for the repository-wide workflow rules.
+Create a short-lived branch from the clean, updated `main`; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into `main` after verification. See [repository instructions](../AGENTS.md) for the repository-wide workflow rules.

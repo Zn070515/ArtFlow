@@ -1,16 +1,21 @@
 # ArtFlow-Plus
 
-This directory is the v2 workspace. The Django application at the repository
-root is the frozen v1 reference implementation; nothing here imports it.
+This directory is the v2 workspace and the only product line. The Django
+application at the repository root is a frozen v1 reference retained only until
+external review; nothing here imports it, and it will be deleted.
 
 ## Current state
 
 M0–M15.2 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
-public vote page, and one protected realtime core. Production still runs v1 on
-`main`; the cutover code and runbooks are ready, but the domain has not been
-switched. Milestone exits and evidence live in
-`docs/artflow-plus/roadmap.md`.
+public vote page, ticket-backed voting, analytics, tasks, and one protected
+realtime core. Milestone exits and evidence live in
+`docs/artflow-plus/roadmap.md`; the remaining v1 coverage gaps are tracked in
+`docs/artflow-plus/skeleton-coverage.md`.
+
+The v1 compatibility bridge has been removed: there is no legacy bundle import,
+operational adoption, participant claim, or v1 media bridge. v1 data stays with
+the archived Django source instead of migrating into v2.
 
 M15.1 adds a read-only activity operations analytics projection at
 `GET /api/activities/:id/operations/analytics`. It aggregates existing
@@ -36,37 +41,11 @@ tokens from the browser login/register responses. Releases and confirmed results
 created before that pass must be re-released or reconfirmed because the new
 guards fail closed.
 
-ADR-0031 splits `import:legacy` into a read-only `historical` mode and an
-`adoption` mode that compiles and releases a real Plus definition for a current
-v1 activity. Consumption is now source-aware (a confirmed result only locks the
-rounds/vote sessions it actually consumed), the public selector requires a
-confirmed, non-stale, provenance-bearing result, and runtime contract v2 refuses
-sessions on releases without command ownership.
-
-ADR-0032 makes adoption a semantic conversion: the definition is generated from
-the bundle (questionnaire, round keys and judge counts, rubric, grouping, material
-slots, registration lifecycle), adopted rounds use the resolver's canonical IDs,
-registration has its own lifecycle, and material bytes are served through a
-controlled local volume plus a read-only v1 media bridge. `semanticReady` is true
-only after questionnaire/round/rubric/grouping/material/lifecycle checks pass.
-
-ADR-0033 closes participant and material cutover: the bundle carries
-`materialChecks` even when no file exists, adoption creates real file slots, staff
-can issue a scoped supplement capability without migrating a v1 account, and
-material bytes upload atomically (the old current survives a failed replacement).
-Production compose now mounts `plus_media_data` and the v1 `media_data` read-only,
-and media paths accept Unicode filenames.
-
-ADR-0035 closes the imported-participant account gap without rewriting imported
-IDs or migrating passwords. Staff issue a one-time `/claim#...` fragment for an
-adopted `legacy-user:*` registration; issuing a replacement revokes the prior
-unconsumed claim. The participant creates a new account or binds an existing
-participant session, and the registration/material ownership checks resolve the
-linked legacy identity. The Claim page also accepts a manually pasted token,
-and Ops copy falls back to selection-based copying when Clipboard API access is
-unavailable. The fragment is removed from the address bar immediately; raw
-claim/session credentials stay out of durable responses and audit records. This
-does not authorize deleting v1 source or media.
+ADR-0036 makes `main` the single line and removes the v1 compatibility bridge.
+Consumption remains source-aware (a confirmed result only locks the rounds/vote
+sessions it actually consumed), the public selector requires a confirmed,
+non-stale, provenance-bearing result, and runtime contract v2 refuses sessions on
+releases without command ownership.
 
 ## First vertical slice
 
@@ -312,12 +291,8 @@ new architecture.
 
 ## Next steps
 
-1. Cutover infrastructure is ready for automated and isolated acceptance, but
-   production cutover must be driven by an `import:legacy --mode adoption --pack
-   <id>` of the first current activity followed by the operational smoke profile;
-   it remains gated by clean-baseline evidence, activity-specific capability
-   completeness, and the authority audit, not by a real-activity rehearsal or
-   the calendar. Follow `docs/artflow-plus/cutover-runbook.md`.
+1. Delete the retained Django 1.x source after external review and the v1→v2
+   coverage audit close. Follow `docs/artflow-plus/skeleton-coverage.md`.
 2. Close the remaining product gaps: a public program page for stage shows,
    bracket/composite scoring, XLSX export, on-site display, and multi-instance
    realtime broadcast.
@@ -504,64 +479,6 @@ POST /api/activities/:id/competition/rounds/:roundKey/reset-rehearsal
 The reset deletes the round's non-formal facts/corrections/revisions/rankings
 and performances, supersedes its panel, and returns the round to `prepared`.
 After formal facts exist, rehearse in a copied activity instead.
-
-## M8e-2 Legacy import
-
-v1 activities move through a versioned JSON bundle:
-
-```powershell
-# v1 repository
-uv run python manage.py export_plus_bundle --activity <public_code> --output bundle.json
-
-# v2 repository
-$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
-pnpm -C plus --filter @artflow-plus/api import:legacy -- bundle.json --dry-run
-pnpm -C plus --filter @artflow-plus/api import:legacy -- bundle.json --report report.json
-```
-
-The importer runs in one transaction, skips `is_test_data` rows, keeps materials
-as metadata (`storage_key = legacy:<id>`), imports historical ballots as
-anonymous, and writes published results from the frozen snapshot. It then
-recomputes counts and snapshot hashes from v2 and rolls back on any mismatch.
-Group-chorus stages and other constructs v2 cannot express are listed in the
-report's `unsupported` array; their facts stay in v1.
-
-## M8e-3 Cutover
-
-Plus ships two production images from `deploy/plus/Dockerfile`: `api` (esbuild
-single-file Node bundle) and `web` (nginx + Vite build). The API bundle is
-required because workspace packages export TypeScript sources; `tsc` output
-cannot be loaded at runtime.
-
-```powershell
-pnpm -C plus run build:prod
-docker build -f deploy/plus/Dockerfile --target api -t artflow-plus-api .
-docker build -f deploy/plus/Dockerfile --target web -t artflow-plus-web .
-```
-
-The v2 services run beside v1 as a Compose profile:
-
-```powershell
-docker compose -f deploy/compose.production.yml --env-file .env.production --profile plus up -d
-```
-
-The main domain is switched by Caddy site profile, not by path or activity
-routing:
-
-```dotenv
-# .env.production
-ARTFLOW_SITE_PROFILE=v1   # before cutover, and the rollback target
-ARTFLOW_SITE_PROFILE=v2   # after the switch
-```
-
-```powershell
-docker compose -f deploy/compose.production.yml --env-file .env.production up -d proxy
-node scripts/cutover-smoke.mjs
-```
-
-Rollback is allowed only before the first authoritative v2 write. See
-`docs/artflow-plus/cutover-runbook.md` for the full preflight, commit point,
-and post-cutover checklist.
 
 ## M8e-4 Three activity shapes
 

@@ -189,7 +189,7 @@ production-readiness 契约冲突；`public_content_index` 曾用当前活动名
 ## RES-10 CONFIRMED 结果绑定完整的来源身份
 
 **规则**：`stage_result` 必须持久化来源描述符：`kind`（podium candidate /
-vote session / legacy import）、`aggregateId`、`definitionVersion`、`releaseHash`、
+vote session）、`aggregateId`、`definitionVersion`、`releaseHash`、
 `mode`、`sourceRevision` 与 `inputFingerprint`。确认时投票场次或候选回合的
 definition version 必须等于发布 session 的 release；不匹配即
 `SOURCE_RELEASE_MISMATCH`。

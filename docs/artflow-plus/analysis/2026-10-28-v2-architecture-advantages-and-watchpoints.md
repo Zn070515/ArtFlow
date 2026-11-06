@@ -188,7 +188,7 @@ P0/P1 在 production cutover 前必须有证据；P2 可以按真实流量和业
 
 本项目不再安排真实活动彩排。债务还账从干净 baseline 开始，每次只处理一个主题：
 
-- baseline 必须满足：工作区无未提交改动，`artflow-plus` 与远端一致，Plus check/test、
+- baseline 必须满足：工作区无未提交改动，`main` 与远端一致，Plus check/test、
   headless E2E、build 和文档门禁通过；
 - 每个主题使用独立短分支和独立提交，不能把安全、schema、HTTP 拆分和行为测试混成一笔；
 - 每笔债务先写验收标准，再写回归/门禁，最后实现；合并后在干净主线复跑受影响门禁；

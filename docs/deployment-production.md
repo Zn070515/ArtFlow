@@ -2,7 +2,7 @@
 
 本文档说明 **1.x 生产线**（`main`，Django）的生产运行拓扑。它针对的是面向真实活动的部署；本地开发、Docker Compose 联调和 CI 见 [开发基线](development-baseline.md)。
 
-> **v2（ArtFlow-Plus）不适用本文档。** v2 使用独立的 PostgreSQL 库/卷与 compose `plus` profile，主域名通过 Caddy site profile 整体替换，步骤见 [cutover runbook](artflow-plus/cutover-runbook.md)。
+> **v2（ArtFlow-Plus）不适用本文档。** `main` 只交付 v2；本节保留的 1.x 部署说明只用于审核历史源码，v1→v2 的 cutover 流程已按 ADR-0036 移除。
 
 ## docker-compose.yml 不是生产部署文件
 

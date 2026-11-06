@@ -190,11 +190,10 @@ ERROR 也不是 PASS。
 **规则**：registration capability 的 release artifact 冻结
 `draft/open/review/final` 生命周期。只有 `open` 允许 `registration.start`、
 答题与提交；`registrationOpen` 公开读同样要求 `open`。Activity 处于 active
-不等于报名开放。Adoption 导入已截止的 v1 活动时必须落为 `review` 或 `final`。
+不等于报名开放。
 
-**为什么**：v1 的报名截止只体现在 phase/名单状态；cutover 把活动接管为 active
-后，旧的 `registrationOpen = Activity.active` 会把报名重新打开，Portal 还会自动
-创建新报名，留下名单 final 后无法审核的 submitted 行。
+**为什么**：v1 的报名截止只体现在 phase/名单状态；如果把“活动 active”直接当作
+“报名开放”，Portal 会重新开放报名，留下名单 final 后无法审核的 submitted 行。
 
 **必须攻击的形状**：adoption 后新账号进入 `/join/<code>`；roster final 后
 start/answer/submit；旧 release 没有 lifecycle 字段；Portal 自动 start；
@@ -216,7 +215,7 @@ content 的材料。
 `current=true` 但无字节的新材料，同时把旧的好文件从 current authority 中移除。
 
 **必须攻击的形状**：metadata 成功后 content 失败；content 大小不符；review 批准
-pending 行；并发替换同一 slot；legacy `legacy-file:` 无字节；中文文件名路径。
+pending 行；并发替换同一 slot；无字节的材料；中文文件名路径。
 
 **Plus 要求**：staging 行不可见；写入失败补偿删除；旧 current 在提交前不动；
 material_check 随上传/审核更新；storage 路径只拒绝分隔符、控制字符与 traversal。

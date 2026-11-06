@@ -73,6 +73,5 @@ Plus backup restore verification passed; source services and volumes were not re
 ## 与 v1 流程的边界
 
 - `scripts/backup_plus.sh` / `scripts/restore_plus_verify.sh` 只处理 Plus 三块持久数据。
-- `scripts/backup.sh` / `scripts/restore-verify.sh` 继续处理 v1 Django 数据库、`media_data` 和 v1 manifest。
-- Plus 的 `legacy-file:` 材料引用仍指向 v1 只读桥接；在它被迁移成 Plus 私有材料前，不能把它当作 `plus_media_data` 的备份结果。
-- 这一步是部署数据完整性检查，不创建活动、不改变正式事实，也不改变 cutover 的回滚边界。
+- `scripts/backup.sh` / `scripts/restore-verify.sh` 只服务保留的 v1 Django 源码；v1 不再部署。
+- 这一步是部署数据完整性检查，不创建活动，也不改变正式事实。

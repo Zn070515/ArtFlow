@@ -49,10 +49,8 @@ definition。
 | 分组/合唱阶段 | v1 的 GroupStage 无 v2 表达 | 已由 `grouping` capability 承载（M9）；组材料文件仍归媒体 slice |
 | 参与者投票页缺失 | v2 只有 ballot 写接口，观众没有投票入口 | 已由 M12 的 `/vote/<sessionId>` 关闭；M14 已补齐票据 fragment/手工兑换入口 |
 
-导入的 `legacy-user:*` 报名现在通过 ADR-0035 的一次性 `/claim#...` fragment
-完成账号认领。认领不会改写权威 `participant_id`，也不会迁移 v1 密码；注册和材料
-所有权通过一对一 identity link 同时解析本地 actor 与 legacy subject。v1 源码和媒体
-仍保留在只读 cutover 边界内。
+v1 导入、参与者认领与 v1 媒体桥已按 ADR-0036 移除；v2 参与者使用本地账号，
+不再有 `legacy-user:*` 身份或跨代 identity link。
 
 ## 复现
 

@@ -19,9 +19,9 @@ review-awards 的简化版（无现场表演/无发布）。
 
 | 检查 | 命令/位置 | 负责人 | 结果 |
 | --- | --- | --- | --- |
-| cutover 演练已通过 | `docs/artflow-plus/cutover-runbook.md` §7 | | |
+| 备份恢复演练已通过 | `docs/artflow-plus/backup-restore.md` | | |
 | staff 账号可登录 | `cutover-smoke.mjs` staff 段 | | |
-| 活动/名单已导入或创建 | Ops → 活动 → 报名/名单 | | |
+| 活动/名单已创建 | Ops → 活动 → 报名/名单 | | |
 | 回合已 prepare、评委组已激活 | Live 控制台 | | |
 | 评委链接可打开 | `/judge/<code>?capability=...` | | |
 | 备用录分人/纸面表格 | 2 台设备 + 纸质表 | | |

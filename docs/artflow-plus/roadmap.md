@@ -1,21 +1,21 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M15.1 已完成**（2026-10-28）；生产 cutover 未执行。M13.3 补齐了
-participant/material cutover：MaterialCheck 导入、补交 capability、原子上传、
-生产媒体卷与 Unicode 路径；production cutover 以干净 baseline、自动化/隔离验收、
-operational smoke 与 owner acceptance 为准。产品与架构身份的
-权威是根目录 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）
-与证据。已完成里程碑的段落保留当时的实现描述，后续里程碑在其上覆盖。
+状态：**M0–M16 已完成**（2026-11-06）；`main` 是唯一开发主线，v2 是唯一产品线。
+v1 兼容层（legacy bundle 导入、运营接管、参与者认领、v1 媒体桥、cutover）已按
+ADR-0036 删除；Django 1.x 源码暂留到外部审核与
+[v1→v2 覆盖审计](skeleton-coverage.md) 关闭。产品与架构身份的权威是根目录
+`GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）与证据。已完成
+里程碑的段落保留当时的实现描述；标有"已移除"的段落只作历史记录，不再对应代码。
 
 ## M0 — Legacy Extraction（已完成）
 
 - 54 条领域不变量：`docs/invariants/`。
 - 497 条 fix 的经验与事故库：`docs/artflow-plus/analysis/`、`docs/incidents/`。
-- 6 个 golden fixtures + v1 适配器（结果发布生命周期）。
+- 6 个 golden fixtures（结果发布生命周期；v1 适配器已移除）。
 - 6 组结构门禁 + Gates CI。
-- 时代边界：`main` = 1.x，`artflow-plus` = v2。
+- 主线：`main` 单线承载 v2（ADR-0036）。
 
-**出口**：Gates 在 `artflow-plus` 常绿；golden 结构校验通过。
+**出口**：Gates 在 `main` 常绿；golden 结构校验通过。
 
 ## M1 — Engine Kernel（已完成）
 
@@ -185,7 +185,7 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
 ## M8 — Product Surfaces 与 Cutover 拓扑（已完成，2026-10-26）
 
 > 完成的是四个产品面、切换拓扑与工具链；**生产接管流程**（v1 当前活动 →
-> Plus 可运行活动）不在 M8，见 M13.1。因此 M8“完成”不等于 production cutover
+> Plus 可运行活动）不在 M8，见 M13.1。M13.1–M13.3 的接管实现已在 ADR-0036 中移除，
 > ready。
 
 - Studio/Ops/Live/Portal 四个产品面按 capability 贡献组装。
@@ -238,7 +238,7 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   ranking_snapshot 带 mode；正式读路径按 mode 过滤；非 formal 生命周期在 formal
   事实出现后被 `FORMAL_FACTS_EXIST` 拒绝；`reset-rehearsal` 清除非 formal 数据并
   把回合还原到 prepared。正式后排练改用活动副本。
-- **M8e-2 v1 导入与对账（已完成，2026-10-26）**：v1 `export_plus_bundle` →
+- **M8e-2 v1 导入与对账（已移除，ADR-0036）**：v1 `export_plus_bundle` →
   v2 `activity.legacy.import`；单事务 + 对账，失败回滚；test 行跳过并计数；
   媒体只迁元数据；历史快照直接导入并可在公开页展示；无法表达的结构进入
   `unsupported`。ADR-0021。
@@ -258,8 +258,8 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
 
 M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注册/Studio/Live/
 评委/导入赛果；M8e-2 导入报告与 M8e-3 runbook 提供迁移/回滚证据；三类活动
-关键旅程见 `docs/artflow-plus/shape-validation.md`。原现场彩排 runbook 已退役，不再作为
-cutover 前置条件。
+关键旅程见 `docs/artflow-plus/shape-validation.md`。原现场彩排 runbook 已退役，验收依据
+自动化关键旅程与隔离环境证据。
 
 ## M9 — Grouping Capability（已完成，2026-10-27）
 
@@ -298,6 +298,8 @@ cutover 前置条件。
 
 ## M13.1 — Cutover Adoption & Consumption Precision（已完成，2026-10-27）
 
+> 已移除（ADR-0036）：以下为当时的实现记录，对应代码与测试已删除。
+
 - **历史导入与运营接管分离**：`import:legacy --mode historical` 保持只读快照；
   `--mode adoption --pack <id>` 走正常 Pack → Compiler → Release，冻结完整
   capability 组合、`commandScopes` 与 runtime contract v2。
@@ -317,6 +319,8 @@ cutover 前置条件。
   测试、公开 selector 测试、全量门禁与 E2E。
 
 ## M13.2 — Semantic Adoption Closure（已完成，2026-10-27）
+
+> 已移除（ADR-0036）：以下为当时的实现记录，对应代码与测试已删除。
 
 - **Adoption Definition 来自 bundle**：questionnaire、round keys/judge config/rubric、
   grouping groupCount、materials purposes、registration lifecycle、publishing
@@ -339,6 +343,8 @@ cutover 前置条件。
   lock → ranking → podium → confirm → release → public selector → 开投票。
 
 ## M13.3 — Participant & Material Cutover Closure（已完成，2026-10-27）
+
+> 已移除（ADR-0036）：以下为当时的实现记录，对应代码与测试已删除。
 
 - **MaterialCheck 进 bundle**：v1 exporter 独立导出 `materialChecks`（含无
   SubmissionFile 的缺交项）；adoption 导入 `material_check` 并为每个 slot 生成
@@ -372,6 +378,8 @@ cutover 前置条件。
   回归、Plus 类型与测试门禁通过；cutover 使用自动化/隔离证据。
 
 ## M14.1 — Participant Account Claim（已完成，2026-10-28）
+
+> 已移除（ADR-0036）：以下为当时的实现记录，对应代码与测试已删除。
 
 - Staff 可为 active activity 中的 `legacy-user:*` 导入报名生成一次性认领链接；
   token 只存 digest，并受活动、报名、过期时间和一对一 identity link 约束；重新生成时

@@ -1,9 +1,9 @@
 # Changelog
 
-> **时代说明（2026-10-27）：** 本文件记录 **1.x（`main`）** 的批次变更，止于 v1.0.x。
-> v2（ArtFlow-Plus，`artflow-plus`）的里程碑与出口证据见
-> [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md)；架构决策见
-> [`docs/architecture/adr/`](docs/architecture/adr/README.md)。v2 尚未切换到生产。
+> **时代说明（2026-11-06）：** 本文件是 1.x 历史变更记录，止于 v1.0.x，不再更新。
+> v2（ArtFlow-Plus）是 `main` 上的唯一产品线；里程碑与出口证据见
+> [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md)，架构决策见
+> [`docs/architecture/adr/`](docs/architecture/adr/README.md)。
 
 ## 2026-10-09 (last)
 

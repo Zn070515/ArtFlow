@@ -1,6 +1,6 @@
 # ADR-0006: Strangler 共存与按切片 cutover
 
-状态：accepted（2026-10-19）
+状态：superseded by ADR-0036（2026-11-06，v1 兼容层移除）
 
 ## 背景
 

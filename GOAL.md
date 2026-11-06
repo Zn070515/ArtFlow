@@ -953,7 +953,10 @@ A historical bug should become a durable test or invariant whenever possible.
 
 # 26. ArtFlow v1 Relationship
 
-ArtFlow v1.0.0 is the first production reference implementation.
+ArtFlow v1.0.0 was the first production reference implementation. Its mission is
+complete: ArtFlow-Plus is now the only product line. The v1 source is retained
+temporarily as review evidence and will be deleted once external review and the
+coverage audit in `docs/artflow-plus/skeleton-coverage.md` are closed.
 
 It is not the architecture ArtFlow-Plus must preserve.
 

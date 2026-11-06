@@ -1,6 +1,6 @@
 # ADR-0035: 通过一次性 fragment Claim 认领导入的参与者身份
 
-- Status: accepted
+- Status: superseded by ADR-0036
 - Date: 2026-10-28
 - Related: ADR-0031, ADR-0032, ADR-0033
 

@@ -55,7 +55,7 @@ git diff --check
 2. Plus 全量测试在 PostgreSQL 下运行，没有因数据库不可达而 skip；
 3. 没有新增结构门禁 allowlist 例外；
 4. 没有真实活动彩排前置条件；
-5. `git status --short --branch` 干净，提交已推送到 `artflow-plus`。
+5. `git status --short --branch` 干净，提交已推送到 `main`。
 
 ## 已取得的最终证据
 
