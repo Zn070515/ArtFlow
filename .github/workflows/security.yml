@@ -85,9 +85,18 @@ jobs:
                           item.get("status") == "accepted" for item in suppressions
                       ):
                           continue
-                      findings.append(result.get("ruleId", "unknown"))
+                      location = (result.get("locations") or [{}])[0].get(
+                          "physicalLocation", {}
+                      )
+                      uri = location.get("artifactLocation", {}).get("uri", "?")
+                      line = location.get("region", {}).get("startLine", "?")
+                      findings.append(
+                          f"{result.get('ruleId', 'unknown')} at {uri}:{line}"
+                      )
           if findings:
-              print("CodeQL findings: " + ", ".join(sorted(set(findings))))
+              print("CodeQL findings:")
+              for finding in sorted(set(findings)):
+                  print(f"  - {finding}")
               raise SystemExit(1)
           PY
 
