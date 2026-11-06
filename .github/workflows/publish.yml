@@ -8,19 +8,25 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
   packages: write
   attestations: write
   id-token: write
-  actions: read
 
 concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  gates:
+    name: Run release gates
+    uses: ./.github/workflows/gates.yml
+    permissions:
+      contents: read
+
   publish:
     name: Build and push the release image
+    needs: gates
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -29,24 +35,6 @@ jobs:
 
       - name: Resolve the lowercase image name
         run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
-      # A tag is the release authority, but it must not be stronger than CI. The same
-      # commit's main-branch runs are the evidence: a tag pushed before those gates finish
-      # (or from a commit that never passed them) must not produce a formal package.
-      - name: Require green quality gates for this commit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          sha="${{ github.sha }}"
-          for workflow in ci.yml security.yml workflow-lint.yml integration.yml; do
-            count="$(gh api \
-              "repos/${{ github.repository }}/actions/workflows/${workflow}/runs?head_sha=${sha}&branch=main&per_page=20" \
-              --jq '[.workflow_runs[] | select(.event == "push" and .conclusion == "success")] | length')"
-            if [ "$count" -lt 1 ]; then
-              echo "::error::No successful ${workflow} run on main for ${sha}; refusing to publish."
-              exit 1
-            fi
-          done
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -106,14 +94,132 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Create the GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  publish-plus:
+    name: Build and push ArtFlow-Plus images
+    needs: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Resolve the Plus image names
+        run: echo "PLUS_IMAGE_BASE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive API image tags and labels
+        id: meta-api
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.PLUS_IMAGE_BASE }}/artflow-plus-api
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Derive Worker image tags and labels
+        id: meta-worker
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.PLUS_IMAGE_BASE }}/artflow-plus-worker
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Derive Web image tags and labels
+        id: meta-web
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.PLUS_IMAGE_BASE }}/artflow-plus-web
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push Plus API
+        id: build-api
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/plus/Dockerfile
+          target: api
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          build-args: |
+            ARTFLOW_BUILD_SHA=${{ github.sha }}
+          provenance: mode=max
+          cache-from: type=gha,scope=plus-api
+          cache-to: type=gha,mode=max,scope=plus-api
+
+      - name: Build and push Plus Worker
+        id: build-worker
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/plus/Dockerfile
+          target: worker
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          build-args: |
+            ARTFLOW_BUILD_SHA=${{ github.sha }}
+          provenance: mode=max
+          cache-from: type=gha,scope=plus-worker
+          cache-to: type=gha,mode=max,scope=plus-worker
+
+      - name: Build and push Plus Web
+        id: build-web
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/plus/Dockerfile
+          target: web
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          build-args: |
+            ARTFLOW_BUILD_SHA=${{ github.sha }}
+          provenance: mode=max
+          cache-from: type=gha,scope=plus-web
+          cache-to: type=gha,mode=max,scope=plus-web
+
+      - name: Record the published Plus digests
         run: |
-          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-            echo "Release ${{ github.ref_name }} already exists; leaving it unchanged."
-          else
-            gh release create "${{ github.ref_name }}" \
-              --title "ArtFlow ${{ github.ref_name }}" \
-              --notes-from-tag
-          fi
+          {
+            echo "### Published ArtFlow-Plus images"
+            echo ""
+            echo "Commit: \`${{ github.sha }}\`"
+            echo ""
+            echo "API digest: \`${{ steps.build-api.outputs.digest }}\`"
+            echo "Worker digest: \`${{ steps.build-worker.outputs.digest }}\`"
+            echo "Web digest: \`${{ steps.build-web.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

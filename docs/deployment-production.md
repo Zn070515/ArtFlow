@@ -1,6 +1,8 @@
 # 生产部署说明
 
-本文档说明 ArtFlow 的**生产**运行拓扑。它针对的是面向真实活动的部署；本地开发、Docker Compose 联调和 CI 见 [开发基线](development-baseline.md)。
+本文档说明 **1.x 生产线**（`main`，Django）的生产运行拓扑。它针对的是面向真实活动的部署；本地开发、Docker Compose 联调和 CI 见 [开发基线](development-baseline.md)。
+
+> **v2（ArtFlow-Plus）不适用本文档。** v2 使用独立的 PostgreSQL 库/卷与 compose `plus` profile，主域名通过 Caddy site profile 整体替换，步骤见 [cutover runbook](artflow-plus/cutover-runbook.md)。
 
 ## docker-compose.yml 不是生产部署文件
 

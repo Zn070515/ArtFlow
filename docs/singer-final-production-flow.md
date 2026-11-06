@@ -1,6 +1,6 @@
 # 院十佳决赛生产流程
 
-这份说明面向操作当前学年院十佳决赛的工作人员，记录从历史模板到当年正式运行的完整路径，以及各步骤背后的权威边界。工程约定见[开发基线](development-baseline.md)，现场演练场景见[生产彩排 Runbook](production-rehearsal-runbook.md)。
+这份说明面向操作当前学年院十佳决赛的工作人员，记录从历史模板到当年正式运行的完整路径，以及各步骤背后的权威边界。工程约定见[开发基线](development-baseline.md)；验收使用自动化关键旅程、隔离 smoke 与 owner acceptance，不安排真实活动彩排。
 
 ## 活动语义
 
@@ -35,19 +35,6 @@ ArtFlow 中的一次「院十佳」活动表示**院十佳决赛的完整运行�
   原来的分组，不受影响。
 
 当年赛制一律在克隆之后按当年规则调整。
-
-## 个人问卷与分组问卷
-
-2026 内置赛制在一个 `RulesetVersion` 里同时携带两份问卷：
-
-- **选手问卷**（`questionnaire`，`subject=participant`）：每名选手的第二轮、第三轮曲目，以及一个音视频文件（伴奏音频或演唱视频，二选一）。
-- **分组合唱问卷**（`group_questionnaire`，`subject=group`）：每组的合唱曲目，以及一个音视频文件（同上）。
-
-两份问卷都进入冻结快照。分组问卷的提交入口是 `/questionnaire/group/<group_pk>/`：组内任一当前成员可提交，工作人员在分组合唱赛段页审核；材料窗口仍由 `GroupStage.material_status` 控制（开放 / 仅补交 / 关闭），默认是「关闭」，工作人员需要先在分组页设为「开放」。
-
-冻结时，2026 赛制必须同时存在两份问卷；旧版草稿用 `uv run python manage.py upgrade_live_2026_questionnaires --activity <id> --operator-username <staff> --dry-run` 检查后去掉 `--dry-run` 补齐。FROZEN 版本不会被改写。
-
-音视频格式：音频 `.mp3/.wav/.m4a/.flac/.aac/.ogg`，视频 `.mp4/.mov/.webm/.mkv`；单文件上限 100MB。
 
 ## 正式运行流程
 
@@ -108,7 +95,7 @@ VoteSession（用途=成绩组成，requires_ticket=True）
   撤销后第一轮恢复解锁资格，修正成绩并重新锁定后即可重新建立会话（第一轮结果未变也可以重建），
   但只有本轮没有不可回收的正式评委组快照时才能重置轮次。
   一旦已经选人、建比赛或生成第三轮，页面不再提供撤销，须登记事故并走完整纠正流程。
-  测试活动里的评委组与踢馆会话属于彩排数据，会随测试数据清理一起删除。
+  测试活动里的评委组与踢馆会话属于隔离验证数据，会随测试数据清理一起删除。
 - 成绩组成投票必须是明确的 VoteSession 用途，并且启用入场票校验；
 - 原始票数（量纲为 votes）不能直接进入加权综合分；
 - 赛段核定要求它消费的轮次与投票场次都已锁定；
@@ -117,5 +104,4 @@ VoteSession（用途=成绩组成，requires_ticket=True）
 ## 相关文档
 
 - [开发基线](development-baseline.md)
-- [生产彩排 Runbook](production-rehearsal-runbook.md)
 - [生产就绪](production-readiness.md)

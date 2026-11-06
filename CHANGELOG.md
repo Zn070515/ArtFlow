@@ -1,37 +1,9 @@
 # Changelog
 
-## 2026-10-19 (v1.0.2)
-
-### Formatting and release-gate hardening
-
-- Applied `ruff format` to 11 files; no behavior change. This clears the red Linux quality gate
-  that made v1.0.1 unpublishable.
-- `publish.yml` now requires a successful `CI`, `Security`, `Workflow lint`, and
-  `PostgreSQL integration` run on `main` for the exact tag commit before building; a tag can no
-  longer outrun CI.
-- The publish workflow creates the GitHub Release after the image push.
-- **v1.0.1 is withdrawn**: it was tagged and pushed to GHCR while CI was red; do not deploy it.
-  Use v1.0.2.
-
-## 2026-10-19
-
-### The 2026 ruleset can carry participant and group questionnaires
-
-The built-in 2026 format now ships two questionnaires in one definition: `questionnaire`
-(participant R2/R3 songs and one media answer) and `group_questionnaire` (group song and
-one media answer). A media answer accepts either common audio or common video, in both
-documents. The group page reads the group document by subject, any current group member can
-submit, staff review through the existing material checks, and the existing group material
-window (open / supplement-only / closed) is unchanged.
-
-- A version's definition may carry `group_questionnaire` beside `questionnaire`; each root
-  slot enforces its subject at save and freeze.
-- The group questionnaire is selected by subject, so the participant entry and the group
-  form no longer read the same single document.
-- The 2026 freeze requires both documents; an existing DRAFT is upgraded with
-  `upgrade_live_2026_questionnaires` (dry-run first). FROZEN versions are never rewritten.
-- Common formats: audio `.mp3/.wav/.m4a/.flac/.aac/.ogg`, video `.mp4/.mov/.webm/.mkv`,
-  100MB per file.
+> **时代说明（2026-10-27）：** 本文件记录 **1.x（`main`）** 的批次变更，止于 v1.0.x。
+> v2（ArtFlow-Plus，`artflow-plus`）的里程碑与出口证据见
+> [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md)；架构决策见
+> [`docs/architecture/adr/`](docs/architecture/adr/README.md)。v2 尚未切换到生产。
 
 ## 2026-10-09 (last)
 

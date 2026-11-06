@@ -2,6 +2,56 @@
 
 This guide describes the repository's verified development and runtime paths. It is operational documentation, not a replacement for activity-level permission, audit, or data-retention rules.
 
+## Repository eras
+
+`main` is the 1.x production line (Django); the sections below describe it. `artflow-plus`
+is the v2 development line (ArtFlow-Plus, Node 24 + Fastify 5 + React 19 + PostgreSQL 18)
+under `plus/`. v2 is complete through M13.3 (including semantic operational adoption), but
+production still runs v1.0.x. No real-activity adoption rehearsal is planned; production entry is
+based on a clean baseline, automated/isolated acceptance evidence, operational smoke and explicit
+owner acceptance. The two lines do not merge mechanically; see
+[`docs/artflow-plus/README.md`](artflow-plus/README.md).
+
+## ArtFlow-Plus (v2) baseline
+
+- **Toolchain**: Node 24, pnpm 12, TypeScript 7, Fastify 5, Kysely, PostgreSQL 18.
+  The local dev database container is `artflow-plus-postgres` on `127.0.0.1:5433`
+  (database `artflow_plus`, user `artflow`, development password `artflow_dev`).
+- **Install and typecheck**:
+
+  ```powershell
+  Set-Location plus
+  pnpm install
+  pnpm run check
+  ```
+
+- **Tests** (PostgreSQL required; `REQUIRE_DB=1` makes database tests fail instead of
+  silently skipping):
+
+  ```powershell
+  $env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+  $env:REQUIRE_DB = "1"
+  pnpm run test
+  ```
+
+- **Run locally**: `pnpm --filter @artflow-plus/api start` (migrates on start,
+  default `127.0.0.1:3000`) and `pnpm --filter @artflow-plus/web dev` (Vite proxies
+  `/api`). Set `ARTFLOW_PLUS_INLINE_RELAY=1` to run the outbox relay inside the API
+  process (single-process deployments and E2E); production uses the separately
+  built `plus-worker` image and keeps the API value at `0`.
+- **Production proxy boundary**: `ARTFLOW_PLUS_TRUST_PROXY` is an explicit,
+  comma-separated list of internal proxy IPs/CIDRs. It defaults to empty, so
+  public `X-Forwarded-For` headers cannot change rate-limit identity. The Plus
+  Nginx/Caddy transport ceiling is 128 MiB; released material policies remain the
+  domain authority below that ceiling.
+- **Gates**: `uv run pytest tests/gates -q` includes `GATE-PLUS-BOUNDARY-01` and
+  `GATE-REALTIME-CORE-01`; `pwsh -NoProfile -File scripts/check_docs.ps1` validates
+  user-facing docs. Browser E2E runs against the `artflow_e2e` schema with
+  `workers: 1` (`pnpm --filter @artflow-plus/web test:e2e`).
+- **Cutover**: topology and rollback in
+  [`docs/artflow-plus/cutover-runbook.md`](artflow-plus/cutover-runbook.md); rollback is
+  possible only before the first formal v2 write.
+
 ## Environments and dependencies
 
 Use Python 3.12, as selected by `.python-version`, with uv 0.11.29. The Docker image installs that same exact uv version, while the project metadata and CI also support Python 3.13. The lockfile is authoritative:
@@ -198,6 +248,28 @@ The Judge authority browser flow requires a disposable fixture. Prepare it with
 the run. The command is disabled when `APP_ENV=production`, writes no grant to
 stdout, and the Playwright setup deletes the fixture after reading it.
 
+### Mobile layout gate
+
+Field pages treat the phone as the first-class terminal, so layout is gated. Seven
+phone widths (320 / 360 / 375 / 390 / 393 / 412 / 430, covering the first iPhone SE
+through the Pro Max and mainstream Android sizes) are separate Playwright projects;
+iPhone runs WebKit (the real iOS Safari and WeChat iOS engine) and Android runs
+Chromium. The assertion is that a page must not scroll horizontally as a whole;
+horizontal scrolling inside a table with `overflow-x-auto` is allowed (Django
+admin's changelist does the same). The service must already be running:
+
+```powershell
+uv run python manage.py migrate --noinput
+uv run python manage.py prepare_layout_e2e --output-file test-results\layout-e2e.json
+$env:PLAYWRIGHT_LAYOUT_FIXTURE_PATH = "test-results\layout-e2e.json"
+uv run python manage.py runserver
+# another terminal:
+npx playwright install chromium webkit
+npm run test:e2e
+```
+
+Without the fixture the staff pages are skipped; public pages are still measured.
+
 ## Troubleshooting
 
 - If `uv sync --locked` fails, do not edit `requirements.txt` to work around it. Restore the expected lockfile or intentionally update the lockfile and regenerate the compatibility requirements through the provided script.
@@ -210,4 +282,4 @@ stdout, and the Playwright setup deletes the fixture after reading it.
 
 Never commit `.env`, production credentials, database files, uploads, exports, archives, or generated media. Examples use placeholders only; replace them locally or through deployment secret management. Keep internal submission files behind controlled access views, and do not put sensitive configuration in `doctor`, health, CI, or container logs.
 
-Create a short-lived branch from a clean, updated `main`; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into `main` after verification. See [repository instructions](../AGENTS.md) for the repository-wide workflow rules.
+Create a short-lived branch from the clean, updated base of the line you are changing — `main` for 1.x fixes, `artflow-plus` for v2 work; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into that same line after verification. Never merge across lines. See [repository instructions](../AGENTS.md) for the repository-wide workflow rules.

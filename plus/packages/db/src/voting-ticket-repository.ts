@@ -1,0 +1,693 @@
+import type { CompiledVotingArtifact, ExecutionMode } from "@artflow-plus/domain";
+import { sql } from "kysely";
+import type { Kysely, Selectable, SqlBool } from "kysely";
+
+import type {
+  BallotRow,
+  Database,
+  JudgeSeatGrantRow,
+  JudgeSessionRow,
+  TicketAccessSessionRow,
+  TicketRow,
+  VoteOptionRow,
+  VoteRecordRow,
+  VoteSessionRow,
+} from "./types.js";
+
+function iso(value: Date | string | null): string | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function json(value: unknown): unknown {
+  return typeof value === "string" ? (JSON.parse(value) as unknown) : value;
+}
+
+export interface StoredVoteSession {
+  readonly id: string;
+  readonly activityId: string;
+  readonly definitionVersion: number;
+  readonly mode: ExecutionMode;
+  readonly purpose: "popularity" | "score_component";
+  readonly selectionType: "single" | "multi";
+  readonly maxSelections: number;
+  readonly identityPolicy: "ticket" | "browser" | "anonymous";
+  readonly scoringRule: CompiledVotingArtifact["scoringRule"];
+  readonly status: "draft" | "open" | "closed";
+  readonly revision: number;
+  readonly openedAt?: string;
+  readonly closedAt?: string;
+}
+
+function voteSession(row: Selectable<VoteSessionRow>): StoredVoteSession {
+  const openedAt = iso(row.opened_at);
+  const closedAt = iso(row.closed_at);
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    definitionVersion: row.definition_version,
+    mode: row.mode as ExecutionMode,
+    purpose: row.purpose as StoredVoteSession["purpose"],
+    selectionType: row.selection_type as StoredVoteSession["selectionType"],
+    maxSelections: row.max_selections,
+    identityPolicy: row.identity_policy as StoredVoteSession["identityPolicy"],
+    scoringRule: json(row.scoring_rule) as CompiledVotingArtifact["scoringRule"],
+    status: row.status as StoredVoteSession["status"],
+    revision: row.revision,
+    ...(openedAt === null ? {} : { openedAt }),
+    ...(closedAt === null ? {} : { closedAt }),
+  };
+}
+
+export interface StoredVoteOption {
+  readonly id: string;
+  readonly activityId: string;
+  readonly sessionId: string;
+  readonly candidateId: string;
+  readonly ordinal: number;
+}
+
+function voteOption(row: Selectable<VoteOptionRow>): StoredVoteOption {
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    sessionId: row.session_id,
+    candidateId: row.candidate_id,
+    ordinal: row.ordinal,
+  };
+}
+
+export interface StoredBallot {
+  readonly id: string;
+  readonly activityId: string;
+  readonly sessionId: string;
+  readonly identityType: "ticket" | "browser" | "anonymous";
+  readonly identityDigest?: string;
+  readonly ticketId?: string;
+  readonly submittedAt: string;
+}
+
+function ballot(row: Selectable<BallotRow>): StoredBallot {
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    sessionId: row.session_id,
+    identityType: row.identity_type as StoredBallot["identityType"],
+    ...(row.identity_digest === null ? {} : { identityDigest: row.identity_digest }),
+    ...(row.ticket_id === null ? {} : { ticketId: row.ticket_id }),
+    submittedAt: iso(row.submitted_at) ?? "",
+  };
+}
+
+export interface StoredTicket {
+  readonly id: string;
+  readonly activityId: string;
+  readonly publicCode: string;
+  readonly credentialDigest: string;
+  readonly credentialVersion: number;
+  readonly state: "issued" | "redeemed" | "revoked" | "expired";
+  readonly issuedAt: string;
+  readonly redeemedAt?: string;
+  readonly revokedAt?: string;
+}
+
+function ticket(row: Selectable<TicketRow>): StoredTicket {
+  const redeemedAt = iso(row.redeemed_at);
+  const revokedAt = iso(row.revoked_at);
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    publicCode: row.public_code,
+    credentialDigest: row.credential_digest,
+    credentialVersion: row.credential_version,
+    state: row.state as StoredTicket["state"],
+    issuedAt: iso(row.issued_at) ?? "",
+    ...(redeemedAt === null ? {} : { redeemedAt }),
+    ...(revokedAt === null ? {} : { revokedAt }),
+  };
+}
+
+export interface StoredJudgeEntrySeat {
+  readonly id: string;
+  readonly activityId: string;
+  readonly seatKey: string;
+  readonly judgeId?: string;
+  readonly state: "available" | "claimed" | "revoked";
+  readonly sessionId?: string;
+  readonly revision: number;
+}
+
+function judgeSeat(row: Selectable<JudgeSeatGrantRow>): StoredJudgeEntrySeat {
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    seatKey: row.seat_key,
+    ...(row.judge_id === null ? {} : { judgeId: row.judge_id }),
+    state: row.state as StoredJudgeEntrySeat["state"],
+    ...(row.session_id === null ? {} : { sessionId: row.session_id }),
+    revision: row.revision,
+  };
+}
+
+export interface StoredJudgeSession {
+  readonly id: string;
+  readonly activityId: string;
+  readonly seatId: string;
+  readonly actorId: string;
+  readonly tokenDigest: string;
+  readonly expiresAt: string;
+  readonly revokedAt?: string;
+}
+
+function judgeSession(row: Selectable<JudgeSessionRow>): StoredJudgeSession {
+  const expiresAt = iso(row.expires_at) ?? "";
+  const revokedAt = iso(row.revoked_at);
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    seatId: row.seat_id,
+    actorId: row.actor_id,
+    tokenDigest: row.token_digest,
+    expiresAt,
+    ...(revokedAt === null ? {} : { revokedAt }),
+  };
+}
+
+export async function getVoteSession(
+  db: Kysely<Database>,
+  id: string,
+): Promise<StoredVoteSession | null> {
+  const row = await db.selectFrom("vote_session").selectAll().where("id", "=", id).executeTakeFirst();
+  return row === undefined ? null : voteSession(row);
+}
+
+export async function getVoteSessionForUpdate(
+  trx: Kysely<Database>,
+  id: string,
+): Promise<StoredVoteSession | null> {
+  const row = await trx.selectFrom("vote_session").selectAll().where("id", "=", id).forUpdate().executeTakeFirst();
+  return row === undefined ? null : voteSession(row);
+}
+
+export async function listVoteSessionsForActivity(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredVoteSession[]> {
+  const rows = await db.selectFrom("vote_session").selectAll()
+    .where("activity_id", "=", activityId)
+    .orderBy("id", "asc")
+    .execute();
+  return rows.map(voteSession);
+}
+
+export async function listVoteOptions(
+  db: Kysely<Database>,
+  sessionId: string,
+): Promise<readonly StoredVoteOption[]> {
+  const rows = await db.selectFrom("vote_option").selectAll().where("session_id", "=", sessionId).orderBy("ordinal", "asc").execute();
+  return rows.map(voteOption);
+}
+
+export async function insertVoteSession(
+  trx: Kysely<Database>,
+  input: StoredVoteSession,
+): Promise<void> {
+  await trx.insertInto("vote_session").values({
+    id: input.id,
+    activity_id: input.activityId,
+    definition_version: input.definitionVersion,
+    mode: input.mode,
+    purpose: input.purpose,
+    selection_type: input.selectionType,
+    max_selections: input.maxSelections,
+    identity_policy: input.identityPolicy,
+    scoring_rule: JSON.stringify(input.scoringRule),
+    status: input.status,
+    revision: input.revision,
+    opened_at: input.openedAt ?? null,
+    closed_at: input.closedAt ?? null,
+  }).execute();
+}
+
+export async function insertVoteOptions(
+  trx: Kysely<Database>,
+  options: readonly StoredVoteOption[],
+): Promise<void> {
+  if (options.length === 0) return;
+  await trx.insertInto("vote_option").values(options.map((option) => ({
+    id: option.id,
+    activity_id: option.activityId,
+    session_id: option.sessionId,
+    candidate_id: option.candidateId,
+    ordinal: option.ordinal,
+  }))).execute();
+}
+
+export async function updateVoteSessionStatus(
+  trx: Kysely<Database>,
+  session: StoredVoteSession,
+  expectedRevision: number,
+  now: string,
+): Promise<void> {
+  await trx.updateTable("vote_session").set({
+    status: session.status,
+    revision: session.revision,
+    opened_at: session.openedAt ?? null,
+    closed_at: session.closedAt ?? null,
+  }).where("id", "=", session.id).where("revision", "=", expectedRevision).executeTakeFirstOrThrow();
+  void now;
+}
+
+export async function insertBallot(
+  trx: Kysely<Database>,
+  input: StoredBallot,
+): Promise<void> {
+  await trx.insertInto("ballot").values({
+    id: input.id,
+    activity_id: input.activityId,
+    session_id: input.sessionId,
+    identity_type: input.identityType,
+    identity_digest: input.identityDigest ?? null,
+    ticket_id: input.ticketId ?? null,
+    submitted_at: input.submittedAt,
+  }).execute();
+}
+
+export async function insertVoteRecords(
+  trx: Kysely<Database>,
+  records: readonly Pick<Selectable<VoteRecordRow>, "id" | "activity_id" | "session_id" | "ballot_id" | "option_id">[],
+): Promise<void> {
+  if (records.length === 0) return;
+  await trx.insertInto("vote_record").values(records.map((record) => ({ ...record }))).execute();
+}
+
+/**
+ * The single authoritative ballot-validity predicate: a ballot counts unless it
+ * names a ticket that has not been redeemed. Shared by the Kysely selector and
+ * the raw tally query so the two can never disagree.
+ */
+export const validBallotPredicate = sql<SqlBool>`(ballot.identity_type <> 'ticket' or ticket.state = 'redeemed')`;
+
+/** The authoritative ballot selector used by closed-session tallies. */
+function validBallots(
+  db: Kysely<Database>,
+  sessionId: string,
+) {
+  return db.selectFrom("ballot")
+    .leftJoin("ticket", "ticket.id", "ballot.ticket_id")
+    .where("ballot.session_id", "=", sessionId)
+    .where(validBallotPredicate);
+}
+
+export interface ValidVoteTally {
+  readonly totalBallots: number;
+  readonly countsByOption: Readonly<Record<string, number>>;
+}
+
+/** Reads the valid ballot set, vote records, and frozen options in one snapshot. */
+export async function readValidVoteTally(
+  db: Kysely<Database>,
+  sessionId: string,
+): Promise<ValidVoteTally> {
+  const result = await sql<{
+    readonly total_ballots: number | string;
+    readonly counts_by_option: Record<string, number | string>;
+  }>`
+    with valid_ballots as (
+      select ballot.id
+        from ballot
+        left join ticket on ticket.id = ballot.ticket_id
+       where ballot.session_id = ${sessionId}
+         and ${validBallotPredicate}
+    ), option_counts as (
+      select vote_option.id as option_id,
+             count(valid_ballots.id) as count
+        from vote_option
+        left join vote_record
+          on vote_record.option_id = vote_option.id
+         and vote_record.session_id = ${sessionId}
+        left join valid_ballots on valid_ballots.id = vote_record.ballot_id
+       where vote_option.session_id = ${sessionId}
+       group by vote_option.id
+    )
+    select (select count(*) from valid_ballots) as total_ballots,
+           coalesce(
+             (select jsonb_object_agg(option_id, count) from option_counts),
+             '{}'::jsonb
+           ) as counts_by_option
+  `.execute(db);
+  const row = result.rows[0];
+  if (row === undefined) throw new Error("The vote tally query returned no row.");
+
+  const counts = row.counts_by_option;
+  return {
+    totalBallots: Number(row.total_ballots),
+    countsByOption: Object.fromEntries(
+      Object.entries(counts).map(([optionId, count]) => [optionId, Number(count)]),
+    ),
+  };
+}
+
+export async function countBallots(
+  db: Kysely<Database>,
+  sessionId: string,
+): Promise<number> {
+  const row = await validBallots(db, sessionId)
+    .clearSelect()
+    .select(({ fn }) => fn.countAll<number>().as("count"))
+    .executeTakeFirstOrThrow();
+  return Number(row.count);
+}
+
+/** Vote sessions in which this ticket actually cast a ballot. */
+export async function listVoteSessionIdsForTicket(
+  db: Kysely<Database>,
+  activityId: string,
+  ticketId: string,
+): Promise<readonly string[]> {
+  const rows = await db.selectFrom("ballot")
+    .select("session_id")
+    .distinct()
+    .where("activity_id", "=", activityId)
+    .where("ticket_id", "=", ticketId)
+    .execute();
+  return rows.map((row) => row.session_id);
+}
+
+export async function findTicketByCredential(
+  db: Kysely<Database>,
+  publicCode: string,
+  version: number,
+): Promise<StoredTicket | null> {
+  const row = await db.selectFrom("ticket").selectAll().where("public_code", "=", publicCode).where("credential_version", "=", version).executeTakeFirst();
+  return row === undefined ? null : ticket(row);
+}
+
+export async function getTicketForUpdate(
+  trx: Kysely<Database>,
+  id: string,
+): Promise<StoredTicket | null> {
+  const row = await trx.selectFrom("ticket").selectAll().where("id", "=", id).forUpdate().executeTakeFirst();
+  return row === undefined ? null : ticket(row);
+}
+
+export async function getTicket(
+  db: Kysely<Database>,
+  id: string,
+): Promise<StoredTicket | null> {
+  const row = await db.selectFrom("ticket").selectAll().where("id", "=", id).executeTakeFirst();
+  return row === undefined ? null : ticket(row);
+}
+
+export async function insertTicket(
+  trx: Kysely<Database>,
+  input: StoredTicket,
+): Promise<void> {
+  await trx.insertInto("ticket").values({
+    id: input.id,
+    activity_id: input.activityId,
+    public_code: input.publicCode,
+    credential_digest: input.credentialDigest,
+    credential_version: input.credentialVersion,
+    state: input.state,
+    issued_at: input.issuedAt,
+    redeemed_at: input.redeemedAt ?? null,
+    revoked_at: input.revokedAt ?? null,
+  }).execute();
+}
+
+export async function updateTicket(
+  trx: Kysely<Database>,
+  ticketValue: StoredTicket,
+): Promise<void> {
+  await trx.updateTable("ticket").set({
+    credential_digest: ticketValue.credentialDigest,
+    credential_version: ticketValue.credentialVersion,
+    state: ticketValue.state,
+    redeemed_at: ticketValue.redeemedAt ?? null,
+    revoked_at: ticketValue.revokedAt ?? null,
+  }).where("id", "=", ticketValue.id).executeTakeFirstOrThrow();
+}
+
+export async function listAvailableJudgeSeatsForUpdate(
+  trx: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredJudgeEntrySeat[]> {
+  const rows = await trx.selectFrom("judge_seat_grant").selectAll().where("activity_id", "=", activityId).where("state", "=", "available").orderBy("seat_key", "asc").forUpdate().skipLocked().execute();
+  return rows.map(judgeSeat);
+}
+
+export async function getJudgeSeatGrant(
+  db: Kysely<Database>,
+  id: string,
+): Promise<StoredJudgeEntrySeat | null> {
+  const row = await db.selectFrom("judge_seat_grant").selectAll().where("id", "=", id).executeTakeFirst();
+  return row === undefined ? null : judgeSeat(row);
+}
+
+export async function findJudgeSeatGrantBySeatKey(
+  db: Kysely<Database>,
+  activityId: string,
+  seatKey: string,
+): Promise<StoredJudgeEntrySeat | null> {
+  const row = await db.selectFrom("judge_seat_grant").selectAll()
+    .where("activity_id", "=", activityId)
+    .where("seat_key", "=", seatKey)
+    .executeTakeFirst();
+  return row === undefined ? null : judgeSeat(row);
+}
+
+export async function findJudgeSeatGrantBySeatKeyForUpdate(
+  trx: Kysely<Database>,
+  activityId: string,
+  seatKey: string,
+): Promise<StoredJudgeEntrySeat | null> {
+  const row = await trx.selectFrom("judge_seat_grant").selectAll()
+    .where("activity_id", "=", activityId)
+    .where("seat_key", "=", seatKey)
+    .forUpdate()
+    .executeTakeFirst();
+  return row === undefined ? null : judgeSeat(row);
+}
+
+/** Recycles a claimed entry seat for the next panel using the same seat key. */
+export async function reopenJudgeEntrySeat(
+  trx: Kysely<Database>,
+  seat: StoredJudgeEntrySeat,
+): Promise<void> {
+  await trx.updateTable("judge_seat_grant").set({
+    judge_id: null,
+    state: "available",
+    session_id: null,
+    revision: seat.revision + 1,
+    updated_at: new Date(),
+  }).where("id", "=", seat.id).executeTakeFirstOrThrow();
+}
+
+export async function revokeJudgeSessionsForSeat(
+  trx: Kysely<Database>,
+  seatId: string,
+  revokedAt: string,
+): Promise<void> {
+  await trx.updateTable("judge_session").set({ revoked_at: revokedAt })
+    .where("seat_id", "=", seatId)
+    .where("revoked_at", "is", null)
+    .execute();
+}
+
+export async function insertJudgeEntrySeat(
+  trx: Kysely<Database>,
+  input: StoredJudgeEntrySeat,
+): Promise<void> {
+  await trx.insertInto("judge_seat_grant").values({
+    id: input.id,
+    activity_id: input.activityId,
+    seat_key: input.seatKey,
+    judge_id: input.judgeId ?? null,
+    state: input.state,
+    session_id: input.sessionId ?? null,
+    revision: input.revision,
+  }).execute();
+}
+
+/**
+ * Panels reuse seat keys across rounds, so preparing entry seats must not fail
+ * when a grant for the same (activity, seat key) was already created.
+ */
+export async function ensureJudgeEntrySeat(
+  trx: Kysely<Database>,
+  input: StoredJudgeEntrySeat,
+): Promise<void> {
+  await trx.insertInto("judge_seat_grant").values({
+    id: input.id,
+    activity_id: input.activityId,
+    seat_key: input.seatKey,
+    judge_id: input.judgeId ?? null,
+    state: input.state,
+    session_id: input.sessionId ?? null,
+    revision: input.revision,
+  }).onConflict((conflict) => conflict.columns(["activity_id", "seat_key"]).doNothing()).execute();
+}
+
+export async function claimJudgeEntrySeat(
+  trx: Kysely<Database>,
+  seat: StoredJudgeEntrySeat,
+  judgeId: string,
+  sessionId: string,
+): Promise<void> {
+  await trx.updateTable("judge_seat_grant").set({
+    judge_id: judgeId,
+    state: "claimed",
+    session_id: sessionId,
+    revision: seat.revision + 1,
+    updated_at: new Date(),
+  }).where("id", "=", seat.id).where("state", "=", "available").executeTakeFirstOrThrow();
+}
+
+export async function insertJudgeSession(
+  trx: Kysely<Database>,
+  input: {
+    readonly id: string;
+    readonly activity_id: string;
+    readonly seat_id: string;
+    readonly actor_id: string;
+    readonly token_digest: string;
+    readonly expires_at: Date | string;
+    readonly revoked_at: Date | string | null;
+    readonly created_at?: Date;
+  },
+): Promise<void> {
+  await trx.insertInto("judge_session").values({
+    id: input.id,
+    activity_id: input.activity_id,
+    seat_id: input.seat_id,
+    actor_id: input.actor_id,
+    token_digest: input.token_digest,
+    expires_at: input.expires_at,
+    revoked_at: input.revoked_at,
+  }).execute();
+}
+
+export async function getJudgeSessionForUpdate(
+  trx: Kysely<Database>,
+  tokenDigest: string,
+): Promise<StoredJudgeSession | null> {
+  const row = await trx.selectFrom("judge_session").selectAll().where("token_digest", "=", tokenDigest).forUpdate().executeTakeFirst();
+  return row === undefined ? null : judgeSession(row);
+}
+
+export async function findJudgeSession(
+  db: Kysely<Database>,
+  tokenDigest: string,
+): Promise<StoredJudgeSession | null> {
+  const row = await db.selectFrom("judge_session").selectAll().where("token_digest", "=", tokenDigest).executeTakeFirst();
+  return row === undefined ? null : judgeSession(row);
+}
+
+export async function getJudgeEntryForUpdate(
+  trx: Kysely<Database>,
+  activityId: string,
+): Promise<{ readonly activityId: string; readonly publicCode: string; readonly open: boolean; readonly version: number } | null> {
+  const row = await trx.selectFrom("activity").select(["id", "public_code", "judge_entry_open", "judge_entry_version"]).where("id", "=", activityId).forUpdate().executeTakeFirst();
+  return row === undefined ? null : { activityId: row.id, publicCode: row.public_code, open: row.judge_entry_open, version: row.judge_entry_version };
+}
+
+export async function findActivityByPublicCodeAndVersion(
+  db: Kysely<Database>,
+  publicCode: string,
+  version: number,
+): Promise<{ readonly activityId: string; readonly publicCode: string; readonly version: number } | null> {
+  const row = await db.selectFrom("activity").select(["id", "public_code", "judge_entry_version"]).where("public_code", "=", publicCode).where("judge_entry_version", "=", version).executeTakeFirst();
+  return row === undefined ? null : { activityId: row.id, publicCode: row.public_code, version: row.judge_entry_version };
+}
+
+export async function updateJudgeEntry(
+  trx: Kysely<Database>,
+  activityId: string,
+  input: { readonly open: boolean; readonly version: number },
+): Promise<void> {
+  await trx.updateTable("activity").set({ judge_entry_open: input.open, judge_entry_version: input.version }).where("id", "=", activityId).executeTakeFirstOrThrow();
+}
+
+export async function getTicketAccessSessionForUpdate(
+  trx: Kysely<Database>,
+  tokenDigest: string,
+): Promise<Selectable<TicketAccessSessionRow> | null> {
+  return (await trx.selectFrom("ticket_access_session").selectAll().where("token_digest", "=", tokenDigest).forUpdate().executeTakeFirst()) ?? null;
+}
+
+export async function getTicketAccessSessionByIdForUpdate(
+  trx: Kysely<Database>,
+  id: string,
+): Promise<Selectable<TicketAccessSessionRow> | null> {
+  return (await trx.selectFrom("ticket_access_session").selectAll().where("id", "=", id).forUpdate().executeTakeFirst()) ?? null;
+}
+
+export async function revokeTicketAccessSession(
+  trx: Kysely<Database>,
+  id: string,
+  revokedAt: string,
+): Promise<void> {
+  await trx.updateTable("ticket_access_session").set({ revoked_at: revokedAt }).where("id", "=", id).where("revoked_at", "is", null).executeTakeFirstOrThrow();
+}
+
+export async function findTicketAccessSession(
+  db: Kysely<Database>,
+  tokenDigest: string,
+): Promise<{ readonly id: string; readonly activityId: string; readonly ticketId: string; readonly expiresAt: string; readonly revokedAt?: string } | null> {
+  const row = await db.selectFrom("ticket_access_session").selectAll().where("token_digest", "=", tokenDigest).executeTakeFirst();
+  if (row === undefined) return null;
+  const expiresAt = iso(row.expires_at) ?? "";
+  const revokedAt = iso(row.revoked_at);
+  return {
+    id: row.id,
+    activityId: row.activity_id,
+    ticketId: row.ticket_id,
+    expiresAt,
+    ...(revokedAt === null ? {} : { revokedAt }),
+  };
+}
+
+export async function insertTicketAccessSession(
+  trx: Kysely<Database>,
+  input: {
+    readonly id: string;
+    readonly activity_id: string;
+    readonly ticket_id: string;
+    readonly token_digest: string;
+    readonly expires_at: Date | string;
+    readonly last_seen_at: Date | string | null;
+    readonly revoked_at: Date | string | null;
+    readonly created_at?: Date;
+  },
+): Promise<void> {
+  await trx.insertInto("ticket_access_session").values({ ...input }).execute();
+}
+
+export async function hasBallotForIdentity(
+  db: Kysely<Database>,
+  sessionId: string,
+  identityDigest: string,
+): Promise<boolean> {
+  const row = await db.selectFrom("ballot")
+    .select("id")
+    .where("session_id", "=", sessionId)
+    .where("identity_type", "=", "browser")
+    .where("identity_digest", "=", identityDigest)
+    .executeTakeFirst();
+  return row !== undefined;
+}
+
+export async function hasBallotForTicket(
+  db: Kysely<Database>,
+  sessionId: string,
+  ticketId: string,
+): Promise<boolean> {
+  const row = await db.selectFrom("ballot")
+    .select("id")
+    .where("session_id", "=", sessionId)
+    .where("identity_type", "=", "ticket")
+    .where("ticket_id", "=", ticketId)
+    .executeTakeFirst();
+  return row !== undefined;
+}
