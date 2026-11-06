@@ -1,61 +1,46 @@
-import { closeDb, createDb, migrate } from "@artflow-plus/db";
-import { assertReleaseProvenance, relayOutboxOnce, startRelayLoop } from "@artflow-plus/runtime";
-import { PgBoss } from "pg-boss";
-
-const RELAY_QUEUE = "outbox-relay";
+import { readWorkerConfig, startWorker } from "./worker.js";
 
 async function main(): Promise<void> {
-  const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
-  if (connectionString === undefined || connectionString.trim() === "") {
-    throw new Error("ARTFLOW_PLUS_DATABASE_URL is required.");
-  }
-  assertReleaseProvenance();
-  const schema = process.env.ARTFLOW_PLUS_DB_SCHEMA;
-
-  const db = createDb({
-    connectionString,
-    ...(schema === undefined || schema === "" ? {} : { schema }),
-  });
-  await migrate(db);
-
-  const boss = new PgBoss({ connectionString, schema: "pgboss" });
-  boss.on("error", (error) => {
-    console.error("pg-boss:", error);
-  });
-  await boss.start();
-  await boss.createQueue(RELAY_QUEUE);
-  // Cron is minute-granular: this is the recovery backstop, not the latency path.
-  await boss.schedule(RELAY_QUEUE, "* * * * *", {});
-  await boss.work(RELAY_QUEUE, async () => {
-    await relayOutboxOnce(db);
-  });
-
-  const stopLoop = startRelayLoop(() => relayOutboxOnce(db), {
-    intervalMs: 250,
-    onError: (error) => {
-      console.error("outbox relay:", error);
-    },
-  });
-
+  const config = readWorkerConfig();
+  const handle = await startWorker(config);
   let stopping = false;
-  const shutdown = async (): Promise<void> => {
+
+  const shutdown = (reason: string): void => {
     if (stopping) return;
     stopping = true;
-    stopLoop();
-    await boss.stop();
-    await closeDb(db);
+    console.log(JSON.stringify({ event: "worker.stopping", reason }));
+    void handle
+      .stop()
+      .then(() => {
+        console.log(JSON.stringify({ event: "worker.stopped" }));
+        process.exit(0);
+      })
+      .catch((error: unknown) => {
+        console.error(JSON.stringify({ event: "worker.stopFailed", error: String(error) }));
+        process.exit(1);
+      });
   };
-  process.once("SIGINT", () => {
-    void shutdown().then(() => process.exit(0));
-  });
-  process.once("SIGTERM", () => {
-    void shutdown().then(() => process.exit(0));
-  });
 
-  console.log("ArtFlow-Plus worker started.");
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+
+  const fatal = (event: string) => (error: unknown): void => {
+    console.error(JSON.stringify({ event, error: String(error) }));
+    shutdown(event);
+  };
+  process.on("unhandledRejection", fatal("worker.unhandledRejection"));
+  process.on("uncaughtException", fatal("worker.uncaughtException"));
+
+  console.log(
+    JSON.stringify({
+      event: "worker.started",
+      relayIntervalMs: config.relayIntervalMs,
+      shutdownTimeoutMs: config.shutdownTimeoutMs,
+    }),
+  );
 }
 
 void main().catch((error: unknown) => {
-  console.error(error);
+  console.error(JSON.stringify({ event: "worker.startFailed", error: String(error) }));
   process.exit(1);
 });

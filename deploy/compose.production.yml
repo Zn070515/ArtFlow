@@ -324,6 +324,13 @@ services:
       APP_ENV: production
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA}
       ARTFLOW_PLUS_DATABASE_URL: postgresql://${PLUS_POSTGRES_USER}:${PLUS_POSTGRES_PASSWORD}@plus-db:5432/${PLUS_POSTGRES_DB:-artflow_plus}
+      ARTFLOW_PLUS_WORKER_READY_FILE: /tmp/artflow-worker-ready
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/artflow-worker-ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - artflow_internal
 
