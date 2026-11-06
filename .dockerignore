@@ -13,10 +13,6 @@ plus/packages/*/dist/
 .ruff_cache/
 __pycache__/
 *.py[cod]
-*.sqlite3
-db.sqlite3
-media/
-staticfiles/
 **/var/archives/
 backups/
 logs/

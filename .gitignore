@@ -1,11 +1,8 @@
-# Python
+# Python gate tooling
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-
-# Virtual environment
-venv/
 .venv/
 .pytest_cache/
 .mypy_cache/
@@ -14,53 +11,40 @@ venv/
 .coverage.*
 htmlcov/
 
-# Django
-*.log
-local_settings.py
-# Any SQLite database, whatever it happens to be called, plus its journal/wal
-# siblings. Never commit a SQLite database.
-*.sqlite3
-*.sqlite3-*
-media/
-staticfiles/
-
 # Local environment files (tracked templates are explicit exceptions)
 .env
 .env.*
 !.env.example
 !.env.production.example
-!.env.event.example
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Node / Tailwind
+# Node
 node_modules/
 dist/
-# The root npm workspace is the v1 line; pnpm only manages plus/, and pnpm 12
-# writes a package-manager lockfile at the root when invoked there.
+# pnpm 12 writes a package-manager lockfile at the root when invoked there.
 /pnpm-lock.yaml
+
 # ArtFlow-Plus build output
 plus/packages/domain/dist/
-# ArtFlow-Plus sealed archive packages (local volume)
+# ArtFlow-Plus sealed archive packages and local volumes
 plus/var/
 plus/apps/api/var/
 # Generated E2E seed handoff
 plus/apps/web/.e2e-live.json
-plus/apps/web/.e2e-legacy.json
-!static/dist/
-!static/dist/rapid_score.js
-!static/dist/*.js
-backups/
 
+# Runtime artifacts
+*.sqlite3
+media/
+backups/
 logs/**
 test-results/
 .playwright-mcp/
+*.log
 
 docs/advices/**
 docs/superpowers/**

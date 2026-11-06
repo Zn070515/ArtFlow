@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_ENV_EXAMPLES = {
     ".env.example",
     ".env.production.example",
-    ".env.event.example",
 }
 
 
@@ -34,7 +33,16 @@ def test_no_secrets_or_runtime_data_are_tracked() -> None:
             offenders.append(path)
         elif name.endswith((".sqlite3", ".db", ".pem", ".key")):
             offenders.append(path)
-        elif path.startswith(("media/", "staticfiles/", "backups/", "logs/", "test-results/")):
+        elif path.startswith(
+            (
+                "backups/",
+                "logs/",
+                "test-results/",
+                ".playwright-mcp/",
+                "plus/var/",
+                "plus/apps/api/var/",
+            )
+        ):
             if not path.endswith(".gitkeep"):
                 offenders.append(path)
         elif name.endswith((".zip", ".log")):
@@ -48,5 +56,14 @@ def test_gitignore_still_covers_the_runtime_roots() -> None:
         for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.startswith("#")
     }
-    for required in (".env", "*.sqlite3", "media/", "staticfiles/", "backups/", "logs/**"):
+    for required in (
+        ".env",
+        "node_modules/",
+        "dist/",
+        "backups/",
+        "logs/**",
+        "test-results/",
+        "plus/var/",
+        "plus/apps/api/var/",
+    ):
         assert required in patterns, f".gitignore lost {required!r}"

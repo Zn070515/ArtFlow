@@ -1,44 +1,15 @@
 [project]
-name = "artflow"
+name = "artflow-gates"
 version = "0.1.0"
-description = "ArtFlow student arts department activity operations platform"
-readme = "README.md"
+description = "Structural and documentation gates for the ArtFlow-Plus repository"
 requires-python = ">=3.12,<3.14"
-dependencies = [
-    "asgiref==3.11.1",
-    "channels>=4.3,<5",
-    "channels-redis>=4.3,<5",
-    "daphne>=4.2,<5",
-    "django==6.0.8",
-    "et-xmlfile==2.0.0",
-    "openpyxl==3.1.5",
-    "pillow==12.3.0",
-    "psycopg2-binary==2.9.12",
-    "python-docx==1.1.2",
-    "python-dotenv>=1.0",
-    "qrcode==8.2",
-    "redis>=6,<7",
-    "reportlab>=5.0.1",
-    "sqlparse==0.6.0",
-    "tzdata==2026.2",
-    "whitenoise>=6.9,<7",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
-    "pytest-cov>=6.0",
-    "pytest-django>=4.11",
-    "pytest-xdist>=3.6",
-    "ruff>=0.11",
-    "mypy>=1.15",
-    "django-stubs>=5.2",
     "pyyaml>=6.0.3",
-    "types-openpyxl>=3.1.5.20260807",
-    "types-qrcode>=8.2.0.20260518",
-]
-production = [
-    "gunicorn>=23; sys_platform != 'win32'",
+    "ruff>=0.11",
 ]
 
 [tool.uv]
@@ -47,204 +18,12 @@ package = false
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = [
-    "accounts",
-    "archive",
-    "common",
-    "config",
-    "core",
-    "entry_access",
-    "exports",
-    "farewell_show",
-    "files",
-    "incidents",
-    "public_portal",
-    "questionnaire",
-    "realtime",
-    "ruleset",
-    "singer_contest",
-    "staff_panel",
-    "scripts",
-    "tickets",
-    "voting",
-    "tests",
-]
-extend-exclude = [
-    "**/migrations/*.py",
-    "**/__pycache__/**",
-    "media/**",
-    "staticfiles/**",
-    # Planning/advice docs are prose with illustrative Python snippets, not source
-    # code; formatting them just to satisfy the repo-wide gate adds churn without
-    # improving anything. Mirrors the non-source excludes above.
-    "docs/**",
-]
+src = ["scripts", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
-[tool.ruff.format]
-exclude = [
-    "**/migrations/*.py",
-    "**/__pycache__/**",
-    "media/**",
-    "staticfiles/**",
-]
-
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings"
-python_files = ["tests.py", "test_*.py", "*_tests.py"]
-addopts = "-ra --strict-markers"
-filterwarnings = ["error"]
-markers = [
-    "postgresql: tests that require PostgreSQL database semantics",
-]
-
-[tool.coverage.run]
-branch = true
-source = [
-    "accounts",
-    "archive",
-    "common",
-    "config",
-    "core",
-    "entry_access",
-    "exports",
-    "farewell_show",
-    "files",
-    "incidents",
-    "public_portal",
-    "questionnaire",
-    "realtime",
-    "ruleset",
-    "singer_contest",
-    "staff_panel",
-    "tickets",
-    "voting",
-]
-omit = [
-    "*/migrations/*",
-    "*/__pycache__/*",
-    "media/*",
-    "*/media/*",
-    "staticfiles/*",
-    "*/staticfiles/*",
-]
-
-[tool.coverage.report]
-fail_under = 75
-exclude_also = [
-    "if TYPE_CHECKING:",
-    "if __name__ == .__main__.:",
-    "raise NotImplementedError",
-]
-
-[tool.mypy]
-plugins = ["mypy_django_plugin.main"]
-files = [
-    "accounts",
-    "archive",
-    "common",
-    "config",
-    "core",
-    "entry_access",
-    "exports",
-    "farewell_show",
-    "files",
-    "incidents",
-    "public_portal",
-    "questionnaire",
-    "ruleset",
-    "realtime",
-    "singer_contest",
-    "staff_panel",
-    "scripts",
-    "tests",
-    "tickets",
-    "voting",
-]
-# `scripts` is a directory of standalone tools, not a package: without this, mypy sees
-# `scripts/verify_private_test_package.py` both as the top-level module the tests import
-# and as `scripts.verify_private_test_package`, and refuses to check the directory at all.
-explicit_package_bases = true
-check_untyped_defs = true
-disallow_untyped_defs = false
-disallow_untyped_calls = false
-warn_unused_configs = true
-
-[[tool.mypy.overrides]]
-module = [
-    "config",
-    "config.*",
-    "common",
-    "common.*",
-    "accounts.management",
-    "accounts.management.*",
-    "public_portal.management",
-    "public_portal.management.*",
-]
-# `strict` itself is global-only in mypy. Keep its compatible checks scoped to
-# the modules that are ready for them while annotation enforcement is gradual.
-disallow_any_generics = true
-disallow_subclassing_any = true
-disallow_incomplete_defs = true
-disallow_untyped_calls = true
-disallow_untyped_defs = true
-disallow_untyped_decorators = true
-warn_unused_ignores = true
-warn_return_any = true
-no_implicit_reexport = true
-strict_equality = true
-extra_checks = true
-
-[[tool.mypy.overrides]]
-# Preserve gradual typing for existing business views and legacy test modules.
-# Production config/common helpers and the approved management namespaces remain strict.
-module = [
-    "common.views",
-    "common.tests",
-    # Legacy black-box characterization suites: these introspect runtime behaviour
-    # rather than annotate a domain API, so strict untyped-call/def enforcement only
-    # churns them without adding safety. Treated like common.tests (gradual).
-    "common.test_characterization",
-    "common.test_contest_domain_characterization",
-    # The authority matrix deliberately invokes dynamic Django model/Admin entry
-    # points across applications. Its runtime contracts are covered by the matrix;
-    # gradual typing avoids false positives from dynamically generated managers.
-    "common.test_authority_matrix",
-    "config.tests",
-    # Private rehearsal loaders and their tests are data-shaping boundaries. They are
-    # covered by the private-package contract tests and remain gradual while the
-    # production authority/services code stays under the project type gates.
-    "common.private_test_fixture",
-    "common.private_test_loader",
-    "common.private_test_questionnaire",
-    # The browser-fixture command shapes disposable test rows through models whose
-    # managers are built from `models.Manager.from_queryset(...)`, which mypy cannot see
-    # a `create` on. It is a data-shaping boundary like the loaders above, covered by the
-    # layout spec rather than by an annotated domain API.
-    "common.management.commands.prepare_layout_e2e",
-    "common.test_private_test_fixture",
-    "common.test_private_test_loader",
-    "common.test_private_test_questionnaire",
-]
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-disallow_untyped_defs = false
-disallow_any_generics = false
-disallow_subclassing_any = false
-disallow_untyped_decorators = false
-warn_unused_ignores = false
-warn_return_any = false
-no_implicit_reexport = false
-strict_equality = false
-extra_checks = false
-check_untyped_defs = false
-
-[tool.django-stubs]
-django_settings_module = "config.settings"
-
-[dependency-groups]
-dev = [
-    "pyright>=1.1,<2",
-]
+python_files = ["test_*.py"]
+testpaths = ["tests/gates", "scripts/tests"]
+addopts = "-ra"

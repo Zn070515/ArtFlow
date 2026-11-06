@@ -1,20 +1,6 @@
-# Gitleaks config: keep the built-in rule set but allowlist the false positives
-# the generic-api-key rule produces on Python identifiers. Both entries below are
-# names, not credentials: the rule looks for ``<something with "key"> = <value>``
-# and a module-level constant qualifies as both sides of that shape.
-#
-# The scan covers every reachable commit, so an allowlist is the only way to clear
-# a finding in history — editing the source now would leave it in the scan.
+# Gitleaks config. The active tree scan uses the built-in rule set. The
+# archived v1 history is preserved in tag v1.0.2; a full-history audit is a
+# separate, explicit exercise rather than a per-push gate.
 
 [extend]
 useDefault = true
-
-[allowlist]
-description = "Python identifiers that the generic-api-key rule reads as key/value pairs"
-regexes = [
-    # ORM kwarg shorthand in singer_contest/services.py.
-    'computed_by=computed_by',
-    # An import list in staff_panel/views.py (commit 6f4ebb6): the rule reads
-    # ``..._KEY, LIVE_2026_PODIUM_KEYS`` as a key/value pair.
-    'LIVE_2026_PODIUM_KEYS',
-]
