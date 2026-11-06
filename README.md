@@ -102,7 +102,7 @@ pnpm --filter @artflow-plus/web dev     # Vite 代理 /api 到 API
 | [`docs/artflow-plus/shape-validation.md`](docs/artflow-plus/shape-validation.md) | 三类活动验证与明确缺口 |
 | [`docs/artflow-plus/skeleton-coverage.md`](docs/artflow-plus/skeleton-coverage.md) | v1 → v2 功能覆盖审计与待办缺口 |
 | [`docs/artflow-plus/frontend-design-direction.md`](docs/artflow-plus/frontend-design-direction.md) | Portal / Console 双壳视觉方向与桌面布局规格 |
-| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0036） |
+| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0037） |
 | [`docs/invariants/`](docs/invariants/README.md) | 领域不变量（AUTH/LIFE/CONC/SCOR/RES/TICK/GRP/RT/DEPL） |
 | [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / realtime） |
 | [`docs/gates/`](docs/gates/README.md) | 结构/golden/架构门禁 |

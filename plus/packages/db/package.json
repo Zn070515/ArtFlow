@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "schema:check": "node scripts/schema-check.mjs"
   },
   "dependencies": {
     "@artflow-plus/domain": "workspace:*",

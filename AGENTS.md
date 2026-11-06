@@ -41,6 +41,8 @@ The API migrates on start. Browser E2E uses the `artflow_e2e` schema and `worker
 
 - TypeScript: strict, ESM, `.js` import suffixes. Keep capability code dependent on its own module and the engine only; never import another capability's internals.
 - Domain logic stays pure; runtime services own transactions and projections; API routes translate HTTP and never invent authority.
+- HTTP registration lives in `plus/apps/api/src/routes/<surface>.ts`; each module exports `registerXRoutes(ctx: ApiContext)`. `app.ts` keeps construction, hooks, CSRF, error mapping, and the realtime server only. `tests/gates/test_plus_route_modules.py` enforces the boundary.
+- `db/src/types.ts` and `db/src/migrations.ts` are two descriptions of one schema. Update both for any schema change and run `pnpm -C plus run schema:check`; the drift gate compares tables, columns, and nullability against a migrated PostgreSQL schema.
 - React components use PascalCase files for routes/components and camelCase for helpers; shared contracts come from `@artflow-plus/contracts`.
 - Python that remains in the 1.x tree follows Django conventions and is migration-only until deletion.
 

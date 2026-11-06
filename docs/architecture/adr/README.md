@@ -41,6 +41,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0034](0034-portal-console-shell-split.md) | 公开 Portal 与运营 Console 双壳；品牌 token 共享，页面骨架与动效分离 | proposed |
 | [0035](0035-participant-account-claim.md) | 通过一次性 fragment Claim 认领导入的参与者身份 | superseded by 0036 |
 | [0036](0036-single-main-line.md) | main 单线承载 v2；删除 v1 兼容层，Django 源码待审核后删除 | accepted |
+| [0037](0037-http-route-modules-and-schema-drift.md) | HTTP 路由按 surface 拆模块；schema drift gate 阻断类型/迁移漂移 | accepted |
 
 新增 ADR 的规则：
 

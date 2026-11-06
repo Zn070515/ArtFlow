@@ -138,6 +138,24 @@ Console 是新壳，不复用 Portal 的 hero 骨架：
 
 禁止在业务组件中新增十六进制色值；所有状态色进 token。
 
+### 6.1.1 候选方向：紫色系（待定）
+
+维护者偏好腾讯众测平台那种紫色调。这是**候选方向**，不是已采用的主题；落地前需要
+参考页面/截图，并同时满足下面的对比度与语义色约束。建议新增独立主题，而不是改写
+现有 `afterglow` / `signal`：
+
+```text
+--color-page            深紫黑底（例如 #0d0916 区间）
+--color-surface         低饱和紫灰卡片
+--color-accent          品牌紫（主操作、active）
+--color-accent-strong   浅紫高光（focus、关键数值）
+--color-accent-contrast 深色文字，保证按钮对比度
+--success/warning/danger/info  保持现有语义，不紫化
+```
+
+验收：`theme-contrast.test.ts` 的全组合通过；Portal 的 three.js 装饰仍可降级；Console
+不引入紫色装饰动效。参考链接与最终色值确定后再写入 `tokens.css`。
+
 ### 6.2 字号
 
 | 用途 | Portal | Console |
