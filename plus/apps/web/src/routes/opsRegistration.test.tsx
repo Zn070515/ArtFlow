@@ -21,10 +21,6 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: useParamsMock,
 }));
 
-vi.mock("../api/ops.js", () => ({
-  issueParticipantClaim: vi.fn(),
-}));
-
 vi.mock("../api/registrations.js", () => ({
   fetchRegistrationDetail: vi.fn(),
 }));

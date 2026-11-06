@@ -89,19 +89,6 @@ describe("PortalShell and ConsoleShell", () => {
     expect(screen.queryByTestId("aurora-scene")).not.toBeInTheDocument();
   });
 
-  it("does not mount a decorative scene for participant claim routes", () => {
-    locationMock.mockReturnValue({ pathname: "/claim" });
-
-    render(
-      <PortalShell>
-        <p>claim page</p>
-      </PortalShell>,
-    );
-
-    expect(screen.queryByTestId("aurora-scene")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("static-backdrop")).not.toBeInTheDocument();
-  });
-
   it.each([
     ["/judge/public-code", "Judge · 评分"],
     ["/join", "报名 · 参与者"],

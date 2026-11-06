@@ -33,14 +33,6 @@ export type OpsRoster =
 
 export type ReviewStatus = "approved" | "need_supplement" | "rejected";
 
-export interface ParticipantClaimIssue {
-  readonly token: string | null;
-  readonly activityId: string;
-  readonly publicCode: string;
-  readonly title: string;
-  readonly expiresAt: string;
-}
-
 export async function fetchOpsActivities(): Promise<readonly OpsActivitySummary[]> {
   const response = await apiFetch<{ activities: readonly OpsActivitySummary[] }>("/api/activities");
   return response.activities;
@@ -88,20 +80,5 @@ export function finalizeRoster(
     headers: { "idempotency-key": commandId },
     body: JSON.stringify({ expectedRevision }),
   });
-}
-
-export function issueParticipantClaim(
-  activityId: string,
-  registrationId: string,
-  commandId: string,
-): Promise<ParticipantClaimIssue> {
-  return apiFetch<ParticipantClaimIssue>(
-    `/api/activities/${encodeURIComponent(activityId)}/registrations/${encodeURIComponent(registrationId)}/account-claim`,
-    {
-      method: "POST",
-      headers: { "idempotency-key": commandId },
-      body: "{}",
-    },
-  );
 }
 

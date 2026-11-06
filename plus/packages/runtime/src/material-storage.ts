@@ -30,17 +30,9 @@ function inside(base: string, relative: string): string {
   return path;
 }
 
-/**
- * Local material storage. New content lives under `private/<activity>/<blob>`;
- * a read-only legacy root serves v1 files during operational adoption so staff
- * can still open the migrated accompaniment before media is re-uploaded.
- */
-export function createLocalMaterialStorage(input: {
-  readonly root: string;
-  readonly legacyRoot?: string;
-}): MaterialStorage {
+/** Local material storage. Content lives under `private/<activity>/<blob>`. */
+export function createLocalMaterialStorage(input: { readonly root: string }): MaterialStorage {
   const base = resolve(input.root);
-  const legacyBase = input.legacyRoot === undefined ? undefined : resolve(input.legacyRoot);
 
   async function write(key: string, bytes: Uint8Array): Promise<void> {
     if (!key.startsWith("private/")) throw new Error(`Unsafe material key: ${key}`);
@@ -69,12 +61,6 @@ export function createLocalMaterialStorage(input: {
       if (key.startsWith("private/")) {
         return await readFile(inside(base, key.slice("private/".length)));
       }
-      if (key.startsWith("legacy-file:")) {
-        if (legacyBase === undefined) {
-          throw new Error("The legacy media root is not configured.");
-        }
-        return await readFile(inside(legacyBase, key.slice("legacy-file:".length)));
-      }
       throw new Error("The material has no stored bytes.");
     },
     async remove(key) {
@@ -82,7 +68,7 @@ export function createLocalMaterialStorage(input: {
         await rm(inside(base, key.slice("private/".length)), { force: true });
         return;
       }
-      throw new Error("Legacy material bytes are read-only.");
+      throw new Error("The material has no stored bytes.");
     },
   };
 }

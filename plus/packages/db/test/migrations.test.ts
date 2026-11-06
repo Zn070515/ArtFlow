@@ -59,7 +59,7 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
     ]);
   });
 
-  it("creates participant claim and identity-link tables", async () => {
+  it("drops the participant claim and identity-link tables", async () => {
     const tables = await sql<{ table_name: string }>`
       select table_name
         from information_schema.tables
@@ -67,38 +67,7 @@ describe.skipIf(!connectionString)("migration 0002 on PostgreSQL", () => {
          and table_name in ('participant_claim', 'participant_identity_link')
        order by table_name
     `.execute(db);
-    expect(tables.rows.map((row) => row.table_name)).toEqual([
-      "participant_claim",
-      "participant_identity_link",
-    ]);
-
-    const indexes = await sql<{ indexname: string }>`
-      select indexname
-        from pg_indexes
-       where schemaname = current_schema()
-         and indexname in (
-           'participant_claim_token_digest_key',
-           'participant_claim_registration_idx',
-           'participant_claim_active_registration_key',
-           'participant_identity_link_actor_key'
-         )
-       order by indexname
-    `.execute(db);
-    expect(indexes.rows.map((row) => row.indexname)).toEqual([
-      "participant_claim_active_registration_key",
-      "participant_claim_registration_idx",
-      "participant_claim_token_digest_key",
-      "participant_identity_link_actor_key",
-    ]);
-
-    const claimColumns = await sql<{ column_name: string }>`
-      select column_name
-        from information_schema.columns
-       where table_schema = current_schema()
-         and table_name = 'participant_claim'
-         and column_name = 'revoked_at'
-    `.execute(db);
-    expect(claimColumns.rows.map((row) => row.column_name)).toEqual(["revoked_at"]);
+    expect(tables.rows).toEqual([]);
   });
 
   it("adds the hardening columns", async () => {

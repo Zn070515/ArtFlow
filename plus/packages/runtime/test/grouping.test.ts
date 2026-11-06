@@ -376,7 +376,7 @@ describe.skipIf(!connectionString)("grouping lifecycle", () => {
       source_candidate_revision: 1,
       input_fingerprint: "fingerprint",
       source: JSON.stringify({
-        kind: "legacy_import",
+        kind: "podium_candidate",
         aggregateId: "stage-result-1",
         definitionVersion: 1,
         releaseHash: "grouping-release",

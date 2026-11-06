@@ -153,10 +153,7 @@ export async function markConsumedResultsStale(
   return marked;
 }
 
-/**
- * Recomputes the source fingerprint for a confirmed result and fails when the
- * source moved after confirmation. Legacy imports have no live source.
- */
+/** Recomputes the source fingerprint for a confirmed result and fails when the source moved after confirmation. */
 export function requireSourceFingerprint(
   result: StoredStageResult,
   currentFingerprint: string,
@@ -164,7 +161,6 @@ export function requireSourceFingerprint(
   if (result.staleAt !== undefined) {
     throw new DomainError("RESULT_STALE", "The result source changed after confirmation; reconfirm it.");
   }
-  if (result.source?.kind === "legacy_import") return;
   if (currentFingerprint !== result.inputFingerprint) {
     throw new DomainError("RESULT_STALE", "The result source changed after confirmation; reconfirm it.");
   }

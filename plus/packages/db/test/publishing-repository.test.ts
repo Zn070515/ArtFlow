@@ -61,7 +61,7 @@ async function seed(activityId: string, publicCode: string): Promise<void> {
     sourceCandidateRevision: 3,
     inputFingerprint: "fp-1",
     source: {
-      kind: "legacy_import",
+      kind: "podium_candidate",
       aggregateId: `stage-${activityId}`,
       definitionVersion: 1,
       releaseHash: "repo-release",
@@ -168,7 +168,7 @@ describe.skipIf(!connectionString)("publishing repository", () => {
 
     await db.updateTable("stage_result").set({
       source: JSON.stringify({
-        kind: "legacy_import",
+        kind: "podium_candidate",
         aggregateId: `stage-${activityId}`,
         definitionVersion: 1,
         releaseHash: "repo-release",

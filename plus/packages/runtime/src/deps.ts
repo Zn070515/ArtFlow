@@ -44,9 +44,6 @@ export function defaultRuntimeDeps(): RuntimeDeps {
     ),
     materialStorage: createLocalMaterialStorage({
       root: process.env.ARTFLOW_PLUS_MEDIA_DIR ?? resolve(process.cwd(), "var/media"),
-      ...(process.env.ARTFLOW_PLUS_LEGACY_MEDIA_DIR === undefined
-        ? {}
-        : { legacyRoot: process.env.ARTFLOW_PLUS_LEGACY_MEDIA_DIR }),
     }),
   };
 }

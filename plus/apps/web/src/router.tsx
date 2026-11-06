@@ -4,7 +4,6 @@ import { Landing } from "./routes/index.js";
 import { JoinPage } from "./routes/join.js";
 import { JoinActivityPage } from "./routes/joinActivity.js";
 import { JudgePage } from "./routes/judge.js";
-import { ClaimPage } from "./routes/claim.js";
 import { LivePage } from "./routes/live.js";
 import { LiveActivityPage } from "./routes/liveActivity.js";
 import { LoginPage } from "./routes/login.js";
@@ -51,12 +50,6 @@ const joinActivityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/join/$publicCode",
   component: JoinActivityPage,
-});
-
-const claimRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/claim",
-  component: ClaimPage,
 });
 
 const opsRoute = createRoute({
@@ -128,7 +121,6 @@ const routeTree = rootRoute.addChildren([
   loginRoute,
   joinRoute,
   joinActivityRoute,
-  claimRoute,
   opsRoute,
   opsActivityRoute,
   opsRegistrationRoute,

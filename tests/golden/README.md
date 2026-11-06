@@ -8,9 +8,9 @@
 → 期望的领域事件 / 拒绝原因 / 读模型
 ```
 
-fixture 不绑定 Django、TypeScript 或数据库；v1 的回归测试和 Plus 的 contract
-test 都消费同一份输入/期望。这样“旧实现”和“新实现”验证的是同一条规则，而
-不是两套各自为政的测试。
+fixture 不绑定 Django、TypeScript 或数据库；Plus 的 contract test 直接消费
+输入/期望。v1 的 Django 适配器已随 legacy 兼容层移除，fixture 本身继续作为
+v2 的长期业务样例。
 
 这些 fixture 来自 v1 的行为证据，不是 v2 的架构规范。v1 的 Activity 阶段/
 单一流程在 v2 中可能被表达为多个 capability 生命周期与 execution scopes；
@@ -33,22 +33,7 @@ Plus 适配器负责把同一业务事实映射到新的命令词汇，而不能
 uv run python tests/golden/validate_fixtures.py
 ```
 
-## v1 适配器
-
-[`v1_adapter.py`](v1_adapter.py) 把 `result-release-lifecycle` 的稳定事实映射到
-v1 的 Django 对象，调用真实的 `release_result_post` / `revoke_result_release` /
-`unlock_stage_result`，再按 fixture 的期望比较。拒绝步骤用 `GoldenRejected`
-返回原因码，并断言读模型没有变化。
-
-[`test_v1_fixtures.py`](test_v1_fixtures.py) 运行已适配的 fixture；尚无适配器的
-fixture 在 `V1_COVERAGE` 里记录对应的 v1 套件，保证“还没适配”是可见状态，而
-不是被跳过。
-
-```powershell
-uv run python manage.py test tests.golden
-```
-
-Plus runtime 的 M4 adapter 也消费同一份 `unknown-roster.json`：
+Plus runtime 的 M4 adapter 消费同一份 `unknown-roster.json`：
 
 ```powershell
 $env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
@@ -70,8 +55,7 @@ commands 验证唯一 score fact、重复代录无副作用、原事实编辑和
 
 ## 规则
 
-1. 每个真实事故在 v1 修复后，追加一个 fixture；失败输入和期望拒绝原因都要
-   写清楚。
+1. 每个真实事故在修复后，追加一个 fixture；失败输入和期望拒绝原因都要写清楚。
 2. fixture 中的 ID 使用稳定的业务键，不使用数据库自增 ID。
 3. 时间、随机数和指纹通过显式字段给出，避免“跑两次结果不同”。
 4. 期望拒绝时，必须同时断言原因码和“没有产生副作用”。

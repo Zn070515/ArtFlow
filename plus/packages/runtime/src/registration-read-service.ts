@@ -17,7 +17,7 @@ import {
   listMaterials,
   listRegistrations,
 } from "@artflow-plus/db";
-import { DomainError, hasPermission } from "@artflow-plus/domain";
+import { canActFor, DomainError, hasPermission } from "@artflow-plus/domain";
 import type {
   CompiledQuestionnaireArtifact,
   QuestionnaireFileSlot,
@@ -25,7 +25,6 @@ import type {
 import type { Kysely } from "kysely";
 
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
-import { canActForParticipant, participantSubjectIds } from "./participant-identity.js";
 
 export interface PublicActivity {
   readonly id: string;
@@ -130,7 +129,7 @@ export async function getMyRegistration(
   activityId: string,
 ): Promise<StoredRegistration | null> {
   const actor = runtimeActor(deps);
-  return getRegistrationByParticipants(db, activityId, await participantSubjectIds(db, actor));
+  return getRegistrationByParticipants(db, activityId, [actor.actorId]);
 }
 
 function materialDto(material: StoredMaterial): RegistrationMaterialDto {
@@ -157,7 +156,7 @@ export async function getRegistrationDetail(
     throw new DomainError("NOT_FOUND", "The registration was not found.");
   }
   const allowed =
-    await canActForParticipant(db, actor, registration.participantId, "registration.manage") ||
+    canActFor(actor, registration.participantId, "registration.manage") ||
     hasPermission(actor, "registration.review");
   if (!allowed) throw new DomainError("FORBIDDEN", "The actor cannot read this registration.");
   const activity = await getActivitySummary(db, activityId);

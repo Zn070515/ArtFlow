@@ -23,7 +23,7 @@ function json(value: unknown): unknown {
 }
 
 export interface StoredResultSource {
-  readonly kind: "podium_candidate" | "vote_session" | "legacy_import";
+  readonly kind: "podium_candidate" | "vote_session";
   readonly aggregateId: string;
   readonly definitionVersion: number;
   readonly releaseHash: string;

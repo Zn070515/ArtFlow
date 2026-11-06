@@ -69,7 +69,7 @@ if (existing === null) {
       sourceCandidateRevision: 3,
       inputFingerprint: "fingerprint-not-public",
       source: {
-        kind: "legacy_import",
+        kind: "podium_candidate",
         aggregateId: "stage-e2e",
         definitionVersion: 1,
         releaseHash: "seed-public-result",
@@ -115,7 +115,7 @@ if (existing === null) {
   // the fail-closed public selector keeps working across repeated runs.
   await db.updateTable("stage_result").set({
     source: JSON.stringify({
-      kind: "legacy_import",
+      kind: "podium_candidate",
       aggregateId: "stage-e2e",
       definitionVersion: 1,
       releaseHash: "seed-public-result",

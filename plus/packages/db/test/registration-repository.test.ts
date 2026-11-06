@@ -90,11 +90,11 @@ describe.skipIf(!connectionString)("registration persistence on PostgreSQL", () 
 
   it("finds a registration by any ordered participant subject", async () => {
     const activityId = await seedActivity();
-    const imported = registration(activityId, "legacy-user:1");
+    const imported = registration(activityId, "participant:imported:1");
     await insertRegistration(db, imported);
 
-    await expect(getRegistrationByParticipants(db, activityId, ["participant:1", "legacy-user:1"]))
-      .resolves.toMatchObject({ id: imported.id, participantId: "legacy-user:1" });
+    await expect(getRegistrationByParticipants(db, activityId, ["participant:1", "participant:imported:1"]))
+      .resolves.toMatchObject({ id: imported.id, participantId: "participant:imported:1" });
     await expect(getRegistrationByParticipants(db, activityId, [])).resolves.toBeNull();
   });
 

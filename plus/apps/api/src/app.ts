@@ -42,7 +42,6 @@ import {
   RenameActivityBodySchema,
   UnarchiveActivityBodySchema,
   RegisterParticipantBodySchema,
-  ParticipantClaimConsumeBodySchema,
   ActivityAnalyticsParamsSchema,
   ActivityAnalyticsResponseSchema,
   AssignTaskBodySchema,
@@ -172,8 +171,6 @@ import {
   getGroupingState,
   recordGroupingGroups,
   setGroupingMaterialWindow,
-  consumeParticipantClaim,
-  issueParticipantClaim,
   getActivityAnalytics,
   ACTIVITY_ANALYTICS_READ_PERMISSIONS,
   assignTask,
@@ -1184,47 +1181,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   );
 
   app.post(
-    "/api/public/participant-claims/consume",
-    {
-      schema: { body: ParticipantClaimConsumeBodySchema },
-      validatorCompiler: compileClosedTypeBoxSchema,
-      config: { access: "public" },
-    },
-    async (request, reply) => {
-      await requirePublicRateLimit(request, "participant-claim-consume", 10);
-      const body = request.body as {
-        token: string;
-        username?: string;
-        password?: string;
-      };
-      const session = await requestSession(request);
-      const consumeDeps: RuntimeDeps = {
-        ...deps,
-        actor: session?.actor ?? SYSTEM_ACTOR,
-      };
-      const outcome = await consumeParticipantClaim(db, consumeDeps, {
-        commandId: requireIdempotency(request),
-        token: body.token,
-        ...(body.username === undefined ? {} : { username: body.username }),
-        ...(body.password === undefined ? {} : { password: body.password }),
-      });
-      const sessionToken = sessionTokenValue(outcome.body.sessionToken);
-      let csrfToken: string | undefined;
-      if (sessionToken !== undefined && !outcome.replayed) {
-        csrfToken = csrfTokenFor(sessionToken, sessionSecret);
-        setSessionCookies(reply, sessionToken, csrfToken);
-      }
-      reply.header("cache-control", "no-store");
-      return reply.status(outcome.status).send({
-        actor: publicActor(outcome.body.actor),
-        publicCode: outcome.body.publicCode,
-        ...(csrfToken === undefined ? {} : { csrfToken }),
-        ...(outcome.body.expiresAt === undefined ? {} : { expiresAt: outcome.body.expiresAt }),
-      });
-    },
-  );
-
-  app.post(
     "/api/public/supplement/claim",
     { schema: { body: Type.Object({ token: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, config: { access: "public" } },
     async (request, reply) => {
@@ -1705,25 +1661,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         activityId: id,
         participantId: body.participantId ?? actor.actorId,
       });
-      return reply.status(outcome.status).send(outcome.body);
-    },
-  );
-
-  app.post(
-    "/api/activities/:id/registrations/:registrationId/account-claim",
-    {
-      schema: { params: RegistrationParams, body: Type.Object({}, { additionalProperties: false }) },
-      validatorCompiler: compileClosedTypeBoxSchema,
-    },
-    async (request, reply) => {
-      const commandId = requireIdempotency(request);
-      const { id, registrationId } = request.params as { id: string; registrationId: string };
-      const outcome = await issueParticipantClaim(db, await requestDeps(request), {
-        commandId,
-        activityId: id,
-        registrationId,
-      });
-      reply.header("cache-control", "no-store");
       return reply.status(outcome.status).send(outcome.body);
     },
   );
