@@ -19,8 +19,7 @@ export function registerAuthRoutes(ctx: ApiContext): void {
   app.post(
     "/api/auth/login",
     { schema: { body: LoginBody } },
-    // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
-    async (request, reply) => {
+    async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       const body = request.body as { username: string; password: string };
       await requirePublicRateLimit(request, "auth-login", 10);
       await requireRateLimit(`auth-login-user:${body.username.trim().toLowerCase()}`, 20);
@@ -40,8 +39,7 @@ export function registerAuthRoutes(ctx: ApiContext): void {
   app.post(
     "/api/auth/token",
     { schema: { body: LoginBody } },
-    // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
-    async (request) => {
+    async (request) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       const body = request.body as { username: string; password: string };
       await requirePublicRateLimit(request, "auth-token", 10);
       await requireRateLimit(`auth-token-user:${body.username.trim().toLowerCase()}`, 20);
