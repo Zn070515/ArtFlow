@@ -97,8 +97,8 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
       pongTimer = setTimeout(() => {
         pongTimer = null;
         socket?.close();
-      }, boundedTimer(pongTimeoutMs));
-    }, boundedTimer(pingIntervalMs));
+      }, boundedTimer(pongTimeoutMs)); // codeql[js/resource-exhaustion] bounded to 1s-120s.
+    }, boundedTimer(pingIntervalMs)); // codeql[js/resource-exhaustion] bounded to 1s-120s.
   }
 
   function dispatch(message: ServerMessage): void {
