@@ -29,6 +29,15 @@ function requestId(): string {
   return `r-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+const MIN_TIMER_MS = 1_000;
+const MAX_TIMER_MS = 120_000;
+
+/** A server-supplied heartbeat value must not create an unbounded timer. */
+function boundedTimer(value: number): number {
+  if (!Number.isFinite(value)) return MIN_TIMER_MS;
+  return Math.min(Math.max(Math.round(value), MIN_TIMER_MS), MAX_TIMER_MS);
+}
+
 export function createRealtimeClient(options: RealtimeClientOptions = {}): RealtimeClient {
   const url = options.url ?? "/api/realtime";
   const listeners = new Set<(fallback: boolean) => void>();
@@ -44,8 +53,10 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
   let pongTimer: ReturnType<typeof setTimeout> | null = null;
-  let pingIntervalMs = options.pingIntervalMs ?? HEARTBEAT.clientPingIntervalMs;
-  let pongTimeoutMs = options.pongTimeoutMs ?? HEARTBEAT.pongTimeoutMs;
+  let pingIntervalMs = boundedTimer(
+    options.pingIntervalMs ?? HEARTBEAT.clientPingIntervalMs,
+  );
+  let pongTimeoutMs = boundedTimer(options.pongTimeoutMs ?? HEARTBEAT.pongTimeoutMs);
 
   function setFallback(next: boolean): void {
     if (fallback === next) return;
@@ -86,16 +97,18 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
       pongTimer = setTimeout(() => {
         pongTimer = null;
         socket?.close();
-      }, pongTimeoutMs);
-    }, pingIntervalMs);
+      }, boundedTimer(pongTimeoutMs));
+    }, boundedTimer(pingIntervalMs));
   }
 
   function dispatch(message: ServerMessage): void {
     if (message.type === "hello") {
       helloReceived = true;
       attempt = 0;
-      pingIntervalMs = options.pingIntervalMs ?? message.clientPingIntervalMs;
-      pongTimeoutMs = options.pongTimeoutMs ?? message.pongTimeoutMs;
+      pingIntervalMs = boundedTimer(
+        options.pingIntervalMs ?? message.clientPingIntervalMs,
+      );
+      pongTimeoutMs = boundedTimer(options.pongTimeoutMs ?? message.pongTimeoutMs);
       setFallback(false);
       // A restarted server may restart sequence numbers; drop stale cursors.
       lastSeq.clear();
