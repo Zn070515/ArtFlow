@@ -1,12 +1,11 @@
 name: Gates
 
-# The v1 production line is frozen on main. These structural gates live on the
-# ArtFlow-Plus line and run for every change that will become v2.
+# main is the ArtFlow-Plus line. These structural gates run for every change.
 on:
   push:
-    branches: [artflow-plus]
+    branches: [main]
   pull_request:
-    branches: [artflow-plus]
+    branches: [main]
   workflow_call:
 
 permissions:
@@ -86,9 +85,6 @@ jobs:
 
       - name: Validate golden fixtures
         run: uv run python tests/golden/validate_fixtures.py
-
-      - name: Run the golden fixtures with a v1 adapter
-        run: uv run python manage.py test tests.golden --noinput
 
       - name: Lint the gate code
         run: uv run ruff check tests/gates tests/golden
