@@ -231,7 +231,7 @@ describe.skipIf(!connectionString)("public vote session", () => {
       activity_id: activityId,
       ticket_id: ticketId,
       token_digest: stableHash(accessToken),
-      expires_at: "2026-10-29T09:00:00Z",
+      expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       last_seen_at: null,
       revoked_at: null,
     }).execute();
