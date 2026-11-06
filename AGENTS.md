@@ -3,7 +3,7 @@
 
 ## Project Structure & Module Organization
 
-ArtFlow is a single-line repository. `main` carries **ArtFlow-Plus (v2)**; the 1.x Django monolith remains at the root only until external review and the v1→v2 coverage audit close. Do not add features to the Django code.
+ArtFlow is a single-line repository. `main` carries **ArtFlow-Plus (v2)**; the 1.x Django monolith has been removed and its source is preserved in tag `v1.0.2`. Its feature record is in `docs/archive/v1/`. Do not reintroduce it.
 
 ### ArtFlow-Plus layout
 
@@ -33,10 +33,6 @@ pnpm --filter @artflow-plus/web dev
 
 The API migrates on start. Browser E2E uses the `artflow_e2e` schema and `workers: 1`. Structural gates live in `tests/gates`; golden fixtures are validated by `uv run python tests/golden/validate_fixtures.py`.
 
-### Retained 1.x source
-
-`accounts/`, `core/`, `ruleset/`, `questionnaire/`, `files/`, `singer_contest/`, `voting/`, `tickets/`, `entry_access/`, `public_portal/`, `farewell_show/`, `staff_panel/`, `exports/`, `archive/`, `incidents/`, `common/`, `config/`, `templates/`, `frontend/`, and `static/` are the frozen Django monolith. They can be inspected with `uv sync --locked --extra dev`, `uv run python manage.py check`, and `uv run python manage.py test`, but are not a delivery path. Delete them only after the coverage audit and external review are approved.
-
 ## Coding Style & Naming Conventions
 
 - TypeScript: strict, ESM, `.js` import suffixes. Keep capability code dependent on its own module and the engine only; never import another capability's internals.
@@ -44,7 +40,7 @@ The API migrates on start. Browser E2E uses the `artflow_e2e` schema and `worker
 - HTTP registration lives in `plus/apps/api/src/routes/<surface>.ts`; each module exports `registerXRoutes(ctx: ApiContext)`. `app.ts` keeps construction, hooks, CSRF, error mapping, and the realtime server only. `tests/gates/test_plus_route_modules.py` enforces the boundary.
 - `db/src/types.ts` and `db/src/migrations.ts` are two descriptions of one schema. Update both for any schema change and run `pnpm -C plus run schema:check`; the drift gate compares tables, columns, and nullability against a migrated PostgreSQL schema.
 - React components use PascalCase files for routes/components and camelCase for helpers; shared contracts come from `@artflow-plus/contracts`.
-- Python that remains in the 1.x tree follows Django conventions and is migration-only until deletion.
+- Python is gate-only: pytest/ruff over `tests/gates`, `tests/golden`, and `scripts/tests`.
 
 ## Testing Guidelines
 
@@ -116,7 +112,7 @@ After each round, check the configuration against what the tree now contains:
 - `.env.example` / `.env.production.example` / `.env.event.example` — every knob the Plus apps read is documented.
 - `.dockerignore` / `.gitignore` — node_modules, dist, media, archives, logs, and local databases are excluded.
 - `.github/dependabot.yml` — one entry per package ecosystem the repository actually uses.
-- While the Django tree remains: `pyrightconfig.json`, `[tool.mypy] files`, `[tool.ruff] src`, and `tailwind.config.js` still list every app directory.
+- `pyproject.toml` `[tool.ruff] src` and `[tool.pytest.ini_options] testpaths` still cover every gate module.
 
 ## Security & Configuration Tips
 

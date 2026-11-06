@@ -40,7 +40,7 @@ ArtFlow 是面向学院文艺部的 **EventOps 活动运行平台**：把原本�
 
 第一个生产验证场景是学院十佳歌手大赛与毕业晚会，但 ArtFlow 的目标不是「十佳算分器」，而是一套可长期运行、可复用到多类学院文艺活动的运行平台。产品目标与领域边界见 [GOAL.md](GOAL.md)。
 
-> **项目状态：** `main` 是唯一的开发主线，承载 ArtFlow-Plus（v2）。1.x 的 Django 实现已完成历史使命，源码暂留作外部审核对照，审核通过后删除；仓库不再维护双线，也不再提供 v1 数据导入与 cutover 兼容。验证入口以[开发基线](docs/development-baseline.md)为准。
+> **项目状态：** `main` 是唯一的开发主线，承载 ArtFlow-Plus（v2）。1.x 的 Django 实现已完成历史使命并从 `main` 删除，完整源码保存在 tag `v1.0.2`；功能记录见 [`docs/archive/v1/`](docs/archive/v1/README.md)。仓库不再维护双线，也不再提供 v1 数据导入与 cutover 兼容。验证入口以[开发基线](docs/development-baseline.md)为准。
 
 ## 项目现状
 
@@ -48,7 +48,7 @@ ArtFlow 是面向学院文艺部的 **EventOps 活动运行平台**：把原本�
 |---|---|
 | 开发主线 | `main`，Node 24 / Fastify 5 / TypeBox / Kysely / React 19 / PostgreSQL 18 |
 | 状态 | M0–M13.3 与后续能力已完成；v2 是唯一在开发与部署的产品线 |
-| 1.x 代码 | Django app 暂留在根目录，仅作外部审核对照；不再接新功能，审核后删除 |
+| 1.x 代码 | 已从 `main` 删除；完整源码与功能记录归档在 tag `v1.0.2` / [`docs/archive/v1/`](docs/archive/v1/README.md) |
 | v1 兼容 | 已移除：不再支持 legacy bundle 导入、运营接管、参与者认领或 v1 媒体桥 |
 
 ## ArtFlow-Plus（v2）
@@ -121,9 +121,10 @@ v2 使用 `deploy/compose.production.yml` 的 `plus` profile：独立 PostgreSQL
 | [`AGENTS.md`](AGENTS.md) | 模块划分、目录职责与贡献准则。 |
 | [`docs/development-baseline.md`](docs/development-baseline.md) | 已验证的开发、运行与验收基线。 |
 | [`docs/artflow-plus/roadmap.md`](docs/artflow-plus/roadmap.md) | 里程碑与出口证据。 |
-| [`docs/artflow-plus/skeleton-coverage.md`](docs/artflow-plus/skeleton-coverage.md) | v1 → v2 覆盖审计；删除 1.x 代码前必须先收敛这里的缺口。 |
+| [`docs/artflow-plus/skeleton-coverage.md`](docs/artflow-plus/skeleton-coverage.md) | v1 → v2 覆盖审计与仍缺功能。 |
+| [`docs/archive/v1/`](docs/archive/v1/README.md) | 1.x 功能记录与模块/路由清单（源码见 tag `v1.0.2`）。 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 1.x 历史变更记录（只读归档）。 |
-| [`docs/`](docs/) | 部署、演练、备份恢复与现场运行手册。 |
+| [`docs/`](docs/) | Plus 部署、备份恢复、领域/ADR/不变量/门禁文档；v1 历史文档与功能记录见 [`docs/archive/v1/`](docs/archive/v1/README.md)。 |
 
 ## 工程原则 · Engineering rules
 
@@ -151,7 +152,6 @@ v2 使用 `deploy/compose.production.yml` 的 `plus` profile：独立 PostgreSQL
 
 提交前至少运行 `pnpm -C plus run check`、`REQUIRE_DB=1 pnpm -C plus run test`、`uv run pytest tests/gates -q` 与 `pwsh -NoProfile -File scripts/check_docs.ps1`。完整的数据库、Docker、CI、故障排查和安全说明见[开发基线](docs/development-baseline.md)。
 
-1.x 的 Django 源码在删除前仍可用 `uv sync --locked --extra dev` 与 `uv run python manage.py check` 做只读核对，但不再是交付路径，也不再接受新功能。
 
 ## 许可与商业授权 · License
 

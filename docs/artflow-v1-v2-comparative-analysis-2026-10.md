@@ -2,8 +2,8 @@
 
 日期：2026-10-28
 代码参考：`e2c7805`（`artflow-plus`，M15.1 前的干净基线）；统计快照为 2026-10-28 的 M15.1 当前工作树
-统计工具：[`scripts/artflow_comparison.py`](../scripts/artflow_comparison.py)
-统计测试：[`scripts/tests/test_artflow_comparison.py`](../scripts/tests/test_artflow_comparison.py)
+统计工具：[`scripts/artflow_comparison.py`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/scripts/artflow_comparison.py)
+统计测试：[`scripts/tests/test_artflow_comparison.py`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/scripts/tests/test_artflow_comparison.py)
 
 ## 结论先行
 

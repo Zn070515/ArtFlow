@@ -1,0 +1,516 @@
+# ArtFlow 1.x 模块与路由清单
+
+来源：`v1.0.2`（commit `ed0db16`）的 Django 项目自动导出，2026-11-06。
+模型字段使用 `name:FieldClass` 形式；URL 来自 `config/urls.py` 的实际解析。
+管理命令按 app 列出。该清单用于功能归档，不替代 tag 中的源码。
+
+## Apps
+
+### accounts (accounts)
+- InstallationState: id:PositiveSmallIntegerField, initialized_at:DateTimeField
+- User: password:CharField, last_login:DateTimeField, is_superuser:BooleanField, username:CharField, first_name:CharField, last_name:CharField, email:EmailField, is_staff:BooleanField, is_active:BooleanField, date_joined:DateTimeField, role:CharField, groups:ManyToManyField, user_permissions:ManyToManyField
+- commands: provision_first_admin, seed_dev_admin
+
+### archive (archive)
+- ArchivePackage: activity:ForeignKey, file:FileField, includes:TextField, note:TextField, created_by:ForeignKey, version:PositiveIntegerField, is_current:BooleanField, created_at:DateTimeField
+
+### common (common)
+- AuditLog: operator:ForeignKey, action_type:CharField, target:CharField, old_value:TextField, new_value:TextField, ip_address:GenericIPAddressField, note:TextField, created_at:DateTimeField
+- SeedRecord: key:CharField, content_type:ForeignKey, object_id:PositiveBigIntegerField, created_at:DateTimeField
+- RateLimitBucket: key:CharField, window_started_at:DateTimeField, count:PositiveIntegerField, expires_at:DateTimeField
+- MaintenanceState: id:PositiveSmallIntegerField, enabled:BooleanField, reason:CharField, started_at:DateTimeField
+- commands: backup_artflow, cleanup_media_download_rehearsal, cleanup_result_release_rehearsal, doctor, inspect_result_closure_rehearsal, inspect_result_release_rehearsal, invalidate_sessions, load_private_test_fixture, prepare_human_acceptance_e2e, prepare_layout_e2e, prepare_media_download_rehearsal, prepare_result_closure_rehearsal, prepare_result_release_rehearsal, prepare_site_load_rehearsal, prune_retained_state, purge_retained_pii, purge_ticket_sessions, seed_demo_data, verify_app_backup
+
+### core (core)
+- Activity: title:CharField, subtitle:CharField, activity_type:CharField, phase:CharField, description:TextField, cover_image:ImageField, is_test_mode:BooleanField, public_code:CharField, judge_entry_open:BooleanField, judge_entry_version:PositiveIntegerField, data_lifecycle:CharField, is_locked:BooleanField, locked_at:DateTimeField, locked_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+
+### entry_access (entry_access)
+- EntryPoint: activity:ForeignKey, kind:CharField, label:CharField, is_active:BooleanField, created_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+- AccessGrant: entry_point:ForeignKey, kind:CharField, activity:ForeignKey, round:ForeignKey, token_digest:CharField, expires_at:DateTimeField, redeemed_at:DateTimeField, revoked_at:DateTimeField, issued_by:ForeignKey, created_at:DateTimeField
+- EphemeralSession: grant:OneToOneField, kind:CharField, activity:ForeignKey, round:ForeignKey, token_digest:CharField, expires_at:DateTimeField, last_seen_at:DateTimeField, revoked_at:DateTimeField, created_at:DateTimeField
+
+### exports (exports)
+- ExportTask: activity:ForeignKey, export_type:CharField, format:CharField, file:FileField, created_by:ForeignKey, created_at:DateTimeField
+- ArticleTemplate: name:CharField, template_type:CharField, body:TextField, created_at:DateTimeField, updated_at:DateTimeField
+- GeneratedDocument: template:ForeignKey, activity:ForeignKey, title:CharField, file:FileField, is_test_data:BooleanField, created_by:ForeignKey, created_at:DateTimeField
+
+### farewell_show (farewell_show)
+- Program: activity:ForeignKey, user:ForeignKey, name:CharField, program_type:CharField, contact_name:CharField, contact_phone:CharField, class_name:CharField, performers:TextField, estimated_duration:CharField, description:TextField, mic_requirements:TextField, prop_requirements:TextField, special_notes:TextField, sort_order:IntegerField, status:CharField, is_test_data:BooleanField, created_at:DateTimeField, updated_at:DateTimeField
+
+### files (files)
+- SubmissionFile: singer_registration:ForeignKey, program:ForeignKey, group:ForeignKey, file:FileField, derivative:FileField, original_name:CharField, file_size:IntegerField, file_purpose:CharField, is_public:BooleanField, question_key:CharField, source_ruleset_version:ForeignKey, is_test_data:BooleanField, is_current:BooleanField, version:PositiveIntegerField, uploaded_by:ForeignKey, uploaded_at:DateTimeField
+- MaterialRequirement: activity:ForeignKey, applies_to:CharField, item_name:CharField, file_purpose:CharField, is_required:BooleanField, sort_order:IntegerField
+- StaffNote: singer_registration:ForeignKey, program:ForeignKey, content:TextField, created_by:ForeignKey, created_at:DateTimeField
+- MaterialCheck: singer_registration:ForeignKey, group:ForeignKey, program:ForeignKey, item_name:CharField, question_key:CharField, source_ruleset_version:ForeignKey, file_purpose:CharField, accepted_file_purposes:JSONField, status:CharField, required:BooleanField, review_note:TextField, reviewed_by:ForeignKey, reviewed_at:DateTimeField, sort_order:IntegerField
+- MaterialSlot: activity:ForeignKey, round:ForeignKey, singer_registration:ForeignKey, program:ForeignKey, group:ForeignKey, category:CharField, label:CharField, is_required:BooleanField, sequence:IntegerField, is_test_data:BooleanField
+
+### incidents (incidents)
+- IncidentRecord: activity:ForeignKey, occurred_at:DateTimeField, event_type:CharField, round:ForeignKey, authority_state:CharField, needs_review:BooleanField, singer:ForeignKey, program:ForeignKey, handled_by:ForeignKey, problem:TextField, action_taken:TextField, resolution:TextField, remark:TextField, is_test:BooleanField, created_at:DateTimeField
+
+### public_portal (public_portal)
+- PublicPost: title:CharField, subtitle:CharField, content:TextField, cover_image:ImageField, post_type:CharField, status:CharField, related_activity:ForeignKey, is_pinned:BooleanField, sort_order:IntegerField, created_by:ForeignKey, updated_by:ForeignKey, published_at:DateTimeField, created_at:DateTimeField, updated_at:DateTimeField, version:PositiveIntegerField
+- ResultRelease: post:ForeignKey, stage_result:ForeignKey, post_version:PositiveIntegerField, result_version:PositiveIntegerField, candidate_revision:PositiveBigIntegerField, result_snapshot:JSONField, ruleset_version:ForeignKey, authority_hash:CharField, input_fingerprint:CharField, status:CharField, released_by:ForeignKey, released_at:DateTimeField, transition_by:ForeignKey, transition_at:DateTimeField, note:TextField
+- PublicMedia: post:ForeignKey, related_activity:ForeignKey, image:ImageField, caption:CharField, original_name:CharField, source_path:TextField, is_published:BooleanField, sort_order:IntegerField, created_at:DateTimeField
+- commands: import_public_photos
+
+### questionnaire (questionnaire)
+- QuestionnaireResponse: singer_registration:ForeignKey, group:ForeignKey, ruleset_version:ForeignKey, questionnaire_key:CharField, subject:CharField, schema_hash:CharField, answers:JSONField, status:CharField, is_test_data:BooleanField, created_at:DateTimeField, updated_at:DateTimeField, submitted_at:DateTimeField
+- commands: prepare_questionnaire_e2e
+
+### realtime (realtime)
+
+### ruleset (ruleset)
+- RulesetTemplate: name:CharField, schema_version:PositiveIntegerField, definition:TextField, description:TextField, status:CharField, is_available:BooleanField, builtin_key:CharField, capability_status:CharField, content_hash:CharField, created_by:ForeignKey, frozen_by:ForeignKey, frozen_at:DateTimeField, created_at:DateTimeField, updated_at:DateTimeField
+- ContestRuleset: activity:ForeignKey, name:CharField, source_template:ForeignKey, is_test_data:BooleanField, stage_key:CharField, round_keys:JSONField, announcement_blocks:JSONField, announcement_blocks_by_checkpoint:JSONField, vote_keys:JSONField, vote_scoring_rule_keys:JSONField, group_keys:JSONField, group_stage_keys:JSONField, audience_keys:JSONField, live_challenge:JSONField, created_by:ForeignKey, binding_revision:PositiveBigIntegerField, group_stage_binding_revision:PositiveBigIntegerField, created_at:DateTimeField, updated_at:DateTimeField
+- RulesetVersion: ruleset:ForeignKey, version:PositiveIntegerField, schema_version:PositiveIntegerField, definition:TextField, content_hash:CharField, authority_hash:CharField, binding:JSONField, execution_plan:TextField, status:CharField, is_current:BooleanField, created_by:ForeignKey, frozen_by:ForeignKey, frozen_at:DateTimeField, created_at:DateTimeField, updated_at:DateTimeField
+- RulesetPlanningDraft: ruleset_version:OneToOneField, payload:JSONField, revision:PositiveIntegerField, source:CharField, updated_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+- commands: seed_ruleset_templates, upgrade_live_2026_questionnaires
+
+### singer_contest (singer_contest)
+- SingerRegistration: activity:ForeignKey, user:ForeignKey, name:CharField, official_number:PositiveIntegerField, student_id:CharField, college:CharField, class_name:CharField, phone:CharField, wechat:CharField, song_name:CharField, is_original:BooleanField, description:TextField, remark:TextField, pre_status:CharField, live_status:CharField, is_test_data:BooleanField, created_at:DateTimeField, updated_at:DateTimeField
+- GroupStage: material_status:CharField, roster_source:CharField, roster_source_round:ForeignKey, source_roster_fingerprint:CharField, activity:ForeignKey, stage_key:CharField, name:CharField, managed_by:CharField, managed_by_version:ForeignKey, replaces_group_stage:ForeignKey, expected_group_stage_binding_revision:PositiveBigIntegerField, status:CharField, confirmed_at:DateTimeField, confirmed_by:ForeignKey, frozen_at:DateTimeField, frozen_by:ForeignKey, is_test_data:BooleanField, created_at:DateTimeField, updated_at:DateTimeField
+- Group: stage:ForeignKey, name:CharField, group_order:PositiveIntegerField, is_active:BooleanField, is_test_data:BooleanField, created_at:DateTimeField, updated_at:DateTimeField
+- GroupMembership: group:ForeignKey, singer:ForeignKey, is_current:BooleanField, joined_at:DateTimeField, left_at:DateTimeField, added_by:ForeignKey, removed_by:ForeignKey, change_reason:TextField
+- ContestRound: activity:ForeignKey, round_type:CharField, scoring_mode:CharField, score_completion_mode:CharField, judge_count:PositiveIntegerField, minimum_judge_count:PositiveIntegerField, name:CharField, sequence:PositiveIntegerField, order_policy:CharField, tie_order_policy:CharField, scheduled_at:DateTimeField, venue:CharField, rubric:ForeignKey, advance_count:IntegerField, status:CharField, is_locked:BooleanField, score_version:PositiveIntegerField, advancement_status:CharField, roster_source:CharField, roster_source_stage:CharField, roster_source_challenge_session:ForeignKey
+- Judge: activity:ForeignKey, name:CharField, is_active:BooleanField
+- RoundEntry: round:ForeignKey, singer:ForeignKey, running_order:PositiveIntegerField
+- RoundJudge: round:ForeignKey, judge:ForeignKey
+- RoundPanelSnapshot: round:ForeignKey, activity:ForeignKey, version:PositiveIntegerField, change_policy:CharField, state:CharField, expected_judge_count:PositiveIntegerField, minimum_judge_count:PositiveIntegerField, scoring_method:CharField, completion_mode:CharField, roster_digest:CharField, captured_by:ForeignKey, captured_at:DateTimeField, is_test_data:BooleanField
+- RoundPanelSnapshotMember: panel_snapshot:ForeignKey, judge:ForeignKey, source_round_judge:ForeignKey, seat_key:CharField, is_active:BooleanField
+- JudgeSeat: panel_member:ForeignKey, state:CharField, display_label:CharField, assigned_by:ForeignKey, assigned_at:DateTimeField, revoked_at:DateTimeField, revocation_reason:CharField, is_test_data:BooleanField
+- JudgeSeatGrant: access_grant:OneToOneField, seat:ForeignKey, panel_snapshot:ForeignKey, created_at:DateTimeField
+- JudgeSession: ephemeral_session:OneToOneField, seat:ForeignKey, panel_snapshot:ForeignKey, state:CharField, expires_at:DateTimeField, revoked_at:DateTimeField, revocation_reason:CharField, created_at:DateTimeField, last_seen_at:DateTimeField, is_test_data:BooleanField
+- PerformanceRunState: round:OneToOneField, current_performance:ForeignKey, state:CharField, context_version:PositiveIntegerField, hold_reason:CharField, changed_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField, is_test_data:BooleanField
+- ScoreRecord: round:ForeignKey, singer:ForeignKey, judge:ForeignKey, score:DecimalField, notes:CharField, source:CharField, panel_snapshot:ForeignKey, judge_seat:ForeignKey, source_command_id:CharField, source_reference:CharField, is_test_data:BooleanField
+- JudgeScoreReceipt: command_id:CharField, operation:CharField, source:CharField, payload_hash:CharField, panel_snapshot:ForeignKey, seat:ForeignKey, performance:ForeignKey, session:ForeignKey, operator:ForeignKey, score_record:OneToOneField, status:CharField, result_code:CharField, created_at:DateTimeField, completed_at:DateTimeField
+- ScoreWriteReceipt: command_id:CharField, operator:ForeignKey, operation:CharField, payload_hash:CharField, result_version:PositiveIntegerField, result_payload:JSONField, status:CharField, created_at:DateTimeField
+- ScoreSummary: round:ForeignKey, singer:ForeignKey, average_score:DecimalField, rank:IntegerField, is_advanced:BooleanField, is_test_data:BooleanField
+- AudienceScore: activity:ForeignKey, stage_key:CharField, singer:ForeignKey, score:DecimalField, source:CharField, source_note:CharField, is_test_data:BooleanField, entered_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+- Award: activity:ForeignKey, singer:ForeignKey, name:CharField, is_test_data:BooleanField, source_vote_session:OneToOneField, source_stage_result:ForeignKey, source_award_decision:OneToOneField, source_node:CharField
+- PerformanceGroup: activity:ForeignKey, round:ForeignKey, name:CharField, sequence:PositiveIntegerField, is_test_data:BooleanField
+- Performance: activity:ForeignKey, round:ForeignKey, singer:ForeignKey, group:ForeignKey, sequence:PositiveIntegerField, song_title:CharField, guest:CharField, duration:DurationField, notes:TextField, is_test_data:BooleanField
+- PerformanceScoreState: performance:OneToOneField, state:CharField, context_version:PositiveIntegerField, opened_by:ForeignKey, opened_at:DateTimeField, locked_by:ForeignKey, locked_at:DateTimeField, is_test_data:BooleanField
+- ScoringRubric: activity:ForeignKey, name:CharField, description:TextField, sequence:PositiveIntegerField, is_test_data:BooleanField
+- RubricCriterion: rubric:ForeignKey, name:CharField, max_score:DecimalField, sequence:PositiveIntegerField, description:TextField, is_test_data:BooleanField
+- CriterionScore: score_record:ForeignKey, criterion:ForeignKey, value:DecimalField, is_test_data:BooleanField
+- StageResult: activity:ForeignKey, ruleset_version:ForeignKey, created_by:ForeignKey, confirmed_by:ForeignKey, stage_key:CharField, status:CharField, reasons:JSONField, ruleset_hash:CharField, input_fingerprint:CharField, schema_version:PositiveIntegerField, plan_version:PositiveIntegerField, result_version:PositiveIntegerField, candidate_revision:PositiveBigIntegerField, computed_at:DateTimeField, confirmed_at:DateTimeField, is_test_data:BooleanField
+- PodiumTieDecision: activity:ForeignKey, ruleset_version:ForeignKey, stage_key:CharField, tie_score:DecimalField, singer_ids:JSONField, ordering:JSONField, reason:TextField, input_fingerprint:CharField, is_test_data:BooleanField, created_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+- StageDecision: stage_result:ForeignKey, singer:ForeignKey, outcome_code:CharField, source_node:CharField, rank:IntegerField, score:DecimalField, reason:TextField, is_test_data:BooleanField
+- StageAwardDecision: stage_result:ForeignKey, activity:ForeignKey, singer:ForeignKey, name:CharField, source_node:CharField, is_test_data:BooleanField
+- CompositeResult: stage_result:ForeignKey, singer:ForeignKey, node_key:CharField, value:DecimalField, components:JSONField, is_test_data:BooleanField
+- ManualDecision: activity:ForeignKey, ruleset_version:ForeignKey, manual_key:CharField, group:CharField, chosen:JSONField, is_test_data:BooleanField, created_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+- DuelDecision: activity:ForeignKey, ruleset_version:ForeignKey, duel_key:CharField, pair_key:CharField, winner:CharField, is_test_data:BooleanField, created_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+- ChallengeSession: activity:ForeignKey, source_round:ForeignKey, ruleset_version:ForeignKey, state:CharField, source_score_version:PositiveIntegerField, source_roster_fingerprint:CharField, ruleset_hash:CharField, input_fingerprint:CharField, first_round_weight:DecimalField, challenge_round_weight:DecimalField, revision:PositiveIntegerField, current_turn_number:PositiveIntegerField, created_by:ForeignKey, confirmed_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField, confirmed_at:DateTimeField, is_test_data:BooleanField
+- ChallengeSeat: session:ForeignKey, position:PositiveIntegerField, initial_holder:ForeignKey, current_holder:ForeignKey, third_round_position:PositiveIntegerField, is_challenged:BooleanField, challenged_at:DateTimeField, revision:PositiveIntegerField, is_test_data:BooleanField
+- ChallengeTurn: session:ForeignKey, sequence:PositiveIntegerField, challenger:ForeignKey, state:CharField, target_seat:ForeignKey, waive_reason:CharField, revision:PositiveIntegerField, acted_by:ForeignKey, acted_at:DateTimeField, is_test_data:BooleanField
+- ChallengeMatch: session:ForeignKey, turn:OneToOneField, seat:ForeignKey, challenger:ForeignKey, defender:ForeignKey, status:CharField, winner:ForeignKey, score_round:ForeignKey, result_fingerprint:CharField, challenger_first_score:DecimalField, defender_first_score:DecimalField, challenger_second_score:DecimalField, defender_second_score:DecimalField, challenger_combined_score:DecimalField, defender_combined_score:DecimalField, revision:PositiveIntegerField, confirmed_by:ForeignKey, confirmed_at:DateTimeField, is_test_data:BooleanField
+- ChallengeCommand: session:ForeignKey, command_id:CharField, operation:CharField, payload_hash:CharField, result_type:CharField, result_id:PositiveIntegerField, result_payload:JSONField, operator:ForeignKey, created_at:DateTimeField
+- commands: audit_challenge_residue, prepare_judge_e2e
+
+### staff_panel (staff_panel)
+
+### tickets (tickets)
+- Ticket: activity:ForeignKey, batch_reference:CharField, serial_number:CharField, secret_digest:CharField, public_code:CharField, credential_version:PositiveIntegerField, state:CharField, issued_at:DateTimeField, issued_by:ForeignKey, checked_in_at:DateTimeField, checked_in_by:ForeignKey, revoked_at:DateTimeField, revoked_by:ForeignKey, voided_at:DateTimeField, voided_by:ForeignKey, is_test_data:BooleanField, created_at:DateTimeField, updated_at:DateTimeField
+- TicketAccessSession: ticket:ForeignKey, token_digest:CharField, expires_at:DateTimeField, last_seen_at:DateTimeField, revoked_at:DateTimeField, is_test_data:BooleanField, created_at:DateTimeField
+
+### voting (voting)
+- VoteSession: activity:ForeignKey, name:CharField, passcode:CharField, start_time:DateTimeField, end_time:DateTimeField, is_open:BooleanField, is_locked:BooleanField, is_test_data:BooleanField, selection_type:CharField, max_selections:IntegerField, purpose:CharField, requires_ticket:BooleanField, created_at:DateTimeField
+- VoteBallot: vote_session:ForeignKey, ticket:ForeignKey, browser_session_key:CharField, ip_address:GenericIPAddressField, is_test_data:BooleanField, submitted_at:DateTimeField
+- VoteOption: vote_session:ForeignKey, singer:ForeignKey, sort_order:IntegerField, is_test_data:BooleanField
+- VoteRecord: ballot:ForeignKey, vote_session:ForeignKey, vote_option:ForeignKey, browser_session_key:CharField, ip_address:GenericIPAddressField, is_test_data:BooleanField, created_at:DateTimeField
+- VoteScoringRule: vote_session:OneToOneField, mode:CharField, output_scale:CharField, configured_by:ForeignKey, created_at:DateTimeField, updated_at:DateTimeField
+- commands: benchmark_ballot_burst, prepare_live_ticket_e2e
+
+## URLs
+- livez/ [livez]
+- readyz/ [readyz]
+- healthz/ [healthz]
+- e/<str:public_code>/ [activity_entry]
+- e/<str:public_code>/apply/ [activity_apply]
+- e/<str:public_code>/live/ [activity_live]
+- e/<str:public_code>/live/state/ [activity_live_state]
+- e/<str:public_code>/judge/ [activity_judge]
+-  [home]
+- post/<int:pk>/ [post_detail]
+- showcase/ [showcase_list]
+- announcements/ [announcement_list]
+- results/ [result_list]
+- privacy/ [privacy]
+- login/ [login]
+- login/participant/ [participant_login]
+- login/staff/ [staff_login]
+- login/admin/ [admin_login]
+- register/ [register]
+- register/staff/ [staff_register]
+- register/admin/ [admin_register]
+- logout/ [logout]
+- me/ [profile]
+- password-change/ [password_change]
+- admin/users/<int:user_id>/reset-password/ [admin_password_reset]
+- contest/apply/ [apply]
+- contest/my-registrations/ [my_registrations]
+- contest/my-submission/ [my_submission]
+- contest/registrations/<int:pk>/ [my_registration_detail]
+- contest/register/ [choose]
+- contest/register/<int:activity_pk>/ [activity]
+- questionnaire/<int:activity_pk>/ [form]
+- questionnaire/<int:activity_pk>/autosave/ [autosave]
+- questionnaire/<int:activity_pk>/submit/ [submit]
+- questionnaire/<int:activity_pk>/file/<str:question_key>/ [upload]
+- questionnaire/group/<int:group_pk>/ [group_form]
+- questionnaire/group/<int:group_pk>/autosave/ [group_autosave]
+- questionnaire/group/<int:group_pk>/submit/ [group_submit]
+- questionnaire/group/<int:group_pk>/file/<str:question_key>/ [group_upload]
+- judge/terminal/ [terminal]
+- judge/claim/<str:public_code>/ [claim]
+- judge/context/ [context]
+- judge/score/ [score]
+- farewell/apply/ [apply]
+- farewell/my-programs/ [my_programs]
+- farewell/my-program/ [my_program]
+- farewell/programs/<int:pk>/ [my_program_detail]
+- staff/ [dashboard]
+- staff/activities/ [activity_list]
+- staff/activities/<int:pk>/workspace/ [activity_workspace]
+- staff/activities/<int:pk>/live-challenge/ [live_challenge_console]
+- staff/activities/<int:pk>/live-materials/ [live_material_progress]
+- staff/activities/new/ [activity_create]
+- staff/activities/<int:activity_id>/group-stages/new/ [group_stage_create]
+- staff/group-stages/<int:pk>/ [group_stage_detail]
+- staff/group-stages/<int:pk>/history/ [group_stage_history]
+- staff/groups/<int:pk>/materials/history/ [group_material_history]
+- staff/group-stages/<int:pk>/record/ [group_stage_record]
+- staff/group-stages/<int:pk>/confirm/ [group_stage_confirm]
+- staff/group-stages/<int:pk>/freeze/ [group_stage_freeze]
+- staff/group-stages/<int:pk>/cancel/ [group_stage_cancel]
+- staff/group-stages/<int:pk>/material-status/ [group_stage_material_status]
+- staff/group-stages/<int:pk>/correct/ [group_stage_correct]
+- staff/activities/<int:pk>/edit/ [activity_edit]
+- staff/activities/<int:pk>/fields/<str:field>/ [activity_field_patch]
+- staff/activities/<int:pk>/judge-entry/toggle/ [activity_judge_entry_toggle]
+- staff/activities/<int:pk>/judge-entry/rotate/ [activity_judge_entry_rotate]
+- staff/posts/ [post_list]
+- staff/posts/new/ [post_create]
+- staff/posts/<int:pk>/preview/ [post_preview]
+- staff/posts/<int:pk>/edit/ [post_edit]
+- staff/posts/<int:post_id>/result-release/ [result_release]
+- staff/posts/<int:post_id>/result-release/revoke/ [result_release_revoke]
+- staff/registrations/ [singer_registration_list]
+- staff/registrations/<int:pk>/ [singer_registration_detail]
+- staff/programs/ [program_list]
+- staff/programs/<int:pk>/ [program_detail]
+- staff/export/registrations/ [export_registrations]
+- staff/export/programs/ [export_programs]
+- staff/rounds/ [round_list]
+- staff/rounds/new/ [round_create]
+- staff/rounds/<int:pk>/edit/ [round_edit]
+- staff/rounds/<int:pk>/prepare/ [round_prepare]
+- staff/rounds/<int:pk>/running-order/ [round_running_order]
+- staff/rounds/<int:pk>/groups/ [round_groups]
+- staff/rounds/<int:pk>/scores/ [round_score_entry]
+- staff/rounds/<int:pk>/scores/api/ [round_scores_api]
+- staff/activity/<int:activity_id>/audience-scores/ [audience_score_entry]
+- staff/activity/<int:activity_id>/audience-scores/api/ [audience_scores_api]
+- staff/rounds/<int:pk>/ranking/ [round_ranking]
+- staff/rounds/<int:pk>/advancement/ [round_finalize_advancement]
+- staff/rounds/<int:pk>/lock/ [round_lock]
+- staff/rounds/<int:pk>/unlock/ [round_unlock]
+- staff/rounds/<int:pk>/reset/ [round_reset]
+- staff/judges/ [judge_list]
+- staff/judges/new/ [judge_create]
+- staff/judges/round/<int:pk>/control/ [judge_control]
+- staff/judges/round/<int:pk>/prepare/ [judge_prepare]
+- staff/judges/round/<int:pk>/panel/hold/ [judge_panel_hold]
+- staff/judges/round/<int:pk>/panel/resume/ [judge_panel_resume]
+- staff/judges/round/<int:pk>/seats/<int:seat_id>/label/ [judge_seat_label]
+- staff/judges/round/<int:pk>/seats/<int:seat_id>/release/ [judge_seat_release]
+- staff/judges/round/<int:pk>/performances/advance/ [judge_performance_advance]
+- staff/judges/round/<int:pk>/performance-groups/advance/ [judge_performance_group_advance]
+- staff/judges/round/<int:pk>/performances/score-lock/ [judge_performance_score_lock]
+- staff/judges/round/<int:pk>/performances/score-reopen/ [judge_performance_score_reopen]
+- staff/judges/round/<int:pk>/performances/hold/ [judge_performance_hold]
+- staff/judges/round/<int:pk>/performances/resume/ [judge_performance_resume]
+- staff/judges/round/<int:pk>/scores/proxy/ [judge_score_proxy]
+- staff/judges/round/<int:pk>/scores/paper/ [judge_score_paper]
+- staff/rubrics/new/ [rubric_create]
+- staff/awards/ [award_list]
+- staff/vote-sessions/ [vote_session_list]
+- staff/vote-sessions/new/ [vote_session_create]
+- staff/vote-sessions/<int:pk>/ [vote_session_detail]
+- staff/vote-sessions/<int:pk>/open/ [vote_session_open]
+- staff/vote-sessions/<int:pk>/close/ [vote_session_close]
+- staff/vote-sessions/<int:pk>/lock/ [vote_session_lock]
+- staff/vote-sessions/<int:pk>/unlock/ [vote_session_unlock]
+- staff/vote-sessions/<int:pk>/export/ [vote_session_export]
+- staff/qr/ [qr_center]
+- staff/qr/<int:pk>/ [qr_generate]
+- staff/qr/<int:pk>/<str:kind>.png [qr_image]
+- staff/export-center/ [export_center]
+- staff/export/material-checklist/<int:activity_id>/ [excel_material_checklist]
+- staff/export/score-template/<int:round_id>/ [excel_score_template]
+- staff/export/import-scores/<int:round_id>/ [excel_import_scores]
+- staff/word/generate/<int:template_id>/<int:activity_id>/ [word_generate]
+- staff/execution-package/<int:activity_id>/ [execution_package]
+- staff/archive-package/<int:activity_id>/ [archive_package_create]
+- staff/incidents/ [incident_list]
+- staff/incidents/new/ [incident_create]
+- staff/incidents/export/ [incident_export]
+- staff/activity/<int:pk>/test-toggle/ [activity_test_toggle]
+- staff/activity/<int:pk>/clear-test/ [activity_clear_test_data]
+- staff/activity/<int:pk>/lock/ [activity_lock]
+- staff/activity/<int:pk>/unlock/ [activity_unlock]
+- staff/material-review/ [material_check_review]
+- staff/activities/<int:activity_id>/materials/ [activity_material_requirements]
+- staff/activities/<int:activity_id>/materials/<int:pk>/delete/ [activity_material_requirement_delete]
+- staff/activity/<int:pk>/archive/ [activity_archive]
+- staff/activity/<int:pk>/unarchive/ [activity_unarchive]
+- staff/activity/<int:pk>/clone/ [activity_clone]
+- staff/activity/<int:activity_id>/result-board/ [activity_result_board]
+- staff/activity/<int:activity_id>/result-closure/ [activity_result_closure]
+- staff/stage-results/<int:pk>/ [stage_result_detail]
+- staff/stage-results/<int:pk>/pdf/ [stage_result_pdf]
+- staff/stage-results/<int:pk>/confirm/ [stage_result_confirm]
+- staff/stage-results/<int:pk>/podium-tie/ [stage_result_podium_tie]
+- staff/stage-results/<int:pk>/correction/relock/ [stage_result_relock_performance]
+- staff/stage-results/<int:pk>/correction/lock-round/ [stage_result_lock_round]
+- staff/stage-results/<int:pk>/unlock/ [stage_result_unlock]
+- staff/ruleset-templates/ [ruleset_template_list]
+- staff/ruleset-templates/<int:pk>/ [ruleset_template_detail]
+- staff/ruleset-templates/<int:template_pk>/clone/ [ruleset_clone_from_template]
+- staff/ruleset-templates/clone-last-year/ [ruleset_clone_last_year]
+- staff/rulesets/create/ [contest_ruleset_create]
+- staff/rulesets/<int:pk>/planning/ [ruleset_planning]
+- staff/rulesets/<int:pk>/planning/preview/ [ruleset_planning_preview]
+- staff/rulesets/<int:pk>/planning/apply/ [ruleset_planning_apply]
+- staff/rulesets/<int:pk>/edit/ [ruleset_edit]
+- staff/rulesets/<int:pk>/live-2026/ [ruleset_live_2026_config]
+- staff/rulesets/<int:pk>/live-2026/first-round/clone/ [ruleset_live_2026_clone_first_round]
+- staff/rulesets/<int:pk>/questionnaire/ [ruleset_questionnaire]
+- staff/rulesets/<int:pk>/questionnaire/preview/<str:context>/ [ruleset_questionnaire_preview]
+- staff/rulesets/<int:pk>/questionnaire/group/ [ruleset_group_questionnaire]
+- staff/rulesets/<int:pk>/questionnaire/group/preview/<str:context>/ [ruleset_group_questionnaire_preview]
+- staff/rulesets/<int:pk>/bind/ [ruleset_bind]
+- staff/rulesets/<int:pk>/validate/ [ruleset_validate]
+- staff/rulesets/<int:pk>/preview/ [ruleset_preview]
+- staff/rulesets/<int:pk>/freeze/ [ruleset_freeze]
+- staff/ruleset-versions/<int:pk>/manual-decisions/ [manual_decision]
+- staff/audit-logs/ [audit_log_list]
+- staff/users/ [user_list]
+- staff/users/<int:pk>/role/ [user_role_update]
+- staff/users/<int:pk>/active/ [user_set_active]
+- staff/tickets/ [list]
+- staff/tickets/manage/ [list_page]
+- staff/tickets/issue/ [issue]
+- staff/tickets/issue-page/ [issue_page]
+- staff/tickets/check-in/ [check_in]
+- staff/tickets/check-in-page/ [check_in_page]
+- staff/tickets/<int:ticket_id>/detail/ [detail]
+- staff/tickets/<int:ticket_id>/action/ [action]
+- staff/tickets/<int:ticket_id>/reset-credential/ [reset_credential]
+- staff/tickets/sessions/<int:session_id>/revoke/ [revoke_session]
+- staff/tickets/<int:ticket_id>/void/ [void]
+- staff/tickets/<int:ticket_id>/revoke/ [revoke]
+- vote/<int:pk>/ [vote_entry]
+- vote/<int:pk>/cast/ [vote_cast]
+- vote/<int:pk>/done/ [vote_done]
+- entry-access/grants/redeem/ [grant_redeem]
+- tickets/scan/ [scan]
+- tickets/redeem/ [redeem]
+- media/<path:path> [controlled_media]
+- admin/ [index]
+- admin/login/ [login]
+- admin/logout/ [logout]
+- admin/password_change/ [password_change]
+- admin/password_change/done/ [password_change_done]
+- admin/autocomplete/ [autocomplete]
+- admin/jsi18n/ [jsi18n]
+- admin/r/<path:content_type_id>/<path:object_id>/ [view_on_site]
+- admin/auth/group/ [auth_group_changelist]
+- admin/auth/group/add/ [auth_group_add]
+- admin/auth/group/<path:object_id>/history/ [auth_group_history]
+- admin/auth/group/<path:object_id>/delete/ [auth_group_delete]
+- admin/auth/group/<path:object_id>/change/ [auth_group_change]
+- admin/auth/group/<path:object_id>/ 
+- admin/entry_access/entrypoint/ [entry_access_entrypoint_changelist]
+- admin/entry_access/entrypoint/add/ [entry_access_entrypoint_add]
+- admin/entry_access/entrypoint/<path:object_id>/history/ [entry_access_entrypoint_history]
+- admin/entry_access/entrypoint/<path:object_id>/delete/ [entry_access_entrypoint_delete]
+- admin/entry_access/entrypoint/<path:object_id>/change/ [entry_access_entrypoint_change]
+- admin/entry_access/entrypoint/<path:object_id>/ 
+- admin/entry_access/accessgrant/ [entry_access_accessgrant_changelist]
+- admin/entry_access/accessgrant/add/ [entry_access_accessgrant_add]
+- admin/entry_access/accessgrant/<path:object_id>/history/ [entry_access_accessgrant_history]
+- admin/entry_access/accessgrant/<path:object_id>/delete/ [entry_access_accessgrant_delete]
+- admin/entry_access/accessgrant/<path:object_id>/change/ [entry_access_accessgrant_change]
+- admin/entry_access/accessgrant/<path:object_id>/ 
+- admin/entry_access/ephemeralsession/ [entry_access_ephemeralsession_changelist]
+- admin/entry_access/ephemeralsession/add/ [entry_access_ephemeralsession_add]
+- admin/entry_access/ephemeralsession/<path:object_id>/history/ [entry_access_ephemeralsession_history]
+- admin/entry_access/ephemeralsession/<path:object_id>/delete/ [entry_access_ephemeralsession_delete]
+- admin/entry_access/ephemeralsession/<path:object_id>/change/ [entry_access_ephemeralsession_change]
+- admin/entry_access/ephemeralsession/<path:object_id>/ 
+- admin/accounts/user/<id>/password/ [auth_user_password_change]
+- admin/accounts/user/ [accounts_user_changelist]
+- admin/accounts/user/add/ [accounts_user_add]
+- admin/accounts/user/<path:object_id>/history/ [accounts_user_history]
+- admin/accounts/user/<path:object_id>/delete/ [accounts_user_delete]
+- admin/accounts/user/<path:object_id>/change/ [accounts_user_change]
+- admin/accounts/user/<path:object_id>/ 
+- admin/core/activity/ [core_activity_changelist]
+- admin/core/activity/add/ [core_activity_add]
+- admin/core/activity/<path:object_id>/history/ [core_activity_history]
+- admin/core/activity/<path:object_id>/delete/ [core_activity_delete]
+- admin/core/activity/<path:object_id>/change/ [core_activity_change]
+- admin/core/activity/<path:object_id>/ 
+- admin/public_portal/publicpost/ [public_portal_publicpost_changelist]
+- admin/public_portal/publicpost/add/ [public_portal_publicpost_add]
+- admin/public_portal/publicpost/<path:object_id>/history/ [public_portal_publicpost_history]
+- admin/public_portal/publicpost/<path:object_id>/delete/ [public_portal_publicpost_delete]
+- admin/public_portal/publicpost/<path:object_id>/change/ [public_portal_publicpost_change]
+- admin/public_portal/publicpost/<path:object_id>/ 
+- admin/public_portal/publicmedia/ [public_portal_publicmedia_changelist]
+- admin/public_portal/publicmedia/add/ [public_portal_publicmedia_add]
+- admin/public_portal/publicmedia/<path:object_id>/history/ [public_portal_publicmedia_history]
+- admin/public_portal/publicmedia/<path:object_id>/delete/ [public_portal_publicmedia_delete]
+- admin/public_portal/publicmedia/<path:object_id>/change/ [public_portal_publicmedia_change]
+- admin/public_portal/publicmedia/<path:object_id>/ 
+- admin/files/submissionfile/ [files_submissionfile_changelist]
+- admin/files/submissionfile/add/ [files_submissionfile_add]
+- admin/files/submissionfile/<path:object_id>/history/ [files_submissionfile_history]
+- admin/files/submissionfile/<path:object_id>/delete/ [files_submissionfile_delete]
+- admin/files/submissionfile/<path:object_id>/change/ [files_submissionfile_change]
+- admin/files/submissionfile/<path:object_id>/ 
+- admin/files/staffnote/ [files_staffnote_changelist]
+- admin/files/staffnote/add/ [files_staffnote_add]
+- admin/files/staffnote/<path:object_id>/history/ [files_staffnote_history]
+- admin/files/staffnote/<path:object_id>/delete/ [files_staffnote_delete]
+- admin/files/staffnote/<path:object_id>/change/ [files_staffnote_change]
+- admin/files/staffnote/<path:object_id>/ 
+- admin/files/materialcheck/ [files_materialcheck_changelist]
+- admin/files/materialcheck/add/ [files_materialcheck_add]
+- admin/files/materialcheck/<path:object_id>/history/ [files_materialcheck_history]
+- admin/files/materialcheck/<path:object_id>/delete/ [files_materialcheck_delete]
+- admin/files/materialcheck/<path:object_id>/change/ [files_materialcheck_change]
+- admin/files/materialcheck/<path:object_id>/ 
+- admin/files/materialrequirement/ [files_materialrequirement_changelist]
+- admin/files/materialrequirement/add/ [files_materialrequirement_add]
+- admin/files/materialrequirement/<path:object_id>/history/ [files_materialrequirement_history]
+- admin/files/materialrequirement/<path:object_id>/delete/ [files_materialrequirement_delete]
+- admin/files/materialrequirement/<path:object_id>/change/ [files_materialrequirement_change]
+- admin/files/materialrequirement/<path:object_id>/ 
+- admin/ruleset/rulesettemplate/ [ruleset_rulesettemplate_changelist]
+- admin/ruleset/rulesettemplate/add/ [ruleset_rulesettemplate_add]
+- admin/ruleset/rulesettemplate/<path:object_id>/history/ [ruleset_rulesettemplate_history]
+- admin/ruleset/rulesettemplate/<path:object_id>/delete/ [ruleset_rulesettemplate_delete]
+- admin/ruleset/rulesettemplate/<path:object_id>/change/ [ruleset_rulesettemplate_change]
+- admin/ruleset/rulesettemplate/<path:object_id>/ 
+- admin/ruleset/contestruleset/ [ruleset_contestruleset_changelist]
+- admin/ruleset/contestruleset/add/ [ruleset_contestruleset_add]
+- admin/ruleset/contestruleset/<path:object_id>/history/ [ruleset_contestruleset_history]
+- admin/ruleset/contestruleset/<path:object_id>/delete/ [ruleset_contestruleset_delete]
+- admin/ruleset/contestruleset/<path:object_id>/change/ [ruleset_contestruleset_change]
+- admin/ruleset/contestruleset/<path:object_id>/ 
+- admin/ruleset/rulesetversion/ [ruleset_rulesetversion_changelist]
+- admin/ruleset/rulesetversion/add/ [ruleset_rulesetversion_add]
+- admin/ruleset/rulesetversion/<path:object_id>/history/ [ruleset_rulesetversion_history]
+- admin/ruleset/rulesetversion/<path:object_id>/delete/ [ruleset_rulesetversion_delete]
+- admin/ruleset/rulesetversion/<path:object_id>/change/ [ruleset_rulesetversion_change]
+- admin/ruleset/rulesetversion/<path:object_id>/ 
+- admin/singer_contest/singerregistration/ [singer_contest_singerregistration_changelist]
+- admin/singer_contest/singerregistration/add/ [singer_contest_singerregistration_add]
+- admin/singer_contest/singerregistration/<path:object_id>/history/ [singer_contest_singerregistration_history]
+- admin/singer_contest/singerregistration/<path:object_id>/delete/ [singer_contest_singerregistration_delete]
+- admin/singer_contest/singerregistration/<path:object_id>/change/ [singer_contest_singerregistration_change]
+- admin/singer_contest/singerregistration/<path:object_id>/ 
+- admin/singer_contest/contestround/ [singer_contest_contestround_changelist]
+- admin/singer_contest/contestround/add/ [singer_contest_contestround_add]
+- admin/singer_contest/contestround/<path:object_id>/history/ [singer_contest_contestround_history]
+- admin/singer_contest/contestround/<path:object_id>/delete/ [singer_contest_contestround_delete]
+- admin/singer_contest/contestround/<path:object_id>/change/ [singer_contest_contestround_change]
+- admin/singer_contest/contestround/<path:object_id>/ 
+- admin/singer_contest/judge/ [singer_contest_judge_changelist]
+- admin/singer_contest/judge/add/ [singer_contest_judge_add]
+- admin/singer_contest/judge/<path:object_id>/history/ [singer_contest_judge_history]
+- admin/singer_contest/judge/<path:object_id>/delete/ [singer_contest_judge_delete]
+- admin/singer_contest/judge/<path:object_id>/change/ [singer_contest_judge_change]
+- admin/singer_contest/judge/<path:object_id>/ 
+- admin/singer_contest/roundentry/ [singer_contest_roundentry_changelist]
+- admin/singer_contest/roundentry/add/ [singer_contest_roundentry_add]
+- admin/singer_contest/roundentry/<path:object_id>/history/ [singer_contest_roundentry_history]
+- admin/singer_contest/roundentry/<path:object_id>/delete/ [singer_contest_roundentry_delete]
+- admin/singer_contest/roundentry/<path:object_id>/change/ [singer_contest_roundentry_change]
+- admin/singer_contest/roundentry/<path:object_id>/ 
+- admin/singer_contest/roundjudge/ [singer_contest_roundjudge_changelist]
+- admin/singer_contest/roundjudge/add/ [singer_contest_roundjudge_add]
+- admin/singer_contest/roundjudge/<path:object_id>/history/ [singer_contest_roundjudge_history]
+- admin/singer_contest/roundjudge/<path:object_id>/delete/ [singer_contest_roundjudge_delete]
+- admin/singer_contest/roundjudge/<path:object_id>/change/ [singer_contest_roundjudge_change]
+- admin/singer_contest/roundjudge/<path:object_id>/ 
+- admin/singer_contest/scorerecord/ [singer_contest_scorerecord_changelist]
+- admin/singer_contest/scorerecord/add/ [singer_contest_scorerecord_add]
+- admin/singer_contest/scorerecord/<path:object_id>/history/ [singer_contest_scorerecord_history]
+- admin/singer_contest/scorerecord/<path:object_id>/delete/ [singer_contest_scorerecord_delete]
+- admin/singer_contest/scorerecord/<path:object_id>/change/ [singer_contest_scorerecord_change]
+- admin/singer_contest/scorerecord/<path:object_id>/ 
+- admin/singer_contest/criterionscore/ [singer_contest_criterionscore_changelist]
+- admin/singer_contest/criterionscore/add/ [singer_contest_criterionscore_add]
+- admin/singer_contest/criterionscore/<path:object_id>/history/ [singer_contest_criterionscore_history]
+- admin/singer_contest/criterionscore/<path:object_id>/delete/ [singer_contest_criterionscore_delete]
+- admin/singer_contest/criterionscore/<path:object_id>/change/ [singer_contest_criterionscore_change]
+- admin/singer_contest/criterionscore/<path:object_id>/ 
+- admin/singer_contest/scoringrubric/ [singer_contest_scoringrubric_changelist]
+- admin/singer_contest/scoringrubric/add/ [singer_contest_scoringrubric_add]
+- admin/singer_contest/scoringrubric/<path:object_id>/history/ [singer_contest_scoringrubric_history]
+- admin/singer_contest/scoringrubric/<path:object_id>/delete/ [singer_contest_scoringrubric_delete]
+- admin/singer_contest/scoringrubric/<path:object_id>/change/ [singer_contest_scoringrubric_change]
+- admin/singer_contest/scoringrubric/<path:object_id>/ 
+- admin/singer_contest/rubriccriterion/ [singer_contest_rubriccriterion_changelist]
+- admin/singer_contest/rubriccriterion/add/ [singer_contest_rubriccriterion_add]
+- admin/singer_contest/rubriccriterion/<path:object_id>/history/ [singer_contest_rubriccriterion_history]
+- admin/singer_contest/rubriccriterion/<path:object_id>/delete/ [singer_contest_rubriccriterion_delete]
+- admin/singer_contest/rubriccriterion/<path:object_id>/change/ [singer_contest_rubriccriterion_change]
+- admin/singer_contest/rubriccriterion/<path:object_id>/ 
+- admin/singer_contest/scoresummary/ [singer_contest_scoresummary_changelist]
+- admin/singer_contest/scoresummary/add/ [singer_contest_scoresummary_add]
+- admin/singer_contest/scoresummary/<path:object_id>/history/ [singer_contest_scoresummary_history]
+- admin/singer_contest/scoresummary/<path:object_id>/delete/ [singer_contest_scoresummary_delete]
+- admin/singer_contest/scoresummary/<path:object_id>/change/ [singer_contest_scoresummary_change]
+- admin/singer_contest/scoresummary/<path:object_id>/ 
+- admin/singer_contest/award/ [singer_contest_award_changelist]
+- admin/singer_contest/award/add/ [singer_contest_award_add]
+- admin/singer_contest/award/<path:object_id>/history/ [singer_contest_award_history]
+- admin/singer_contest/award/<path:object_id>/delete/ [singer_contest_award_delete]
+- admin/singer_contest/award/<path:object_id>/change/ [singer_contest_award_change]
+- admin/singer_contest/award/<path:object_id>/ 
+- admin/farewell_show/program/ [farewell_show_program_changelist]
+- admin/farewell_show/program/add/ [farewell_show_program_add]
+- admin/farewell_show/program/<path:object_id>/history/ [farewell_show_program_history]
+- admin/farewell_show/program/<path:object_id>/delete/ [farewell_show_program_delete]
+- admin/farewell_show/program/<path:object_id>/change/ [farewell_show_program_change]
+- admin/farewell_show/program/<path:object_id>/ 
+- admin/voting/votesession/ [voting_votesession_changelist]
+- admin/voting/votesession/add/ [voting_votesession_add]
+- admin/voting/votesession/<path:object_id>/history/ [voting_votesession_history]
+- admin/voting/votesession/<path:object_id>/delete/ [voting_votesession_delete]
+- admin/voting/votesession/<path:object_id>/change/ [voting_votesession_change]
+- admin/voting/votesession/<path:object_id>/ 
+- admin/voting/voteoption/ [voting_voteoption_changelist]
+- admin/voting/voteoption/add/ [voting_voteoption_add]
+- admin/voting/voteoption/<path:object_id>/history/ [voting_voteoption_history]
+- admin/voting/voteoption/<path:object_id>/delete/ [voting_voteoption_delete]
+- admin/voting/voteoption/<path:object_id>/change/ [voting_voteoption_change]
+- admin/voting/voteoption/<path:object_id>/ 
+- admin/voting/voteballot/ [voting_voteballot_changelist]
+- admin/voting/voteballot/add/ [voting_voteballot_add]
+- admin/voting/voteballot/<path:object_id>/history/ [voting_voteballot_history]
+- admin/voting/voteballot/<path:object_id>/delete/ [voting_voteballot_delete]
+- admin/voting/voteballot/<path:object_id>/change/ [voting_voteballot_change]
+- admin/voting/voteballot/<path:object_id>/ 
+- admin/voting/voterecord/ [voting_voterecord_changelist]
+- admin/voting/voterecord/add/ [voting_voterecord_add]
+- admin/voting/voterecord/<path:object_id>/history/ [voting_voterecord_history]
+- admin/voting/voterecord/<path:object_id>/delete/ [voting_voterecord_delete]
+- admin/voting/voterecord/<path:object_id>/change/ [voting_voterecord_change]
+- admin/voting/voterecord/<path:object_id>/ 
+- admin/^(?P<app_label>auth|entry_access|accounts|core|public_portal|files|ruleset|singer_contest|farewell_show|voting)/$ [app_list]
+- admin/(?P<url>.*)$ 

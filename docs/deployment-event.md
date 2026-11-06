@@ -5,7 +5,7 @@
 公网 HTTPS 部署不使用本文件的事件 Compose，而使用 [`deploy/compose.production.yml`](../deploy/compose.production.yml) 和 [生产部署说明](deployment-production.md)。事件启动壳不提供 TLS、公网入口或 DDoS 防护。
 
 事件 Compose 只发布**一个** loopback 端口，属于 `proxy`（Caddy，见
-[`deploy/Caddyfile.event`](../deploy/Caddyfile.event)）。`web`、`media`、`realtime` 都只在
+[`deploy/Caddyfile.event`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/deploy/Caddyfile.event)）。`web`、`media`、`realtime` 都只在
 内部网络里，谁都不发布 host port；PostgreSQL 同样不发布。不要把端口绑定到 `0.0.0.0`，
 除非明确选择并遵循下方的 LAN 模式。
 

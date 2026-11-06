@@ -51,16 +51,14 @@ Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与�
   `legacy-user:*` 报名；导入移除后一并删除。v2 参与者使用本地账号。
 - **1.x 部署切换**：不再有 cutover 流程；v2 是唯一部署目标。
 
-## 删除 1.x 源码的门槛
+## 1.x 源码归档状态
 
-1. 外部审核通过（审核对象是 `main` 上的 v2 实现与本文）。
-2. 本文"仍缺口"表中没有必须在上线前完成的项目；被评估为有意放弃的项目需要有
-   对应 ADR 或本文记录。
-3. `pnpm -C plus run check`、`REQUIRE_DB=1 pnpm -C plus run test`、
-   `pnpm -C plus run build:prod`、`uv run pytest tests/gates -q`、
-   `uv run python tests/golden/validate_fixtures.py` 全绿。
-4. 删除后同步清理 `pyproject.toml`、`pyrightconfig.json`、`tailwind.config.js`、
-   `.dockerignore`、Dependabot 与 CI 中的 Django 条目。
+1.x 源码已于 2026-11-06 从 `main` 删除，完整源码保存在 tag `v1.0.2`，功能记录
+在 [`docs/archive/v1/`](../archive/v1/README.md)。删除同步清掉了 Django app、
+模板、静态资源、Django 测试、v1 CI、v1 部署与 Python 框架依赖；`pyproject.toml`
+现在只保留 pytest/ruff/pyyaml 门禁工具。
+
+后续功能缺口仍按本文表格推进，不再受 1.x 源码删除门槛约束。
 
 ## 约束
 
