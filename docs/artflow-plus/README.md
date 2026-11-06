@@ -3,9 +3,9 @@
 产品与架构身份的权威是根目录 [`GOAL.md`](../../GOAL.md)；本目录与
 `docs/architecture/`、`docs/domains/` 都是它的执行材料。
 
-`main` 是唯一开发主线，本工作区位于 `plus/`。1.x Django 源码作为历史证据暂留，
-等外部审核与 [v1→v2 覆盖审计](skeleton-coverage.md) 关闭后删除；仓库不再维护双线，
-也不再提供 legacy bundle 导入、运营接管、参与者认领或 v1 媒体桥。
+`main` 是唯一开发主线，本工作区位于 `plus/`。1.x Django 源码已从 `main` 删除，
+完整源码保存在 tag `v1.0.2`，功能记录见 [`docs/archive/v1/`](../archive/v1/README.md)。
+仓库不再维护双线，也不再提供 legacy bundle 导入、运营接管、参与者认领或 v1 媒体桥。
 
 ## 当前阶段（2026-11-06）
 
@@ -65,7 +65,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 - 舞台类节目单公开页、bracket/对阵、XLSX/Word 导出、二维码、现场大屏。
 - SSO provider；当前使用本地会话。
 - 多实例实时广播（Redis）与权限实时撤销。
-- 1.x 源码删除：等待外部审核与覆盖审计关闭。
+- 1.x 源码已删除；功能记录在 `docs/archive/v1/`，源码见 tag `v1.0.2`。
 
 ## 文档与规划基线
 

@@ -1,275 +1,5 @@
 services:
-  db:
-    image: ${ARTFLOW_POSTGRES_IMAGE:?Set ARTFLOW_POSTGRES_IMAGE}
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
-    networks:
-      - artflow_internal
-
-  redis:
-    image: ${ARTFLOW_REDIS_IMAGE:?Set ARTFLOW_REDIS_IMAGE}
-    restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
-    networks:
-      - artflow_internal
-
-  web:
-    image: ${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      APP_ENV: production
-      DEBUG: "False"
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the deployment environment}
-      QR_SIGNING_KEY: ${QR_SIGNING_KEY:?Set QR_SIGNING_KEY in the deployment environment}
-      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:?Set STAFF_ACCESS_KEY in the deployment environment}
-      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:?Set ADMIN_ACCESS_KEY in the deployment environment}
-      ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
-      ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
-      ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
-      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
-      ARTFLOW_PROCESS_ROLE: web
-      # Tunable runtime knobs, documented in .env.production.example. They are listed
-      # here explicitly because this manifest sets `environment:` per service and never
-      # uses `env_file:`, so a knob that is not listed here silently keeps its built-in
-      # default no matter what the deployment .env says.
-      ARTFLOW_DELIVERY_BACKEND: ${ARTFLOW_DELIVERY_BACKEND:-local}
-      ARTFLOW_VIDEO_UPLOAD_MAX_MB: ${ARTFLOW_VIDEO_UPLOAD_MAX_MB:-100}
-      ARTFLOW_UPLOAD_QUOTA_MB: ${ARTFLOW_UPLOAD_QUOTA_MB:-512}
-      ARTFLOW_UPLOAD_MAX_VERSIONS: ${ARTFLOW_UPLOAD_MAX_VERSIONS:-5}
-      ARTFLOW_UPLOAD_MIN_FREE_MB: ${ARTFLOW_UPLOAD_MIN_FREE_MB:-256}
-      ARTFLOW_UPLOAD_RATE_LIMIT: ${ARTFLOW_UPLOAD_RATE_LIMIT:-10}
-      ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS: ${ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS:-3600}
-      ARTFLOW_PII_RETENTION_DAYS: ${ARTFLOW_PII_RETENTION_DAYS:-365}
-      LIVE_STATE_CACHE_SECONDS: ${LIVE_STATE_CACHE_SECONDS:-1}
-      ADMIN_VERIFICATION_TTL_SECONDS: ${ADMIN_VERIFICATION_TTL_SECONDS:-900}
-      TICKET_ACCESS_SESSION_TTL_SECONDS: ${TICKET_ACCESS_SESSION_TTL_SECONDS:-28800}
-      SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
-      SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
-      SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in the deployment environment}
-      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in the deployment environment}
-      TRUST_X_FORWARDED_FOR: "true"
-      RATE_LIMIT_BACKEND: database
-      DATABASE_ENGINE: postgresql
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
-    volumes:
-      - static_data:/app/staticfiles
-      - media_data:/app/media
-      - backup_data:/app/backups
-    # Liveness only: a temporary database outage must not get the application
-    # container declared dead. Database readiness is covered by the proxy probe
-    # below, which reaches the app through the real request path.
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
-    networks:
-      - artflow_internal
-
-  # Media gets its own worker pool. A download occupies a Gunicorn sync worker for the
-  # whole transfer, and the load rehearsal (docs/production-readiness.md) measured three
-  # slow downloads taking the application down with them; on this manifest that would be
-  # scoring, voting and judge requests sharing those workers. Authorization is unchanged:
-  # this service runs the same controlled_media view against the same database, so a
-  # private file is still refused before a byte is produced. Only the pool is separate.
-  media:
-    image: ${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      APP_ENV: production
-      DEBUG: "False"
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the deployment environment}
-      QR_SIGNING_KEY: ${QR_SIGNING_KEY:?Set QR_SIGNING_KEY in the deployment environment}
-      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:?Set STAFF_ACCESS_KEY in the deployment environment}
-      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:?Set ADMIN_ACCESS_KEY in the deployment environment}
-      ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
-      ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
-      ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
-      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
-      ARTFLOW_PROCESS_ROLE: media
-      # Same explicit list as `web`: every Django process loads the same settings
-      # module, so a knob forwarded to one service but not another makes two pools
-      # disagree about the running configuration.
-      ARTFLOW_DELIVERY_BACKEND: ${ARTFLOW_DELIVERY_BACKEND:-local}
-      ARTFLOW_VIDEO_UPLOAD_MAX_MB: ${ARTFLOW_VIDEO_UPLOAD_MAX_MB:-100}
-      ARTFLOW_UPLOAD_QUOTA_MB: ${ARTFLOW_UPLOAD_QUOTA_MB:-512}
-      ARTFLOW_UPLOAD_MAX_VERSIONS: ${ARTFLOW_UPLOAD_MAX_VERSIONS:-5}
-      ARTFLOW_UPLOAD_MIN_FREE_MB: ${ARTFLOW_UPLOAD_MIN_FREE_MB:-256}
-      ARTFLOW_UPLOAD_RATE_LIMIT: ${ARTFLOW_UPLOAD_RATE_LIMIT:-10}
-      ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS: ${ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS:-3600}
-      ARTFLOW_PII_RETENTION_DAYS: ${ARTFLOW_PII_RETENTION_DAYS:-365}
-      LIVE_STATE_CACHE_SECONDS: ${LIVE_STATE_CACHE_SECONDS:-1}
-      ADMIN_VERIFICATION_TTL_SECONDS: ${ADMIN_VERIFICATION_TTL_SECONDS:-900}
-      TICKET_ACCESS_SESSION_TTL_SECONDS: ${TICKET_ACCESS_SESSION_TTL_SECONDS:-28800}
-      SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
-      SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
-      SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in the deployment environment}
-      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in the deployment environment}
-      TRUST_X_FORWARDED_FOR: "true"
-      RATE_LIMIT_BACKEND: database
-      DATABASE_ENGINE: postgresql
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
-    # Media workers do nothing but stream bytes, so they need no headroom for the
-    # slower scoring and export paths the web pool carries.
-    command:
-      [
-        "gunicorn",
-        "config.wsgi:application",
-        "--bind",
-        "0.0.0.0:8002",
-        "--workers",
-        "2",
-        "--timeout",
-        "120",
-        "--graceful-timeout",
-        "30",
-      ]
-    volumes:
-      # Error pages are Django templates and `{% static %}` resolves through the
-      # manifest storage when DEBUG=False. Without the collected manifest a 404 from
-      # this pool turns into a 500 (and the 500 template raises the same error), so the
-      # read-only share is what keeps "private file" answering 404. `web` populates the
-      # volume before it reports healthy, and `proxy` waits for that, so the manifest is
-      # present before any external request reaches this service.
-      - static_data:/app/staticfiles:ro
-      - media_data:/app/media
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8002/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
-    networks:
-      - artflow_internal
-
-  realtime:
-    image: ${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-      # `service_started`, not `service_healthy`, for the same reason `proxy` below
-      # only requires the container to exist: with a health gate, an unhealthy Redis
-      # means this container is never created, which leaves `proxy`'s
-      # `realtime: service_started` permanently unsatisfied and takes the whole HTTP
-      # site down even though nothing on it needs Redis. `restart: unless-stopped`
-      # retries the process until Redis accepts connections.
-      redis:
-        condition: service_started
-    environment:
-      APP_ENV: production
-      DEBUG: "False"
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the deployment environment}
-      QR_SIGNING_KEY: ${QR_SIGNING_KEY:?Set QR_SIGNING_KEY in the deployment environment}
-      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:?Set STAFF_ACCESS_KEY in the deployment environment}
-      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:?Set ADMIN_ACCESS_KEY in the deployment environment}
-      ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
-      ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
-      ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
-      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
-      ARTFLOW_PROCESS_ROLE: realtime
-      ARTFLOW_REALTIME_REDIS_URL: redis://redis:6379/0
-      # Same explicit list as `web`: every Django process loads the same settings
-      # module, so a knob forwarded to one service but not another makes two pools
-      # disagree about the running configuration.
-      ARTFLOW_DELIVERY_BACKEND: ${ARTFLOW_DELIVERY_BACKEND:-local}
-      ARTFLOW_VIDEO_UPLOAD_MAX_MB: ${ARTFLOW_VIDEO_UPLOAD_MAX_MB:-100}
-      ARTFLOW_UPLOAD_QUOTA_MB: ${ARTFLOW_UPLOAD_QUOTA_MB:-512}
-      ARTFLOW_UPLOAD_MAX_VERSIONS: ${ARTFLOW_UPLOAD_MAX_VERSIONS:-5}
-      ARTFLOW_UPLOAD_MIN_FREE_MB: ${ARTFLOW_UPLOAD_MIN_FREE_MB:-256}
-      ARTFLOW_UPLOAD_RATE_LIMIT: ${ARTFLOW_UPLOAD_RATE_LIMIT:-10}
-      ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS: ${ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS:-3600}
-      ARTFLOW_PII_RETENTION_DAYS: ${ARTFLOW_PII_RETENTION_DAYS:-365}
-      LIVE_STATE_CACHE_SECONDS: ${LIVE_STATE_CACHE_SECONDS:-1}
-      ADMIN_VERIFICATION_TTL_SECONDS: ${ADMIN_VERIFICATION_TTL_SECONDS:-900}
-      TICKET_ACCESS_SESSION_TTL_SECONDS: ${TICKET_ACCESS_SESSION_TTL_SECONDS:-28800}
-      SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
-      SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
-      SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in the deployment environment}
-      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in the deployment environment}
-      TRUST_X_FORWARDED_FOR: "true"
-      RATE_LIMIT_BACKEND: database
-      DATABASE_ENGINE: postgresql
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
-    volumes:
-      # Same reason as the media pool: a Django-rendered error page must be able to
-      # resolve `{% static %}` from the manifest instead of failing into a 500.
-      - static_data:/app/staticfiles:ro
-    command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "config.asgi:application"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8001/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
-    networks:
-      - artflow_internal
-
-  # --- ArtFlow-Plus cutover profile -----------------------------------------
-  # These services are inert unless `--profile plus` is used. v1 keeps running
-  # beside them; Caddy selects which upstream answers the public hostname.
   plus-db:
-    profiles: ["plus"]
     image: ${ARTFLOW_POSTGRES_IMAGE:?Set ARTFLOW_POSTGRES_IMAGE}
     restart: unless-stopped
     environment:
@@ -288,7 +18,6 @@ services:
       - artflow_internal
 
   plus-api:
-    profiles: ["plus"]
     image: ${ARTFLOW_PLUS_API_IMAGE:?Set ARTFLOW_PLUS_API_IMAGE}
     restart: unless-stopped
     depends_on:
@@ -309,11 +38,22 @@ services:
     volumes:
       - plus_archive_data:/app/var/archives
       - plus_media_data:/app/var/media
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/healthz').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - artflow_internal
 
   plus-worker:
-    profiles: ["plus"]
     image: ${ARTFLOW_PLUS_WORKER_IMAGE:?Set ARTFLOW_PLUS_WORKER_IMAGE}
     restart: unless-stopped
     depends_on:
@@ -325,6 +65,8 @@ services:
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA}
       ARTFLOW_PLUS_DATABASE_URL: postgresql://${PLUS_POSTGRES_USER}:${PLUS_POSTGRES_PASSWORD}@plus-db:5432/${PLUS_POSTGRES_DB:-artflow_plus}
       ARTFLOW_PLUS_WORKER_READY_FILE: /tmp/artflow-worker-ready
+      ARTFLOW_PLUS_WORKER_RELAY_INTERVAL_MS: ${ARTFLOW_PLUS_WORKER_RELAY_INTERVAL_MS:-250}
+      ARTFLOW_PLUS_WORKER_SHUTDOWN_TIMEOUT_MS: ${ARTFLOW_PLUS_WORKER_SHUTDOWN_TIMEOUT_MS:-10000}
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/artflow-worker-ready"]
       interval: 15s
@@ -335,7 +77,6 @@ services:
       - artflow_internal
 
   plus-web:
-    profiles: ["plus"]
     image: ${ARTFLOW_PLUS_WEB_IMAGE:?Set ARTFLOW_PLUS_WEB_IMAGE}
     restart: unless-stopped
     depends_on:
@@ -354,18 +95,8 @@ services:
     image: ${ARTFLOW_CADDY_IMAGE:?Set ARTFLOW_CADDY_IMAGE}
     restart: unless-stopped
     depends_on:
-      web:
+      plus-web:
         condition: service_healthy
-      media:
-        condition: service_healthy
-      # The container must exist, because Caddy resolves the `realtime` upstream when it
-      # loads its config; it does not have to be healthy. Requiring health made a Redis
-      # outage a total outage: realtime would not start, so the proxy would not start, so
-      # the entire HTTP site was unreachable even though nothing on it needs Redis. Every
-      # realtime client already degrades to HTTP (judge polling, rapid-score refetch,
-      # group forms), and those mutations never went through the socket in the first place.
-      realtime:
-        condition: service_started
     healthcheck:
       test:
         [
@@ -378,7 +109,6 @@ services:
       start_period: 20s
     environment:
       CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?Set CADDY_SITE_ADDRESS to the public DNS name}
-      ARTFLOW_SITE_PROFILE: ${ARTFLOW_SITE_PROFILE:-v1}
     ports:
       - "80:80"
       - "443:443"
@@ -387,22 +117,18 @@ services:
       - caddy_config:/config
       - ./caddy/sites:/etc/caddy/sites:ro
     configs:
-      - source: caddyfile_switch
+      - source: caddyfile
         target: /etc/caddy/Caddyfile
     networks:
       - artflow_frontend
       - artflow_internal
 
 volumes:
-  postgres_data:
-  static_data:
-  media_data:
-  backup_data:
-  caddy_data:
-  caddy_config:
   plus_postgres_data:
   plus_archive_data:
   plus_media_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   artflow_frontend:
@@ -411,5 +137,5 @@ networks:
     internal: true
 
 configs:
-  caddyfile_switch:
-    file: ./caddy/Caddyfile.switch
+  caddyfile:
+    file: ./caddy/Caddyfile.plus

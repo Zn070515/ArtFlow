@@ -3,7 +3,7 @@
 
 ## Project overview
 
-ArtFlow is a single-line repository. `main` carries **ArtFlow-Plus (v2)** under `plus/` — a Node 24 / Fastify 5 / React 19 / PostgreSQL 18 workspace. The 1.x Django monolith is retained at the repository root only as review evidence; its mission is complete and it will be deleted once external review and the coverage audit close. Do not add features to the Django code.
+ArtFlow is a single-line repository. `main` carries **ArtFlow-Plus (v2)** under `plus/` — a Node 24 / Fastify 5 / React 19 / PostgreSQL 18 workspace. The 1.x Django monolith has been removed from `main`; its complete source is preserved in tag `v1.0.2`, and its feature record lives in `docs/archive/v1/`. Do not reintroduce it.
 
 Read `GOAL.md` for product scope, [`AGENTS.md`](AGENTS.md) for the module breakdown, and [the development baseline](docs/development-baseline.md) for the current, verified operating procedures.
 
@@ -24,7 +24,7 @@ pnpm --filter @artflow-plus/web dev
 
 The API migrates on start. Browser E2E uses the `artflow_e2e` schema with `workers: 1`. `uv run pytest tests/gates -q` includes the structural gates; `uv run python tests/golden/validate_fixtures.py` validates the implementation-independent fixtures.
 
-The retained Django source can still be inspected with `uv sync --locked --extra dev`, `uv run python manage.py check`, and `uv run python manage.py test`, but it is not a delivery path. Do not extend it.
+Python is used only for structural gates: `uv sync --locked --extra dev`, `uv run pytest tests/gates -q`, `uv run python tests/golden/validate_fixtures.py`, and `pwsh -NoProfile -File scripts/check_docs.ps1`.
 
 ## Runtime operations
 

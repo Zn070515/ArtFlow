@@ -466,7 +466,7 @@ migration 和文档检查通过。GitHub Actions 最近一次 push 的所有 job
 TLS 终端或第三方 IdP。使用最新源码构建的临时 `web` 容器，连接现有 PostgreSQL
 16 容器；`RATE_LIMIT_BACKEND=database`，服务映射为 `127.0.0.1:18000`，单请求
 超时 5 秒，最大并发 32。测试脚本为
-[`scripts/m2_c_malicious_rehearsal.mjs`](../scripts/m2_c_malicious_rehearsal.mjs)，
+[`scripts/m2_c_malicious_rehearsal.mjs`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/scripts/m2_c_malicious_rehearsal.mjs)，
 所有 Judge fixture 均为非生产一次性数据。除 redeem 建立 7 个测试会话外，599 个
 协议/负载请求均不提交评分、投票、奖项或其他权威事实；7 个 fixture 在测试后通过
 `clear_activity_test_data` 清理，测试活动仅按既有契约保留配置壳。
@@ -519,7 +519,7 @@ HTTP 请求；没有超时、连接错误或 5xx。Django authority/恶意边界
 （`requires_ticket=True`，走完整锁链），驱动方式是真实服务入口
 `voting.services.submit_ballot`，每个模拟观众一个线程、一张已检票票据，在
 `--duration` 内随机释放自己那一票。命令为
-[`voting/management/commands/benchmark_ballot_burst.py`](../voting/management/commands/benchmark_ballot_burst.py)：
+[`voting/management/commands/benchmark_ballot_burst.py`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/voting/management/commands/benchmark_ballot_burst.py)：
 
 ```powershell
 uv run python manage.py benchmark_ballot_burst --vote-session <pk> --clients 300 --duration 10
@@ -559,7 +559,7 @@ failure mode，不是代码缺陷。本轮把它从判断变成测量。
 （`ARTFLOW_VIDEO_UPLOAD_MAX_MB` 的默认值，即正式活动允许的最大视频），文件为稀疏文件。
 每个模拟客户端读取一块后停 50 ms，用背压模拟现场 wifi 上的手机；一条**独立**连接每
 250 ms 探一次 `/livez/`（不碰数据库的存活探针），单次 5 s 超时。命令为
-[`scripts/media_download_load_rehearsal.mjs`](../scripts/media_download_load_rehearsal.mjs)：
+[`scripts/media_download_load_rehearsal.mjs`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/scripts/media_download_load_rehearsal.mjs)：
 
 ```powershell
 # 在 web 容器内生成 fixture，拷出后可重复使用
