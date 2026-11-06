@@ -5,12 +5,13 @@ import { describe, expect, it } from "vitest";
 const stylesDirectory = join(process.cwd(), "src", "styles");
 
 describe("ArtFlow visual theme styles", () => {
-  it("declares both theme presets and Console layout roles", async () => {
+  it("declares the Portal and Console theme presets with layout roles", async () => {
     const tokens = await readFile(`${stylesDirectory}/tokens.css`, "utf8");
     const global = await readFile(`${stylesDirectory}/global.css`, "utf8");
 
-    expect(tokens).toContain('[data-theme="afterglow"]');
+    expect(tokens).toContain('[data-theme="violet"]');
     expect(tokens).toContain('[data-theme="signal"]');
+    expect(tokens).toContain('[data-theme="afterglow"]');
     expect(tokens).toContain("--color-surface-raised");
     expect(global).toContain(".console-shell");
     expect(global).toContain(".console-table-wrap");

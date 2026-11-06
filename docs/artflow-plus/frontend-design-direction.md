@@ -138,23 +138,28 @@ Console 是新壳，不复用 Portal 的 hero 骨架：
 
 禁止在业务组件中新增十六进制色值；所有状态色进 token。
 
-### 6.1.1 候选方向：紫色系（待定）
+### 6.1.1 紫色系（已采用，Portal）
 
-维护者偏好腾讯众测平台那种紫色调。这是**候选方向**，不是已采用的主题；落地前需要
-参考页面/截图，并同时满足下面的对比度与语义色约束。建议新增独立主题，而不是改写
-现有 `afterglow` / `signal`：
+参考：[腾讯安全众测](https://zc.tencent.com) 的紫调。从站点 CSS 提取到的主色是
+`#8b5cf6`（主操作/active）、`#c4b5fd`（高光/焦点）、深色 surface `#1f1e33`，
+以及特殊块使用的 `#8d02ea → #380af9` 渐变。ArtFlow 采用独立主题
+`data-theme="violet"`，只应用于 **Portal**；Console 保留 `signal` 的中性深色，
+避免运营表格与评分界面被紫色装饰干扰。
 
 ```text
---color-page            深紫黑底（例如 #0d0916 区间）
---color-surface         低饱和紫灰卡片
---color-accent          品牌紫（主操作、active）
---color-accent-strong   浅紫高光（focus、关键数值）
---color-accent-contrast 深色文字，保证按钮对比度
---success/warning/danger/info  保持现有语义，不紫化
+--color-page            #0b0916   深紫黑底
+--color-surface         #151222   低饱和紫灰卡片
+--color-accent          #8b5cf6   主操作、active
+--color-accent-strong   #c4b5fd   高光、focus
+--color-accent-contrast #120821   按钮上的深色文字
+--color-text            #f5f1ff
+--color-text-muted      #c9c1e6
+--gold / --gold-bright  覆盖为紫色，保持既有 gold 变量消费点同步换色
+--success/warning/danger/info  保持原语义，不紫化
 ```
 
-验收：`theme-contrast.test.ts` 的全组合通过；Portal 的 three.js 装饰仍可降级；Console
-不引入紫色装饰动效。参考链接与最终色值确定后再写入 `tokens.css`。
+验收：`theme-contrast.test.ts` 同时覆盖 `signal` 与 `violet`；Portal 的 three.js
+装饰仍可降级；Console 不引入紫色装饰动效。
 
 ### 6.2 字号
 

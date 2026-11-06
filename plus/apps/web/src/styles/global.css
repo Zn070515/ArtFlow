@@ -227,8 +227,8 @@ input {
   padding: 13px 18px;
   border: 0;
   border-radius: 12px;
-  background: linear-gradient(120deg, var(--gold-bright), var(--gold) 55%, #c98b2f);
-  color: #160f05;
+  background: linear-gradient(120deg, var(--gold-bright), var(--gold) 55%, var(--gold-deep));
+  color: var(--accent-ink);
   font-weight: 600;
   letter-spacing: 0.06em;
   cursor: pointer;
@@ -1128,8 +1128,8 @@ a.primary-button {
   padding: 0 22px;
   border: 0;
   border-radius: 14px;
-  background: linear-gradient(120deg, var(--gold-bright), var(--gold) 55%, #c98b2f);
-  color: #160f05;
+  background: linear-gradient(120deg, var(--gold-bright), var(--gold) 55%, var(--gold-deep));
+  color: var(--accent-ink);
   font-weight: 600;
   letter-spacing: 0.06em;
   cursor: pointer;

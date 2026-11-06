@@ -30,22 +30,27 @@ function contrast(first: string, second: string): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
-describe("Signal theme contrast", () => {
+function expectReadableTheme(tokens: string, theme: "signal" | "violet"): void {
+  const block = tokens.slice(tokens.indexOf(`[data-theme="${theme}"]`));
+  const page = tokenValue(block, "color-page");
+  const surface = tokenValue(block, "color-surface");
+  const text = tokenValue(block, "color-text");
+  const textMuted = tokenValue(block, "color-text-muted");
+  const accent = tokenValue(block, "color-accent");
+  const accentContrast = tokenValue(block, "color-accent-contrast");
+  const focus = tokenValue(block, "color-focus");
+
+  expect(contrast(text, page), `${theme}: text on page`).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(textMuted, surface), `${theme}: muted text on surface`).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(accent, surface), `${theme}: accent on surface`).toBeGreaterThanOrEqual(3);
+  expect(contrast(accentContrast, accent), `${theme}: text on accent`).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(focus, surface), `${theme}: focus on surface`).toBeGreaterThanOrEqual(3);
+}
+
+describe("theme contrast", () => {
   it("meets readable text and control contrast thresholds", async () => {
     const tokens = await readFile(`${stylesDirectory}/tokens.css`, "utf8");
-    const signal = tokens.slice(tokens.indexOf('[data-theme="signal"]'));
-    const page = tokenValue(signal, "color-page");
-    const surface = tokenValue(signal, "color-surface");
-    const text = tokenValue(signal, "color-text");
-    const textMuted = tokenValue(signal, "color-text-muted");
-    const accent = tokenValue(signal, "color-accent");
-    const accentContrast = tokenValue(signal, "color-accent-contrast");
-    const focus = tokenValue(signal, "color-focus");
-
-    expect(contrast(text, page)).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(textMuted, surface)).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(accent, surface)).toBeGreaterThanOrEqual(3);
-    expect(contrast(accentContrast, accent)).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(focus, surface)).toBeGreaterThanOrEqual(3);
+    expectReadableTheme(tokens, "signal");
+    expectReadableTheme(tokens, "violet");
   });
 });

@@ -1,11 +1,14 @@
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+
+import { themeColor } from "./palette.js";
 
 const COUNT = 180;
 
 export function DustField() {
   const points = useRef<THREE.Points>(null);
+  const material = useRef<THREE.PointsMaterial>(null);
   const positions = useMemo(() => {
     const values = new Float32Array(COUNT * 3);
     for (let index = 0; index < COUNT; index += 1) {
@@ -14,6 +17,10 @@ export function DustField() {
       values[index * 3 + 2] = (Math.random() - 0.5) * 2 - 0.6;
     }
     return values;
+  }, []);
+
+  useEffect(() => {
+    material.current?.color.copy(themeColor("--gold", "#E8B45A"));
   }, []);
 
   useFrame((_state, delta) => {
@@ -30,6 +37,7 @@ export function DustField() {
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial
+        ref={material}
         color="#E8B45A"
         size={0.018}
         sizeAttenuation

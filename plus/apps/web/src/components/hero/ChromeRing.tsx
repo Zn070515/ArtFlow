@@ -1,7 +1,8 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
+import { themeColor } from "./palette.js";
 import { ringFragment, ringVertex } from "./shaders.js";
 
 export function ChromeRing() {
@@ -10,12 +11,21 @@ export function ChromeRing() {
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uGold: { value: new THREE.Color("#E8B45A") },
-      uEmber: { value: new THREE.Color("#C2410C") },
-      uCool: { value: new THREE.Color("#7DD3FC") },
+      uGold: { value: themeColor("--gold", "#E8B45A") },
+      uEmber: { value: themeColor("--ember", "#C2410C") },
+      uCool: { value: themeColor("--cool", "#7DD3FC") },
     }),
     [],
   );
+
+  const lineMaterial = useRef<THREE.MeshBasicMaterial>(null);
+
+  useEffect(() => {
+    uniforms.uGold.value.copy(themeColor("--gold", "#E8B45A"));
+    uniforms.uEmber.value.copy(themeColor("--ember", "#C2410C"));
+    uniforms.uCool.value.copy(themeColor("--cool", "#7DD3FC"));
+    lineMaterial.current?.color.copy(themeColor("--gold", "#E8B45A"));
+  }, [uniforms]);
 
   useFrame((_state, delta) => {
     if (document.visibilityState === "hidden") return;
@@ -44,7 +54,7 @@ export function ChromeRing() {
       </mesh>
       <mesh rotation={[1.1, 0.35, 0]}>
         <torusGeometry args={[1.36, 0.008, 16, 128]} />
-        <meshBasicMaterial color="#E8B45A" transparent opacity={0.32} />
+        <meshBasicMaterial ref={lineMaterial} color="#E8B45A" transparent opacity={0.32} />
       </mesh>
     </group>
   );

@@ -13,7 +13,7 @@ export function PortalShell({ children }: { readonly children: ReactNode }) {
   const showStaticBackdrop = pathname.startsWith("/vote/");
 
   return (
-    <div className="app-shell" data-shell="portal" data-theme="afterglow">
+    <div className="app-shell" data-shell="portal" data-theme="violet">
       {showAurora || showStaticBackdrop ? (
         <AuroraScene reducedMotion={reducedMotion || showStaticBackdrop} />
       ) : null}
