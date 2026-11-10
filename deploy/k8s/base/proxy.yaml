@@ -4,10 +4,6 @@ metadata:
   name: caddy-lab
 data:
   Caddyfile: |
-    {
-      auto_https off
-    }
-
     http://:8081 {
       @health path /healthz /healthz/ /readyz /readyz/
       reverse_proxy @health plus-web:8080

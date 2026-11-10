@@ -56,14 +56,20 @@ $digests.Keys | Sort-Object | ForEach-Object { "$_=$($digests[$_])" } |
 Copy-Item $envPath "deploy/k8s/overlays/test/images.env" -Force
 Copy-Item $envPath "deploy/k8s/overlays/restore/images.env" -Force
 
+function Set-ImageDigest {
+  param([string]$Text, [string]$Name, [string]$Digest)
+  $pattern = "(?m)(name: " + [regex]::Escape($Name) + "\s*\n\s*newName: [^\n]+\n\s*digest: )\S+"
+  return [regex]::Replace($Text, $pattern, "`${1}$Digest")
+}
+
 foreach ($overlay in @("dev", "test", "restore")) {
   $path = "deploy/k8s/overlays/$overlay/kustomization.yaml"
   $text = Get-Content -LiteralPath $path -Raw
-  $text = $text.Replace("sha256:REPLACE_WITH_API_DIGEST", $digests.ARTFLOW_PLUS_API_DIGEST)
-  $text = $text.Replace("sha256:REPLACE_WITH_WORKER_DIGEST", $digests.ARTFLOW_PLUS_WORKER_DIGEST)
-  $text = $text.Replace("sha256:REPLACE_WITH_WEB_DIGEST", $digests.ARTFLOW_PLUS_WEB_DIGEST)
-  $text = $text.Replace("sha256:REPLACE_WITH_POSTGRES_DIGEST", $digests.POSTGRES_DIGEST)
-  $text = $text.Replace("sha256:REPLACE_WITH_CADDY_DIGEST", $digests.CADDY_DIGEST)
+  $text = Set-ImageDigest $text "artflow-plus-api" $digests.ARTFLOW_PLUS_API_DIGEST
+  $text = Set-ImageDigest $text "artflow-plus-worker" $digests.ARTFLOW_PLUS_WORKER_DIGEST
+  $text = Set-ImageDigest $text "artflow-plus-web" $digests.ARTFLOW_PLUS_WEB_DIGEST
+  $text = Set-ImageDigest $text "library/postgres" $digests.POSTGRES_DIGEST
+  $text = Set-ImageDigest $text "library/caddy" $digests.CADDY_DIGEST
   Set-Content -LiteralPath $path -Value $text -NoNewline
 }
 

@@ -6,13 +6,13 @@ resources:
 images:
   - name: artflow-plus-api
     newName: 192.168.47.10:5000/artflow-plus-api
-    digest: sha256:1bc926d5d14f0c117832abd027be07126721e8cd53c0e98597a4d3f08ec7d2e6
+    digest: sha256:023fc974cd8bdaf3a34a66fd2998fcbfac97fe58b9113e24b352bbc12d3b8f06
   - name: artflow-plus-worker
     newName: 192.168.47.10:5000/artflow-plus-worker
-    digest: sha256:2c7e2b9f25dce27e2b6e5250f0eeaf302865c9e5b16aa938d27a78154c675a52
+    digest: sha256:7263b04f1289b0319b33c4e85e92f17342c0a3cf90f84660037deded3936e8ba
   - name: artflow-plus-web
     newName: 192.168.47.10:5000/artflow-plus-web
-    digest: sha256:f076164a02bf6c0a179589af2c382fb66c91a2cab0f47475c5b294965da8f704
+    digest: sha256:a8aa23adda56f2f809f856b78c5d7b9b14311d65467023fea2bdb3928b8fb48a
   - name: library/postgres
     newName: 192.168.47.10:5000/library/postgres
     digest: sha256:dccfb624111cd5c2139ccb4e9bf12588c8676e0d4e852fa949998f9a01c7b3bd
