@@ -3,6 +3,8 @@ import { expect, it } from "vitest";
 
 import {
   ActivityPackSchema,
+  AttendanceCheckinBodySchema,
+  AttendanceQuerySchema,
   CapabilityManifestSchema,
   CloseExecutionBodySchema,
   CommandEnvelopeSchema,
@@ -242,4 +244,22 @@ it("validates a capability manifest and its surfaces", () => {
   expect(
     Value.Check(CapabilityManifestSchema, { ...manifest, surfaces: [] }),
   ).toBe(false);
+});
+
+it("accepts the attendance check-in union and rejects mixed ticket inputs", () => {
+  expect(Value.Check(AttendanceCheckinBodySchema, {
+    pointKey: "gate", subjectType: "ticket", ticketId: "ticket-1",
+  })).toBe(true);
+  expect(Value.Check(AttendanceCheckinBodySchema, {
+    pointKey: "gate", subjectType: "ticket", credential: "T.abc",
+  })).toBe(true);
+  expect(Value.Check(AttendanceCheckinBodySchema, {
+    pointKey: "gate", subjectType: "ticket", ticketId: "ticket-1", credential: "T.abc",
+  })).toBe(false);
+});
+
+it("bounds attendance query modes and limits", () => {
+  expect(Value.Check(AttendanceQuerySchema, { mode: "formal", limit: 100 })).toBe(true);
+  expect(Value.Check(AttendanceQuerySchema, { mode: "rehearsal" })).toBe(false);
+  expect(Value.Check(AttendanceQuerySchema, { limit: 501 })).toBe(false);
 });
