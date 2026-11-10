@@ -114,7 +114,7 @@ describe("AttendanceCard", () => {
   it("offers undo for a present subject", async () => {
     renderCard({}, {
       ...list,
-      rows: [{ ...list.rows[0], status: "present" }],
+      rows: [{ ...list.rows[0]!, status: "present" as const }],
       summary: [{ subjectType: "participant", expected: 1, present: 1, undone: 0 }],
     });
     expect(await screen.findByTestId("attendance-card")).toBeTruthy();
