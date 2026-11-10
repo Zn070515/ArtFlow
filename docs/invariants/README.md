@@ -15,6 +15,7 @@
 | `SCOR-` | [scoring.md](scoring.md) | 评分事实、评委组、评分门 |
 | `RES-` | [results.md](results.md) | 结果快照、公示、撤销、归档 |
 | `TICK-` | [tickets.md](tickets.md) | 票据、凭证、访问、限流 |
+| `ATT-` | [attendance.md](attendance.md) | 签到/到场：观测性、append-only、mode 分区、票据分离 |
 | `DEPL-` | [deployment.md](deployment.md) | 发布产物一致性与部署边界 |
 | `RT-` | [realtime.md](realtime.md) | 实时核心：通知-only、版本、鉴权、有界资源、核心独占 |
 

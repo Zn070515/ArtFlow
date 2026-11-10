@@ -422,8 +422,22 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   [`M15.2 自建检查`](checks/2026-10-28-tasks-readiness-checks.md) 与
   [`M15.2 设计`](specs/2026-10-28-tasks-readiness-design.md)。
 
-后续按顺序实现 M15.3 Check-in/Attendance、M15.4 Schedule/Program Release、M15.5
-Incident/Recovery/Feedback；仍不把真实活动彩排作为验收前置条件。
+## M15.3 — Attendance / Check-in（已完成，2026-11-10）
+
+- 新增可选 `attendance` capability：签到点、staff roster、append-only 签到事实与
+  mode 分区的 current 投影；数据库唯一约束与活动锁兜底。
+- 三种主体统一：participant（approved registration）、ticket（issued/redeemed，
+  与 `ticketing.ticket.redeem` 独立）、staff（活动级 roster）。
+- `attendance.checkin` / `attendance.undo` 绑定运行中的 `checkin` execution
+  session；写权限 `attendance.manage`，读面 `config.access: "attendance"`。
+- Ops Attendance 卡片（session 开关、签到点、三 Tab、票据 credential、签到/撤销/
+  备注）与 Live 只读摘要；签到只做观测，不改变任何其他 capability 的 gate。
+- 出口：domain/DB/runtime/API/Web 定向测试与浏览器 E2E；不变量见
+  [`docs/invariants/attendance.md`](../invariants/attendance.md)，决策见
+  [ADR-0038](../architecture/adr/0038-attendance-observational-authority.md)。
+
+后续按顺序实现 M15.4 Schedule/Program Release、M15.5 Incident/Recovery/Feedback；
+仍不把真实活动彩排作为验收前置条件。
 
 ## Definition of Done（每个 slice）
 

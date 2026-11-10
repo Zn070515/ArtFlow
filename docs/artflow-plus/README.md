@@ -9,7 +9,7 @@
 
 ## 当前阶段（2026-11-06）
 
-v2 已完成 **M0–M15.2**（含 M13.1–M13.3、票据投票、运营分析与 Tasks），并完成单线化与 v1 兼容层移除；
+v2 已完成 **M0–M15.3**（含 M13.1–M13.3、票据投票、运营分析、Tasks 与签到），并完成单线化与 v1 兼容层移除；
 1.x 的功能覆盖审计已进入执行清单。逐项出口与证据在 [roadmap.md](roadmap.md)。
 
 | 里程碑 | 状态 | 主要交付 |
@@ -31,6 +31,7 @@ v2 已完成 **M0–M15.2**（含 M13.1–M13.3、票据投票、运营分析与
 | M14 Ticket-backed Voting | 已完成 | 票据 fragment、手工兑换与观众投票入口 |
 | M15 Operations Analytics | 已完成 | 运营对比分析与审计视图 |
 | M16 Tasks Readiness | 已完成 | 版本化任务项、审计命令与 Ops 控制台 |
+| M15.3 Attendance | 已完成 | 统一签到（participant/ticket/staff）、签到点与 staff roster、Ops/Live 到场视图 |
 | v1 兼容移除 | 已完成 | 删除 legacy import/adoption、参与者认领、v1 媒体桥与 v1 golden adapter |
 
 ### v2 架构速览
