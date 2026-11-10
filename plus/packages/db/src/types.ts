@@ -624,6 +624,57 @@ export interface TaskItemRow {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+export interface AttendancePointRow {
+  id: string;
+  activity_id: string;
+  key: string;
+  name: string;
+  subject_types: ColumnType<unknown, string, string>;
+  active: boolean;
+  revision: number;
+  created_by: string;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+export interface AttendanceStaffRow {
+  id: string;
+  activity_id: string;
+  display_name: string;
+  actor_id: string | null;
+  active: boolean;
+  revision: number;
+  created_by: string;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+export interface AttendanceFactRow {
+  id: string;
+  activity_id: string;
+  mode: string;
+  point_key: string;
+  subject_type: string;
+  subject_id: string;
+  action: string;
+  note: string | null;
+  actor_id: string;
+  command_id: string;
+  occurred_at: ColumnType<Date, Date | string, Date | string>;
+}
+
+export interface AttendanceCurrentRow {
+  activity_id: string;
+  mode: string;
+  point_key: string;
+  subject_type: string;
+  subject_id: string;
+  status: string;
+  note: string | null;
+  revision: number;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface Database {
   activity: ActivityRow;
   command_receipt: CommandReceiptRow;
@@ -672,4 +723,8 @@ export interface Database {
   grouping_membership: GroupingMembershipRow;
   rate_limit_bucket: RateLimitBucketRow;
   task_item: TaskItemRow;
+  attendance_point: AttendancePointRow;
+  attendance_staff: AttendanceStaffRow;
+  attendance_fact: AttendanceFactRow;
+  attendance_current: AttendanceCurrentRow;
 }
