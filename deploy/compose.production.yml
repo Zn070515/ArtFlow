@@ -79,6 +79,8 @@ services:
   plus-web:
     image: ${ARTFLOW_PLUS_WEB_IMAGE:?Set ARTFLOW_PLUS_WEB_IMAGE}
     restart: unless-stopped
+    environment:
+      ARTFLOW_NGINX_RESOLVER: ${ARTFLOW_NGINX_RESOLVER:-127.0.0.11}
     depends_on:
       plus-api:
         condition: service_healthy
