@@ -24,6 +24,12 @@ spec:
                 configMapKeyRef:
                   name: plus-config
                   key: ARTFLOW_NGINX_RESOLVER
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ARTFLOW_NGINX_API_HOST
+              value: "plus-api.$(POD_NAMESPACE).svc.cluster.local:3000"
           readinessProbe:
             httpGet:
               path: /

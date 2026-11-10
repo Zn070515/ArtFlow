@@ -123,6 +123,7 @@ def test_plus_proxy_trust_and_body_limits_are_explicit() -> None:
     nginx_template = (ROOT / "deploy" / "plus" / "nginx.conf.template").read_text(encoding="utf-8")
     caddy = (ROOT / "deploy" / "caddy" / "sites" / "v2.caddy").read_text(encoding="utf-8")
     assert "resolver ${ARTFLOW_NGINX_RESOLVER}" in nginx_template
+    assert "set $plus_api ${ARTFLOW_NGINX_API_HOST}" in nginx_template
     assert "client_max_body_size 128m" in nginx_template
     assert "max_size 128MB" in caddy
 
@@ -133,6 +134,7 @@ def test_plus_web_image_reads_the_resolver_from_the_environment() -> None:
     assert "deploy/plus/nginx.conf.template" in dockerfile
     compose = _yaml(COMPOSE)["services"]["plus-web"]
     assert compose["environment"]["ARTFLOW_NGINX_RESOLVER"] == "${ARTFLOW_NGINX_RESOLVER:-127.0.0.11}"
+    assert compose["environment"]["ARTFLOW_NGINX_API_HOST"] == "${ARTFLOW_NGINX_API_HOST:-plus-api:3000}"
 
 
 def test_every_manifest_variable_is_documented() -> None:

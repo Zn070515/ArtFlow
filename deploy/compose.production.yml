@@ -81,6 +81,7 @@ services:
     restart: unless-stopped
     environment:
       ARTFLOW_NGINX_RESOLVER: ${ARTFLOW_NGINX_RESOLVER:-127.0.0.11}
+      ARTFLOW_NGINX_API_HOST: ${ARTFLOW_NGINX_API_HOST:-plus-api:3000}
     depends_on:
       plus-api:
         condition: service_healthy

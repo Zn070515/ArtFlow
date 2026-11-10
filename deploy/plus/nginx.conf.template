@@ -9,7 +9,7 @@ server {
   # Resolve at request time so an API restart never leaves a stale upstream.
   # Compose supplies the Docker embedded resolver; Kubernetes supplies cluster DNS.
   resolver ${ARTFLOW_NGINX_RESOLVER} valid=10s ipv6=off;
-  set $plus_api plus-api:3000;
+  set $plus_api ${ARTFLOW_NGINX_API_HOST};
 
   # Caddy's health probe uses /healthz/; Fastify only registers the bare paths.
   location ~ ^/(healthz|readyz)/?$ {
