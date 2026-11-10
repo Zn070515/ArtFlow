@@ -6,19 +6,19 @@ resources:
 images:
   - name: artflow-plus-api
     newName: 192.168.47.10:5000/artflow-plus-api
-    digest: sha256:REPLACE_WITH_API_DIGEST
+    digest: sha256:1bc926d5d14f0c117832abd027be07126721e8cd53c0e98597a4d3f08ec7d2e6
   - name: artflow-plus-worker
     newName: 192.168.47.10:5000/artflow-plus-worker
-    digest: sha256:REPLACE_WITH_WORKER_DIGEST
+    digest: sha256:2c7e2b9f25dce27e2b6e5250f0eeaf302865c9e5b16aa938d27a78154c675a52
   - name: artflow-plus-web
     newName: 192.168.47.10:5000/artflow-plus-web
-    digest: sha256:REPLACE_WITH_WEB_DIGEST
+    digest: sha256:f076164a02bf6c0a179589af2c382fb66c91a2cab0f47475c5b294965da8f704
   - name: library/postgres
     newName: 192.168.47.10:5000/library/postgres
-    digest: sha256:REPLACE_WITH_POSTGRES_DIGEST
+    digest: sha256:dccfb624111cd5c2139ccb4e9bf12588c8676e0d4e852fa949998f9a01c7b3bd
   - name: library/caddy
     newName: 192.168.47.10:5000/library/caddy
-    digest: sha256:REPLACE_WITH_CADDY_DIGEST
+    digest: sha256:8151f2ea469a220cc7d6ba5a5d581d9dd3a312793743ce59ab506fd9585a204a
 secretGenerator:
   - name: plus-secrets
     envs:
