@@ -66,6 +66,12 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       capability: "tasks",
       default: false,
     },
+    {
+      id: "attendance",
+      prompt: "是否需要现场签到？",
+      capability: "attendance",
+      default: false,
+    },
   ],
   definitions: {
     competition: createCompetitionDefinition(
@@ -128,6 +134,12 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       id: "tasks",
       prompt: "是否需要运营任务清单？",
       capability: "tasks",
+      default: false,
+    },
+    {
+      id: "attendance",
+      prompt: "是否需要现场签到？",
+      capability: "attendance",
       default: false,
     },
   ],
