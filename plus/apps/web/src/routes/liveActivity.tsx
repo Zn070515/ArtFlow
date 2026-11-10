@@ -6,6 +6,7 @@ import { RequireSession } from "../auth/RequireSession.js";
 import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
+import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
 import { useRealtimeTopic } from "../realtime/useRealtimeTopic.js";
 
 export function LiveActivityPage() {
@@ -88,6 +89,12 @@ function LiveActivityContent() {
         </div>
         <aside className="live-control-rail">
           <LiveSessionPanel state={state} onChanged={refresh} />
+          {state.activity.enabledCapabilities.includes("attendance") ? (
+            <AttendanceSummary
+              activityId={activityId}
+              mode={state.session?.mode === "test" ? "test" : "formal"}
+            />
+          ) : null}
           <section className="ops-card live-roster-card">
             <p className="eyebrow">ROSTER · 选手</p>
             <h2 className="console-card-title">最终名单</h2>
