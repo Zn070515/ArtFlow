@@ -12,7 +12,7 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $imageDir = Join-Path $root "logs/k8s/images"
 Set-Location $root
 
-$release = Get-Content -LiteralPath (Join-Path $imageDir "release.env") | ConvertFrom-StringData
+$release = Get-Content -LiteralPath (Join-Path $imageDir "release.env") -Raw | ConvertFrom-StringData
 $sha = $release.RELEASE_SHA
 if ($sha -notmatch '^[0-9a-f]{40}$') { throw "bad release SHA: $sha" }
 
