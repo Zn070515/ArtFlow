@@ -40,6 +40,11 @@ kubectl -n kube-system rollout status deploy/metrics-server --timeout=300s
 kubectl apply -f "${DIR}/registry.yaml"
 kubectl -n artflow-system rollout status deploy/artflow-registry --timeout=300s
 
+# The registry PVC needed the mirror helper. Once the registry is up, switch the
+# helper to the lab registry image so later volumes do not depend on the mirror.
+sed -i 's#image: docker.m.daocloud.io/library/busybox:1.36#image: 192.168.47.10:5000/library/busybox:1.36#' /tmp/local-path.yaml
+kubectl apply -f /tmp/local-path.yaml
+
 TOKEN="$(kubectl -n artflow-system create token artflow-deployer --duration=8760h)"
 CA="$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')"
 SERVER="$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}')"
