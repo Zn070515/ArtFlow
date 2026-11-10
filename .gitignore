@@ -48,3 +48,7 @@ test-results/
 
 docs/advices/**
 docs/superpowers/**
+
+# Kubernetes lab credentials and generated manifests
+.kube/
+deploy/k8s/overlays/*/secrets.env

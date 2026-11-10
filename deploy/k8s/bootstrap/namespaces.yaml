@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: artflow-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: artflow-dev
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: artflow-test
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: artflow-restore

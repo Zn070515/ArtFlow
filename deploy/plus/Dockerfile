@@ -46,7 +46,7 @@ CMD ["node", "main.cjs"]
 FROM ${NGINX_IMAGE} AS web
 ARG ARTFLOW_BUILD_SHA
 LABEL org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"
-COPY deploy/plus/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/plus/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /src/apps/web/dist /usr/share/nginx/html
 COPY --from=build /src/ARTFLOW_RELEASE_SHA /usr/share/nginx/html/ARTFLOW_RELEASE_SHA
 EXPOSE 8080

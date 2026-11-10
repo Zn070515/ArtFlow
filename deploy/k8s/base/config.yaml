@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plus-config
+data:
+  NODE_ENV: production
+  APP_ENV: production
+  HOST: 0.0.0.0
+  PORT: "3000"
+  ARTFLOW_PLUS_INLINE_RELAY: "0"
+  ARTFLOW_PLUS_ARCHIVE_DIR: /app/var/archives
+  ARTFLOW_PLUS_MEDIA_DIR: /app/var/media
+  ARTFLOW_PLUS_WORKER_RELAY_INTERVAL_MS: "250"
+  ARTFLOW_PLUS_WORKER_SHUTDOWN_TIMEOUT_MS: "10000"
+  ARTFLOW_PLUS_WORKER_READY_FILE: /tmp/artflow-worker-ready
+  ARTFLOW_NGINX_RESOLVER: 10.96.0.10
+  ARTFLOW_PLUS_TRUST_PROXY: 10.244.0.0/16
