@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plus-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plus-worker
+  template:
+    metadata:
+      labels:
+        app: plus-worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: worker
+          image: artflow-plus-worker
+          envFrom:
+            - configMapRef:
+                name: plus-config
+            - secretRef:
+                name: plus-secrets
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "test -f /tmp/artflow-worker-ready"]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "test -f /tmp/artflow-worker-ready"]
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "test -f /tmp/artflow-worker-ready"]
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

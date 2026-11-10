@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-lab
+data:
+  Caddyfile: |
+    {
+      auto_https off
+    }
+
+    http://:8081 {
+      @health path /healthz /healthz/ /readyz /readyz/
+      reverse_proxy @health plus-web:8080
+    }
+
+    https://artflow.local {
+      tls internal
+      request_body {
+        max_size 128MB
+      }
+      header -Server
+      reverse_proxy plus-web:8080 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plus-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plus-proxy
+  template:
+    metadata:
+      labels:
+        app: plus-proxy
+    spec:
+      containers:
+        - name: caddy
+          image: library/caddy
+          args: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+            - name: health
+              containerPort: 8081
+          volumeMounts:
+            - name: config
+              mountPath: /etc/caddy
+            - name: data
+              mountPath: /data
+            - name: config-data
+              mountPath: /config
+          readinessProbe:
+            httpGet:
+              path: /healthz/
+              port: health
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz/
+              port: health
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: caddy-lab
+        - name: data
+          emptyDir: {}
+        - name: config-data
+          emptyDir: {}

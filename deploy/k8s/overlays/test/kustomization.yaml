@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: artflow-test
+resources:
+  - ../../base
+images:
+  - name: artflow-plus-api
+    newName: 192.168.47.10:5000/artflow-plus-api
+    digest: sha256:REPLACE_WITH_API_DIGEST
+  - name: artflow-plus-worker
+    newName: 192.168.47.10:5000/artflow-plus-worker
+    digest: sha256:REPLACE_WITH_WORKER_DIGEST
+  - name: artflow-plus-web
+    newName: 192.168.47.10:5000/artflow-plus-web
+    digest: sha256:REPLACE_WITH_WEB_DIGEST
+  - name: library/postgres
+    newName: 192.168.47.10:5000/library/postgres
+    digest: sha256:REPLACE_WITH_POSTGRES_DIGEST
+  - name: library/caddy
+    newName: 192.168.47.10:5000/library/caddy
+    digest: sha256:REPLACE_WITH_CADDY_DIGEST
+secretGenerator:
+  - name: plus-secrets
+    envs:
+      - secrets.env
+    options:
+      disableNameSuffixHash: true
+patches:
+  - target:
+      kind: Deployment
+      name: plus-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          kubernetes.io/hostname: k8s-worker-2
+  - target:
+      kind: StatefulSet
+      name: plus-db
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          kubernetes.io/hostname: k8s-worker-1
+  - target:
+      kind: Deployment
+      name: plus-proxy
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          kubernetes.io/hostname: k8s-worker-2

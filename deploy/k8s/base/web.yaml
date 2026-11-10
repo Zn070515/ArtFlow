@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plus-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plus-web
+  template:
+    metadata:
+      labels:
+        app: plus-web
+    spec:
+      containers:
+        - name: web
+          image: artflow-plus-web
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ARTFLOW_NGINX_RESOLVER
+              valueFrom:
+                configMapKeyRef:
+                  name: plus-config
+                  key: ARTFLOW_NGINX_RESOLVER
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
