@@ -16,6 +16,19 @@ function Invoke-Kubectl {
   return $output
 }
 
+function Invoke-KubectlExec {
+  param(
+    [string]$Namespace,
+    [string]$Pod,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Command
+  )
+  $output = & kubectl --kubeconfig $script:Kubeconfig -n $Namespace exec $Pod -- @Command 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "kubectl exec $Pod $($Command -join ' ') failed:`n$output"
+  }
+  return $output
+}
+
 function Wait-Rollout {
   param([string]$Kind, [string]$Name, [string]$Namespace, [int]$Seconds = 300)
   Invoke-Kubectl -n $Namespace rollout status "$Kind/$Name" "--timeout=$($Seconds)s"
