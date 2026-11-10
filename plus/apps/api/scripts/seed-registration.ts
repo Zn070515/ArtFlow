@@ -46,6 +46,7 @@ const adminPermissions = [
   "grouping.manage",
   "voting.manage",
   "result.manage",
+  "attendance.manage",
 ];
 if ((await getLocalAccount(db, adminUsername)) === null) {
   await createLocalAccount(db, {

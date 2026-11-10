@@ -280,6 +280,7 @@ it("a pack diagnoses a disabled dependency instead of silently re-enabling it", 
 it("the default registry exposes only implemented capabilities", () => {
   expect(defaultCapabilityRegistry.list().map((item) => item.manifest.identity)).toEqual([
     "archive",
+    "attendance",
     "competition",
     "grouping",
     "materials",

@@ -36,3 +36,5 @@ export * from "./relay-loop.js";
 export * from "./grouping-read-service.js";
 export * from "./analytics-service.js";
 export * from "./tasks-service.js";
+export * from "./attendance-service.js";
+export * from "./attendance-read-service.js";

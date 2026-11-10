@@ -36,6 +36,7 @@ plus/var/
 plus/apps/api/var/
 # Generated E2E seed handoff
 plus/apps/web/.e2e-live.json
+plus/apps/web/.e2e-attendance.json
 
 # Runtime artifacts
 *.sqlite3

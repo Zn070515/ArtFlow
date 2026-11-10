@@ -45,6 +45,8 @@ const INTERNAL_READS = [
   "/api/activities/any/studio",
   "/api/activities/any/tasks",
   "/api/activities/any/readiness",
+  "/api/activities/any/attendance",
+  "/api/activities/any/attendance/staff",
   "/api/activities/any/publishing/state",
   "/api/activities/any/archive",
 ] as const;

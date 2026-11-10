@@ -10,6 +10,7 @@ export * from "./capabilities/publishing.js";
 export * from "./capabilities/archive.js";
 export * from "./capabilities/grouping.js";
 export * from "./capabilities/tasks.js";
+export * from "./capabilities/attendance.js";
 export * from "./commands.js";
 export * from "./compiler.js";
 export * from "./defaults.js";

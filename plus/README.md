@@ -26,8 +26,12 @@ row-level participant/judge credentials. M15.2 adds an optional independent
 `tasks` capability: templates are frozen in a release, task rows are versioned
 and audited, readiness is derived only from task rows, and the Ops checklist
 shows mutation controls only for `tasks.manage`. Task commands never mutate a
-source capability. The next slices are check-in/attendance, schedule/program
-release, and incident/recovery.
+source capability. M15.3 adds an optional independent `attendance` capability:
+activity points, a staff roster, append-only check-in facts, and a
+mode-partitioned current projection. Check-in and undo require a running
+`checkin` execution session; ticket check-in stays independent of ticket redeem
+and never changes ticket state. The next slices are schedule/program release and
+incident/recovery.
 
 The Live console and the voting card share the single WebSocket core in
 `packages/realtime`. Sockets only invalidate queries; HTTP remains the recovery

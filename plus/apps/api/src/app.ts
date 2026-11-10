@@ -16,6 +16,7 @@ import type { ApiContext } from "./http/context.js";
 import { bearerToken, cookieValue, errorCode, errorDetails, publicErrorMessage } from "./http/helpers.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
+import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCompetitionRoutes } from "./routes/competition.js";
 import { registerGroupingRoutes } from "./routes/grouping.js";
@@ -74,6 +75,15 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   FORMAL_FACTS_EXIST: 409,
   NOT_FOUND: 404,
   CROSS_ACTIVITY: 404,
+  POINT_NOT_FOUND: 404,
+  POINT_KEY_TAKEN: 409,
+  POINT_INACTIVE: 409,
+  POINT_TYPE_IN_USE: 409,
+  SUBJECT_TYPE_NOT_ALLOWED: 409,
+  SUBJECT_NOT_ELIGIBLE: 409,
+  ALREADY_CHECKED_IN: 409,
+  NOT_CHECKED_IN: 409,
+  INVALID_MODE: 409,
   STALE_REVISION: 409,
   INVALID_TRANSITION: 409,
   COMMAND_ID_CONFLICT: 409,
@@ -259,11 +269,26 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   // Every GET route must declare its read surface. The default is not "public":
   // an undeclared route fails at boot, so a new endpoint cannot quietly become
   // an anonymous internal read.
-  type ReadAccess = "public" | "session" | "operations" | "analytics" | "studio" | "tasks" | "voting" | "result" | "archive";
-  const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "tasks" | "voting" | "result" | "archive", readonly string[]>> = {
+  type ReadAccess = "public" | "session" | "operations" | "analytics" | "studio" | "tasks" | "attendance" | "voting" | "result" | "archive";
+  const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "tasks" | "attendance" | "voting" | "result" | "archive", readonly string[]>> = {
     analytics: ACTIVITY_ANALYTICS_READ_PERMISSIONS,
     tasks: [
       "tasks.manage",
+      "studio.manage",
+      "competition.manage",
+      "judge.manage",
+      "registration.manage",
+      "registration.review",
+      "materials.manage",
+      "materials.review",
+      "grouping.manage",
+      "voting.manage",
+      "result.manage",
+      "archive.manage",
+      "ticket.manage",
+    ],
+    attendance: [
+      "attendance.manage",
       "studio.manage",
       "competition.manage",
       "judge.manage",
@@ -313,7 +338,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (route.url === "/api/realtime") return;
     const access = (route.config as { access?: ReadAccess } | undefined)?.access;
     if (access === undefined) {
-      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, analytics, studio, tasks, voting, result, archive).`);
+      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, analytics, studio, tasks, attendance, voting, result, archive).`);
     }
     const guard = async (request: FastifyRequest): Promise<void> => {
       await requireReadAccess(request, access);
@@ -406,6 +431,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerAuthRoutes(routeContext);
   registerActivityRoutes(routeContext);
   registerTasksRoutes(routeContext);
+  registerAttendanceRoutes(routeContext);
   registerRegistrationRoutes(routeContext);
   registerGroupingRoutes(routeContext);
   registerCompetitionRoutes(routeContext);

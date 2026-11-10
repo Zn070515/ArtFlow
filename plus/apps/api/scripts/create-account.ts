@@ -26,6 +26,7 @@ const permissions = (argument("--permissions") ?? [
   "archive.manage",
   "materials.manage",
   "materials.read",
+  "attendance.manage",
 ].join(",")).split(",").map((permission) => permission.trim()).filter(Boolean);
 const roles = (argument("--roles") ?? "admin").split(",").map((role) => role.trim()).filter(Boolean);
 

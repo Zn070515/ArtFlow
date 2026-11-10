@@ -581,6 +581,34 @@ export async function revokeTicket(
   });
 }
 
+export interface AttendanceTicketResolution {
+  readonly ticketId: string;
+  readonly activityId: string;
+}
+
+/**
+ * Resolve a scanned ticket credential for attendance without creating a ticket
+ * access session or changing the ticket state. The attendance command re-reads
+ * the ticket inside its own transaction.
+ */
+export async function resolveTicketCredentialForAttendance(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  rawCredential: string,
+): Promise<AttendanceTicketResolution> {
+  const signingSecret = secret(deps);
+  const parsed = parseCredential(rawCredential, "T", signingSecret);
+  if (parsed === null) throw new DomainError("INVALID_TICKET", "The ticket credential is invalid.");
+  const candidate = await findTicketByCredential(db, parsed.publicCode, parsed.version);
+  if (
+    candidate === null ||
+    !validCredentialForRow(rawCredential, "T", candidate.publicCode, candidate.credentialVersion, signingSecret)
+  ) {
+    throw new DomainError("INVALID_TICKET", "The ticket credential is invalid.");
+  }
+  return { ticketId: candidate.id, activityId: candidate.activityId };
+}
+
 export interface RedeemTicketInput {
   readonly commandId: string;
   readonly credential: string;

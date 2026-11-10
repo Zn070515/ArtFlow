@@ -107,7 +107,16 @@ export type DomainErrorCode =
   | "MATERIAL_CONTENT_UNAVAILABLE"
   | "INVALID_SUPPLEMENT"
   | "SUPPLEMENT_CLOSED"
-  | "INVALID_PARTICIPANT_CLAIM";
+  | "INVALID_PARTICIPANT_CLAIM"
+  | "POINT_NOT_FOUND"
+  | "POINT_KEY_TAKEN"
+  | "POINT_INACTIVE"
+  | "POINT_TYPE_IN_USE"
+  | "SUBJECT_TYPE_NOT_ALLOWED"
+  | "SUBJECT_NOT_ELIGIBLE"
+  | "ALREADY_CHECKED_IN"
+  | "NOT_CHECKED_IN"
+  | "INVALID_MODE";
 
 /**
  * A refusal the caller can act on. Domain code and human message travel
