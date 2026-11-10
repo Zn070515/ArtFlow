@@ -46,6 +46,8 @@ foreach ($base in $bases) {
   if ($LASTEXITCODE -ne 0) {
     docker pull "docker.m.daocloud.io/library/$($base.Name)"
     if ($LASTEXITCODE -ne 0) { throw "cannot pull $($base.Name)" }
+    docker tag "docker.m.daocloud.io/library/$($base.Name)" $base.Name
+    if ($LASTEXITCODE -ne 0) { throw "cannot tag $($base.Name)" }
   }
   docker save -o (Join-Path $outDir $base.Tar) $base.Name
   if ($LASTEXITCODE -ne 0) { throw "docker save failed for $($base.Name)" }
