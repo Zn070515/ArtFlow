@@ -50,6 +50,9 @@ Out of scope for this slice:
    action changes the other.
 4. A check-in command requires a running execution session with scope `checkin`.
    The session's mode is the fact's mode. Formal and test attendance never mix.
+   Opening and closing that session uses the existing execution endpoints and
+   therefore requires `studio.manage` or `competition.manage`, not
+   `attendance.manage` alone.
 5. Every write uses the single write path: receipt, audit, fact, and outbox in
    one transaction. Undo is a new fact; history is never deleted.
 6. The raw ticket credential is resolved to a ticket id in the API layer. It
@@ -113,7 +116,9 @@ nullability flag.
 | `created_by` | text | actor id |
 | `created_at` / `updated_at` | timestamptz | |
 
-Constraint: `unique(activity_id, key)`.
+Constraint: `unique(activity_id, key)`. Point keys match
+`[a-z0-9][a-z0-9._-]{0,63}`; point names and staff display names are 1-120
+characters.
 
 ### `attendance_staff`
 
@@ -179,6 +184,17 @@ Constraint: `unique(activity_id, mode, point_key, subject_type, subject_id)`.
   belong to the activity and be active. The optional `actor_id` links the entry
   to an account for display only; the operator is always the command actor.
 
+### Expected sets and historical rows
+
+The expected participant set is the activity's approved registrations; the
+expected ticket set is tickets in `issued` or `redeemed` state; the expected
+staff set is the active roster. A subject that later leaves the expected set
+(for example a registration is rejected, a ticket is revoked, or a staff entry
+is deactivated) keeps its current attendance row, displayed with an
+`ineligible` marker. Summary counts include only currently expected subjects;
+nothing is deleted. This keeps the attendance history visible without making a
+stale subject eligible for a new check-in.
+
 ## Commands
 
 | Command | Session | Permission | Behaviour |
@@ -192,9 +208,11 @@ Constraint: `unique(activity_id, mode, point_key, subject_type, subject_id)`.
 
 Check-in and undo call `requireRunningCommandSession`; the release policy must
 bind the command to `checkin`. The session's mode is written to the fact and
-current rows. The handler takes the activity row lock, validates the point,
-subject, and current state, writes the fact and projection, and appends an
-engine event for realtime invalidation.
+current rows. The handler takes the activity row lock and **re-reads the point,
+subject, and current row inside the transaction**; an API-side credential
+lookup or list rendering is not authority. It validates the point, subject, and
+current state, writes the fact and projection, and appends an engine event for
+realtime invalidation.
 
 Error codes include:
 
@@ -221,11 +239,12 @@ Add `apps/api/src/routes/attendance.ts` with `registerAttendanceRoutes(ctx)`.
 | POST | `/api/activities/:id/attendance/checkin` | `attendance.manage` |
 | POST | `/api/activities/:id/attendance/undo` | `attendance.manage` |
 
-The list endpoint returns points, a summary (expected, present, undone) per
-subject type, and paginated rows filtered by point, subject type, and a bounded
-search string. It joins the approved registrations, activity tickets, and active
-staff roster to the current projection for the requested mode; a missing mode
-defaults to `formal` and is explicit in the response.
+The list endpoint accepts `point`, `subjectType`, `query`, and `mode` query
+parameters. It returns points, a summary (expected, present, undone) per subject
+type, and paginated rows filtered by those parameters. It joins the approved
+registrations, activity tickets, and active staff roster to the current
+projection for the requested mode; a missing mode defaults to `formal` and the
+effective mode is explicit in the response.
 
 The check-in body is a closed union:
 
@@ -237,12 +256,23 @@ type CheckinBody =
 ```
 
 Exactly one of `ticketId` and `credential` is required for a ticket. The route
-resolves a credential through the ticketing service and passes only the ticket
-id to the runtime command.
+resolves a credential through a new narrow ticketing export,
+`resolveTicketCredentialForAttendance`, which verifies the signed credential and
+returns the ticket id without creating a ticket access session; the command
+never receives the raw credential. The handling service revalidates the ticket
+state, activity, and current row inside the transaction.
 
 `app.ts` adds `attendance` to `ReadAccess` and to `READ_ACCESS_PERMISSIONS` with
-`attendance.manage` plus the existing operations/registration/ticket manage
-permissions. The startup read-access check rejects an undeclared GET route.
+`attendance.manage` plus the same permission union used by the `tasks` read
+surface (`studio.manage`, `competition.manage`, `judge.manage`,
+`registration.manage`, `registration.review`, `materials.manage`,
+`materials.review`, `grouping.manage`, `voting.manage`, `result.manage`,
+`archive.manage`, `ticket.manage`). The startup read-access check rejects an
+undeclared GET route.
+
+`apps/api/scripts/create-account.ts` adds `attendance.manage` to its default
+administrator permission list; otherwise a freshly provisioned administrator
+cannot exercise the capability.
 
 Contracts live in `packages/contracts`; the route uses the closed TypeBox
 validator, consistent with the tasks and voting routes.
@@ -251,7 +281,8 @@ validator, consistent with the tasks and voting routes.
 
 - `apps/web/src/api/attendance.ts` and its tests.
 - `apps/web/src/components/ops/AttendanceCard.tsx`: session status and
-  open/close (existing execution endpoints, `session.manage`); point selector
+  open/close (existing execution endpoints, `studio.manage` or
+  `competition.manage`); point selector
   and add; tabs for participants, tickets, and staff; search; check-in, undo,
   and note; per-point counts. Write controls render only with
   `attendance.manage`.
@@ -267,9 +298,11 @@ refetches on an event; the HTTP list remains the recovery authority.
 ## Realtime
 
 `AttendanceCheckedIn`, `AttendanceUndone`, `AttendancePointChanged`, and
-`AttendanceStaffChanged` are engine events written to the outbox. The existing
-activity invalidation topic causes subscribers to refetch. No new WebSocket
-topic is introduced.
+`AttendanceStaffChanged` are engine events written to the outbox. Their payloads
+carry activity, point key, subject type, and subject id only; notes, display
+names, and ticket credentials are never included. The existing activity
+invalidation topic causes subscribers to refetch. No new WebSocket topic is
+introduced.
 
 ## Invariants
 
@@ -301,6 +334,17 @@ topic is introduced.
 - Gates: route-module boundary, capability boundary, schema drift, release
   artifacts, and documentation.
 
+## Documentation
+
+The slice updates:
+
+- `docs/invariants/` with `ATT-01` through `ATT-08`;
+- a new ADR recording the observational attendance authority and the ticket /
+  redeem separation;
+- the M15.3 section in [the roadmap](../roadmap.md);
+- the next-slice line in `docs/artflow-plus/README.md`;
+- the runbook-grade operator notes in the Ops card help text.
+
 ## Acceptance
 
 1. The capability is optional and enabling it does not change any existing
@@ -319,8 +363,10 @@ topic is introduced.
 - The activity row lock serializes check-ins; event volume is low and the
   unique-current constraint is the final guard.
 - Staff roster is the only new source entity; it is activity-level and audited.
-- Opening the check-in session needs `session.manage`; the Ops card states the
-  required permission rather than silently failing.
+- Opening the check-in session needs `studio.manage` or `competition.manage`;
+  the Ops card states the required permission rather than silently failing. An
+  operator with only `attendance.manage` can check in once a session manager has
+  opened the session.
 - The capability is off by default; enabling it in a pack changes the Ops card
   but not any authority.
 - Attendance intentionally has no check-out; adding it later must be a new fact
