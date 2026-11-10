@@ -18,6 +18,7 @@ backups/
 logs/
 test-results/
 .playwright-mcp/
+plus/apps/web/.e2e-*.json
 docs/
 htmlcov/
 .coverage
