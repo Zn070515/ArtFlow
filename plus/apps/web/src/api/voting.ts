@@ -51,11 +51,12 @@ export async function fetchExecutions(activityId: string): Promise<readonly Exec
 export async function startExecution(
   activityId: string,
   scope: string,
+  mode: "formal" | "test" = "formal",
 ): Promise<ExecutionSessionView> {
   return apiFetch<ExecutionSessionView>(`/api/activities/${activityId}/executions`, {
     method: "POST",
     headers: { "idempotency-key": commandId("execution-start") },
-    body: JSON.stringify({ scope, mode: "formal" }),
+    body: JSON.stringify({ scope, mode }),
   });
 }
 

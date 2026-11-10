@@ -188,6 +188,7 @@ export const AttendanceUndoBodySchema = Type.Object(
 );
 
 export type AttendanceListResponse = Static<typeof AttendanceListResponseSchema>;
+export type AttendanceStaffListResponse = Static<typeof AttendanceStaffListResponseSchema>;
 export type AttendanceRow = Static<typeof AttendanceRowSchema>;
 export type AttendancePoint = Static<typeof AttendancePointSchema>;
 export type AttendanceStaff = Static<typeof AttendanceStaffSchema>;
