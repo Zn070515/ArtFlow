@@ -43,7 +43,7 @@ import { idFromCommand } from "./hash.js";
 
 export type AttendanceMode = "formal" | "test";
 
-const ATTENDANCE_READ_PERMISSIONS = [
+export const ATTENDANCE_READ_PERMISSIONS = [
   "attendance.manage",
   "studio.manage",
   "competition.manage",
@@ -63,13 +63,13 @@ function withActor(deps: RuntimeDeps, actor: ActorContext): RuntimeDeps {
   return { ...deps, actor };
 }
 
-function requireAttendanceRead(actor: ActorContext): void {
+export function requireAttendanceRead(actor: ActorContext): void {
   if (!ATTENDANCE_READ_PERMISSIONS.some((permission) => hasPermission(actor, permission))) {
     throw new DomainError("FORBIDDEN", "An attendance read permission is required.");
   }
 }
 
-function requireAttendanceEnabled(activity: { readonly enabledCapabilities: readonly string[] }): void {
+export function requireAttendanceEnabled(activity: { readonly enabledCapabilities: readonly string[] }): void {
   if (!activity.enabledCapabilities.includes("attendance")) {
     throw new DomainError("CAPABILITY_NOT_ENABLED", "The attendance capability is not enabled on this activity.");
   }
