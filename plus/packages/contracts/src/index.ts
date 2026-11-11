@@ -13,3 +13,4 @@ export * from "./analytics.js";
 export * from "./packs.js";
 export * from "./tasks.js";
 export * from "./attendance.js";
+export * from "./contracts/index.js";
