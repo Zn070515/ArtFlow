@@ -276,6 +276,26 @@ Adapter 不复制服务内部步骤，不 mock Repository；数据库测试仍�
 约 3 人日。若不满足“新增 Capability ≤ 1 个 Adapter 文件”，停止推广并重新设计
 模板。
 
+### 4.9 原型结果（2026-11-11）
+
+已落地：
+
+- 共享契约 Schema：`packages/contracts/src/contracts/` 的 `descriptor`、
+  `lifecycle`、`idempotency`、`authorization`、`transaction`、`event`、
+  `recovery`。
+- 测试 harness：`tools/contracts/src/harness/` 的 `ContractContext`、
+  `ContractClock`、`assertLifecycle`，以及 `assertReplay` / `assertConflict` /
+  `assertActorBinding` / `assertAuthorization` / `assertAtomicSuccess` /
+  `assertRollback`。
+- 两个 Adapter：`registration`（生命周期、回执、权限、事务、roster final）与
+  `ticketing`（票据生命周期、权限、凭证重放、归档守卫）。
+- 29 个 contract-tools 测试（其中 14 个契约测试）；全量 581 tests 通过。
+- 故意破坏验证：移除 `insertAudit` 后，`assertAtomicSuccess` 与 `assertReplay`
+  立即失败；恢复后 6/6 registration 契约测试通过。
+- 决策记录：ADR-0041（仓库内 Descriptor + Adapter harness，不引入 Pact Broker）。
+
+尚未完成：把 `graph:check` 与契约测试接入 CI、生成变更影响报告（P4）。
+
 ## 5. P3：已知问题复现与修复
 
 每个问题独立提交，顺序固定：**失败测试 → 修复 → 通过测试**。测试与修复分开
@@ -412,14 +432,14 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
 | --- | ---: | --- | --- |
 | P0 审核 | 已完成 | 无 | 无 |
 | P1 Consumer Graph（原型已完成） | 2 | +30 秒 | 符号解析边界、动态声明遗漏 |
-| P2 Contract / Adapter | 3 | +60 秒 | Adapter 膨胀、契约固化实现 |
-| P3 已知问题 | 3 | 现有套件内 | 修复触及凭证或投影语义 |
+| P2 Contract / Adapter（原型已完成） | 3 | +60 秒 | Adapter 膨胀、契约固化实现 |
+| P3 已知问题（已完成） | 3 | 现有套件内 | 修复触及凭证或投影语义 |
 | P4 推广 | 2 | +90 秒；夜间 +10 分钟 | CI 成本、夜间稳定性 |
 | 合计 | 约 10 人日 | — | 估算误差 ±50% |
 
 运行基线（2026-11-11）：
 
-- `REQUIRE_DB=1 pnpm -C plus run test`：通过，561 个测试；墙钟未记录；
+- `REQUIRE_DB=1 pnpm -C plus run test`：通过，581 个测试；墙钟未记录；
 - `pnpm -C plus run check`：通过；
 - `uv run pytest tests/gates -q`：25 passed；
 - `uv run python tests/golden/validate_fixtures.py`：6 个 fixture、78 条不变量，OK；
@@ -467,8 +487,9 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
 ## 12. 下一步
 
 1. P1 Consumer Graph 原型已完成并合入 `main`；
-2. P3 六项已知缺陷已完成复现与修复；
-3. 下一阶段进入 P2：`executeCommand` 的 Contract 与 Adapter 原型，先
-   `registration`，再 `ticketing`；
-4. P2 通过出口后再接 Outbox Relay 与 Realtime，不提前铺开所有 Capability；
+2. P2 Contract / Adapter 原型已完成：29 个 contract-tools 测试，其中 14 个
+   契约测试；故意移除审计写入会让契约测试失败；
+3. P3 六项已知缺陷已完成复现与修复；
+4. 下一阶段进入 P4：把 `graph:check` 与契约测试接入 CI，生成变更影响报告，
+   建立 R2 夜间故障/恢复套件；
 5. 继续用 Consumer Graph 的 warning 收敛 Manifest 声明缺口。
