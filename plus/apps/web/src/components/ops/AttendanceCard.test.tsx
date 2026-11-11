@@ -58,21 +58,27 @@ const list: AttendanceListResponse = {
   ],
 };
 
+const runningCheckin = {
+  id: "session-1",
+  activityId: "activity-1",
+  definitionVersion: 1,
+  scope: "checkin",
+  mode: "formal" as "formal" | "test" | "rehearsal",
+  status: "running" as const,
+  revision: 1,
+};
+
 function renderCard(
-  options: { canManage?: boolean; canManageSession?: boolean } = {},
+  options: {
+    canManage?: boolean;
+    canManageSession?: boolean;
+    sessions?: readonly (typeof runningCheckin)[];
+  } = {},
   attendanceList: AttendanceListResponse = list,
 ): void {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   fetchAttendanceMock.mockResolvedValue(attendanceList);
-  fetchExecutionsMock.mockResolvedValue([{
-    id: "session-1",
-    activityId: "activity-1",
-    definitionVersion: 1,
-    scope: "checkin",
-    mode: "formal",
-    status: "running",
-    revision: 1,
-  }]);
+  fetchExecutionsMock.mockResolvedValue(options.sessions ?? [runningCheckin]);
   checkInAttendanceMock.mockResolvedValue({});
   undoAttendanceMock.mockResolvedValue({});
   render(
@@ -124,5 +130,37 @@ describe("AttendanceCard", () => {
       subjectType: "participant",
       subjectId: "registration-1",
     }));
+  });
+
+  it("does not label a rehearsal check-in session as formal", async () => {
+    renderCard({ sessions: [{ ...runningCheckin, mode: "rehearsal" }] });
+    expect(await screen.findByTestId("attendance-mode-disclosure")).toHaveTextContent(
+      "签到没有 rehearsal 分区，当前数字是 formal。",
+    );
+    expect(screen.queryByText("签到已开放（正式）")).toBeNull();
+    expect(screen.getByText("签到已开放（rehearsal）")).toBeTruthy();
+    expect(fetchAttendanceMock).toHaveBeenCalledWith("activity-1", expect.objectContaining({ mode: "formal" }));
+  });
+
+  it("asks before opening a formal check-in and starts a test session without that prompt", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    startExecutionMock.mockResolvedValue({});
+    renderCard({ sessions: [] });
+    expect(await screen.findByTestId("attendance-rehearsal-note")).toHaveTextContent("彩排签到会被拒绝");
+    expect(await screen.findByTestId("attendance-mode-disclosure")).toHaveTextContent(
+      "当前没有签到会话，下列数字是 formal 分区。",
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "打开签到" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(startExecutionMock).not.toHaveBeenCalled();
+
+    const select = screen.getByTestId("attendance-session").querySelector("select");
+    if (select === null) throw new Error("missing check-in mode select");
+    fireEvent.change(select, { target: { value: "test" } });
+    fireEvent.click(screen.getByRole("button", { name: "打开签到" }));
+    await waitFor(() => expect(startExecutionMock).toHaveBeenCalledWith("activity-1", "checkin", "test"));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
   });
 });

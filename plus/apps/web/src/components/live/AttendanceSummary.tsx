@@ -1,17 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchAttendance } from "../../api/attendance.js";
+import { attendancePartitionForSession } from "../attendancePartition.js";
 
 export function AttendanceSummary({
   activityId,
-  mode,
+  sessionMode,
 }: {
   readonly activityId: string;
-  readonly mode: "formal" | "test";
+  readonly sessionMode: "test" | "rehearsal" | "formal" | null | undefined;
 }) {
+  const partition = attendancePartitionForSession(sessionMode, "评分会话");
   const query = useQuery({
-    queryKey: ["live-attendance", activityId, mode],
-    queryFn: () => fetchAttendance(activityId, { mode }),
+    queryKey: ["live-attendance", activityId, partition.mode],
+    queryFn: () => fetchAttendance(activityId, { mode: partition.mode }),
     retry: false,
   });
   if (query.isPending) return <p className="auth-loading">正在加载签到…</p>;
@@ -21,6 +23,9 @@ export function AttendanceSummary({
   return (
     <section className="ops-card" data-testid="live-attendance-summary">
       <p className="eyebrow">ATTENDANCE · 到场</p>
+      {partition.disclosure === null ? null : (
+        <p className="state-copy" data-testid="attendance-mode-disclosure">{partition.disclosure}</p>
+      )}
       <ul>
         {query.data.summary.map((item) => (
           <li key={item.subjectType}>

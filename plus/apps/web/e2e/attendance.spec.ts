@@ -24,8 +24,9 @@ test("ops opens check-in, checks in a participant, staff member, and ticket", as
   const card = page.getByTestId("attendance-card");
   await expect(card).toBeVisible();
 
+  page.once("dialog", (dialog) => dialog.accept());
   await card.getByRole("button", { name: "打开签到" }).click();
-  await expect(card.getByText(/签到已开放/)).toBeVisible();
+  await expect(card.getByText("签到已开放（正式）")).toBeVisible();
   await card.getByLabel("签到点").selectOption(fixture.pointKey);
 
   const participantRow = card.locator("li", { hasText: "选手甲" });

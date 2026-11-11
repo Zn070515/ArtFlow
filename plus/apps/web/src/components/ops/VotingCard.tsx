@@ -16,7 +16,7 @@ import {
   releaseVoteResult,
   startExecution,
 } from "../../api/voting.js";
-import type { VoteResultCandidateView } from "../../api/voting.js";
+import type { ExecutionSessionView, VoteResultCandidateView } from "../../api/voting.js";
 import { useRealtimeTopic } from "../../realtime/useRealtimeTopic.js";
 
 function humanError(error: unknown): string {
@@ -75,6 +75,7 @@ export function VotingCard(props: {
   const [preview, setPreview] = useState<VoteResultCandidateView | null>(null);
   const [stageKey, setStageKey] = useState("vote_result");
   const [note, setNote] = useState("");
+  const [sessionMode, setSessionMode] = useState<ExecutionSessionView["mode"]>("rehearsal");
 
   const onRealtimeData = (data: VotingSessionsSnapshot): void => {
     queryClient.setQueryData(["voting-sessions", props.activityId], data);
@@ -112,7 +113,8 @@ export function VotingCard(props: {
     executions.find((session) => session.scope === scope && session.status === "running");
 
   const start = useMutation({
-    mutationFn: (scope: string) => startExecution(props.activityId, scope),
+    mutationFn: (input: { readonly scope: string; readonly mode: ExecutionSessionView["mode"] }) =>
+      startExecution(props.activityId, input.scope, input.mode),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["executions", props.activityId] });
     },
@@ -182,10 +184,37 @@ export function VotingCard(props: {
   const voteSession = running("voting");
   const publishingSession = running("publishing");
 
+  function requestStart(scope: string): void {
+    if (sessionMode === "formal") {
+      const confirmed = window.confirm(
+        `将以正式模式启动 ${scope} 会话，后续记录写入正式分区。继续？`,
+      );
+      if (!confirmed) return;
+    }
+    start.mutate({ scope, mode: sessionMode });
+  }
+
   return (
     <section className="ops-card voting-card">
       <p className="eyebrow">VOTING · 投票</p>
       <h2>投票与发布</h2>
+
+      {props.canManageSessions ? (
+        <div className="voting-session-row">
+          <label>
+            启动模式
+            <select
+              value={sessionMode}
+              onChange={(event) => setSessionMode(event.target.value as ExecutionSessionView["mode"])}
+            >
+              <option value="test">test</option>
+              <option value="rehearsal">rehearsal</option>
+              <option value="formal">formal</option>
+            </select>
+          </label>
+          <p className="state-copy">默认 rehearsal。正式模式会写入正式分区，启动前需要确认。</p>
+        </div>
+      ) : null}
 
       <div className="voting-sessions">
         {(["voting", "publishing"] as const).map((scope) => {
@@ -193,10 +222,10 @@ export function VotingCard(props: {
           return (
             <div key={scope} className="voting-session-row">
               <span>{scope} 会话</span>
-              <span>{session === undefined ? "未启动" : "运行中"}</span>
+              <span>{session === undefined ? "未启动" : `${session.mode} · 运行中`}</span>
               {props.canManageSessions ? (
                 session === undefined ? (
-                  <button type="button" className="secondary-button" onClick={() => start.mutate(scope)}>
+                  <button type="button" className="secondary-button" onClick={() => requestStart(scope)}>
                     启动
                   </button>
                 ) : (

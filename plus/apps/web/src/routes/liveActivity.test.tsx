@@ -6,6 +6,7 @@ const useQueryMock = vi.hoisted(() => vi.fn());
 const useQueryClientMock = vi.hoisted(() => vi.fn());
 const useParamsMock = vi.hoisted(() => vi.fn());
 const useSessionMock = vi.hoisted(() => vi.fn());
+const attendanceSummarySpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
@@ -30,6 +31,12 @@ vi.mock("../components/live/LiveRoundPanel.js", () => ({
 }));
 vi.mock("../components/live/LiveSessionPanel.js", () => ({
   LiveSessionPanel: () => <section data-testid="live-session-panel">会话</section>,
+}));
+vi.mock("../components/live/AttendanceSummary.js", () => ({
+  AttendanceSummary: (props: { readonly activityId: string; readonly sessionMode?: string | null }) => {
+    attendanceSummarySpy(props);
+    return <section data-testid="live-attendance-summary" />;
+  },
 }));
 vi.mock("../realtime/useRealtimeTopic.js", () => ({
   useRealtimeTopic: () => ({ fallback: false }),
@@ -85,5 +92,64 @@ describe("LiveActivityPage", () => {
     expect(document.querySelector(".live-workspace")).not.toBeNull();
     expect(document.querySelector(".live-main-column")).not.toBeNull();
     expect(document.querySelector(".live-control-rail")).not.toBeNull();
+    expect(attendanceSummarySpy).not.toHaveBeenCalled();
+  });
+
+  it("gives the attendance summary the scoring session mode, including rehearsal", () => {
+    useQueryMock.mockReturnValue({
+      data: {
+        activity: {
+          id: "activity-1",
+          title: "春季现场",
+          publicCode: "SPRING-1",
+          status: "active",
+          revision: 2,
+          enabledCapabilities: ["ticketing", "attendance"],
+          activeDefinitionVersion: 1,
+        },
+        config: { rounds: [], rubric: { criteria: [] }, tiePolicy: "hold" },
+        session: { mode: "rehearsal" },
+        rounds: [],
+        participantIds: [],
+      },
+      error: null,
+      isPending: false,
+    });
+
+    render(<LiveActivityPage />);
+
+    expect(attendanceSummarySpy).toHaveBeenCalledWith({
+      activityId: "activity-1",
+      sessionMode: "rehearsal",
+    });
+  });
+
+  it("does not invent a formal scoring session when none is running", () => {
+    useQueryMock.mockReturnValue({
+      data: {
+        activity: {
+          id: "activity-1",
+          title: "春季现场",
+          publicCode: "SPRING-1",
+          status: "active",
+          revision: 2,
+          enabledCapabilities: ["attendance"],
+          activeDefinitionVersion: 1,
+        },
+        config: { rounds: [], rubric: { criteria: [] }, tiePolicy: "hold" },
+        session: null,
+        rounds: [],
+        participantIds: [],
+      },
+      error: null,
+      isPending: false,
+    });
+
+    render(<LiveActivityPage />);
+
+    expect(attendanceSummarySpy).toHaveBeenCalledWith({
+      activityId: "activity-1",
+      sessionMode: undefined,
+    });
   });
 });

@@ -11,6 +11,7 @@ import {
 } from "../../api/attendance.js";
 import { ApiError } from "../../api/client.js";
 import { closeExecution, fetchExecutions, startExecution } from "../../api/voting.js";
+import { attendancePartitionForSession } from "../attendancePartition.js";
 
 type AttendanceTab = "participant" | "ticket" | "staff";
 
@@ -20,6 +21,12 @@ function tabLabel(tab: AttendanceTab): string {
 
 function statusLabel(status: AttendanceRow["status"]): string {
   return { present: "已到", undone: "已撤销", not_checked_in: "未到" }[status];
+}
+
+function checkinModeLabel(mode: "test" | "rehearsal" | "formal"): string {
+  if (mode === "test") return "测试";
+  if (mode === "formal") return "正式";
+  return "rehearsal";
 }
 
 function humanError(error: unknown): string {
@@ -53,13 +60,16 @@ export function AttendanceCard({
   const executions = useQuery({
     queryKey: ["attendance-executions", activityId],
     queryFn: () => fetchExecutions(activityId),
-    enabled: canManageSession,
     retry: false,
   });
   const session = executions.data?.find(
     (item) => item.scope === "checkin" && item.status === "running",
   );
-  const mode = session?.mode === "test" ? "test" : "formal";
+  const partition = executions.isSuccess
+    ? attendancePartitionForSession(session?.mode, "签到会话")
+    : { mode: "formal" as const, disclosure: null };
+  const mode = partition.mode;
+  const selectedMode = session?.mode === "formal" || session?.mode === "test" ? session.mode : sessionMode;
 
   const attendance = useQuery({
     queryKey: ["ops-attendance", activityId, point, tab, search, mode],
@@ -144,6 +154,14 @@ export function AttendanceCard({
     },
   });
 
+  function openSession(): void {
+    if (sessionMode === "formal") {
+      const confirmed = window.confirm("将打开正式签到，到场记录写入正式分区。继续？");
+      if (!confirmed) return;
+    }
+    sessionMutation.mutate("open");
+  }
+
   if (attendance.isPending) {
     return <section className="ops-card attendance-card"><p className="auth-loading">正在加载签到…</p></section>;
   }
@@ -166,21 +184,24 @@ export function AttendanceCard({
           <p className="eyebrow">ATTENDANCE · 现场签到</p>
           <h2>签到</h2>
         </div>
-        {session !== undefined ? <span>签到已开放（{session.mode === "test" ? "测试" : "正式"}）</span> : null}
+        {session !== undefined ? <span>签到已开放（{checkinModeLabel(session.mode)}）</span> : null}
       </div>
 
       {canManageSession ? (
         <div className="attendance-session" data-testid="attendance-session">
           <select
-            value={sessionMode}
+            value={selectedMode}
             onChange={(event) => setSessionMode(event.target.value as "formal" | "test")}
             disabled={session !== undefined}
           >
             <option value="formal">正式</option>
             <option value="test">测试</option>
           </select>
+          <p className="state-copy" data-testid="attendance-rehearsal-note">
+            彩排签到会被拒绝。签到只有正式和测试分区；打开正式签到会写入正式分区。
+          </p>
           {session === undefined ? (
-            <button onClick={() => sessionMutation.mutate("open")} disabled={sessionMutation.isPending}>
+            <button onClick={openSession} disabled={sessionMutation.isPending}>
               打开签到
             </button>
           ) : (
@@ -227,6 +248,10 @@ export function AttendanceCard({
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索姓名 / 票据码" />
         <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" maxLength={500} />
       </div>
+
+      {partition.disclosure === null ? null : (
+        <p className="state-copy" data-testid="attendance-mode-disclosure">{partition.disclosure}</p>
+      )}
 
       {summary !== undefined ? (
         <p className="attendance-summary">

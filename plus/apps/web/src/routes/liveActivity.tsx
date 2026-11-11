@@ -92,7 +92,7 @@ function LiveActivityContent() {
           {state.activity.enabledCapabilities.includes("attendance") ? (
             <AttendanceSummary
               activityId={activityId}
-              mode={state.session?.mode === "test" ? "test" : "formal"}
+              sessionMode={state.session?.mode}
             />
           ) : null}
           <section className="ops-card live-roster-card">

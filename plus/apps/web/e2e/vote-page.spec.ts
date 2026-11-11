@@ -1,4 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function startFormalVoting(page: Page): Promise<void> {
+  const card = page.locator(".voting-card");
+  await card.getByLabel("启动模式").selectOption("formal");
+  page.once("dialog", (dialog) => dialog.accept());
+  const row = card.locator(".voting-session-row").filter({ hasText: "voting 会话" });
+  await row.getByRole("button", { name: "启动" }).click();
+  await expect(row.getByText("formal · 运行中")).toBeVisible();
+}
 
 test("a voter opens the shared link, votes, and sees the already-voted state", async ({
   page,
@@ -11,9 +20,7 @@ test("a voter opens the shared link, votes, and sees the already-voted state", a
   await page.waitForURL(/\/ops$/);
 
   await page.goto("/ops/act_e2e_vote_page");
-  const sessionRows = page.locator(".voting-session-row");
-  await sessionRows.filter({ hasText: "voting 会话" }).getByRole("button", { name: "启动" }).click();
-  await expect(sessionRows.filter({ hasText: "voting 会话" }).getByText("运行中")).toBeVisible();
+  await startFormalVoting(page);
 
   await page.getByLabel("候选（每行一个）").fill("alice\nbob");
   await page.getByRole("button", { name: "开启投票" }).click();
@@ -50,9 +57,7 @@ test("a ticket holder redeems a ticket and votes through the public page", async
 
   const activityId = "act_e2e_ticket_vote_page";
   await page.goto("/ops/" + activityId);
-  const sessionRows = page.locator(".voting-session-row");
-  await sessionRows.filter({ hasText: "voting 会话" }).getByRole("button", { name: "启动" }).click();
-  await expect(sessionRows.filter({ hasText: "voting 会话" }).getByText("运行中")).toBeVisible();
+  await startFormalVoting(page);
   await page.getByLabel("候选（每行一个）").fill("alice\nbob");
   await page.getByRole("button", { name: "开启投票" }).click();
   await expect(page.locator(".voting-session").first()).toBeVisible();

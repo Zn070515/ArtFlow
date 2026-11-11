@@ -35,11 +35,40 @@ describe("AttendanceSummary", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
-        <AttendanceSummary activityId="activity-1" mode="formal" />
+        <AttendanceSummary activityId="activity-1" sessionMode="formal" />
       </QueryClientProvider>,
     );
     expect(await screen.findByTestId("live-attendance-summary")).toBeTruthy();
     expect(screen.getByText("参赛者：应到 15 · 已到 12 · 已撤销 1")).toBeTruthy();
+    expect(screen.queryByTestId("attendance-mode-disclosure")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+    expect(fetchAttendanceMock).toHaveBeenCalledWith("activity-1", { mode: "formal" });
+  });
+
+  it("labels formal attendance while a rehearsal scoring session is running", async () => {
+    fetchAttendanceMock.mockResolvedValue(list);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AttendanceSummary activityId="activity-1" sessionMode="rehearsal" />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByTestId("attendance-mode-disclosure")).toHaveTextContent(
+      "签到没有 rehearsal 分区，当前数字是 formal。",
+    );
+    expect(fetchAttendanceMock).toHaveBeenCalledWith("activity-1", { mode: "formal" });
+  });
+
+  it("reads the test partition for a test scoring session", async () => {
+    fetchAttendanceMock.mockResolvedValue({ ...list, mode: "test" });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AttendanceSummary activityId="activity-1" sessionMode="test" />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByTestId("live-attendance-summary")).toBeTruthy();
+    expect(screen.queryByTestId("attendance-mode-disclosure")).toBeNull();
+    expect(fetchAttendanceMock).toHaveBeenCalledWith("activity-1", { mode: "test" });
   });
 });

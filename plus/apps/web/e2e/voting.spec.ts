@@ -10,12 +10,17 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
   await page.goto("/ops/act_e2e_voting");
   await expect(page.getByRole("heading", { name: "投票与发布" })).toBeVisible();
 
-  // Start the two execution sessions the card needs.
-  const sessionRows = page.locator(".voting-session-row");
-  await sessionRows.filter({ hasText: "voting 会话" }).getByRole("button", { name: "启动" }).click();
-  await expect(sessionRows.filter({ hasText: "voting 会话" }).getByText("运行中")).toBeVisible();
-  await sessionRows.filter({ hasText: "publishing 会话" }).getByRole("button", { name: "启动" }).click();
-  await expect(sessionRows.filter({ hasText: "publishing 会话" }).getByText("运行中")).toBeVisible();
+  // Publishing a result is formal-only, so this journey opts into formal
+  // and accepts the confirmation. The card defaults to rehearsal.
+  const votingCard = page.locator(".voting-card");
+  await votingCard.getByLabel("启动模式").selectOption("formal");
+  const sessionRows = votingCard.locator(".voting-session-row");
+  for (const scope of ["voting", "publishing"]) {
+    page.once("dialog", (dialog) => dialog.accept());
+    const row = sessionRows.filter({ hasText: `${scope} 会话` });
+    await row.getByRole("button", { name: "启动" }).click();
+    await expect(row.getByText("formal · 运行中")).toBeVisible();
+  }
 
   // Open a vote with two candidates.
   await page.getByLabel("候选（每行一个）").fill("alice\nbob");
