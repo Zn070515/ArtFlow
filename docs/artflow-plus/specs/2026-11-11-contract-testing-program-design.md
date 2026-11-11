@@ -359,7 +359,10 @@ Vitest Fixtures / Mocking、Playwright 跨上下文集成测试。
   `tests/gates/` 与 `tests/golden/`。
 - Pact 的 broker/provider 服务模型与单仓库、进程内 Provider 不匹配；先实现轻量的
   Consumer Contract 清单与断言，不引入外部 Broker。
-- Consumer Graph 用 TypeScript Compiler API 生成，不新增解析依赖。
+- Consumer Graph 用自写的有界 TypeScript 扫描器生成，不新增解析依赖。
+  `typescript@7.0.2` 是原生编译器，不暴露 `createSourceFile` / `createProgram`；
+  扫描器只解析 import、`executeCommand` / `appendEngineEvent` 调用点和 Manifest
+  字面量，其余动态依赖由显式声明补齐。
 - 故障注入优先依赖注入与测试 seam，不把故障开关散落到生产路径。
 - Playwright 只用于跨浏览器上下文的旅程，不承担契约或并发验证。
 
