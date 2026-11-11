@@ -52,6 +52,7 @@ test-results/
 
 docs/advices/**
 docs/superpowers/**
+.superpowers/
 
 # Kubernetes lab credentials and generated manifests
 .kube/
