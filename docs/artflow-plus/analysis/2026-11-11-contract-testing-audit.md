@@ -13,8 +13,8 @@
 2. 缺少三样东西：**可查询的 Consumer Graph**、**机器可读的小型 Contract 清单**、
    **可复用的故障注入 seam**。现有规则主要散落在 `docs/invariants/`、各 Capability
    的测试和实现代码里。
-3. 任务书列出的六个已知问题在最新代码中**全部仍然存在**，且现有测试均未覆盖其
-   缺陷形成机制。逐项证据见 §5。
+3. 任务书列出的六个已知问题在 P3 开始时**全部仍然存在**，且现有测试均未覆盖其
+   缺陷形成机制。2026-11-11 已逐项先写失败测试再修复，证据见 §5.7。
 4. 其中 Capability Manifest 与共享 Schema 的漂移已经可以直接用现有 TypeBox 测试
    复现；Outbox / Live Projection 的一致性问题最隐蔽，影响也最大。
 5. 不建议引入 Pact Broker 或新的测试服务。优先复用 Vitest、fast-check、真实
@@ -102,7 +102,9 @@
 
 ## 5. 已知问题复核
 
-| # | 问题 | 最新代码结论 | 现有测试是否覆盖缺陷机制 |
+> 下表是 P3 开始时的代码快照。修复状态、复现测试与对应提交见 §5.7。
+
+| # | 问题 | P3 开始时结论 | 当时测试是否覆盖缺陷机制 |
 | --- | --- | --- | --- |
 | 1 | 归档状态下仍允许不应发生的 Ticket 操作 | **存在** | 否 |
 | 2 | Roster 最终确定后仍可产生新 Registration | **存在** | 否，只测了“final 后 review 被拒” |
@@ -231,6 +233,30 @@ published。下一个事件 B 成功 → `upsertLiveState` 清空 block，并把
 失败路径：任何用共享 Schema 校验真实 Capability Manifest 的调用都会因为
 `commandScopes` 是额外字段而失败；同时 TypeScript 无法发现两份独立声明的字段
 差异。现有测试只验证少量手写样例，所以一直绿色。
+
+### 5.7 P3 复现与修复结果（2026-11-11）
+
+六项都按“先写失败测试、确认失败、再修业务代码、最后通过”的顺序处理。
+
+| # | 复现测试 | 修复 |
+| ---: | --- | --- |
+| 1 | `packages/runtime/test/voting-ticket-service.test.ts`：archived ticket writes | 票据/评委凭证写命令增加 `ACTIVITY_NOT_ACTIVE` / `ACTIVITY_ARCHIVED` 守卫；`closed` 保留带原因的 revoke |
+| 2 | `packages/runtime/test/registration-service.test.ts`：start/answer/submit after roster final | 三个命令在锁内读取 roster，`final` 返回 `ROSTER_FINAL` |
+| 3 | 同文件：blocked live projection sticky | `upsertLiveState` 在 blocked 时 no-op；读面返回 `stale`/`blockedReason`；Worker 增加 `rebuild-voting-live` |
+| 4 | 同文件：judge claim replay | judge session token 改为 `HMAC(secret, "AF1.JS."+sessionId)`；增加 `onReplay` |
+| 5 | `packages/realtime/test/server.test.ts`：close during authorize | `RealtimeConnection` 增加 `closed` 标志，每个 await 后检查 |
+| 6 | `packages/contracts/test/contracts.test.ts`：every manifest passes shared schema | 共享 Schema 增加 `commandScopes`；事件名允许 CamelCase 与 dotted lowercase 两种约定 |
+
+全量回归：`REQUIRE_DB=1 pnpm -C plus run test` 567 tests 通过。契约与决策记录：
+
+- `docs/invariants/tickets.md` TICK-08、`lifecycle.md` LIFE-05/LIFE-09、
+  `realtime.md` RT-09/RT-10；
+- `docs/architecture/adr/0039-judge-session-replay.md`、
+  `0040-live-projection-sticky-recovery.md`。
+
+仍然开放的声明缺口（不在这六项内）：competition 多条命令未进 Manifest；
+`questionnaire.answer` 声明与实际 `registration.answer` 不一致；若干事件没有
+Manifest 声明。它们已由 Consumer Graph 的 warning 暴露，留给 P2/P3 后续。
 
 ## 6. 缺口与重复建设风险
 

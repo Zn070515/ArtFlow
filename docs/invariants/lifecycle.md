@@ -121,6 +121,10 @@ RESULTS_PUBLISHED 并 demote 当前归档包。
 **Plus 要求**：终态在读模型与写命令两层都不可写；归档包是发布产物的一部分；
 解归档是显式恢复命令，不改变历史包。
 
+**2026-11-11 补强**：归档活动的票据写入一律 fail closed（issue、rotate、
+revoke、reissue、claim、access-session revoke）。`closed` 只保留带原因的
+revoke / access-session revoke，用于事故响应；`closed` 不得产生新凭证。
+
 ---
 
 ## LIFE-06 清理顺序由事实依赖决定，不由表名决定
@@ -201,6 +205,10 @@ supplement 被误当作重新报名。
 
 **Plus 要求**：release 冻结 lifecycle；命令与公开读共用同一 artifact；
 旧 release 缺失字段按 `open` 兼容；`final` 后只允许显式补交 seam，不能重新报名。
+
+**2026-11-11 补强**：`registration.start`、`registration.answer`、
+`registration.submit` 都在锁内读取 roster；`final` 后三者一律返回
+`ROSTER_FINAL`。只有 `registration.supplement.*` 的显式补交 seam 例外。
 
 ---
 

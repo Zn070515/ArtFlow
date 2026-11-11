@@ -306,19 +306,37 @@ commit，便于审查和回滚。
   reissue / claim / revoke；`closed` 允许带原因的 revoke 与 session revoke，
   但拒绝产生新凭证。理由：保留事故响应，同时不重新打开对外凭证面。
 - **Live 投影恢复**：失败后 block 必须保持到显式重建；后续成功事件不得清除 block；
-  读面必须告诉调用方“这不是权威计数”。推荐把投票 Live 投影纳入
-  `plus/apps/worker/src/ops.ts` 的 `retry` / `rebuild` 命令。
+  读面必须告诉调用方“这不是权威计数”。已实现为 sticky block + `stale` 读面 +
+  Worker `rebuild-voting-live`；见 ADR-0040 与 RT-10。
 - **Judge Claim 重放**：重放不能在响应里返回空凭证，也不能持久化明文 token。
-  允许在重放事务内轮换同一 session 的 token digest，并返回新 token；旧 token
-  立即失效。该语义需要写入 `docs/invariants/tickets.md`（TICK-03/TICK-05）与
-  对应 ADR。
-- **Manifest 单一真相**：短期用共享 Schema 加门禁；长期评估让领域类型从 TypeBox
-  Schema 派生，减少两份声明。先不引入包依赖方向变化。
+  judge session token 从 `sessionId` + 服务端 secret 确定性派生（HMAC），重放用
+  持久化的 `sessionId` 重新计算同一个 token，不创建第二个 session。见 ADR-0039
+  与 TICK-08。
+- **Manifest 单一真相**：短期用共享 Schema 加门禁；共享 Schema 已补
+  `commandScopes`，事件名接受 CamelCase 领域事件与 dotted lowercase 失效信号。
+  长期评估让领域类型从 TypeBox Schema 派生，减少两份声明。先不引入包依赖方向变化。
 
 ### 5.4 成本
 
 约 3 人日（六个问题，含修复与回归）。若某个修复需要改数据库迁移或审计语义，
 单独拆阶段，不混在契约测试提交里。
+
+### 5.5 结果（2026-11-11）
+
+六项都已完成“失败测试 → 修复 → 通过”：
+
+| 问题 | 复现测试 | 修复 |
+| --- | --- | --- |
+| Manifest / Schema 漂移 | contracts：every manifest passes shared schema | 补 `commandScopes`；事件名双约定 |
+| 归档后票据写入 | runtime：archived ticket writes | `ACTIVITY_NOT_ACTIVE` / `ACTIVITY_ARCHIVED` |
+| Roster final 后新报名 | runtime：start/answer/submit after final | 锁内 roster 守卫 |
+| Judge Claim 重放 | runtime：replay with a usable token | 确定性 HMAC token + `onReplay` |
+| Live Projection | runtime：blocked live sticky | block sticky + stale 读面 + ops rebuild |
+| Realtime 竞态 | realtime：close during authorize | `closed` 标志与 await 后检查 |
+
+全量回归 567 tests 通过。记录：TICK-08、LIFE-05/LIFE-09 补强、RT-09/RT-10、
+ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
+`questionnaire.answer`、若干事件）由 Consumer Graph warning 继续跟踪。
 
 ## 6. P4：推广与 CI 门禁
 
@@ -448,8 +466,9 @@ commit，便于审查和回滚。
 
 ## 12. 下一步
 
-1. 在 `main` 上开短生命周期分支 `feat/contract-testing-p1`；
-2. 先补 §8 的运行基线；
-3. 实现 `plus/tools/contracts` 的 Consumer Graph 最小原型；
-4. 用 `claimJudgeSeat`、`executeCommand`、Outbox Relay 三条链验收；
-5. 通过出口后再进入 P2，不提前铺开所有 Capability。
+1. P1 Consumer Graph 原型已完成并合入 `main`；
+2. P3 六项已知缺陷已完成复现与修复；
+3. 下一阶段进入 P2：`executeCommand` 的 Contract 与 Adapter 原型，先
+   `registration`，再 `ticketing`；
+4. P2 通过出口后再接 Outbox Relay 与 Realtime，不提前铺开所有 Capability；
+5. 继续用 Consumer Graph 的 warning 收敛 Manifest 声明缺口。
