@@ -1,8 +1,9 @@
 # ArtFlow-Plus
 
-This directory is the v2 workspace and the only product line. The Django
-application at the repository root is a frozen v1 reference retained only until
-external review; nothing here imports it, and it will be deleted.
+This directory is the v2 workspace and the only product line on `main`. The
+1.x Django monolith has been removed; its complete source is preserved in tag
+`v1.0.2`, and its feature record lives in `docs/archive/v1/`. Nothing here
+imports it.
 
 ## Current state
 
@@ -310,8 +311,9 @@ new architecture.
 
 ## Next steps
 
-1. Delete the retained Django 1.x source after external review and the v1→v2
-   coverage audit close. Follow `docs/artflow-plus/skeleton-coverage.md`.
+1. Close the remaining v1 coverage gaps in
+   `docs/artflow-plus/skeleton-coverage.md`. The Django source is already gone
+   from `main` and is preserved in tag `v1.0.2`.
 2. Close the remaining product gaps: a public program page for stage shows,
    bracket/composite scoring, XLSX export, on-site display, and multi-instance
    realtime broadcast.
