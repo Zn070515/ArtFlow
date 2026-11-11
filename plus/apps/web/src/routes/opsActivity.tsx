@@ -70,6 +70,23 @@ function OpsActivityContent() {
           <p className="eyebrow">OPS · {activity?.status ?? "ACTIVITY"}</p>
           <h1 className="console-page-title">{activity?.title ?? activityId}</h1>
           {activity === undefined ? null : <p className="state-copy">公开码 {activity.publicCode}</p>}
+          <p className="state-copy">
+            <Link to="/live/$activityId/cues" params={{ activityId }} className="table-link">
+              主持手卡
+            </Link>
+            {activity === undefined ? null : (
+              <>
+                {" · "}
+                <Link
+                  to="/programme/$publicCode"
+                  params={{ publicCode: activity.publicCode }}
+                  className="table-link"
+                >
+                  公开节目单
+                </Link>
+              </>
+            )}
+          </p>
         </div>
       </header>
       <div className="ops-grid">

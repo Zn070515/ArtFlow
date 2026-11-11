@@ -33,7 +33,7 @@ Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与�
 | 缺口 | v1 证据 | 影响 | 计划 |
 | --- | --- | --- | --- |
 | 公开公告 / 往届风采 / 活动文章 | `public_portal/` 的 `PublicPost` 类型与页面 | Portal 只有活动结果与报名入口 | 新 capability 或扩展 `publishing` 的非结果内容 |
-| 舞台类节目单公开页 / 节目顺序 | `farewell_show/` 的 `Program` 与 order | 观众看不到节目安排 | 新 capability 或 `publishing` 的非比赛 stage |
+| 舞台类节目单公开页 / 节目顺序 | `farewell_show/` 的 `Program` 与 order | 观众可看已定稿名单的公开节目单，主持可看同一份大字手卡。手动调序和结果大屏仍未做 | 只读投影，不新写赛果 |
 | XLSX 导出 | `exports/`、`staff_panel` 导出 | 运营无法导出报名/评分/投票表格 | 独立导出模块，不塞进 capability |
 | Word / 微信推文生成 | `exports/` 的 `ArticleTemplate`、`GeneratedDocument` | 无法一键生成推文 | 独立内容生成模块 |
 | bracket / 对阵 / 复合分 | `ruleset/` 的淘汰赛表达 | v2 competition 只表达 round/panel/score | 新 capability |

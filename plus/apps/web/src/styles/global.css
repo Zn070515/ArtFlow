@@ -2423,3 +2423,74 @@ a.primary-button {
     min-height: 420px;
   }
 }
+
+.programme-page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 72px) 20px 80px;
+}
+
+.programme-list {
+  display: grid;
+  gap: 18px;
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.programme-list li {
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 6px);
+  background: rgba(12, 12, 18, 0.72);
+}
+
+.programme-list h2 {
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+}
+
+.cue-page {
+  max-width: 1100px;
+}
+
+.cue-deck {
+  display: grid;
+  gap: 28px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cue-card {
+  padding: clamp(28px, 4vw, 56px);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: #07070b;
+}
+
+.cue-order {
+  margin: 0;
+  color: var(--gold);
+  font-size: clamp(1.1rem, 2vw, 1.5rem);
+  letter-spacing: 0.16em;
+}
+
+.cue-title {
+  margin: 8px 0 12px;
+  font-size: clamp(2.6rem, 7vw, 5rem);
+}
+
+.cue-performers,
+.cue-notes {
+  margin: 0;
+}
+
+.cue-performers {
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+}
+
+.cue-notes {
+  margin-top: 14px;
+  color: var(--muted, #c8c4bc);
+  font-size: clamp(1.15rem, 2.2vw, 1.7rem);
+}

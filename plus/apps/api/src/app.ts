@@ -20,6 +20,7 @@ import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCompetitionRoutes } from "./routes/competition.js";
 import { registerGroupingRoutes } from "./routes/grouping.js";
+import { registerProgrammeRoutes } from "./routes/programme.js";
 import { registerPublicRoutes } from "./routes/public.js";
 import { registerPublishingRoutes } from "./routes/publishing.js";
 import { registerRegistrationRoutes } from "./routes/registration.js";
@@ -439,6 +440,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerArchiveRoutes(routeContext);
   registerPublishingRoutes(routeContext);
   registerPublicRoutes(routeContext);
+  registerProgrammeRoutes(routeContext);
 
 
   app.setErrorHandler((error, request, reply) => {

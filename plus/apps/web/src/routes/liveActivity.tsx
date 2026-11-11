@@ -68,6 +68,19 @@ function LiveActivityContent() {
             公开码 {state.activity.publicCode} · release v{state.activity.activeDefinitionVersion} ·
             {fallback ? " 5s 轮询" : " 实时推送"}
           </p>
+          <p className="state-copy">
+            <Link to="/live/$activityId/cues" params={{ activityId }} className="table-link">
+              主持手卡
+            </Link>
+            {" · "}
+            <Link
+              to="/programme/$publicCode"
+              params={{ publicCode: state.activity.publicCode }}
+              className="table-link"
+            >
+              公开节目单
+            </Link>
+          </p>
           {hasTicketing ? null : (
             <p className="form-error" role="alert">
               该活动未启用 ticketing，无法生成评委入口链接。

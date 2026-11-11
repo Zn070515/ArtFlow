@@ -6,6 +6,8 @@ import { JoinActivityPage } from "./routes/joinActivity.js";
 import { JudgePage } from "./routes/judge.js";
 import { LivePage } from "./routes/live.js";
 import { LiveActivityPage } from "./routes/liveActivity.js";
+import { LiveCuesPage } from "./routes/liveCues.js";
+import { ProgrammePage } from "./routes/programme.js";
 import { LoginPage } from "./routes/login.js";
 import { OpsPage } from "./routes/ops.js";
 import { OpsActivityPage } from "./routes/opsActivity.js";
@@ -100,6 +102,18 @@ const liveActivityRoute = createRoute({
   component: LiveActivityPage,
 });
 
+const liveCuesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/live/$activityId/cues",
+  component: LiveCuesPage,
+});
+
+const programmeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/programme/$publicCode",
+  component: ProgrammePage,
+});
+
 const voteRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/vote/$sessionId",
@@ -129,6 +143,8 @@ const routeTree = rootRoute.addChildren([
   studioActivityRoute,
   liveRoute,
   liveActivityRoute,
+  liveCuesRoute,
+  programmeRoute,
   voteRoute,
   judgeRoute,
 ]);

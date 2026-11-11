@@ -10,7 +10,7 @@ describe("getShellSurface", () => {
     },
   );
 
-  it.each(["/", "/results/public-code", "/vote/session-1", "/unknown"])(
+  it.each(["/", "/results/public-code", "/programme/public-code", "/vote/session-1", "/unknown"])(
     "assigns %s to the Portal shell",
     (pathname) => {
       expect(getShellSurface(pathname)).toBe("portal");
