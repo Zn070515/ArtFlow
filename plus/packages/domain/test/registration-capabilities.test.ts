@@ -108,6 +108,7 @@ it("default Singer Pack instantiates with all M4 capabilities", () => {
     "materials",
     "questionnaire",
     "registration",
+    "ticketing",
   ]);
   expect(Object.keys(result.instantiation.definition.capabilities).sort()).toEqual(
     [...result.instantiation.enabledCapabilities].sort(),

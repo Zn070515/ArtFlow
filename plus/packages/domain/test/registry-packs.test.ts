@@ -72,6 +72,7 @@ const SINGER_CAPABILITIES: readonly CapabilityRegistration[] = [
   stubCapability("publishing", { dependencies: ["competition"] }),
   stubCapability("archive"),
   stubCapability("grouping", { dependencies: ["registration", "competition"] }),
+  stubCapability("ticketing"),
 ];
 
 function singerRegistry() {
@@ -215,7 +216,7 @@ it("composition merges declared scope conflicts", () => {
     { ...stubCapability("judging"), scopeConflicts: { judging: ["voting"] } },
   ]);
   expect(registry.ok).toBe(true);
-  expect(base.list()).toHaveLength(9);
+  expect(base.list()).toHaveLength(10);
   if (!registry.ok) return;
   const composition = registry.registry.validateComposition({ enable: ["stage", "judging"] });
   expect(composition.ok).toBe(true);
@@ -238,6 +239,7 @@ it("a pack generates a compilable empty definition from its defaults", () => {
     "publishing",
     "questionnaire",
     "registration",
+    "ticketing",
   ]);
   expect(Object.keys(result.instantiation.definition.capabilities).sort()).toEqual(
     result.instantiation.enabledCapabilities,
@@ -318,6 +320,25 @@ it("instantiates the three guided shapes with runnable defaults", () => {
       expect(JSON.stringify(competition)).toContain('"criteria"');
     }
   }
+});
+
+it("the singer pack enables judge entry unless the guided answer turns it off", () => {
+  const enabled = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry);
+  expect(enabled.ok).toBe(true);
+  if (!enabled.ok) return;
+  expect(enabled.instantiation.enabledCapabilities).toContain("ticketing");
+  const compiled = compileActivityDefinitionPackage(
+    enabled.instantiation.definition,
+    defaultCapabilityRegistry.compilers,
+  );
+  expect(compiled.ok).toBe(true);
+
+  const disabled = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry, {
+    answers: { "judge-entry": false },
+  });
+  expect(disabled.ok).toBe(true);
+  if (!disabled.ok) return;
+  expect(disabled.instantiation.enabledCapabilities).not.toContain("ticketing");
 });
 
 it("instantiates the Singer Pack with every default now that archive exists", () => {
