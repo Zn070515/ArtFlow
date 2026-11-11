@@ -91,6 +91,9 @@ jobs:
         # its accepted entry removed. Do not update it silently in CI.
         run: pnpm -C plus --filter @artflow-plus/contract-tools run audit:check
 
+      - name: Check documentation links and stale content
+        run: pwsh -NoProfile -File scripts/check_docs.ps1
+
       - name: Validate golden fixtures
         run: uv run python tests/golden/validate_fixtures.py
 
