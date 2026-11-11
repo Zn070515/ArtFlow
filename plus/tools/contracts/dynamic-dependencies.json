@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "eventConsumers": [
+    {
+      "eventType": "ExecutionSessionStarted",
+      "consumer": "packages/runtime/src/outbox-relay.ts#applyToProjection",
+      "reason": "The relay derives the execution projection from session lifecycle events."
+    },
+    {
+      "eventType": "ExecutionSessionClosed",
+      "consumer": "packages/runtime/src/outbox-relay.ts#applyToProjection",
+      "reason": "The relay derives the execution projection from session lifecycle events."
+    },
+    {
+      "eventType": "VoteSessionOpened",
+      "consumer": "packages/runtime/src/outbox-relay.ts#applyToLiveProjection",
+      "reason": "The voting live projection is maintained by the relay, not by the command."
+    },
+    {
+      "eventType": "BallotSubmitted",
+      "consumer": "packages/runtime/src/outbox-relay.ts#applyToLiveProjection",
+      "reason": "The voting live projection is maintained by the relay, not by the command."
+    },
+    {
+      "eventType": "VoteSessionClosed",
+      "consumer": "packages/runtime/src/outbox-relay.ts#applyToLiveProjection",
+      "reason": "The voting live projection is maintained by the relay, not by the command."
+    }
+  ],
+  "commands": [
+    {
+      "commandType": "competition.score.direct_judge",
+      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
+    },
+    {
+      "commandType": "competition.score.staff_rapid",
+      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
+    },
+    {
+      "commandType": "competition.score.staff_proxy",
+      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
+    },
+    {
+      "commandType": "competition.score.paper_dr",
+      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
+    },
+    {
+      "commandType": "tasks.assign",
+      "provider": "packages/runtime/src/tasks-service.ts#mutateTask",
+      "reason": "The command type is built from MutationKind, not written as a literal at the call site."
+    },
+    {
+      "commandType": "tasks.start",
+      "provider": "packages/runtime/src/tasks-service.ts#mutateTask",
+      "reason": "The command type is built from MutationKind, not written as a literal at the call site."
+    },
+    {
+      "commandType": "tasks.block",
+      "provider": "packages/runtime/src/tasks-service.ts#mutateTask",
+      "reason": "The command type is built from MutationKind, not written as a literal at the call site."
+    },
+    {
+      "commandType": "tasks.complete",
+      "provider": "packages/runtime/src/tasks-service.ts#mutateTask",
+      "reason": "The command type is built from MutationKind, not written as a literal at the call site."
+    },
+    {
+      "commandType": "tasks.reopen",
+      "provider": "packages/runtime/src/tasks-service.ts#mutateTask",
+      "reason": "The command type is built from MutationKind, not written as a literal at the call site."
+    }
+  ],
+  "eventProviders": [
+    {
+      "provider": "packages/runtime/src/execution-service.ts#appendRuntimeFact",
+      "reason": "Generic engine fact seam: the event type and capability are caller inputs validated at runtime."
+    }
+  ]
+}

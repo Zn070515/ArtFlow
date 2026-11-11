@@ -18,7 +18,10 @@
 4. 其中 Capability Manifest 与共享 Schema 的漂移已经可以直接用现有 TypeBox 测试
    复现；Outbox / Live Projection 的一致性问题最隐蔽，影响也最大。
 5. 不建议引入 Pact Broker 或新的测试服务。优先复用 Vitest、fast-check、真实
-   PostgreSQL、TypeBox、TypeScript Compiler API 和现有门禁目录。
+   PostgreSQL、TypeBox、Node 24 与现有门禁目录。注意：`typescript@7.0.2` 是原生
+   编译器，不暴露 `createSourceFile` / `createProgram`，Consumer Graph 不能依赖
+   TypeScript Compiler API；应使用有界词法扫描 + 显式动态依赖声明，或单独论证
+   后再引入解析器依赖。
 
 ## 2. 盘点口径
 
@@ -76,7 +79,7 @@
 | --- | ---: | --- |
 | Capability 注册 | 11 个 Capability 文件 | dependencies / conflicts / commands / events / permissions / scopes / commandScopes |
 | `executeCommand` 调用点 | 70 处，分布在 16 个 runtime 文件 | 命令 → 服务 → 事务边界 |
-| `appendEngineEvent` 调用点 | 77 处 | 事实 → 事件 → 投影 / 实时 |
+| `appendEngineEvent` 调用点 | 76 处，分布在 17 个 runtime 文件 | 事实 → 事件 → 投影 / 实时 |
 | API 路由模块 | `plus/apps/api/src/routes/` 下按产品面拆分 | HTTP → runtime 服务 |
 | Realtime Topic | `plus/apps/api/src/realtime-topics.ts` 的 `voting` 与 `activity` | 投影 → 订阅者 |
 | Outbox Relay | `plus/packages/runtime/src/outbox-relay.ts` | 事件 → 执行投影 / 投票 Live 投影 |

@@ -1,0 +1,24 @@
+{
+  "name": "@artflow-plus/contract-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "graph": "pnpm run build && node dist/graph/cli.js graph",
+    "graph:check": "pnpm run build && node dist/graph/cli.js graph --check",
+    "impact": "pnpm run build && node dist/graph/cli.js impact"
+  }
+}

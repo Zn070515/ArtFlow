@@ -28,8 +28,9 @@ P0 审核：[2026-11-11-contract-testing-audit.md](../analysis/2026-11-11-contra
 - 现有 137 个测试文件与完整分层；
 - 6 个已知问题全部仍存在，且现有测试未覆盖缺陷机制；
 - 共享 Capability Manifest Schema 已发生真实漂移；
-- 现有技术栈已具备 Vitest、fast-check、真实 PostgreSQL、TypeBox、TypeScript
-  Compiler API，不需要新增基础设施。
+- 现有技术栈已具备 Vitest、fast-check、真实 PostgreSQL、TypeBox 与 TypeScript
+  类型检查，不需要新增基础设施。`typescript@7.0.2` 不暴露 Compiler API，因此
+  Consumer Graph 使用自写的有界扫描器 + 显式动态依赖声明。
 
 P0 后续补齐项（进入 P1 前完成）：
 
@@ -56,7 +57,7 @@ plus/tools/contracts/
   package.json                 # @artflow-plus/contract-tools, private
   tsconfig.json
   src/graph/
-    build.ts                   # TypeScript Compiler API 扫描
+    build.ts                   # 有界 TS 扫描：imports / 调用点 / Manifest 字面量
     schema.ts                  # 节点 / 边类型
     dynamic.ts                 # 动态依赖声明加载与校验
     impact.ts                  # 反向追踪与传递影响
@@ -142,6 +143,22 @@ pnpm -C plus --filter @artflow-plus/contract-tools run impact -- --base origin/m
 
 约 2 人日。主要风险是 TypeScript 符号解析的边界；原型允许 `unresolved`，但必须
 把 unresolved 数量作为指标，不能静默忽略。
+
+### 3.8 原型结果（2026-11-11）
+
+已落地 `plus/tools/contracts`：
+
+- `pnpm --filter @artflow-plus/contract-tools run check`、`test` 通过；15 个测试。
+- `graph:check` 首次运行：1756 个节点、2831 条边、0 个 unresolved、48 条 warning。
+- 已验证的反向影响：`claimJudgeSeat` → `POST /api/judge-entry/claim`、`ticketing`
+  capability、`JudgeSeatClaimed` 事件；`topic:voting` → `readVotingSessionsState`。
+- 动态 seam 已显式声明：`competition.score.*`、`tasks.*` 与 `appendRuntimeFact`
+  的运行时事件类型。
+- warning 暴露了新的声明缺口，作为 P2/P3 的输入：competition 的多条命令未出现在
+  Manifest；`questionnaire.answer` 声明与实际 `registration.answer` 不一致；
+  `MaterialContentStored`、`RegistrationSupplement*`、`RehearsalRoundReset`、
+  `StageResultMarkedStale` 等事件没有 Manifest 声明。
+- 尚未接入 CI（P4）；当前通过包内脚本运行。
 
 ## 4. P2：Contract 与 Adapter 原型
 
@@ -361,7 +378,8 @@ commit，便于审查和回滚。
 | --- | --- | --- |
 | Vitest | 采用 | 已在全部 Node 包中使用，零迁移成本 |
 | fast-check | 采用 | 已是根依赖；适合状态机与生命周期属性测试 |
-| TypeScript Compiler API | 采用 | `typescript` 已是根依赖；可做符号级依赖图 |
+| 自写有界 TS 扫描器 | 采用 | `typescript@7.0.2` 不暴露 Compiler API；原型只需 import、调用点和 Manifest 字面量，避免新增解析依赖。若后续需要符号级精度，再评估 `@babel/parser` 等依赖 |
+| TypeScript Compiler API | 不采用（当前版本） | 原生编译器没有 `createSourceFile` / `createProgram`，无法直接建符号图 |
 | TypeBox | 采用 | 共享契约已使用；小型 Schema 可组合 |
 | 真实 PostgreSQL + Kysely | 采用 | 现有多数集成测试已如此；避免过度 Mock |
 | Pact / Pact Broker | 暂不采用 | 单仓库、进程内 Provider，Broker 增加服务与版本管理成本；先用轻量 Contract 清单 |
@@ -375,18 +393,19 @@ commit，便于审查和回滚。
 | 阶段 | 人日 | CI 影响 | 主要风险 |
 | --- | ---: | --- | --- |
 | P0 审核 | 已完成 | 无 | 无 |
-| P1 Consumer Graph | 2 | +30 秒 | 符号解析边界、动态声明遗漏 |
+| P1 Consumer Graph（原型已完成） | 2 | +30 秒 | 符号解析边界、动态声明遗漏 |
 | P2 Contract / Adapter | 3 | +60 秒 | Adapter 膨胀、契约固化实现 |
 | P3 已知问题 | 3 | 现有套件内 | 修复触及凭证或投影语义 |
 | P4 推广 | 2 | +90 秒；夜间 +10 分钟 | CI 成本、夜间稳定性 |
 | 合计 | 约 10 人日 | — | 估算误差 ±50% |
 
-运行基线待补：
+运行基线（2026-11-11）：
 
-- `pnpm -C plus run test`：待测；
-- `pnpm -C plus run check`：待测；
-- `uv run pytest tests/gates -q`：待测；
-- `uv run python tests/golden/validate_fixtures.py`：待测。
+- `REQUIRE_DB=1 pnpm -C plus run test`：通过，561 个测试；墙钟未记录；
+- `pnpm -C plus run check`：通过；
+- `uv run pytest tests/gates -q`：25 passed；
+- `uv run python tests/golden/validate_fixtures.py`：6 个 fixture、78 条不变量，OK；
+- `pwsh -NoProfile -File scripts/check_docs.ps1`：通过。
 
 ## 9. 验收指标
 
