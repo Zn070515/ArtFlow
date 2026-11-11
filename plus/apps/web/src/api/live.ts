@@ -291,6 +291,14 @@ export function reissueJudgeEntry(
   });
 }
 
+export function closeJudgeEntry(activityId: string, reason: string): Promise<unknown> {
+  return apiFetch(`/api/activities/${activityId}/judge-entry/close`, {
+    method: "POST",
+    headers: commandHeaders(crypto.randomUUID()),
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export function judgeEntryUrl(publicCode: string, capability: string): string {
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   return `${origin}/judge/${encodeURIComponent(publicCode)}?capability=${encodeURIComponent(capability)}`;

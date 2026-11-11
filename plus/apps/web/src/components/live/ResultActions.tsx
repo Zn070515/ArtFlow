@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { LiveState } from "../../api/live.js";
-import { archiveActivity, closeActivity } from "../../api/ops.js";
+import { archiveActivity, closeActivity, unarchiveActivity } from "../../api/ops.js";
 import {
   confirmPodiumResult,
   fetchExecutions,
@@ -87,9 +87,20 @@ export function ResultActions({
     mutationFn: () => archiveActivity(activityId, state.activity.revision, note.trim()),
     onSuccess: refresh,
   });
+  const unarchive = useMutation({
+    mutationFn: () => unarchiveActivity(activityId, state.activity.revision, note.trim()),
+    onSuccess: refresh,
+  });
 
-  const busy = recompute.isPending || confirm.isPending || release.isPending || close.isPending || archive.isPending;
-  const error = recompute.error ?? confirm.error ?? release.error ?? close.error ?? archive.error;
+  const busy =
+    recompute.isPending ||
+    confirm.isPending ||
+    release.isPending ||
+    close.isPending ||
+    archive.isPending ||
+    unarchive.isPending;
+  const error =
+    recompute.error ?? confirm.error ?? release.error ?? close.error ?? archive.error ?? unarchive.error;
 
   return (
     <section className="ops-card result-actions-card" data-testid="live-result-actions">
@@ -141,6 +152,16 @@ export function ResultActions({
         <button type="button" className="secondary-button" disabled={busy || state.activity.status !== "closed" || note.trim() === ""} onClick={() => archive.mutate()}>
           归档活动
         </button>
+        {state.activity.status === "archived" ? (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy || note.trim() === ""}
+            onClick={() => unarchive.mutate()}
+          >
+            取消归档
+          </button>
+        ) : null}
       </div>
       {publishing.error === null || publishing.error === undefined ? null : <p className="form-error" role="alert">赛果状态暂时不可用。</p>}
       {error === null || error === undefined ? null : <p className="form-error" role="alert">{errorText(error)}</p>}

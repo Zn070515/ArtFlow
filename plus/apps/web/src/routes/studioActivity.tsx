@@ -6,6 +6,7 @@ import { ApiError } from "../api/client.js";
 import {
   activateStudioActivity,
   fetchStudioState,
+  renameStudioActivity,
   type StudioState,
 } from "../api/studio.js";
 import { RequireSession } from "../auth/RequireSession.js";
@@ -51,6 +52,9 @@ function StudioActivityContent() {
   const queryClient = useQueryClient();
   const allowed = hasStudioAccess(session);
   const [activating, setActivating] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["studio-state", activityId],
@@ -62,6 +66,26 @@ function StudioActivityContent() {
   function refresh(): void {
     void queryClient.invalidateQueries({ queryKey: ["studio-state", activityId] });
     void queryClient.invalidateQueries({ queryKey: ["studio-activities"] });
+  }
+
+  async function rename(): Promise<void> {
+    if (query.data === undefined || title.trim() === "") return;
+    setRenaming(true);
+    setError(null);
+    try {
+      await renameStudioActivity(
+        activityId,
+        crypto.randomUUID(),
+        title.trim(),
+        query.data.activity.revision,
+      );
+      setRenameOpen(false);
+      refresh();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "重命名失败，请稍后重试。");
+    } finally {
+      setRenaming(false);
+    }
   }
 
   async function activate(): Promise<void> {
@@ -111,17 +135,54 @@ function StudioActivityContent() {
             {state.activity.activeDefinitionVersion}
           </p>
         </div>
-        {state.activity.status === "draft" ? (
+        <div className="task-actions">
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={state.activity.status === "archived"}
+            onClick={() => {
+              setTitle(state.activity.title);
+              setRenameOpen(true);
+            }}
+          >
+            重命名
+          </button>
+          {state.activity.status === "draft" ? (
+            <button
+              className="primary-button"
+              type="button"
+              disabled={activating}
+              onClick={() => void activate()}
+            >
+              {activating ? "正在激活…" : "激活活动"}
+            </button>
+          ) : null}
+        </div>
+      </header>
+      {renameOpen ? (
+        <div className="session-controls">
+          <label className="field">
+            <span>活动标题</span>
+            <input value={title} onChange={(event) => setTitle(event.target.value)} />
+          </label>
           <button
             className="primary-button"
             type="button"
-            disabled={activating}
-            onClick={() => void activate()}
+            disabled={renaming || title.trim() === ""}
+            onClick={() => void rename()}
           >
-            {activating ? "正在激活…" : "激活活动"}
+            {renaming ? "正在保存…" : "保存标题"}
           </button>
-        ) : null}
-      </header>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={renaming}
+            onClick={() => setRenameOpen(false)}
+          >
+            取消
+          </button>
+        </div>
+      ) : null}
       {error === null ? null : (
         <p className="form-error" role="alert">
           {error}

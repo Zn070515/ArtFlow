@@ -455,6 +455,8 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   增加权威文档的退役命令门禁。详见
   [`工程加固计划`](plans/2026-11-12-engineering-hardening.md) 与
   [`文档口径审计`](analysis/2026-11-12-documentation-consistency.md)。
+- **缺口清理第一轮**：Pack readiness 3 → 0；新增 `api-only.json` 显式声明机制；
+  补关闭评委入口、重命名活动、取消归档三条 UI；baseline 156 → 145。
 
 ## Definition of Done（每个 slice）
 

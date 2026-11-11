@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { loadApiOnly, validateApiOnly } from "../src/audit/api-only.js";
 import { buildConsumerGraph } from "../src/graph/build.js";
 import { loadDynamicDependencies } from "../src/graph/dynamic.js";
 import { impactOf } from "../src/graph/impact.js";
@@ -42,6 +43,11 @@ describe("the real ArtFlow consumer graph", () => {
     const ids = report.nodes.map((item) => item.node.id);
     expect(ids).toContain("route:POST /api/judge-entry/claim");
     expect(ids).toContain("capability:ticketing");
+  });
+
+  it("keeps every api-only declaration attached to a live route", () => {
+    const apiOnly = loadApiOnly(path.resolve(import.meta.dirname, "../api-only.json"));
+    expect(validateApiOnly(apiOnly, graph)).toEqual([]);
   });
 
   it("keeps the declared event consumers connected", () => {

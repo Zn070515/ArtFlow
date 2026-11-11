@@ -109,6 +109,19 @@ export function createStudioActivity(
   });
 }
 
+export function renameStudioActivity(
+  activityId: string,
+  commandId: string,
+  title: string,
+  expectedRevision: number,
+): Promise<StudioActivity> {
+  return apiFetch<StudioActivity>(`/api/activities/${activityId}/title`, {
+    method: "PATCH",
+    headers: { "idempotency-key": commandId },
+    body: JSON.stringify({ title, expectedRevision }),
+  });
+}
+
 export function activateStudioActivity(
   activityId: string,
   commandId: string,

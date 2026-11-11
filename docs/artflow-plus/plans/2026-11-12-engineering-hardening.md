@@ -107,3 +107,21 @@ packages/db/src/types.ts
 - `pwsh -NoProfile -File scripts/check_docs.ps1`
 
 任何一项失败都视为未完成；不得通过跳过数据库测试或放宽 baseline 获得绿色。
+
+## 7. 存量缺口清理（2026-11-12 第一轮）
+
+- Starter Pack readiness 从 3 条降到 **0**：
+  - `stage-show` / `review-awards` 补 `voting` definition（browser identity）；
+  - `review-awards` 增加默认启用的 `judge-entry`（ticketing）问题，使评委入口链接有凭证能力。
+- 新增 `tools/contracts/api-only.json`：没有 Web 调用方的 mutation route 必须显式声明
+  method、path、reason；`audit:check` 与 `graph:check` 都会校验声明仍对应真实路由，
+  未知路由、空 reason、重复声明直接失败。
+- 首批声明 5 条 API-only：`runtime-facts`（测试 seam）、4 条 legacy 兼容别名
+  （rounds prepare、registration answer、materials upload/review）。
+- 补齐 3 条真实 UI 路径：
+  - Live「关闭评委入口」（带原因）；
+  - Studio「重命名活动」；
+  - Live/Ops「取消归档」。
+- `gap-baseline.json` 从 **156 → 145**；`uiGaps` 从 26 → 18。
+- 验证：641 tests、check、schema:check、build:prod、结构门禁 26、Golden、
+  `audit:check`（145）、`graph:check`（0 unresolved）、`check_docs` 全绿。

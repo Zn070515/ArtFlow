@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/activities/:id/runtime-facts",
+      "reason": "Test and operations seam, registered only when ARTFLOW_PLUS_ENABLE_RUNTIME_FACTS is set; no product surface calls it."
+    },
+    {
+      "method": "POST",
+      "path": "/api/activities/:id/rounds/:roundKey/prepare",
+      "reason": "Legacy compatibility alias for /competition/rounds/:roundKey/prepare; the Web uses the scoped route."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/activities/:id/registrations/:registrationId",
+      "reason": "Legacy compatibility alias for /registrations/:registrationId/answers; the Web uses the explicit answers route."
+    },
+    {
+      "method": "POST",
+      "path": "/api/activities/:id/materials",
+      "reason": "Legacy compatibility alias for /registrations/:registrationId/materials; the Web always supplies the registration scope."
+    },
+    {
+      "method": "POST",
+      "path": "/api/activities/:id/materials/:materialId/review",
+      "reason": "Legacy compatibility alias for /registrations/:registrationId/materials/:materialId/review; the Web uses the scoped review route."
+    }
+  ]
+}

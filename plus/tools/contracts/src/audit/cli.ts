@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { buildConsumerGraph } from "../graph/build.js";
 import { loadDynamicDependencies } from "../graph/dynamic.js";
+import { apiOnlyKeys, loadApiOnly, validateApiOnly } from "./api-only.js";
 import { compareBaseline, readBaseline, writeBaseline } from "./baseline.js";
 import { runGapAudit } from "./gaps.js";
 import type { TestGap } from "./gaps.js";
@@ -47,7 +48,15 @@ function main(): void {
   const repoRoot = path.dirname(plusRoot);
   const dynamic = loadDynamicDependencies(path.resolve(import.meta.dirname, "../../dynamic-dependencies.json"));
   const graph = buildConsumerGraph(plusRoot, dynamic);
-  const gaps = runGapAudit(plusRoot, graph, {}, repoRoot);
+  const apiOnly = loadApiOnly(path.resolve(import.meta.dirname, "../../api-only.json"));
+  const apiOnlyProblems = validateApiOnly(apiOnly, graph);
+  if (apiOnlyProblems.length > 0) {
+    process.stderr.write("Invalid api-only declarations:\n");
+    for (const problem of apiOnlyProblems) process.stderr.write(`- ${problem}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const gaps = runGapAudit(plusRoot, graph, {}, repoRoot, apiOnlyKeys(apiOnly));
   const baselinePath = path.resolve(import.meta.dirname, "../../gap-baseline.json");
   const artifactDirectory = path.join(plusRoot, ".artifacts");
   mkdirSync(artifactDirectory, { recursive: true });
