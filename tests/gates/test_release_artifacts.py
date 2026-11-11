@@ -98,6 +98,13 @@ def test_production_manifest_has_one_origin_and_pinned_images() -> None:
     assert "${ARTFLOW_PLUS_WEB_IMAGE:?" in text
 
 
+def test_plus_db_mounts_the_postgresql_18_data_directory() -> None:
+    services = _yaml(COMPOSE)["services"]
+    mounts = [str(mount) for mount in services["plus-db"]["volumes"]]
+    assert any(mount.endswith(":/var/lib/postgresql") for mount in mounts)
+    assert not any("/var/lib/postgresql/data" in mount for mount in mounts)
+
+
 def test_plus_services_receive_the_release_sha() -> None:
     services = _yaml(COMPOSE)["services"]
     expected = "${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA}"
