@@ -133,8 +133,14 @@ def test_plus_web_image_reads_the_resolver_from_the_environment() -> None:
     assert "/etc/nginx/templates/default.conf.template" in dockerfile
     assert "deploy/plus/nginx.conf.template" in dockerfile
     compose = _yaml(COMPOSE)["services"]["plus-web"]
-    assert compose["environment"]["ARTFLOW_NGINX_RESOLVER"] == "${ARTFLOW_NGINX_RESOLVER:-127.0.0.11}"
-    assert compose["environment"]["ARTFLOW_NGINX_API_HOST"] == "${ARTFLOW_NGINX_API_HOST:-plus-api:3000}"
+    assert (
+        compose["environment"]["ARTFLOW_NGINX_RESOLVER"]
+        == "${ARTFLOW_NGINX_RESOLVER:-127.0.0.11}"
+    )
+    assert (
+        compose["environment"]["ARTFLOW_NGINX_API_HOST"]
+        == "${ARTFLOW_NGINX_API_HOST:-plus-api:3000}"
+    )
 
 
 def test_every_manifest_variable_is_documented() -> None:
