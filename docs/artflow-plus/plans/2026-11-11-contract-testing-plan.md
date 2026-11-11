@@ -439,7 +439,7 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
 
 运行基线（2026-11-11）：
 
-- `REQUIRE_DB=1 pnpm -C plus run test`：通过，581 个测试；墙钟未记录；
+- `REQUIRE_DB=1 pnpm -C plus run test`：通过，607 个测试；墙钟未记录；
 - `pnpm -C plus run check`：通过；
 - `uv run pytest tests/gates -q`：25 passed；
 - `uv run python tests/golden/validate_fixtures.py`：6 个 fixture、78 条不变量，OK；
@@ -513,6 +513,10 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
 - **PR 处理结果**：PR #66 修复 Compose 挂载并加 gate；#67 补 organizer 开户
   文档；#68 让 singer pack 默认启用评委入口。棘轮自动把两个已修复条目标为
   stale，baseline 从 170 降到 168。
+- **L5 变异审计**：`mutation:audit` 运行 8 个关键变异。首次 6/8 caught，
+  发现材料扩展名没有拒绝测试、Realtime 只测了 authorize 阶段关闭；补两个测试
+  后 8/8 caught。详见
+  [变异审计结果](../analysis/2026-11-11-mutation-audit-findings.md)。
 - 设计文档：[自审计测试体系设计](../specs/2026-11-11-self-auditing-test-system-design.md)。
 
 后续优先级：
