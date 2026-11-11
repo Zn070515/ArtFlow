@@ -42,6 +42,24 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   `/api`). Set `ARTFLOW_PLUS_INLINE_RELAY=1` to run the outbox relay inside the API
   process (single-process deployments and E2E); production uses the separately
   built `plus-worker` image and keeps the API value at `0`.
+- **First organizer**: `/login` only self-registers a participant. It does not
+  grant Studio, Ops, or Live. After the database has been migrated (the script
+  migrates on its own, and so does API startup), create the operator account:
+
+  ```powershell
+  $env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:5433/artflow_plus"
+  $env:ARTFLOW_PLUS_ACCOUNT_PASSWORD = "<at least 8 characters; do not commit>"
+  pnpm --filter @artflow-plus/api create-account --username organizer
+  ```
+
+  The password is read from `ARTFLOW_PLUS_ACCOUNT_PASSWORD` so it does not have
+  to appear in the command line. Running the command again updates that
+  username. The default permission set covers Studio, registration review,
+  roster finalization, competition, judge entry, ticketing, voting, results,
+  archive, materials, and attendance. Pass `--permissions a,b` to replace that
+  set, or `--roles` to replace the default `admin` role. Production runs the
+  same command against the production database URL with a secret-managed
+  password. Do not reuse the development password.
 - **Production proxy boundary**: `ARTFLOW_PLUS_TRUST_PROXY` is an explicit,
   comma-separated list of internal proxy IPs/CIDRs. It defaults to empty, so
   public `X-Forwarded-For` headers cannot change rate-limit identity. The Plus

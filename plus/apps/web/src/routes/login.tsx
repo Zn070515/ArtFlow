@@ -65,6 +65,7 @@ export function LoginPage() {
         <p className="auth-copy">
           {mode === "login" ? "登录后报名、查看审核状态。" : "账号只用于本次活动报名；姓名等信息在报名表中填写。"}
         </p>
+        <p className="auth-copy">工作人员账号不在这里注册，由部署人员用 create-account 预先创建。</p>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <label className="field">
             <span>用户名</span>
