@@ -19,6 +19,7 @@ import {
   stringLiteral,
 } from "./scan.js";
 import type { ImportSpec, RouteDecl, SymbolDecl } from "./scan.js";
+import { extractWebCalls, routeMatches } from "./ui.js";
 import {
   capabilityNodeId,
   commandNodeId,
@@ -674,6 +675,32 @@ function addRoutes(state: BuilderState): void {
   }
 }
 
+function addWebConsumers(state: BuilderState): void {
+  const routes = [...state.nodes.values()].filter((node) => node.kind === "route");
+  for (const call of extractWebCalls([...state.files.values()].map((context) => context.file))) {
+    const matches = routes.filter((route) => {
+      const [method, path] = route.name.split(" ", 2);
+      return method === call.method && path !== undefined && routeMatches(path, call.path);
+    });
+    if (matches.length === 0) {
+      warn(
+        state,
+        `Web API call has no matching HTTP route: ${call.method} ${call.path} (${call.file}:${call.line}).`,
+      );
+      continue;
+    }
+    for (const route of matches) {
+      addEdge(state, {
+        from: fileNodeId(call.file),
+        to: route.id,
+        kind: "consumes-route",
+        file: call.file,
+        line: call.line,
+      }, true);
+    }
+  }
+}
+
 function addTables(state: BuilderState): void {
   for (const context of state.files.values()) {
     if (!context.file.path.startsWith("packages/db/src/")) continue;
@@ -824,6 +851,7 @@ export function buildGraphFromSources(
   addCapabilities(state);
   addTopics(state);
   addRoutes(state);
+  addWebConsumers(state);
   addTables(state);
   addDynamicConsumers(state, dynamicResolved);
   validate(state);

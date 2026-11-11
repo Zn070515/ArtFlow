@@ -19,7 +19,8 @@
     "test": "vitest run",
     "graph": "pnpm run build && node dist/graph/cli.js graph",
     "graph:check": "pnpm run build && node dist/graph/cli.js graph --check",
-    "impact": "pnpm run build && node dist/graph/cli.js impact"
+    "impact": "pnpm run build && node dist/graph/cli.js impact",
+    "readiness": "tsx src/harness/readiness-cli.ts"
   },
   "dependencies": {
     "@artflow-plus/contracts": "workspace:*",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@sinclair/typebox": "0.34.52",
-    "@types/pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.15"
   }
 }

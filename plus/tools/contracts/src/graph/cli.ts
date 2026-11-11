@@ -7,6 +7,7 @@ import { loadDynamicDependencies } from "./dynamic.js";
 import { findStartNodes, formatImpactReport, impactOf } from "./impact.js";
 import { summarizeGraph } from "./schema.js";
 import type { NodeKind } from "./schema.js";
+import { findUnreferencedMutationRoutes, formatUiGaps } from "./ui.js";
 
 interface Arguments {
   readonly command: string;
@@ -88,7 +89,13 @@ function main(): void {
       ? String(args.flags.get("out"))
       : artifactPath(root, "consumer-graph.json");
     writeJson(output, graph);
-    process.stdout.write(`${JSON.stringify({ output, ...summary }, null, 2)}\n`);
+    const uiGaps = findUnreferencedMutationRoutes(graph);
+    const gapPath = artifactPath(root, "ui-gaps.json");
+    writeJson(gapPath, uiGaps);
+    process.stdout.write(`${JSON.stringify({ output, uiGaps: uiGaps.length, uiGapsOutput: gapPath, ...summary }, null, 2)}\n`);
+    if (uiGaps.length > 0) {
+      process.stdout.write(`\n${formatUiGaps(uiGaps)}`);
+    }
     if (graph.warnings.length > 0) {
       process.stdout.write(`\nWarnings (${graph.warnings.length}):\n`);
       for (const warning of graph.warnings) process.stdout.write(`- ${warning}\n`);

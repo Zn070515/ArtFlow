@@ -493,3 +493,28 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
 4. 下一阶段进入 P4：把 `graph:check` 与契约测试接入 CI，生成变更影响报告，
    建立 R2 夜间故障/恢复套件；
 5. 继续用 Consumer Graph 的 warning 收敛 Manifest 声明缺口。
+
+## 13. 外部审核驱动的加固（2026-11-11）
+
+外部审核的 15 条 Issue（`#51`–`#65`）暴露的是“能力测试通过，但产品路径不
+连通”。本轮先不逐条修产品，而是把它们变成可重复的诊断：
+
+- **API → Web 消费者缺口**：Consumer Graph 新增 `consumes-route` 边与
+  `findUnreferencedMutationRoutes` 报告，首次运行发现 31 条未引用 mutation
+  route，包括 tasks sync、podium recompute、close/archive、judge-entry close。
+- **Starter Pack 就绪诊断**：`checkPackReadiness` 检查 materials/file question、
+  competition/ticketing、voting identity policy，首次运行发现 6 条 finding。
+- 两者默认非阻塞，产物在 `plus/.artifacts/ui-gaps.json` 与
+  `plus/.artifacts/pack-readiness.json`；`--strict` 留给修复后接入 CI。
+
+后续优先级：
+
+1. P0：Organizer journey E2E、API boundary contract（Idempotency-Key /
+   SQLSTATE）、deployment manifest gate、pack readiness strict、mode default
+   contract。
+2. P1：read-model display contract、material content contract、active docs
+   drift gate、public code contract。
+3. P2：受控导出、只读节目单/主持手卡。
+
+完整映射与验收建议见
+[外部审核驱动的测试体系加固](../analysis/2026-11-11-external-review-test-hardening.md)。
