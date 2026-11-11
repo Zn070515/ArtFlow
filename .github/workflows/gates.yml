@@ -86,6 +86,9 @@ jobs:
       - name: Run structural gates
         run: uv run pytest tests/gates -q
 
+      - name: Build and check the consumer graph
+        run: pnpm -C plus --filter @artflow-plus/contract-tools run graph:check
+
       - name: Audit test coverage gaps
         # The baseline is a ratchet: new gaps fail, and a fixed gap must have
         # its accepted entry removed. Do not update it silently in CI.

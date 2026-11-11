@@ -1,0 +1,3908 @@
+{
+  "version": 1,
+  "source": "packages/db/src/migrations",
+  "tables": [
+    {
+      "name": "activity",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "title",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "enabled_capabilities",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "active_definition_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "public_code",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "judge_entry_open",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "judge_entry_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "1",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "advancement_decision",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "round_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "input_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "decisions",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "decided_by",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "archive_package",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "size_bytes",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "sha256",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "manifest",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "summary",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "note",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "sealed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "sealed_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "is_current",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "false",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "attendance_current",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "point_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "subject_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "subject_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "note",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "attendance_fact",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "point_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "subject_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "subject_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "action",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "note",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "command_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "occurred_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "attendance_point",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "name",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "subject_types",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "active",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "attendance_staff",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "display_name",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "active",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "audit_entry",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "bigint",
+          "nullable": false,
+          "default": "nextval('audit_entry_id_seq'::regclass)",
+          "identity": false
+        },
+        {
+          "name": "command_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "capability",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "command_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "detail",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "ballot",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "session_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "identity_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "identity_digest",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ticket_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "submitted_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "command_receipt",
+      "columns": [
+        {
+          "name": "command_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "result",
+          "dataType": "jsonb",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "capability",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "command_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "payload_hash",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "scope",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "http_status",
+          "dataType": "integer",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_type",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "competition_round",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "round_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "release_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "score_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "minimum_judges",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "judge_count",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "completion_mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "advance_count",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "current_panel_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "locked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "scoring_method",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'average'::character varying",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "definition_compiled",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "draft_revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "content_hash",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "capabilities",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "compiled_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "definition_draft",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "package",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "definition_release",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "content_hash",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "capabilities",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "released_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source_draft_revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "execution_policy",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "capability_versions",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "bindings",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "execution_projection",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "last_sequence",
+          "dataType": "bigint",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'running'::character varying",
+          "identity": false
+        },
+        {
+          "name": "blocked_sequence",
+          "dataType": "bigint",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "blocked_reason",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "execution_session",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "definition_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "content_hash",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "scope",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "opened_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "closed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "grouping_group",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stage_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "group_order",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "name",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "is_active",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "grouping_membership",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stage_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "group_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "participant_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "is_current",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "joined_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "left_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "removed_by",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "reason",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "grouping_stage",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stage_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "name",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'draft'::character varying",
+          "identity": false
+        },
+        {
+          "name": "roster_source",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'all_approved'::character varying",
+          "identity": false
+        },
+        {
+          "name": "source_round_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "material_window",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'closed'::character varying",
+          "identity": false
+        },
+        {
+          "name": "cancel_reason",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "confirmed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "confirmed_by",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "frozen_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "frozen_by",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "cancelled_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "cancelled_by",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "1",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "judge_seat",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "panel_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "judge_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "judge_seat_grant",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "seat_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "judge_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'available'::character varying",
+          "identity": false
+        },
+        {
+          "name": "session_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "judge_session",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "seat_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "token_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revoked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "live_state",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "aggregate_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "aggregate_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "last_sequence",
+          "dataType": "bigint",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'running'::character varying",
+          "identity": false
+        },
+        {
+          "name": "blocked_sequence",
+          "dataType": "bigint",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "blocked_reason",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "local_account",
+      "columns": [
+        {
+          "name": "username",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "password_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'user'::character varying",
+          "identity": false
+        },
+        {
+          "name": "roles",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "permissions",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "auth_context",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "active",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "local_session",
+      "columns": [
+        {
+          "name": "token",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "roles",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "permissions",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "auth_context",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revoked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "material",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "registration_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "question_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "storage_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "original_name",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "content_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "byte_length",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "owner_actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'uploaded'::character varying",
+          "identity": false
+        },
+        {
+          "name": "review_note",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "reviewed_by",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "reviewed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "current",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "content_ready",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "material_check",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "registration_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "slot_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "item_name",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "purpose",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "accepted_purposes",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'missing'::character varying",
+          "identity": false
+        },
+        {
+          "name": "required",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "review_note",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "outbox",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "bigint",
+          "nullable": false,
+          "default": "nextval('outbox_id_seq'::regclass)",
+          "identity": false
+        },
+        {
+          "name": "event_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "payload",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "published_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "event_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "aggregate_type",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "aggregate_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "capability",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "scope",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "occurred_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "attempts",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "last_error",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "dead_lettered_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_type",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "panel_member",
+      "columns": [
+        {
+          "name": "panel_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "judge_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "seat_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "panel_snapshot",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "round_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "expected_judges",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "minimum_judges",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "roster_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "context_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "current",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "performance",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "round_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "contestant_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "sequence",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "context_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "performance_score_state",
+      "columns": [
+        {
+          "name": "performance_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "context_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "opened_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "locked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "podium_candidate",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "input_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "placements",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source_round_ids",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "source_score_versions",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "ranking_snapshot",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "round_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source_score_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "input_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "rows",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "tie_groups",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'formal'::character varying",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "rate_limit_bucket",
+      "columns": [
+        {
+          "name": "key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "window_started_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "window_ms",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "count",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "registration",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "participant_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "questionnaire_version",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "questionnaire_hash",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "answers",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'{}'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "review_note",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "reviewed_by",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "supplement_keys",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "result_publication",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stage_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "title",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "content",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "1",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "result_release",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "publication_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stage_result_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stage_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "snapshot",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "snapshot_candidate_revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "result_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "post_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "input_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "note",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "released_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revoked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "superseded_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "roster",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'unknown'::character varying",
+          "identity": false
+        },
+        {
+          "name": "approved_count",
+          "dataType": "integer",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "finalized_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "score_correction",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "score_fact_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "base_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "reason",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "input_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "score_fact",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "round_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "performance_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "contestant_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "judge_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "panel_snapshot_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "seat_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "total",
+          "dataType": "numeric",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "criteria",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "notes",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "1",
+          "identity": false
+        },
+        {
+          "name": "context_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "current",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "true",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'formal'::character varying",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "score_revision",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "score_fact_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "total",
+          "dataType": "numeric",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "criteria",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "reason",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "command_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "stage_result",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stage_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "candidate_revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source_candidate_revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "input_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "decisions",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "awards",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "confirmed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "unlocked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "note",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "source",
+          "dataType": "jsonb",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stale_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "stale_reason",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "supplement_grant",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "registration_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "token_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "allowed_keys",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revoked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "task_item",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "definition_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "template_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "title",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source_capability",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "source_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "required",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'pending'::character varying",
+          "identity": false
+        },
+        {
+          "name": "assignee_actor_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "due_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "blocked_reason",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "completion_reason",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "ticket",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "public_code",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "credential_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "credential_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "1",
+          "identity": false
+        },
+        {
+          "name": "state",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "issued_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "redeemed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revoked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "ticket_access_session",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ticket_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "token_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "last_seen_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revoked_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "tie_decision",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "round_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ranking_snapshot_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "input_fingerprint",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "contestants",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ordering",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "reason",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "vote_option",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "session_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "candidate_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ordinal",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "vote_record",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "session_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ballot_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "option_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "vote_session",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "definition_version",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "purpose",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "selection_type",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "max_selections",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "scoring_rule",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "opened_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "closed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "identity_policy",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'formal'::character varying",
+          "identity": false
+        }
+      ]
+    }
+  ]
+}

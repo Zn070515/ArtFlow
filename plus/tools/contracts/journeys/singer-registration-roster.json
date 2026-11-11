@@ -1,0 +1,18 @@
+{
+  "id": "singer-registration-roster",
+  "description": "Organizer creates a singer activity, compiles and releases it, a participant registers, and the organizer reviews and finalizes the roster.",
+  "actor": "organizer",
+  "steps": [
+    { "action": "create-activity", "title": "Journey Singer Contest" },
+    { "action": "activate-activity" },
+    { "action": "compile-definition" },
+    { "action": "release-definition" },
+    { "action": "start-registration" },
+    { "action": "answer-question", "key": "name", "value": "Journey Participant" },
+    { "action": "answer-question", "key": "student_id", "value": "20260001" },
+    { "action": "answer-question", "key": "song", "value": "Journey Song" },
+    { "action": "submit-registration" },
+    { "action": "review-registration", "status": "approved" },
+    { "action": "finalize-roster" }
+  ]
+}

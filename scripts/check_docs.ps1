@@ -161,7 +161,7 @@ $forbiddenPatterns = @(
     @{ Description = 'the removed seed_data command'; Pattern = '(?i)(?<![A-Za-z0-9_])seed_data(?![A-Za-z0-9_])' },
     @{ Description = 'the obsolete docker-compose detached startup command'; Pattern = '(?im)^\s*docker-compose\s+up\s+-d(?:\s|$)' },
     @{ Description = 'hardcoded administrator sample credentials'; Pattern = '(?i)admin\s*/\s*admin123' },
-    @{ Description = 'aggregate model, view, or route counts'; Pattern = '(?im)(?:\b\d+\s+(?:Django\s+)?(?:models?|views?|routes?)\b|\b(?:models?|views?|routes?)\s*\(\s*\d+\s+(?:total|total\s+models?)\s*\)|\d+\s*(?:个)?\s*(?:模型|视图|路由))' }
+    @{ Description = 'aggregate model, view, or route counts'; Pattern = '(?im)(?:\b\d+\s+(?:Django\s+)?(?:models?|views?|routes?)\b|\b(?:models?|views?|routes?)\s*\(\s*\d+\s+(?:total|total\s+models?)\s*\)|\b\d+\s*个\s*(?:模型|视图|路由))' }
 )
 $violations = @()
 
@@ -176,6 +176,45 @@ foreach ($document in $documents) {
 
 if ($violations.Count -gt 0) {
     throw ("Documentation contains stale or unsafe content:`n" + ($violations -join "`n"))
+}
+
+# Authoritative operating documents must describe the current Plus line only.
+# Historical material lives under docs/archive/, docs/advices/, docs/superpowers/
+# or a document whose first section carries an explicit historical banner.
+$authoritativeDocuments = @(
+    'README.md',
+    'AGENTS.md',
+    'CLAUDE.md',
+    'GOAL.md',
+    'docs/development-baseline.md',
+    'docs/deployment-production.md',
+    'docs/artflow-plus/README.md',
+    'docs/artflow-plus/roadmap.md'
+)
+$legacyPatterns = @(
+    @{ Description = 'the removed Django management command'; Pattern = '(?i)\bmanage\.py\b' },
+    @{ Description = 'the removed Gunicorn process'; Pattern = '(?i)\bGunicorn\b' },
+    @{ Description = 'the removed artflow-web image'; Pattern = '(?i)\bartflow-web\b' },
+    @{ Description = 'the removed /register/admin/ path'; Pattern = '/register/admin/' },
+    @{ Description = 'the removed ADMIN_ACCESS_KEY variable'; Pattern = 'ADMIN_ACCESS_KEY' },
+    @{ Description = 'the removed scripts/deploy.sh entry'; Pattern = 'scripts/deploy\.sh' }
+)
+$legacyViolations = @()
+foreach ($relative in $authoritativeDocuments) {
+    $path = Join-Path $repositoryRoot $relative
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "$relative is required for documentation consistency validation."
+    }
+    $content = Get-Content -LiteralPath $path -Raw
+    foreach ($rule in $legacyPatterns) {
+        if ($content -match $rule.Pattern) {
+            $legacyViolations += "${relative}: contains $($rule.Description)."
+        }
+    }
+}
+
+if ($legacyViolations.Count -gt 0) {
+    throw ("Authoritative documentation describes a retired v1 workflow:`n" + ($legacyViolations -join "`n"))
 }
 
 Write-Host "Documentation validation passed for $($documents.Count) user-facing Markdown file(s); docs/superpowers was skipped."

@@ -1,5 +1,6 @@
 import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
+import fc from "fast-check";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -744,5 +745,65 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       actor: staff,
     })).resolves.toMatchObject({ id: uploaded.body.id, storageKey: uploaded.body.storageKey });
   });
+
+  it("returns domain refusals, never driver errors, for generated command payloads", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-fuzz",
+      activityId,
+      participantId: participant.actorId,
+    });
+    const registrationId = started.body.id;
+    const operation = fc.record({
+      kind: fc.constantFrom("answer", "submit", "review"),
+      revision: fc.integer({ min: -1, max: 5 }),
+      key: fc.constantFrom("name", "audio", "missing-question", ""),
+      value: fc.oneof(fc.string(), fc.integer(), fc.constant(null), fc.dictionary(fc.string(), fc.string())),
+      status: fc.constantFrom("approved", "rejected", "need_supplement"),
+    });
+
+    await fc.assert(
+      fc.asyncProperty(fc.array(operation, { maxLength: 6 }), async (operations) => {
+        for (const op of operations) {
+          try {
+            if (op.kind === "answer") {
+              await saveRegistrationAnswer(db, deps(participant), {
+                commandId: `fuzz-${randomUUID()}`,
+                activityId,
+                registrationId,
+                expectedRevision: op.revision,
+                questionKey: op.key,
+                value: op.value,
+              });
+            } else if (op.kind === "submit") {
+              await submitRegistration(db, deps(participant), {
+                commandId: `fuzz-${randomUUID()}`,
+                activityId,
+                registrationId,
+                expectedRevision: op.revision,
+              });
+            } else {
+              await reviewRegistration(db, deps(staff), {
+                commandId: `fuzz-${randomUUID()}`,
+                activityId,
+                registrationId,
+                expectedRevision: op.revision,
+                status: op.status,
+                note: "fuzz",
+              });
+            }
+          } catch (error) {
+            // A refused command is a domain decision. A raw pg error here would
+            // mean an API boundary could leak SQLSTATE or table structure.
+            expect(error).toBeInstanceOf(DomainError);
+            expect(error instanceof Error ? error.message : "").not.toMatch(
+              /SQLSTATE|duplicate key|violates|relation "|column "/i,
+            );
+          }
+        }
+      }),
+      { numRuns: 20 },
+    );
+  }, 60_000);
 
 });

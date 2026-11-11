@@ -2,12 +2,14 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readAllStyles } from "./read-styles.js";
+
 const stylesDirectory = join(process.cwd(), "src", "styles");
 
 describe("ArtFlow visual theme styles", () => {
   it("declares the Portal and Console theme presets with layout roles", async () => {
     const tokens = await readFile(`${stylesDirectory}/tokens.css`, "utf8");
-    const global = await readFile(`${stylesDirectory}/global.css`, "utf8");
+    const global = await readAllStyles(stylesDirectory);
 
     expect(tokens).toContain('[data-theme="violet"]');
     expect(tokens).toContain('[data-theme="signal"]');
@@ -18,7 +20,7 @@ describe("ArtFlow visual theme styles", () => {
   });
 
   it("keeps Console surfaces opaque and avoids Portal-only blur", async () => {
-    const global = await readFile(`${stylesDirectory}/global.css`, "utf8");
+    const global = await readAllStyles(stylesDirectory);
     const consoleCss = global.slice(global.indexOf(".console-shell"));
 
     expect(consoleCss).not.toContain("backdrop-filter: blur");
@@ -28,7 +30,7 @@ describe("ArtFlow visual theme styles", () => {
   });
 
   it("keeps Console styling on semantic Signal tokens", async () => {
-    const global = await readFile(`${stylesDirectory}/global.css`, "utf8");
+    const global = await readAllStyles(stylesDirectory);
 
     expect(global).not.toContain("var(--muted, #666)");
     expect(global).not.toContain("var(--line, #ddd)");
@@ -37,7 +39,7 @@ describe("ArtFlow visual theme styles", () => {
   });
 
   it("removes keyboard reachability from a closed mobile sidebar", async () => {
-    const global = await readFile(`${stylesDirectory}/global.css`, "utf8");
+    const global = await readAllStyles(stylesDirectory);
 
     expect(global).toContain("visibility: hidden");
     expect(global).toContain("pointer-events: none");

@@ -1,5 +1,9 @@
 # ArtFlow v1 / ArtFlow-Plus v2 深度对比、统计与实现研究
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 日期：2026-10-28
 代码参考：`e2c7805`（`artflow-plus`，M15.1 前的干净基线）；统计快照为 2026-10-28 的 M15.1 当前工作树
 统计工具：[`scripts/artflow_comparison.py`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/scripts/artflow_comparison.py)

@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readAllStyles } from "./read-styles.js";
+
 const stylesDirectory = join(process.cwd(), "src", "styles");
 
 function tokenValue(css: string, name: string): string {
@@ -85,7 +87,7 @@ describe("theme contrast", () => {
 
   it("keeps the lowest-emphasis portal text above WCAG AA", async () => {
     const tokens = await readFile(`${stylesDirectory}/tokens.css`, "utf8");
-    const global = await readFile(`${stylesDirectory}/global.css`, "utf8");
+    const global = await readAllStyles(stylesDirectory);
     const root = tokens.slice(0, tokens.indexOf('[data-theme="afterglow"]'));
     const violet = tokens.slice(tokens.indexOf('[data-theme="violet"]'));
 

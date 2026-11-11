@@ -439,6 +439,23 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 后续按顺序实现 M15.4 Schedule/Program Release、M15.5 Incident/Recovery/Feedback；
 仍不把真实活动彩排作为验收前置条件。
 
+## 工程质量线 — 加固（已完成，2026-11-12）
+
+- **单文件拆分**：`global.css` 拆为 6 个级联 partial 与 `console` 子 partial；
+  `migrations.ts` 拆为 24 个迁移文件 + 有序索引；`voting-ticket-service.ts` 拆为
+  voting / ticket / judge-entry / shared；`publishing-service.ts` 拆出
+  `result-candidate-service.ts`。
+- **DB 单一来源**：迁移 → `schema.snapshot.json` → `src/types.ts` 的生成链；`schema:check`
+  同时校验快照与类型都是最新派生结果，不再靠手改双份描述。
+- **L3**：fast-check 生命周期模型通过真实 Adapter 执行；随机命令序列断言失败必须是
+  领域错误（无 SQLSTATE / 驱动错误泄漏）。确定性并发已有会话、命令重试与 relay 用例。
+- **L4**：数据驱动 Journey spec（`tools/contracts/journeys/*.json`）由 API 级 runner
+  执行，当前覆盖 singer 报名 → 审核 → 名单定稿。
+- **文档口径**：权威文档只描述 Plus 单线；v1 时代文档加历史横幅；`check_docs.ps1`
+  增加权威文档的退役命令门禁。详见
+  [`工程加固计划`](plans/2026-11-12-engineering-hardening.md) 与
+  [`文档口径审计`](analysis/2026-11-12-documentation-consistency.md)。
+
 ## Definition of Done（每个 slice）
 
 1. 领域规则写入 `docs/invariants/`（新增或引用）。

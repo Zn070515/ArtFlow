@@ -20,7 +20,7 @@ describe("the real ArtFlow consumer graph", () => {
   });
 
   it("connects claimJudgeSeat to its command, event, and route", () => {
-    const provider = "symbol:packages/runtime/src/voting-ticket-service.ts#claimJudgeSeat";
+    const provider = "symbol:packages/runtime/src/judge-entry-service.ts#claimJudgeSeat";
     expect(edge(provider, "command:ticketing.judge_seat.claim", "invokes-command")).toBe(true);
     expect(edge(provider, "event:JudgeSeatClaimed", "emits")).toBe(true);
     expect(edge("route:POST /api/judge-entry/claim", provider, "serves")).toBe(true);
@@ -37,7 +37,7 @@ describe("the real ArtFlow consumer graph", () => {
   it("reports the route and capability from a judge claim change", () => {
     const report = impactOf(
       graph,
-      ["symbol:packages/runtime/src/voting-ticket-service.ts#claimJudgeSeat"],
+      ["symbol:packages/runtime/src/judge-entry-service.ts#claimJudgeSeat"],
     );
     const ids = report.nodes.map((item) => item.node.id);
     expect(ids).toContain("route:POST /api/judge-entry/claim");

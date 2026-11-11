@@ -1,5 +1,9 @@
 # 2026 校园十佳正式彩排与交付运行手册（历史归档，已退役）
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 > 该手册仅保留历史边界和当时的运行记录，不再执行，也不是 production cutover 的
 > 前置条件。当前验收使用自动化关键旅程、隔离环境 smoke、备份恢复和 owner acceptance；
 > 不安排真实活动或真实角色彩排。

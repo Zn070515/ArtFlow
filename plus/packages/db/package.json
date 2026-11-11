@@ -15,7 +15,9 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "schema:check": "node scripts/schema-check.mjs"
+    "schema:check": "node scripts/schema-check.mjs",
+    "schema:snapshot": "tsx scripts/generate-schema-snapshot.ts",
+    "schema:types": "node scripts/generate-types.mjs"
   },
   "dependencies": {
     "@artflow-plus/domain": "workspace:*",
@@ -23,6 +25,7 @@
     "pg": "8.23.1"
   },
   "devDependencies": {
-    "@types/pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.15"
   }
 }

@@ -37,6 +37,24 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   pnpm run schema:check
   ```
 
+- **Schema source of truth**: migrations are the source. `pnpm run schema:snapshot`
+  writes `packages/db/schema.snapshot.json` from a disposable migrated schema;
+  `pnpm run schema:types` derives `packages/db/src/types.ts` from that snapshot.
+  `schema:check` fails when either artifact is stale, so do not edit the snapshot or
+  the row types by hand. Add migrations under `packages/db/src/migrations/` and keep
+  the ordered list in `migrations.ts`.
+- **Contract and audit tooling** (development/CI only, never in runtime images):
+
+  ```powershell
+  pnpm -C plus --filter @artflow-plus/contract-tools run test
+  pnpm -C plus --filter @artflow-plus/contract-tools run graph:check
+  pnpm -C plus --filter @artflow-plus/contract-tools run audit:check
+  pnpm -C plus --filter @artflow-plus/contract-tools run mutation:audit
+  ```
+
+  The contract suite includes the fast-check lifecycle model and the data-driven
+  journey specs under `plus/tools/contracts/journeys/`.
+
 - **Run locally**: `pnpm --filter @artflow-plus/api start` (migrates on start,
   default `127.0.0.1:3000`) and `pnpm --filter @artflow-plus/web dev` (Vite proxies
   `/api`). Set `ARTFLOW_PLUS_INLINE_RELAY=1` to run the outbox relay inside the API

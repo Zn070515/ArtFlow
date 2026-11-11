@@ -1,0 +1,160 @@
+/* Base reset, shell chrome, header and navigation. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus, var(--gold));
+  outline-offset: 3px;
+}
+
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow-x: clip;
+}
+
+.aurora,
+.static-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.aurora canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.static-backdrop {
+  background:
+    radial-gradient(42% 55% at 72% 34%, rgba(232, 180, 90, 0.24), transparent 70%),
+    radial-gradient(38% 48% at 28% 68%, rgba(194, 65, 12, 0.22), transparent 72%),
+    radial-gradient(30% 40% at 50% 50%, rgba(125, 211, 252, 0.06), transparent 70%),
+    var(--ink);
+}
+
+.site-header {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 28px 0 0;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--glass);
+  color: var(--gold);
+  font-family: var(--display);
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  backdrop-filter: blur(16px);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.78rem;
+  letter-spacing: 0.28em;
+  line-height: 1.2;
+}
+
+.brand-text small {
+  color: var(--bone-dim);
+  font-size: 0.62rem;
+  letter-spacing: 0.32em;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.nav-link {
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--bone-dim);
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.nav-link:hover {
+  color: var(--gold);
+}
+
+.site-main {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 8vh 0 12vh;
+}

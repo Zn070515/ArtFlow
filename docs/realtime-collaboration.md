@@ -1,5 +1,9 @@
 # ArtFlow realtime collaboration boundary
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 > **1.x（Django Channels）文档。** v2（ArtFlow-Plus）的实时边界见
 > [`docs/domains/realtime.md`](domains/realtime.md) 与
 > [`plus/packages/realtime/CORE.md`](../plus/packages/realtime/CORE.md)；两者不共用实现。

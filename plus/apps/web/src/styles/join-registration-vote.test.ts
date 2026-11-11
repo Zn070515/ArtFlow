@@ -2,11 +2,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readAllStyles } from "./read-styles.js";
+
 const sourceDirectory = join(process.cwd(), "src");
 
 describe("Join, Registration, and Vote layout contracts", () => {
   it("declares the Console form surfaces and responsive question grid", async () => {
-    const global = await readFile(join(sourceDirectory, "styles", "global.css"), "utf8");
+    const global = await readAllStyles(join(sourceDirectory, "styles"));
 
     expect(global).toContain(".join-page");
     expect(global).toContain(".join-code-card");
@@ -18,7 +20,7 @@ describe("Join, Registration, and Vote layout contracts", () => {
   });
 
   it("declares the Portal Vote workspace and no legacy button class remains", async () => {
-    const global = await readFile(join(sourceDirectory, "styles", "global.css"), "utf8");
+    const global = await readAllStyles(join(sourceDirectory, "styles"));
     const vote = await readFile(join(sourceDirectory, "routes", "vote.tsx"), "utf8");
 
     expect(global).toContain(".vote-workspace");
@@ -29,7 +31,7 @@ describe("Join, Registration, and Vote layout contracts", () => {
   });
 
   it("removes obsolete pre-Console registration selectors", async () => {
-    const global = await readFile(join(sourceDirectory, "styles", "global.css"), "utf8");
+    const global = await readAllStyles(join(sourceDirectory, "styles"));
 
     expect(global).not.toMatch(/\.registration-panel(?:\s|[.{:#,])/);
     expect(global).not.toMatch(/\.registration-head(?:\s|[.{:#,])/);

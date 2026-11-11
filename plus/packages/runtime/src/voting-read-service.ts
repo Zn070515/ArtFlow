@@ -12,7 +12,7 @@ import type { Kysely } from "kysely";
 
 import { stableHash } from "./hash.js";
 import type { VotingLiveState } from "./live-projection.js";
-import type { AuthenticatedTicketSession } from "./voting-ticket-service.js";
+import type { AuthenticatedTicketSession } from "./ticket-service.js";
 
 export interface VotingSessionsState {
   readonly activityId: string;
