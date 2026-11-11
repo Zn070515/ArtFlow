@@ -1,6 +1,6 @@
 # ArtFlow-Plus site profile. The realtime socket is served by plus-api behind
-# plus-web at /api/realtime; there is no separate media gateway, and media bytes
-# remain in v1 rather than being exposed through the public v2 host.
+# plus-web at /api/realtime. Material bytes stay in the Plus media volume
+# (ARTFLOW_PLUS_MEDIA_DIR) and are served only through the Plus API.
 http://127.0.0.1:8081 {
 	@health path /healthz /healthz/ /readyz /readyz/
 	reverse_proxy @health plus-web:8080 {
