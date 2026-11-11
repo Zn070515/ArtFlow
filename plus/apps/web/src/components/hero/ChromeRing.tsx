@@ -3,11 +3,13 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 import { themeColor } from "./palette.js";
+import { shouldRenderChromeRing } from "./ringVisibility.js";
 import { ringFragment, ringVertex } from "./shaders.js";
 
 export function ChromeRing() {
   const mesh = useRef<THREE.Mesh>(null);
   const viewport = useThree((state) => state.viewport);
+  const viewportWidth = useThree((state) => state.size.width);
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
@@ -35,6 +37,8 @@ export function ChromeRing() {
       mesh.current.rotation.y += delta * 0.18;
     }
   });
+
+  if (!shouldRenderChromeRing(viewportWidth)) return null;
 
   const x = Math.min(1.7, viewport.width * 0.28);
   const scale = viewport.width < 4 ? 0.62 : 0.95;

@@ -4,6 +4,8 @@
   --ink-soft: #0d0d13;
   --bone: #f5efe6;
   --bone-dim: rgba(245, 239, 230, 0.64);
+  /* Lowest-emphasis text that still clears WCAG AA (4.5:1) on --ink. */
+  --bone-subtle: rgba(245, 239, 230, 0.58);
   --gold: #e8b45a;
   --gold-bright: #ffe3a3;
   --gold-deep: #c98b2f;
@@ -51,6 +53,7 @@
   --ink-soft: #110e1e;
   --bone: #f5f1ff;
   --bone-dim: rgba(245, 241, 255, 0.66);
+  --bone-subtle: rgba(245, 241, 255, 0.6);
   --gold: #8b5cf6;
   --gold-bright: #c4b5fd;
   --gold-deep: #6d28d9;
