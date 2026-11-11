@@ -78,6 +78,9 @@ describe.skipIf(!connectionString)("singer registration journey", () => {
           "registration.manage",
           "registration.review",
           "registration.roster.finalize",
+          "competition.manage",
+          "judge.manage",
+          "result.manage",
         ],
       },
       active: true,
@@ -103,6 +106,7 @@ describe.skipIf(!connectionString)("singer registration journey", () => {
     let activityRevision = 0;
     let registrationId = "";
     let registrationRevision = 0;
+    let participantId = "";
     let draftRevision = 0;
     let participantToken = "";
 
@@ -170,9 +174,10 @@ describe.skipIf(!connectionString)("singer registration journey", () => {
           payload: {},
         });
         expect(response.statusCode).toBeLessThan(400);
-        const body = response.json() as { id: string; revision: number };
+        const body = response.json() as { id: string; revision: number; participantId: string };
         registrationId = body.id;
         registrationRevision = body.revision;
+        participantId = body.participantId;
       } else if (step.action === "answer-question") {
         const response = await app.inject({
           method: "PATCH",
@@ -231,5 +236,35 @@ describe.skipIf(!connectionString)("singer registration journey", () => {
       headers: staff(),
     });
     expect(roster.json()).toMatchObject({ roster: { status: "final", approvedCount: 1 } });
+
+    // Read-model differential: the authoritative registration, the Ops list and
+    // the Live display names must agree on identity and answers, not just IDs.
+    const registrations = await app.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/registrations`,
+      headers: staff(),
+    });
+    expect(registrations.json()).toMatchObject({
+      registrations: [
+        {
+          id: registrationId,
+          participantId,
+          status: "approved",
+          answers: {
+            name: "Journey Participant",
+            student_id: "20260001",
+            song: "Journey Song",
+          },
+        },
+      ],
+    });
+    const live = await app.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/live`,
+      headers: staff(),
+    });
+    expect(live.statusCode).toBe(200);
+    const liveState = live.json() as { participantNames: Readonly<Record<string, string>> };
+    expect(liveState.participantNames[participantId]).toBe("Journey Participant");
   }, 60_000);
 });
