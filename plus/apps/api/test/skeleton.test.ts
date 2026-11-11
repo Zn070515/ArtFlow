@@ -60,7 +60,7 @@ function stubCapability(identity: string): CapabilityRegistration {
       version: "1",
       dependencies: [],
       conflicts: [],
-      definitionSchemaVersion: 1,
+      definitionSchemaVersion: identity === "voting" ? 2 : 1,
       commands: [],
       queries: [],
       events: [],

@@ -4,6 +4,7 @@ import type {
   TaskCommandBody,
   TaskListResponse,
   TaskResponse,
+  TaskSyncResponse,
 } from "@artflow-plus/contracts";
 
 import { apiFetch } from "./client.js";
@@ -14,6 +15,17 @@ export function fetchTasks(activityId: string): Promise<TaskListResponse> {
 
 export function fetchReadiness(activityId: string): Promise<ReadinessResponse> {
   return apiFetch<ReadinessResponse>(`/api/activities/${encodeURIComponent(activityId)}/readiness`);
+}
+
+export function syncTasks(activityId: string, definitionVersion: number): Promise<TaskSyncResponse> {
+  return apiFetch<TaskSyncResponse>(
+    `/api/activities/${encodeURIComponent(activityId)}/tasks/sync`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify({ definitionVersion }),
+    },
+  );
 }
 
 export function mutateTask(

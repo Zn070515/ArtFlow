@@ -513,6 +513,7 @@ export interface PublishingState {
   readonly publications: readonly StoredResultPublication[];
   readonly releases: readonly StoredResultRelease[];
   readonly stages: readonly PublishingStageDefinition[];
+  readonly podiumCandidate: StoredPodiumCandidate | null;
 }
 
 export async function getPublishingState(
@@ -537,7 +538,8 @@ export async function getPublishingState(
     listResultPublications(db, input.activityId),
     listResultReleases(db, input.activityId),
   ]);
-  return { stageResults, publications, releases, stages };
+  const podiumCandidate = await getLatestPodiumCandidate(db, input.activityId);
+  return { stageResults, publications, releases, stages, podiumCandidate };
 }
 
 export interface ReleaseResultInput {

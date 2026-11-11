@@ -46,6 +46,24 @@ export type PackInstantiationResult =
   | { readonly ok: true; readonly instantiation: PackInstantiation }
   | { readonly ok: false; readonly issues: readonly RegistryIssue[] };
 
+function withoutFileQuestions(definition: CapabilityDefinition): CapabilityDefinition {
+  const payload = definition.payload;
+  if (typeof payload !== "object" || payload === null) return definition;
+  const questions = (payload as { questions?: unknown }).questions;
+  if (!Array.isArray(questions)) return definition;
+  return {
+    ...definition,
+    payload: {
+      ...payload,
+      questions: questions.filter((question) =>
+        typeof question !== "object" ||
+        question === null ||
+        (question as { type?: unknown }).type !== "file",
+      ),
+    },
+  };
+}
+
 function issue(code: string, message: string, path: string): RegistryIssue {
   return { code, message, path };
 }
@@ -116,7 +134,11 @@ export function instantiateActivityPack(
   for (const identity of composition.plan.enabledCapabilities) {
     const registration = registry.get(identity);
     if (registration === undefined) continue;
-    const definition = pack.definitions?.[identity] ?? registration.emptyDefinition();
+    let definition = pack.definitions?.[identity] ?? registration.emptyDefinition();
+    // A file question is only usable when the materials capability is enabled.
+    if (identity === "questionnaire" && !composition.plan.enabledCapabilities.includes("materials")) {
+      definition = withoutFileQuestions(definition);
+    }
     // The CapabilityDefinition envelope is always schemaVersion 1; the
     // capability's own definition language is versioned on its payload.
     const payload = definition.payload;

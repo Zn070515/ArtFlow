@@ -7,6 +7,7 @@ import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
+import { ResultActions } from "../components/live/ResultActions.js";
 import { useRealtimeTopic } from "../realtime/useRealtimeTopic.js";
 
 export function LiveActivityPage() {
@@ -93,7 +94,14 @@ function LiveActivityContent() {
             <AttendanceSummary
               activityId={activityId}
               mode={state.session?.mode === "test" ? "test" : "formal"}
+              rehearsal={state.session?.mode === "rehearsal"}
             />
+          ) : null}
+          {session !== null &&
+          (session.actor.permissions.includes("*") ||
+            session.actor.permissions.includes("result.manage") ||
+            session.actor.roles.includes("admin")) ? (
+            <ResultActions activityId={activityId} state={state} onChanged={refresh} />
           ) : null}
           <section className="ops-card live-roster-card">
             <p className="eyebrow">ROSTER · 选手</p>
@@ -103,7 +111,7 @@ function LiveActivityContent() {
             ) : (
               <ul className="seat-list">
                 {state.participantIds.map((participantId) => (
-                  <li key={participantId}>{participantId}</li>
+                  <li key={participantId}>{state.participantNames[participantId] ?? participantId}</li>
                 ))}
               </ul>
             )}

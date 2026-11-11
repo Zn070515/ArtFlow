@@ -14,6 +14,32 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
   rejected: "未通过",
 };
 
+function answerText(registration: OpsRegistration, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = registration.answers[key];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return undefined;
+}
+
+function registrationName(registration: OpsRegistration): string {
+  return answerText(registration, ["name", "displayName", "title", "负责人"]) ?? registration.participantId;
+}
+
+function registrationSubtitle(registration: OpsRegistration): string {
+  return [
+    answerText(registration, ["student_id", "studentId"]),
+    answerText(registration, ["song", "program", "program_name"]),
+  ].filter((value): value is string => value !== undefined).join(" · ");
+}
+
+function searchableText(registration: OpsRegistration): string {
+  const answers = Object.values(registration.answers)
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  return `${registration.participantId} ${registration.reviewNote ?? ""} ${answers}`.toLocaleLowerCase();
+}
+
 export function RegistrationTable({
   activityId,
   registrations,
@@ -33,7 +59,7 @@ export function RegistrationTable({
   const statuses = [...new Set(registrations.map((registration) => registration.status))].sort();
   const filteredRegistrations = registrations.filter((registration) => {
     const matchesSearch = normalizedSearch.length === 0 ||
-      `${registration.participantId} ${registration.reviewNote ?? ""}`.toLocaleLowerCase().includes(normalizedSearch);
+      searchableText(registration).includes(normalizedSearch);
     return matchesSearch && (statusFilter.length === 0 || registration.status === statusFilter);
   });
   const totalPages = Math.max(1, Math.ceil(filteredRegistrations.length / PAGE_SIZE));
@@ -48,7 +74,7 @@ export function RegistrationTable({
             type="search"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="搜索参与者或审核意见"
+            placeholder="搜索姓名、学号、曲目或审核意见"
           />
         </label>
         <label className="console-filter-field">
@@ -68,6 +94,7 @@ export function RegistrationTable({
             <thead>
               <tr>
                 <th scope="col">参与者</th>
+                <th scope="col">学号 / 曲目</th>
                 <th scope="col">状态</th>
                 <th scope="col">修订</th>
                 <th scope="col">审核意见</th>
@@ -82,9 +109,11 @@ export function RegistrationTable({
                       params={{ activityId, registrationId: registration.id }}
                       className="table-link"
                     >
-                      {registration.participantId}
+                      {registrationName(registration)}
                     </Link>
+                    <span className="state-copy"> {registration.participantId}</span>
                   </td>
+                  <td>{registrationSubtitle(registration) || "—"}</td>
                   <td>
                     <span className={`status-badge status-${registration.status}`}>
                       {STATUS_LABELS[registration.status] ?? registration.status}

@@ -20,7 +20,11 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
       <p className="eyebrow">REGISTRATION · 报名</p>
       <h2 className="console-card-title">报名信息</h2>
       <p className="state-copy">
-        参与者 {detail.registration.participantId} · 状态 {detail.registration.status} · 修订{" "}
+        参与者{" "}
+        {typeof detail.registration.answers.name === "string" && detail.registration.answers.name.trim()
+          ? detail.registration.answers.name
+          : detail.registration.participantId}{" "}
+        · {detail.registration.participantId} · 状态 {detail.registration.status} · 修订{" "}
         {detail.registration.revision}
       </p>
       {detail.registration.reviewNote?.trim() ? (
@@ -36,7 +40,25 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
               question.type === "file"
                 ? material === undefined
                   ? "未登记"
-                  : `${material.originalName}（${material.byteLength} B，仅元数据）`
+                  : (
+                    <span>
+                      {material.originalName}（{material.byteLength} B）
+                      {material.contentReady ? (
+                        <>
+                          {" · "}
+                          <a
+                            href={`/api/activities/${detail.activity.id}/materials/${material.id}/content`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            播放 / 下载
+                          </a>
+                        </>
+                      ) : (
+                        " · 字节未保存"
+                      )}
+                    </span>
+                  )
                 : typeof raw === "string" && raw.trim()
                   ? raw
                   : "—";

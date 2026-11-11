@@ -29,12 +29,16 @@ function rowToActivity(row: ActivitySelectRow): Activity {
   };
 }
 
-export async function insertActivity(db: Kysely<Database>, activity: Activity): Promise<void> {
+export async function insertActivity(
+  db: Kysely<Database>,
+  activity: Activity,
+  publicCode = activity.id,
+): Promise<void> {
   await db
     .insertInto("activity")
     .values({
       id: activity.id,
-      public_code: activity.id,
+      public_code: publicCode,
       title: activity.title,
       status: activity.status,
       revision: activity.revision,

@@ -111,8 +111,27 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       { key: "student_id", label: "学号", type: "text", required: true },
       { key: "song", label: "演唱曲目", type: "text", required: true },
       { key: "description", label: "自我介绍", type: "text", required: false },
+      {
+        key: "audio",
+        label: "试唱 / 伴奏音频",
+        type: "file",
+        required: false,
+        file: {
+          slot: "audio",
+          purpose: "audio",
+          accepts: [".mp3", ".m4a", ".wav"],
+          maxBytes: 25 * 1024 * 1024,
+        },
+      },
     ]),
     materials: createMaterialsDefinition(25 * 1024 * 1024, ["audio"]),
+    voting: createVotingDefinition({
+      purpose: "popularity",
+      selectionType: "single",
+      maxSelections: 1,
+      identityPolicy: "ticket",
+      scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+    }),
     grouping: createGroupingDefinition(5),
     tasks: createTasksDefinition([
       { key: "registration.review", title: "审核报名", sourceCapability: "registration", sourceKey: "review", required: true },

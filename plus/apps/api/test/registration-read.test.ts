@@ -268,4 +268,41 @@ describe.skipIf(!connectionString)("registration read endpoints", () => {
     });
     expect(forbiddenRoster.statusCode).toBe(403);
   });
+
+  it("serves an approved program and exports registrations as CSV", async () => {
+    await insertRegistration(db, {
+      id: "reg-approved",
+      activityId,
+      participantId: "participant-3",
+      questionnaireVersion: "v1",
+      questionnaireHash: "hash-1",
+      status: "approved",
+      answers: { name: "林晓雨", song: "夜空中最亮的星" },
+      revision: 2,
+    });
+    const program = await participantApp.inject({
+      method: "GET",
+      url: "/api/public/programs/READ-1",
+    });
+    expect(program.statusCode).toBe(200);
+    expect(program.json()).toMatchObject({
+      activity: { publicCode: "READ-1", title: "2026 院十佳" },
+      entries: [{ name: "林晓雨", song: "夜空中最亮的星" }],
+    });
+
+    const exported = await staffApp.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/exports/registrations`,
+    });
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers["content-type"]).toContain("text/csv");
+    expect(exported.body).toContain("participantId");
+    expect(exported.body).toContain("林晓雨");
+
+    const forbidden = await outsiderApp.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/exports/registrations`,
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
 });

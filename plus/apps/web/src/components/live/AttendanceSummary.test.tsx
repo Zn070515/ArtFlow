@@ -35,11 +35,22 @@ describe("AttendanceSummary", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
-        <AttendanceSummary activityId="activity-1" mode="formal" />
+        <AttendanceSummary activityId="activity-1" mode="formal" rehearsal={false} />
       </QueryClientProvider>,
     );
     expect(await screen.findByTestId("live-attendance-summary")).toBeTruthy();
     expect(screen.getByText("参赛者：应到 15 · 已到 12 · 已撤销 1")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("labels formal attendance when the scoring session is in rehearsal", async () => {
+    fetchAttendanceMock.mockResolvedValue(list);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AttendanceSummary activityId="activity-1" mode="formal" rehearsal />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("签到只有正式 / 测试分区；当前显示正式数据。")).toBeTruthy();
   });
 });

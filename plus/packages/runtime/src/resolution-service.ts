@@ -464,7 +464,12 @@ export async function recomputePodiumCandidate(
       });
     }
     const candidate = buildPodiumCandidate({ requiredRoundIds, rounds });
-    if (candidate.inputFingerprint !== input.expectedInputFingerprint) throw new DomainError("STALE_RESOLUTION_INPUT", "The podium input fingerprint is stale.");
+    if (
+      input.expectedInputFingerprint !== "*" &&
+      candidate.inputFingerprint !== input.expectedInputFingerprint
+    ) {
+      throw new DomainError("STALE_RESOLUTION_INPUT", "The podium input fingerprint is stale.");
+    }
     const previous = await getLatestPodiumCandidate(trx, activity.id);
     const stored: StoredPodiumCandidate = {
       id: idFromCommand("podium", input.commandId),

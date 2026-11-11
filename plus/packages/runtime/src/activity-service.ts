@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { Database } from "@artflow-plus/db";
 import {
   getActivity as readActivity,
@@ -36,6 +38,18 @@ export interface CreateActivityInput {
   readonly initialDefinition?: ActivityDefinitionPackage;
 }
 
+const PUBLIC_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/** A short, readable public code; the internal activity id never leaves the console. */
+function publicCodeFromCommand(commandId: string): string {
+  const digest = createHash("sha256").update(`public-code:${commandId}`).digest();
+  let code = "";
+  for (let index = 0; index < 8; index += 1) {
+    code += PUBLIC_CODE_ALPHABET.charAt(digest[index]! % PUBLIC_CODE_ALPHABET.length);
+  }
+  return code;
+}
+
 export async function createActivity(
   db: Kysely<Database>,
   registry: CapabilityRegistry,
@@ -43,6 +57,7 @@ export async function createActivity(
   input: CreateActivityInput,
 ): Promise<CommandOutcome<Activity>> {
   const activityId = idFromCommand("act", input.commandId);
+  const publicCode = publicCodeFromCommand(input.commandId);
 
   return executeCommand(
     db,
@@ -72,7 +87,7 @@ export async function createActivity(
         title: input.title,
         capabilities: composition.plan.enabledCapabilities,
       });
-      await insertActivity(trx, activity);
+      await insertActivity(trx, activity, publicCode);
       if (input.initialDefinition !== undefined) {
         await insertDraft(trx, {
           activityId: activity.id,

@@ -504,15 +504,18 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
   route，包括 tasks sync、podium recompute、close/archive、judge-entry close。
 - **Starter Pack 就绪诊断**：`checkPackReadiness` 检查 materials/file question、
   competition/ticketing、voting identity policy，首次运行发现 6 条 finding；
-  PR #68 让 singer-competition 默认启用 ticketing 后剩 5 条。
+  PR #68 与本轮 #55/#59 修复后剩 3 条（stage-show / review-awards 的 voting，
+  review-awards 的 judging）。
 - **统一缺口棘轮**：`audit:check` 把 UI、Pack、Manifest、文档、部署、不变量覆盖
-  合成一个缺口集合，并与 `gap-baseline.json` 比较。当前 baseline 接受 168 条
-  缺口（ui-route 31、pack-readiness 5、manifest 68、doc-drift 5、
-  invariant-coverage 59）；**新增缺口失败，修复后必须删除 baseline 条目**。
-  该步骤已接入 `.github/workflows/gates.yml`。
+  合成一个缺口集合，并与 `gap-baseline.json` 比较。当前 baseline 接受 156 条
+  缺口（ui-route 26、pack-readiness 3、manifest 68、doc-drift 0、
+  deploy-manifest 0、invariant-coverage 59）；**新增缺口失败，修复后必须删除
+  baseline 条目**。该步骤已接入 `.github/workflows/gates.yml`。
 - **PR 处理结果**：PR #66 修复 Compose 挂载并加 gate；#67 补 organizer 开户
-  文档；#68 让 singer pack 默认启用评委入口。棘轮自动把两个已修复条目标为
-  stale，baseline 从 170 降到 168。
+  文档；#68 让 singer pack 默认启用评委入口。棘轮自动把已修复条目标为 stale。
+- **全部 Issue 修复**：13 个 open issue 全部处理；全量 **611 tests** 通过；
+  baseline 从 168 降到 156。逐项结果见
+  [外部审核驱动的测试体系加固](../analysis/2026-11-11-external-review-test-hardening.md)。
 - **L5 变异审计**：`mutation:audit` 运行 8 个关键变异。首次 6/8 caught，
   发现材料扩展名没有拒绝测试、Realtime 只测了 authorize 阶段关闭；补两个测试
   后 8/8 caught。详见

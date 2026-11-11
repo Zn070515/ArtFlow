@@ -12,6 +12,7 @@ import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
+import { ExportCard } from "../components/ops/ExportCard.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
   if (permissions === undefined) return false;
@@ -130,6 +131,7 @@ function OpsActivityContent() {
             canManage={can(session?.actor.permissions, "tasks.manage")}
           />
         ) : null}
+        <ExportCard activityId={activityId} permissions={session?.actor.permissions ?? []} />
         {activity?.enabledCapabilities.includes("attendance") ? (
           <AttendanceCard
             key={activityId}

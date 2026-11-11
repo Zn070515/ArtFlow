@@ -75,6 +75,13 @@ function deps(actor: ActorContext): RuntimeDeps {
   };
 }
 
+function audioBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  const header = [0x49, 0x44, 0x33, 0x04, 0x00, 0x00];
+  bytes.set(header.slice(0, Math.min(length, header.length)), 0);
+  return bytes;
+}
+
 async function uploadWithContent(
   actor: ActorContext,
   input: Parameters<typeof uploadMaterial>[2],
@@ -84,7 +91,7 @@ async function uploadWithContent(
     commandId: `${input.commandId}-content`,
     activityId: input.activityId,
     materialId: uploaded.body.id,
-    bytes: new Uint8Array(input.byteLength).fill(1),
+    bytes: audioBytes(input.byteLength),
   });
 }
 
@@ -207,6 +214,30 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       originalName: "song.txt",
       contentType: "text/plain",
       byteLength: 10,
+    })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
+  });
+
+  it("rejects bytes that do not match the declared audio purpose", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-registration-wrong-content",
+      activityId,
+      participantId: participant.actorId,
+    });
+    const material = await uploadMaterial(db, deps(participant), {
+      commandId: "upload-wrong-content",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "song.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 10,
+    });
+    await expect(attachMaterialContent(db, deps(participant), {
+      commandId: "attach-wrong-content",
+      activityId,
+      materialId: material.body.id,
+      bytes: new Uint8Array(10).fill(1),
     })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
   });
 

@@ -43,6 +43,7 @@ export interface RegistrationMaterial {
   readonly contentType: string;
   readonly byteLength: number;
   readonly status: string;
+  readonly contentReady: boolean;
   readonly revision: number;
 }
 

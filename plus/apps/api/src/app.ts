@@ -19,6 +19,7 @@ import { registerArchiveRoutes } from "./routes/archive.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCompetitionRoutes } from "./routes/competition.js";
+import { registerExportRoutes } from "./routes/exports.js";
 import { registerGroupingRoutes } from "./routes/grouping.js";
 import { registerPublicRoutes } from "./routes/public.js";
 import { registerPublishingRoutes } from "./routes/publishing.js";
@@ -438,6 +439,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerVotingRoutes(routeContext);
   registerArchiveRoutes(routeContext);
   registerPublishingRoutes(routeContext);
+  registerExportRoutes(routeContext);
   registerPublicRoutes(routeContext);
 
 
@@ -454,7 +456,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         .send(errorResponse("VALIDATION_FAILED", publicErrorMessage(status, failure.message ?? "Invalid request.")));
     }
     const code = errorCode(error);
-    if (code !== null) {
+    // Only domain refusals and the two command-receipt errors may carry a
+    // public code. A driver error (for example Postgres SQLSTATE 22001) must
+    // become a generic INTERNAL_ERROR, never leak its code or message.
+    const publicCode =
+      code !== null &&
+      (error instanceof DomainError ||
+        code === "COMMAND_ID_CONFLICT" ||
+        code === "COMMAND_IN_PROGRESS" ||
+        code === "COMPOSITION_INVALID" ||
+        code === "DEFINITION_INVALID");
+    if (code !== null && publicCode) {
       const status = STATUS_BY_CODE[code] ?? 400;
       const details = errorDetails(error);
       return reply
