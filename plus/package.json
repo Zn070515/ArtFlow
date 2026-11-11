@@ -14,7 +14,7 @@
     "schema:check": "pnpm --filter @artflow-plus/db run schema:check"
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.6",
     "fast-check": "4.10.2",
     "typescript": "7.0.2",
     "vitest": "5.0.5"

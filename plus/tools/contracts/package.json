@@ -29,7 +29,7 @@
     "@artflow-plus/db": "workspace:*",
     "@artflow-plus/domain": "workspace:*",
     "@artflow-plus/runtime": "workspace:*",
-    "kysely": "0.29.7",
+    "kysely": "0.29.8",
     "pg": "8.23.1"
   },
   "devDependencies": {
