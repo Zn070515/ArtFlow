@@ -7,13 +7,69 @@ import {
   lockRound,
   openPerformance,
   prepareRound,
+  recordTieDecision,
   reopenRoundForCorrection,
   resetRehearsal,
   resolveRound,
   type LiveRound,
   type LiveState,
+  type LiveTieGroup,
 } from "../../api/live.js";
 import { liveDisplayRanks } from "./ranking.js";
+
+function TieDecisionControls({
+  group,
+  busy,
+  onDecide,
+}: {
+  readonly group: LiveTieGroup;
+  readonly busy: boolean;
+  readonly onDecide: (order: readonly string[], reason: string, tieId: string) => void;
+}) {
+  const [order, setOrder] = useState<readonly string[]>(group.contestants);
+  const [reason, setReason] = useState("");
+  const tieId = group.id;
+  if (tieId === undefined) return null;
+
+  function move(index: number, delta: number): void {
+    const next = index + delta;
+    if (next < 0 || next >= order.length) return;
+    const copy = [...order];
+    const moved = copy[index];
+    const displaced = copy[next];
+    if (moved === undefined || displaced === undefined) return;
+    copy[index] = displaced;
+    copy[next] = moved;
+    setOrder(copy);
+  }
+
+  return (
+    <div className="tie-decision">
+      <p className="state-copy">裁决顺序</p>
+      <ol>
+        {order.map((contestantId, index) => (
+          <li key={contestantId}>
+            <span>{contestantId}</span>
+            <button type="button" className="secondary-button" disabled={busy || index === 0} onClick={() => move(index, -1)}>上移</button>
+            <button type="button" className="secondary-button" disabled={busy || index === order.length - 1} onClick={() => move(index, 1)}>下移</button>
+          </li>
+        ))}
+      </ol>
+      <label className="field">
+        <span>裁决原因</span>
+        <input value={reason} onChange={(event) => setReason(event.target.value)} />
+      </label>
+      <button
+        type="button"
+        className="primary-button"
+        disabled={busy || reason.trim() === ""}
+        onClick={() => onDecide(order, reason.trim(), tieId)}
+      >
+        裁决同分
+      </button>
+    </div>
+  );
+}
 
 interface JudgeDraft {
   readonly judgeId: string;
@@ -106,6 +162,24 @@ export function LiveRoundPanel({
 
   function resolve(): Promise<void> {
     return run(() => resolveRound(state.activity.id, config.key).then(() => undefined), "生成排名失败。");
+  }
+
+  function decideTie(order: readonly string[], reason: string, tieId: string): Promise<void> {
+    const ranking = live.ranking;
+    const fingerprint = ranking?.inputFingerprint;
+    if (round === null || ranking === null || fingerprint === undefined) return Promise.resolve();
+    const group = ranking.tieGroups.find((item) => item.id === tieId);
+    if (group === undefined) return Promise.resolve();
+    return run(
+      () => recordTieDecision(state.activity.id, config.key, tieId, {
+        rankingSnapshotId: ranking.id,
+        inputFingerprint: fingerprint,
+        contestants: group.contestants,
+        order,
+        reason,
+      }).then(() => undefined),
+      "裁决同分失败。",
+    );
   }
 
   function reopenForCorrection(): Promise<void> {
@@ -330,6 +404,29 @@ export function LiveRoundPanel({
               存在同分：{live.ranking.tieGroups.map((group) => group.contestants.join(" / ")).join("；")}
             </p>
           )}
+          {live.ranking.status === "ready" && state.activity.enabledCapabilities.includes("publishing") ? (
+            <p className="state-copy">
+              {sessionMode === "formal"
+                ? "排名已生成。请到 Ops 核定并公示正式赛果。"
+                : "排练排名不能公示。请在正式场次生成排名后，到 Ops 核定并公示。"}
+              {" "}
+              <a className="table-link" href={`/ops/${encodeURIComponent(state.activity.id)}`}>前往 Ops 核定并公示</a>
+            </p>
+          ) : null}
+          {sessionMode === "formal" && live.ranking.tieGroups.length > 0 ? (
+            live.ranking.tieGroups.map((group) => (
+              <TieDecisionControls
+                key={group.id ?? group.contestants.join("-")}
+                group={group}
+                busy={busy}
+                onDecide={(order, reason, tieId) => {
+                  void decideTie(order, reason, tieId);
+                }}
+              />
+            ))
+          ) : live.ranking.tieGroups.length > 0 ? (
+            <p className="state-copy">排练场次不能裁决同分。请在正式场次处理。</p>
+          ) : null}
         </div>
       )}
 

@@ -24,6 +24,7 @@ import {
   openPerformance,
   prepareCompetitionRound,
   recordTieDecision,
+  previewPodiumCandidate,
   recomputePodiumCandidate,
   resolveRound,
   submitJudgeScore,
@@ -278,6 +279,16 @@ describe.skipIf(!connectionString)("resolution commands on PostgreSQL", () => {
         tieGroups: decided.body.tieGroups as { total: string; contestants: string[] }[],
         inputFingerprint: decided.body.inputFingerprint,
       } }],
+    });
+    const preview = await previewPodiumCandidate(db, deps(staff), {
+      activityId: context.activityId,
+      scope: "judging",
+    });
+    expect(preview).toMatchObject({
+      status: "candidate",
+      inputFingerprint: podiumInput.inputFingerprint,
+      roundIds: [context.roundId],
+      blockedReason: null,
     });
     const candidate = await recomputePodiumCandidate(db, deps(staff), {
       commandId: "podium-final",

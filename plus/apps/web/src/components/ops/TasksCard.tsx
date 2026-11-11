@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ApiError } from "../../api/client.js";
-import { fetchReadiness, fetchTasks, mutateTask } from "../../api/tasks.js";
+import { fetchReadiness, fetchTasks, mutateTask, syncTasks } from "../../api/tasks.js";
 
 function taskStatusLabel(status: TaskResponse["status"]): string {
   return {
@@ -45,6 +45,13 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
     queryFn: () => fetchReadiness(activityId),
     retry: false,
   });
+  const syncMutation = useMutation({
+    mutationFn: (definitionVersion: number) => syncTasks(activityId, definitionVersion),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ops-tasks", activityId] });
+      void queryClient.invalidateQueries({ queryKey: ["ops-readiness", activityId] });
+    },
+  });
   const mutation = useMutation({
     mutationFn: ({ task, action }: { readonly task: TaskResponse; readonly action: TaskAction }) => {
       const command = action === "assign"
@@ -71,6 +78,8 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
 
   const tasks = tasksQuery.data?.tasks ?? [];
   const summary = readinessQuery.data?.summary;
+  const definitionVersion = tasksQuery.data?.definitionVersion;
+  const unfinished = summary === undefined ? 0 : summary.total - summary.done;
   return (
     <section className="ops-card tasks-card" data-testid="tasks-card">
       <div className="tasks-card-header">
@@ -89,14 +98,26 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
           <span>逾期 {summary.overdue}</span>
         </div>
       )}
-      {summary === undefined || summary.total - summary.done === 0 ? (
+      {tasks.length === 0 ? (
+        <div className="tasks-unsynced">
+          <p className="tasks-empty">当前版本还没有同步任务模板。</p>
+          {canManage && definitionVersion !== undefined ? (
+            <button
+              type="button"
+              className="primary-button"
+              disabled={syncMutation.isPending}
+              onClick={() => syncMutation.mutate(definitionVersion)}
+            >
+              同步任务模板
+            </button>
+          ) : null}
+        </div>
+      ) : unfinished === 0 ? (
         <p className="tasks-clear">当前没有未完成的任务。</p>
       ) : (
-        <p className="tasks-attention">还有 {summary.total - summary.done} 个任务未完成</p>
+        <p className="tasks-attention">还有 {unfinished} 个任务未完成</p>
       )}
-      {tasks.length === 0 ? (
-        <p className="tasks-empty">当前版本还没有同步任务模板。</p>
-      ) : (
+      {tasks.length === 0 ? null : (
         <ul className="tasks-list">
           {tasks.map((task) => (
             <li key={task.id} className="task-row">
@@ -126,13 +147,14 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
           ))}
         </ul>
       )}
-      {canManage ? (
+      {canManage && tasks.length > 0 ? (
         <div className="task-command-fields">
           <label>负责人<input value={assignee} onChange={(event) => setAssignee(event.target.value)} placeholder="actor id（可留空取消分配）" /></label>
           <label>截止时间<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></label>
           <label>操作说明<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="阻塞、完成或重新打开时必填" /></label>
         </div>
       ) : null}
+      {syncMutation.error === null || syncMutation.error === undefined ? null : <p className="form-error" role="alert">{humanError(syncMutation.error)}</p>}
       {mutation.error === null || mutation.error === undefined ? null : <p className="form-error" role="alert">{humanError(mutation.error)}</p>}
     </section>
   );

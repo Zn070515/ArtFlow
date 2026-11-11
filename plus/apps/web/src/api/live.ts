@@ -93,13 +93,20 @@ export interface LiveRankingRow {
   readonly judgeCount: number;
 }
 
+export interface LiveTieGroup {
+  readonly id?: string;
+  readonly total: string;
+  readonly contestants: readonly string[];
+}
+
 export interface LiveRanking {
   readonly id: string;
   readonly status: "ready" | "hold";
   readonly rows: readonly LiveRankingRow[];
-  readonly tieGroups: readonly { readonly total: string; readonly contestants: readonly string[] }[];
+  readonly tieGroups: readonly LiveTieGroup[];
   readonly revision: number;
   readonly sourceScoreVersion: number;
+  readonly inputFingerprint?: string;
 }
 
 export interface LiveRound {
@@ -261,6 +268,28 @@ export function resetRehearsal(
     headers: commandHeaders(crypto.randomUUID()),
     body: JSON.stringify({ scope: JUDGING_SCOPE, mode }),
   });
+}
+
+export function recordTieDecision(
+  activityId: string,
+  roundKey: string,
+  tieId: string,
+  input: {
+    readonly rankingSnapshotId: string;
+    readonly inputFingerprint: string;
+    readonly contestants: readonly string[];
+    readonly order: readonly string[];
+    readonly reason: string;
+  },
+): Promise<LiveRanking> {
+  return apiFetch<LiveRanking>(
+    `/api/activities/${encodeURIComponent(activityId)}/competition/rounds/${encodeURIComponent(roundKey)}/ties/${encodeURIComponent(tieId)}/decide`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({ scope: JUDGING_SCOPE, ...input }),
+    },
+  );
 }
 
 export function resolveRound(activityId: string, roundKey: string): Promise<LiveRanking> {

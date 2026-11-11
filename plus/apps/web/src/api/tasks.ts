@@ -16,6 +16,17 @@ export function fetchReadiness(activityId: string): Promise<ReadinessResponse> {
   return apiFetch<ReadinessResponse>(`/api/activities/${encodeURIComponent(activityId)}/readiness`);
 }
 
+export function syncTasks(
+  activityId: string,
+  definitionVersion: number,
+): Promise<{ readonly definitionVersion: number; readonly createdCount: number }> {
+  return apiFetch(`/api/activities/${encodeURIComponent(activityId)}/tasks/sync`, {
+    method: "POST",
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({ definitionVersion }),
+  });
+}
+
 export function mutateTask(
   activityId: string,
   taskId: string,

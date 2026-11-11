@@ -6,6 +6,7 @@ import type {
   StoredRound,
 } from "@artflow-plus/db";
 import {
+  getActivity as readActivity,
   getActivityForUpdate,
   getCurrentPanelForUpdate,
   getLatestAdvancementDecision,
@@ -13,6 +14,7 @@ import {
   getPerformanceScoreStateForUpdate,
   getRelease,
   getRoundForUpdate,
+  getRoundByKey,
   getRoundByKeyForUpdate,
   getCurrentRankingSnapshot,
   insertAdvancementDecision,
@@ -21,6 +23,7 @@ import {
   insertTieDecision,
   listCurrentScoreFacts,
   listRoundPerformances,
+  listRoundsForActivity,
   listTieDecisions,
 } from "@artflow-plus/db";
 import type {
@@ -412,6 +415,112 @@ export interface RecomputePodiumCandidateInput {
   readonly scope: string;
 }
 
+export interface PodiumPreview {
+  readonly status: "candidate" | "hold";
+  readonly placements: PodiumCandidateResult["placements"];
+  readonly inputFingerprint: string;
+  readonly roundIds: readonly string[];
+  readonly blockedReason: "unresolved_ties" | "rounds_not_ready" | null;
+}
+
+async function collectPodiumInputs(
+  trx: Kysely<Database>,
+  activityId: string,
+  anchorRound: StoredRound,
+  mode: ExecutionMode,
+  loadRound: (roundKey: string) => Promise<StoredRound | null>,
+): Promise<{ readonly candidate: PodiumCandidateResult; readonly rounds: PodiumRoundInput[] }> {
+  const release = await getRelease(trx, activityId, anchorRound.releaseVersion);
+  const plan = release?.capabilities.competition;
+  if (plan === undefined || plan.ok !== true) {
+    throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The frozen release has no competition snapshot.");
+  }
+  const artifact = plan.artifact as { readonly rounds: readonly { readonly key: string }[] };
+  const requiredRoundKeys = artifact.rounds.map((round) => round.key);
+  const requiredRoundIds = requiredRoundKeys.map((roundKey) => idFromCommand("round", `${activityId}:${roundKey}`));
+  const rounds: PodiumRoundInput[] = [];
+  for (const [index, roundKey] of requiredRoundKeys.entries()) {
+    const round = await loadRound(roundKey);
+    const roundId = requiredRoundIds[index] ?? idFromCommand("round", `${activityId}:${roundKey}`);
+    if (round === null) {
+      rounds.push({
+        roundId,
+        sourceScoreVersion: 0,
+        locked: false,
+        ranking: { status: "hold", rows: [], tieGroups: [], inputFingerprint: "missing" },
+      });
+      continue;
+    }
+    if (round.releaseVersion !== anchorRound.releaseVersion) {
+      rounds.push({
+        roundId: round.id,
+        sourceScoreVersion: round.scoreVersion,
+        locked: false,
+        ranking: { status: "hold", rows: [], tieGroups: [], inputFingerprint: "wrong-release" },
+      });
+      continue;
+    }
+    const ranking = await getCurrentRankingSnapshot(trx, round.id, mode);
+    const rankingReady = ranking !== null && ranking.sourceScoreVersion === round.scoreVersion;
+    rounds.push({
+      roundId: round.id,
+      sourceScoreVersion: ranking?.sourceScoreVersion ?? round.scoreVersion,
+      locked: round.state === "locked" && rankingReady,
+      ranking: !rankingReady
+        ? {
+            status: "hold",
+            rows: [],
+            tieGroups: [],
+            inputFingerprint: ranking === null ? "missing" : "source-version-mismatch",
+          }
+        : rankingFromSnapshot(ranking),
+    });
+  }
+  return { candidate: buildPodiumCandidate({ requiredRoundIds, rounds }), rounds };
+}
+
+/**
+ * The fingerprint the next recompute would require. It does not write a
+ * candidate; the UI sends it back so a stale ranking cannot be confirmed.
+ */
+export async function previewPodiumCandidate(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: { readonly activityId: string; readonly scope: string },
+): Promise<PodiumPreview> {
+  const actor = runtimeActor(deps);
+  requireResolutionPermission(actor);
+  const activity = await readActivity(db, input.activityId);
+  if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+  const { session } = await requireRunningCommandSession(db, activity, "competition.podium.recompute", input.scope);
+  if (session.mode !== "formal") {
+    throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can produce podium candidates.");
+  }
+  const listed = await listRoundsForActivity(db, activity.id);
+  const anchor = listed[0];
+  if (anchor === undefined) {
+    throw new DomainError("INVALID_INPUT", "Podium recomputation needs a frozen competition round.");
+  }
+  const { candidate, rounds } = await collectPodiumInputs(
+    db,
+    activity.id,
+    anchor,
+    session.mode,
+    (roundKey) => getRoundByKey(db, activity.id, roundKey),
+  );
+  return {
+    status: candidate.status,
+    placements: candidate.placements,
+    inputFingerprint: candidate.inputFingerprint,
+    roundIds: [anchor.id],
+    blockedReason: candidate.status === "candidate"
+      ? null
+      : rounds.some((round) => round.ranking.tieGroups.length > 0)
+        ? "unresolved_ties"
+        : "rounds_not_ready",
+  };
+}
+
 export async function recomputePodiumCandidate(
   db: Kysely<Database>,
   deps: RuntimeDeps,
@@ -436,34 +545,13 @@ export async function recomputePodiumCandidate(
     const anchorRoundId = input.roundIds[0];
     if (anchorRoundId === undefined) throw new DomainError("INVALID_INPUT", "Podium recomputation needs a frozen competition round.");
     const anchorRound = requireRound(await getRoundForUpdate(trx, anchorRoundId), activity.id);
-    const release = await getRelease(trx, activity.id, anchorRound.releaseVersion);
-    const plan = release?.capabilities.competition;
-    if (plan === undefined || plan.ok !== true) throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The frozen release has no competition snapshot.");
-    const artifact = plan.artifact as { readonly rounds: readonly { readonly key: string }[] };
-    const requiredRoundKeys = artifact.rounds.map((round) => round.key);
-    const requiredRoundIds = requiredRoundKeys.map((roundKey) => idFromCommand("round", `${activity.id}:${roundKey}`));
-    const rounds: PodiumRoundInput[] = [];
-    for (const [index, roundKey] of requiredRoundKeys.entries()) {
-      const round = await getRoundByKeyForUpdate(trx, activity.id, roundKey);
-      const roundId = requiredRoundIds[index] ?? idFromCommand("round", `${activity.id}:${roundKey}`);
-      if (round === null) {
-        rounds.push({ roundId, sourceScoreVersion: 0, locked: false, ranking: { status: "hold", rows: [], tieGroups: [], inputFingerprint: "missing" } });
-        continue;
-      }
-      if (round.releaseVersion !== anchorRound.releaseVersion) {
-        rounds.push({ roundId: round.id, sourceScoreVersion: round.scoreVersion, locked: false, ranking: { status: "hold", rows: [], tieGroups: [], inputFingerprint: "wrong-release" } });
-        continue;
-      }
-      const ranking = await getCurrentRankingSnapshot(trx, round.id, session.mode);
-      const rankingReady = ranking !== null && ranking.sourceScoreVersion === round.scoreVersion;
-      rounds.push({
-        roundId: round.id,
-        sourceScoreVersion: ranking?.sourceScoreVersion ?? round.scoreVersion,
-        locked: round.state === "locked" && rankingReady,
-        ranking: !rankingReady ? { status: "hold", rows: [], tieGroups: [], inputFingerprint: ranking === null ? "missing" : "source-version-mismatch" } : rankingFromSnapshot(ranking),
-      });
-    }
-    const candidate = buildPodiumCandidate({ requiredRoundIds, rounds });
+    const { candidate } = await collectPodiumInputs(
+      trx,
+      activity.id,
+      anchorRound,
+      session.mode,
+      (roundKey) => getRoundByKeyForUpdate(trx, activity.id, roundKey),
+    );
     if (candidate.inputFingerprint !== input.expectedInputFingerprint) throw new DomainError("STALE_RESOLUTION_INPUT", "The podium input fingerprint is stale.");
     const previous = await getLatestPodiumCandidate(trx, activity.id);
     const stored: StoredPodiumCandidate = {

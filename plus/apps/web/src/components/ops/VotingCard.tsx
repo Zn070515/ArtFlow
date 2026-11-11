@@ -18,6 +18,7 @@ import {
 } from "../../api/voting.js";
 import type { VoteResultCandidateView } from "../../api/voting.js";
 import { useRealtimeTopic } from "../../realtime/useRealtimeTopic.js";
+import { declaredStageKey } from "./publishingStage.js";
 
 function humanError(error: unknown): string {
   const code = error instanceof ApiError ? error.code : "";
@@ -73,7 +74,7 @@ export function VotingCard(props: {
   const queryClient = useQueryClient();
   const [candidateText, setCandidateText] = useState("");
   const [preview, setPreview] = useState<VoteResultCandidateView | null>(null);
-  const [stageKey, setStageKey] = useState("vote_result");
+  const [stageKey, setStageKey] = useState("");
   const [note, setNote] = useState("");
 
   const onRealtimeData = (data: VotingSessionsSnapshot): void => {
@@ -104,9 +105,8 @@ export function VotingCard(props: {
   const sessions = sessionsQuery.data?.sessions ?? [];
   const executions = executionsQuery.data ?? [];
   const stages = publishingQuery.data?.stages ?? [];
-  const effectiveStage = stages.some((stage) => stage.key === stageKey)
-    ? stageKey
-    : stages[0]?.key ?? "vote_result";
+  const declaredStage = declaredStageKey(stages, stageKey);
+  const declaredLabel = stages.find((stage) => stage.key === declaredStage)?.label ?? "";
 
   const running = (scope: string) =>
     executions.find((session) => session.scope === scope && session.status === "running");
@@ -150,15 +150,15 @@ export function VotingCard(props: {
     onSuccess: (candidate) => setPreview(candidate),
   });
   const confirm = useMutation({
-    mutationFn: (candidate: VoteResultCandidateView) =>
-      confirmVoteResult(props.activityId, effectiveStage, candidate),
+    mutationFn: (input: { readonly stageKey: string; readonly candidate: VoteResultCandidateView }) =>
+      confirmVoteResult(props.activityId, input.stageKey, input.candidate),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["publishing-state", props.activityId] });
     },
   });
   const release = useMutation({
-    mutationFn: (candidateRevision: number) =>
-      releaseVoteResult(props.activityId, effectiveStage, candidateRevision, note),
+    mutationFn: (input: { readonly stageKey: string; readonly candidateRevision: number }) =>
+      releaseVoteResult(props.activityId, input.stageKey, input.candidateRevision, note),
     onSuccess: () => {
       setNote("");
       void queryClient.invalidateQueries({ queryKey: ["publishing-state", props.activityId] });
@@ -298,17 +298,25 @@ export function VotingCard(props: {
             <div className="voting-publish">
               <label>
                 阶段
-                <select value={effectiveStage} onChange={(event) => setStageKey(event.target.value)}>
+                <select value={declaredStage ?? ""} onChange={(event) => setStageKey(event.target.value)}>
                   {stages.map((stage) => (
                     <option key={stage.key} value={stage.key}>{stage.label}</option>
                   ))}
                 </select>
               </label>
+              {declaredLabel === "" ? (
+                <p className="state-copy">发布定义里没有可写入的赛果阶段。</p>
+              ) : (
+                <p className="state-copy">将写入阶段「{declaredLabel}」。</p>
+              )}
               <button
                 type="button"
                 className="primary-button"
-                disabled={confirm.isPending || publishingSession === undefined || preview.status === "hold"}
-                onClick={() => confirm.mutate(preview)}
+                disabled={confirm.isPending || publishingSession === undefined || preview.status === "hold" || declaredStage === null}
+                onClick={() => {
+                  if (declaredStage === null) return;
+                  confirm.mutate({ stageKey: declaredStage, candidate: preview });
+                }}
               >
                 确认赛果
               </button>
@@ -319,10 +327,11 @@ export function VotingCard(props: {
               <button
                 type="button"
                 className="primary-button"
-                disabled={release.isPending || note.trim() === "" || confirm.data === undefined}
-                onClick={() =>
-                  confirm.data === undefined ? undefined : release.mutate(confirm.data.candidateRevision)
-                }
+                disabled={release.isPending || note.trim() === "" || confirm.data === undefined || declaredStage === null}
+                onClick={() => {
+                  if (confirm.data === undefined || declaredStage === null) return;
+                  release.mutate({ stageKey: declaredStage, candidateRevision: confirm.data.candidateRevision });
+                }}
               >
                 发布结果
               </button>

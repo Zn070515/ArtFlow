@@ -12,6 +12,7 @@ import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
+import { ResultLifecycleCard } from "../components/ops/ResultLifecycleCard.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
   if (permissions === undefined) return false;
@@ -121,6 +122,30 @@ function OpsActivityContent() {
               can(session?.actor.permissions, "studio.manage") ||
               can(session?.actor.permissions, "competition.manage")
             }
+          />
+        ) : null}
+        {activity !== undefined &&
+        (activity.enabledCapabilities.includes("publishing") ||
+          activity.enabledCapabilities.includes("archive") ||
+          activity.enabledCapabilities.includes("competition")) ? (
+          <ResultLifecycleCard
+            key={activityId}
+            activity={{
+              id: activityId,
+              publicCode: activity.publicCode,
+              status: activity.status,
+              revision: activity.revision,
+              hasCompetition: activity.enabledCapabilities.includes("competition"),
+              hasPublishing: activity.enabledCapabilities.includes("publishing"),
+              hasArchive: activity.enabledCapabilities.includes("archive"),
+              canManageResults: can(session?.actor.permissions, "result.manage"),
+              canManageCompetition: can(session?.actor.permissions, "competition.manage"),
+              canManageSessions:
+                can(session?.actor.permissions, "studio.manage") ||
+                can(session?.actor.permissions, "competition.manage"),
+              canClose: can(session?.actor.permissions, "studio.manage"),
+              canArchive: can(session?.actor.permissions, "archive.manage"),
+            }}
           />
         ) : null}
         {activity?.enabledCapabilities.includes("tasks") ? (

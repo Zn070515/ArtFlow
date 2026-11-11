@@ -1,8 +1,8 @@
 import type { ApiContext } from "../http/context.js";
-import { ActivateCompetitionPanelBodySchema, CompetitionRankingQuerySchema, CompetitionRoundParamsSchema, CompetitionScopeBodySchema, CompetitionScoreBodySchema, EditCompetitionScoreBodySchema, FinalizeAdvancementBodySchema, LockCompetitionRoundBodySchema, OpenCompetitionPerformanceBodySchema, OpenScoreCorrectionBodySchema, PrepareCompetitionRoundBodySchema, ReasonBodySchema, RecomputePodiumBodySchema, ReopenCompetitionRoundBodySchema, ResetRehearsalBodySchema, ResolveCompetitionBodySchema, ScoreCorrectionLifecycleBodySchema, TieDecisionBodySchema } from "@artflow-plus/contracts";
+import { ActivateCompetitionPanelBodySchema, CompetitionRankingQuerySchema, CompetitionRoundParamsSchema, CompetitionScopeBodySchema, CompetitionScoreBodySchema, EditCompetitionScoreBodySchema, FinalizeAdvancementBodySchema, LockCompetitionRoundBodySchema, OpenCompetitionPerformanceBodySchema, OpenScoreCorrectionBodySchema, PodiumPreviewQuerySchema, PrepareCompetitionRoundBodySchema, ReasonBodySchema, RecomputePodiumBodySchema, ReopenCompetitionRoundBodySchema, ResetRehearsalBodySchema, ResolveCompetitionBodySchema, ScoreCorrectionLifecycleBodySchema, TieDecisionBodySchema } from "@artflow-plus/contracts";
 import { getCurrentRankingSnapshot } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
-import { activateCompetitionPanel, closeJudgeEntry, closeScoreCorrection, editScoreFact, finalizeAdvancement, lockPerformance, lockRound, openPerformance, openScoreCorrection, prepareCompetitionRound, recalculateAfterCorrection, recomputePodiumCandidate, recordTieDecision, reissueJudgeCapability, reopenRoundForCorrection, resetRehearsalRound, resolveRound, submitJudgeScore, submitPaperScore, submitProxyScore, submitRapidScore } from "@artflow-plus/runtime";
+import { activateCompetitionPanel, closeJudgeEntry, closeScoreCorrection, editScoreFact, finalizeAdvancement, lockPerformance, lockRound, openPerformance, openScoreCorrection, prepareCompetitionRound, previewPodiumCandidate, recalculateAfterCorrection, recomputePodiumCandidate, recordTieDecision, reissueJudgeCapability, reopenRoundForCorrection, resetRehearsalRound, resolveRound, submitJudgeScore, submitPaperScore, submitProxyScore, submitRapidScore } from "@artflow-plus/runtime";
 import { Type } from "@sinclair/typebox";
 import { ActivityParams, PrepareRoundBody, RoundParams } from "../http/schemas.js";
 import { cookieValue, requireIdempotency } from "../http/helpers.js";
@@ -429,6 +429,19 @@ export function registerCompetitionRoutes(ctx: ApiContext): void {
       const ranking = await getCurrentRankingSnapshot(db, round.id, query.mode ?? "formal");
       if (ranking === null) throw new DomainError("NOT_FOUND", "The ranking was not found.");
       return ranking;
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/competition/podium",
+    { schema: { params: ActivityParams, querystring: PodiumPreviewQuerySchema }, config: { access: "operations" } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as { scope: string };
+      return previewPodiumCandidate(db, await requestDeps(request), {
+        activityId: id,
+        scope: query.scope,
+      });
     },
   );
 

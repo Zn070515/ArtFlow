@@ -7,11 +7,13 @@ import type { ReadinessResponse, TaskListResponse, TaskResponse } from "@artflow
 const fetchTasksMock = vi.hoisted(() => vi.fn());
 const fetchReadinessMock = vi.hoisted(() => vi.fn());
 const mutateTaskMock = vi.hoisted(() => vi.fn());
+const syncTasksMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/tasks.js", () => ({
   fetchTasks: fetchTasksMock,
   fetchReadiness: fetchReadinessMock,
   mutateTask: mutateTaskMock,
+  syncTasks: syncTasksMock,
 }));
 
 import { TasksCard } from "./TasksCard.js";
@@ -90,6 +92,26 @@ describe("TasksCard", () => {
     renderCard(true, { ...list, tasks: [] }, { ...readiness, summary: { ...readiness.summary, total: 0, required: 0, open: 0, blocked: 0, overdue: 0 }, openTaskKeys: [] });
 
     expect(await screen.findByText("当前版本还没有同步任务模板。")).toBeInTheDocument();
+    expect(screen.queryByText("当前没有未完成的任务。")).not.toBeInTheDocument();
+  });
+
+  it("syncs the released template when the list is empty", async () => {
+    syncTasksMock.mockResolvedValue({ definitionVersion: 1, createdCount: 5 });
+    renderCard(true, { ...list, tasks: [] }, { ...readiness, summary: { ...readiness.summary, total: 0, required: 0, open: 0, blocked: 0, overdue: 0 }, openTaskKeys: [] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "同步任务模板" }));
+
+    await vi.waitFor(() => {
+      expect(syncTasksMock).toHaveBeenCalledWith("activity-1", 1);
+    });
+    expect(screen.queryByText("当前没有未完成的任务。")).not.toBeInTheDocument();
+  });
+
+  it("hides template sync without tasks.manage", async () => {
+    renderCard(false, { ...list, tasks: [] }, { ...readiness, summary: { ...readiness.summary, total: 0, required: 0, open: 0, blocked: 0, overdue: 0 }, openTaskKeys: [] });
+
+    expect(await screen.findByText("当前版本还没有同步任务模板。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "同步任务模板" })).not.toBeInTheDocument();
   });
 
   it("hides mutation controls without tasks.manage", async () => {

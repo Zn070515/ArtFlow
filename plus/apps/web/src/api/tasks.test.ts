@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchReadiness, fetchTasks, mutateTask } from "./tasks.js";
+import { fetchReadiness, fetchTasks, mutateTask, syncTasks } from "./tasks.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -32,5 +32,22 @@ describe("tasks API client", () => {
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers as HeadersInit).get("idempotency-key")).toEqual(expect.any(String));
     expect(JSON.parse(String(init.body))).toEqual({ expectedRevision: 4, reason: "已完成复核" });
+  });
+
+  it("syncs the released definition version", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ definitionVersion: 1, createdCount: 5 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await syncTasks("activity/one", 1);
+
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/activities/activity%2Fone/tasks/sync");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers as HeadersInit).get("idempotency-key")).toEqual(expect.any(String));
+    expect(JSON.parse(String(init.body))).toEqual({ definitionVersion: 1 });
   });
 });

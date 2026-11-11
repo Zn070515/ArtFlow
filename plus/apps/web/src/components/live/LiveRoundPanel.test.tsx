@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/live.js", () => ({
@@ -8,12 +8,13 @@ vi.mock("../../api/live.js", () => ({
   lockRound: vi.fn(),
   openPerformance: vi.fn(),
   prepareRound: vi.fn(),
+  recordTieDecision: vi.fn(),
   reopenRoundForCorrection: vi.fn(),
   resetRehearsal: vi.fn(),
   resolveRound: vi.fn(),
 }));
 
-import type { LiveRound, LiveState } from "../../api/live.js";
+import { recordTieDecision, type LiveRound, type LiveState } from "../../api/live.js";
 import { LiveRoundPanel } from "./LiveRoundPanel.js";
 
 const state: LiveState = {
@@ -99,5 +100,44 @@ describe("LiveRoundPanel", () => {
     expect(document.querySelectorAll(".console-table-wrap")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "锁轮" })).toBeVisible();
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
+  });
+
+  it("records a formal tie decision against the current tie group", () => {
+    const tied = {
+      ...live,
+      ranking: {
+        ...live.ranking!,
+        status: "hold" as const,
+        inputFingerprint: "fingerprint-1",
+        tieGroups: [{ id: "tie-1", total: "90.00", contestants: ["singer-a", "singer-b"] }],
+      },
+    };
+    const publishing = {
+      ...state,
+      activity: { ...state.activity, enabledCapabilities: ["publishing", "competition"] },
+    };
+    render(<LiveRoundPanel state={publishing} live={tied} sessionMode="formal" onChanged={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("裁决原因"), { target: { value: "现场听感" } });
+    fireEvent.click(screen.getByRole("button", { name: "裁决同分" }));
+
+    expect(recordTieDecision).toHaveBeenCalledWith("activity-1", "round-1", "tie-1", {
+      rankingSnapshotId: "ranking-1",
+      inputFingerprint: "fingerprint-1",
+      contestants: ["singer-a", "singer-b"],
+      order: ["singer-a", "singer-b"],
+      reason: "现场听感",
+    });
+  });
+
+  it("sends a ready rehearsal ranking to Ops instead of publishing it", () => {
+    const publishing = {
+      ...state,
+      activity: { ...state.activity, enabledCapabilities: ["publishing"] },
+    };
+    render(<LiveRoundPanel state={publishing} live={live} sessionMode="rehearsal" onChanged={vi.fn()} />);
+
+    expect(screen.getByText(/排练排名不能公示/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "前往 Ops 核定并公示" })).toHaveAttribute("href", "/ops/activity-1");
   });
 });

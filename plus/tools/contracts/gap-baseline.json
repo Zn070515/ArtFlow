@@ -576,27 +576,12 @@
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "ui-route:POST /api/activities/:id/archive",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline.",
-      "issue": "#60"
-    },
-    {
       "id": "ui-route:POST /api/activities/:id/attendance/points/:pointKey",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
       "id": "ui-route:POST /api/activities/:id/attendance/staff/:staffId",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/close",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline.",
-      "issue": "#60"
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/competition/podium/recompute",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline.",
-      "issue": "#60"
     },
     {
       "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/advancement/finalize",
@@ -620,10 +605,6 @@
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/ties/:tieId/decide",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "ui-route:POST /api/activities/:id/judge-entry/close",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline.",
       "issue": "#60"
@@ -638,10 +619,6 @@
     },
     {
       "id": "ui-route:POST /api/activities/:id/publishing/releases/:releaseId/revoke",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/publishing/stage-results/:stageKey/confirm",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
@@ -663,11 +640,6 @@
     {
       "id": "ui-route:POST /api/activities/:id/runtime-facts",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/tasks/sync",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline.",
-      "issue": "#61"
     },
     {
       "id": "ui-route:POST /api/activities/:id/ticket-sessions/:sessionId/revoke",
