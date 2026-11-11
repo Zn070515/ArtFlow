@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { fetchPublicResults, PublicResultsNotFound } from "../api/public-results.js";
@@ -36,5 +36,14 @@ export function ResultsRoute() {
   if (query.data.results.length === 0) {
     return <EmptyState activityTitle={query.data.activityTitle} />;
   }
-  return <ResultsView data={query.data} />;
+  return (
+    <>
+      <p style={{ textAlign: "center" }}>
+        <Link className="table-link" to="/program/$publicCode" params={{ publicCode }}>
+          查看节目单 / 主持手卡
+        </Link>
+      </p>
+      <ResultsView data={query.data} />
+    </>
+  );
 }
