@@ -19,6 +19,7 @@ import { registerArchiveRoutes } from "./routes/archive.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCompetitionRoutes } from "./routes/competition.js";
+import { registerExportRoutes } from "./routes/exports.js";
 import { registerGroupingRoutes } from "./routes/grouping.js";
 import { registerPublicRoutes } from "./routes/public.js";
 import { registerPublishingRoutes } from "./routes/publishing.js";
@@ -433,6 +434,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerTasksRoutes(routeContext);
   registerAttendanceRoutes(routeContext);
   registerRegistrationRoutes(routeContext);
+  registerExportRoutes(routeContext);
   registerGroupingRoutes(routeContext);
   registerCompetitionRoutes(routeContext);
   registerVotingRoutes(routeContext);

@@ -12,6 +12,7 @@ import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
+import { ExportCard } from "../components/ops/ExportCard.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
   if (permissions === undefined) return false;
@@ -73,6 +74,7 @@ function OpsActivityContent() {
         </div>
       </header>
       <div className="ops-grid">
+        <ExportCard activityId={activityId} permissions={session?.actor.permissions ?? []} />
         {analytics.isPending ? (
           <section className="ops-card"><p className="auth-loading">正在加载运营分析…</p></section>
         ) : analytics.error !== null ? (

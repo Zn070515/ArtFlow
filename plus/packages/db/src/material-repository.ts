@@ -138,6 +138,20 @@ export async function listMaterials(
   return rows.map(material);
 }
 
+/** Current material metadata for one activity. Callers must not publish storage keys. */
+export async function listCurrentMaterialsForActivity(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredMaterial[]> {
+  const rows = await db.selectFrom("material").selectAll()
+    .where("activity_id", "=", activityId)
+    .where("current", "=", true)
+    .orderBy("registration_id")
+    .orderBy("question_key")
+    .execute();
+  return rows.map(material);
+}
+
 export async function updateMaterialReview(
   trx: Kysely<Database>,
   value: StoredMaterial,

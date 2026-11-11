@@ -34,7 +34,7 @@ Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与�
 | --- | --- | --- | --- |
 | 公开公告 / 往届风采 / 活动文章 | `public_portal/` 的 `PublicPost` 类型与页面 | Portal 只有活动结果与报名入口 | 新 capability 或扩展 `publishing` 的非结果内容 |
 | 舞台类节目单公开页 / 节目顺序 | `farewell_show/` 的 `Program` 与 order | 观众看不到节目安排 | 新 capability 或 `publishing` 的非比赛 stage |
-| XLSX 导出 | `exports/`、`staff_panel` 导出 | 运营无法导出报名/评分/投票表格 | 独立导出模块，不塞进 capability |
+| XLSX 导出 | `exports/`、`staff_panel` 导出 | Ops 可下载报名、材料清单、评分和观众票 CSV（UTF-8，公式已中和，不含媒体字节）。原生 `.xlsx` 仍未做 | 独立导出模块已落地；`.xlsx` 仍独立 |
 | Word / 微信推文生成 | `exports/` 的 `ArticleTemplate`、`GeneratedDocument` | 无法一键生成推文 | 独立内容生成模块 |
 | bracket / 对阵 / 复合分 | `ruleset/` 的淘汰赛表达 | v2 competition 只表达 round/panel/score | 新 capability |
 | 现场大屏 | v1 结果板/主持手卡视图 | Live 只做失效提示与操作台 | 展示层项目 |
