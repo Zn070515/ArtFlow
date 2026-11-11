@@ -38,6 +38,9 @@ plus/apps/api/var/
 plus/apps/web/.e2e-live.json
 plus/apps/web/.e2e-attendance.json
 
+# Generated contract graphs and impact reports
+plus/.artifacts/
+
 # Runtime artifacts
 *.sqlite3
 media/
