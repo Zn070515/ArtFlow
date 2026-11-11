@@ -1,4 +1,4 @@
-import type { ActivityPack, CapabilityDefinition } from "@artflow-plus/domain";
+import type { ActivityPack, ActivityPackQuestion, CapabilityDefinition } from "@artflow-plus/domain";
 import { describe, expect, it } from "vitest";
 
 import { checkPackReadiness, formatReadiness } from "../../src/harness/readiness.js";
@@ -31,15 +31,23 @@ const voting: CapabilityDefinition = {
   payload: { schemaVersion: 2, identityPolicy: "ticket" },
 };
 
-function pack(identity: string, definitions: Record<string, CapabilityDefinition>, votingQuestion = false): ActivityPack {
+function pack(
+  identity: string,
+  definitions: Record<string, CapabilityDefinition>,
+  votingQuestion = false,
+  extraQuestions: ActivityPackQuestion[] = [],
+): ActivityPack {
   return {
     identity,
     version: "1",
     title: identity,
     baselineCapabilities: [],
-    questions: votingQuestion
-      ? [{ id: "voting", prompt: "Voting?", capability: "voting", default: false }]
-      : [],
+    questions: [
+      ...(votingQuestion
+        ? [{ id: "voting", prompt: "Voting?", capability: "voting", default: false }]
+        : []),
+      ...extraQuestions,
+    ],
     definitions,
   };
 }
@@ -77,5 +85,19 @@ describe("pack readiness", () => {
     ]);
     expect(findings).toEqual([]);
     expect(formatReadiness(findings)).toContain("no findings");
+  });
+
+  it("accepts a default-on ticketing question as the judge-entry path", () => {
+    const findings = checkPackReadiness([
+      pack("judge-entry-question", {
+        materials,
+        questionnaire: questionnaire(true),
+        competition,
+        voting,
+      }, true, [
+        { id: "judge-entry", prompt: "Judge entry?", capability: "ticketing", default: true },
+      ]),
+    ]);
+    expect(findings).toEqual([]);
   });
 });

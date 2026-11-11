@@ -2,11 +2,6 @@
   "version": 1,
   "accepted": [
     {
-      "id": "deploy-manifest:compose.plus-db.volume-path",
-      "reason": "Deployment manifest drift; accepted in the 2026-11-11 baseline.",
-      "issue": "#51"
-    },
-    {
       "id": "doc-drift:docs/deployment-production.md:/register/admin/",
       "reason": "Active documentation drift; accepted in the 2026-11-11 baseline.",
       "issue": "#52"
@@ -548,11 +543,6 @@
       "id": "pack-readiness:review-awards:VOTING_IDENTITY_IMPLICIT",
       "reason": "Starter pack readiness gap; accepted in the 2026-11-11 baseline.",
       "issue": "#59"
-    },
-    {
-      "id": "pack-readiness:singer-competition:JUDGING_WITHOUT_TICKETING",
-      "reason": "Starter pack readiness gap; accepted in the 2026-11-11 baseline.",
-      "issue": "#54"
     },
     {
       "id": "pack-readiness:singer-competition:MATERIALS_WITHOUT_FILE_QUESTION",
