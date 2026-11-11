@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import * as QRCode from "qrcode";
+import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/client.js";
 import {
@@ -19,6 +20,43 @@ export function StudioActivityPage() {
     <RequireSession>
       <StudioActivityContent />
     </RequireSession>
+  );
+}
+
+function RegistrationEntry({ publicCode }: { readonly publicCode: string }) {
+  const path = `/join/${encodeURIComponent(publicCode)}`;
+  const url = `${window.location.origin}${path}`;
+  const [qr, setQr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void QRCode.toDataURL(url, { width: 160, margin: 1 })
+      .then((data) => {
+        if (!cancelled) setQr(data);
+      })
+      .catch(() => {
+        if (!cancelled) setQr(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  return (
+    <div className="vote-link">
+      <p className="state-copy">公开码 {publicCode}。报名时念这串短码，或打开报名链接。</p>
+      <a href={path}>{url}</a>
+      <button
+        className="secondary-button"
+        type="button"
+        onClick={() => {
+          void navigator.clipboard?.writeText(url);
+        }}
+      >
+        复制报名链接
+      </button>
+      {qr === null ? null : <img src={qr} alt="报名二维码" width={160} height={160} />}
+    </div>
   );
 }
 
@@ -107,9 +145,10 @@ function StudioActivityContent() {
           <p className="eyebrow">STUDIO · {state.activity.status}</p>
           <h1 className="console-page-title">{state.activity.title}</h1>
           <p className="state-copy">
-            公开码 {state.activity.publicCode} · revision {state.activity.revision} · active release v
+            revision {state.activity.revision} · active release v
             {state.activity.activeDefinitionVersion}
           </p>
+          <RegistrationEntry publicCode={state.activity.publicCode} />
         </div>
         {state.activity.status === "draft" ? (
           <button

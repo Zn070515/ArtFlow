@@ -7,6 +7,8 @@ import {
   closeDb,
   createDb,
   getActivity,
+  getActivityByPublicCode,
+  getActivitySummary,
   insertActivity,
   migrate,
   StaleRevisionError,
@@ -38,6 +40,28 @@ describe.skipIf(!connectionString)("activity repository on PostgreSQL", () => {
     await closeDb(db);
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
     await admin.end();
+  });
+
+  it("stores a short public code that is separate from the activity id", async () => {
+    const draft = createActivity({ id: "act-public-code", title: "Public" });
+    await insertActivity(db, draft, () => "K7M4-P2QX");
+    const summary = await getActivitySummary(db, draft.id);
+    expect(summary?.publicCode).toBe("K7M4-P2QX");
+    expect(summary?.publicCode).not.toBe(draft.id);
+    expect(await getActivityByPublicCode(db, "k7m4 p2qx")).toMatchObject({
+      id: draft.id,
+      publicCode: "K7M4-P2QX",
+    });
+  });
+
+  it("retries when a generated public code is already taken", async () => {
+    const first = createActivity({ id: "act-public-a", title: "A" });
+    const second = createActivity({ id: "act-public-b", title: "B" });
+    await insertActivity(db, first, () => "M8N5-Q3RY");
+    const codes = ["M8N5-Q3RY", "P2QX-K7M4"];
+    await insertActivity(db, second, () => codes.shift() ?? "P2QX-K7M4");
+    expect((await getActivitySummary(db, second.id))?.publicCode).toBe("P2QX-K7M4");
+    expect((await getActivitySummary(db, first.id))?.publicCode).toBe("M8N5-Q3RY");
   });
 
   it("persists and reads an activity", async () => {

@@ -1,4 +1,5 @@
 export * from "./activity-repository.js";
+export * from "./public-code.js";
 export * from "./auth-repository.js";
 export * from "./competition-repository.js";
 export * from "./material-repository.js";

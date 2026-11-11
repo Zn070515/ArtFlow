@@ -68,10 +68,14 @@ describe("StudioActivityPage", () => {
     });
   });
 
-  it("uses a Console title and separates editor from the operational rail", () => {
+  it("uses a Console title and separates editor from the operational rail", async () => {
     render(<StudioActivityPage />);
 
     expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("console-page-title");
+    expect(screen.getByText(/公开码 SPRING-1/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /\/join\/SPRING-1$/ })).toHaveAttribute("href", "/join/SPRING-1");
+    expect(screen.getByRole("button", { name: "复制报名链接" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "报名二维码" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
     expect(document.querySelector(".studio-workspace")).not.toBeNull();
     expect(document.querySelector(".studio-main-column")).not.toBeNull();

@@ -2,6 +2,7 @@ import type { CompiledVotingArtifact, ExecutionMode } from "@artflow-plus/domain
 import { sql } from "kysely";
 import type { Kysely, Selectable, SqlBool } from "kysely";
 
+import { canonicalActivityPublicCode } from "./public-code.js";
 import type {
   BallotRow,
   Database,
@@ -597,7 +598,7 @@ export async function findActivityByPublicCodeAndVersion(
   publicCode: string,
   version: number,
 ): Promise<{ readonly activityId: string; readonly publicCode: string; readonly version: number } | null> {
-  const row = await db.selectFrom("activity").select(["id", "public_code", "judge_entry_version"]).where("public_code", "=", publicCode).where("judge_entry_version", "=", version).executeTakeFirst();
+  const row = await db.selectFrom("activity").select(["id", "public_code", "judge_entry_version"]).where("public_code", "=", canonicalActivityPublicCode(publicCode)).where("judge_entry_version", "=", version).executeTakeFirst();
   return row === undefined ? null : { activityId: row.id, publicCode: row.public_code, version: row.judge_entry_version };
 }
 

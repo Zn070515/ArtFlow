@@ -1,6 +1,7 @@
 import type { Activity, ActivityStatus } from "@artflow-plus/domain";
 import type { Kysely, Selectable } from "kysely";
 
+import { canonicalActivityPublicCode, createActivityPublicCode } from "./public-code.js";
 import type { ActivityRow, Database } from "./types.js";
 
 type ActivitySelectRow = Selectable<ActivityRow>;
@@ -29,19 +30,64 @@ function rowToActivity(row: ActivitySelectRow): Activity {
   };
 }
 
-export async function insertActivity(db: Kysely<Database>, activity: Activity): Promise<void> {
-  await db
-    .insertInto("activity")
-    .values({
-      id: activity.id,
-      public_code: activity.id,
-      title: activity.title,
-      status: activity.status,
-      revision: activity.revision,
-      enabled_capabilities: JSON.stringify([...activity.enabledCapabilities]),
-      active_definition_version: activity.activeDefinitionVersion,
-    })
-    .execute();
+const PUBLIC_CODE_ATTEMPTS = 5;
+
+function isPublicCodeConflict(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as {
+      code?: unknown;
+      constraint?: unknown;
+      detail?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    const constraint = typeof candidate.constraint === "string" ? candidate.constraint : "";
+    const detail = typeof candidate.detail === "string" ? candidate.detail : "";
+    const message = typeof candidate.message === "string" ? candidate.message : "";
+    if (
+      candidate.code === "23505" &&
+      (constraint === "activity_public_code_key" ||
+        detail.includes("(public_code)") ||
+        message.includes("activity_public_code_key"))
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+export async function insertActivity(
+  db: Kysely<Database>,
+  activity: Activity,
+  allocatePublicCode: () => string = createActivityPublicCode,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < PUBLIC_CODE_ATTEMPTS; attempt += 1) {
+    const publicCode = canonicalActivityPublicCode(allocatePublicCode());
+    try {
+      await db
+        .insertInto("activity")
+        .values({
+          id: activity.id,
+          public_code: publicCode,
+          title: activity.title,
+          status: activity.status,
+          revision: activity.revision,
+          enabled_capabilities: JSON.stringify([...activity.enabledCapabilities]),
+          active_definition_version: activity.activeDefinitionVersion,
+        })
+        .execute();
+      return;
+    } catch (error) {
+      if (!isPublicCodeConflict(error) || attempt === PUBLIC_CODE_ATTEMPTS - 1) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Could not allocate a unique activity public code.");
 }
 
 export interface StoredActivitySummary {
@@ -88,7 +134,11 @@ export async function getActivityByPublicCode(
   db: Kysely<Database>,
   publicCode: string,
 ): Promise<StoredActivitySummary | null> {
-  const row = await db.selectFrom("activity").selectAll().where("public_code", "=", publicCode).executeTakeFirst();
+  const row = await db
+    .selectFrom("activity")
+    .selectAll()
+    .where("public_code", "=", canonicalActivityPublicCode(publicCode))
+    .executeTakeFirst();
   return row === undefined ? null : summary(row);
 }
 

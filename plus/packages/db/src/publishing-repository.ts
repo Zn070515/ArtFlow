@@ -6,6 +6,7 @@ import type {
 } from "@artflow-plus/domain";
 import type { Kysely, Selectable } from "kysely";
 
+import { canonicalActivityPublicCode } from "./public-code.js";
 import type {
   Database,
   ResultPublicationRow,
@@ -408,7 +409,7 @@ export async function selectPublicResults(
 ): Promise<PublicResults | null> {
   const activity = await db.selectFrom("activity")
     .select(["id", "public_code"])
-    .where("public_code", "=", publicCode)
+    .where("public_code", "=", canonicalActivityPublicCode(publicCode))
     .executeTakeFirst();
   if (activity === undefined) return null;
   const rows = await db.selectFrom("result_release")
