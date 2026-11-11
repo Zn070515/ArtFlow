@@ -81,6 +81,18 @@ export function closeActivity(
   });
 }
 
+export function unarchiveActivity(
+  activityId: string,
+  expectedRevision: number,
+  note: string,
+): Promise<unknown> {
+  return apiFetch(`/api/activities/${activityId}/unarchive`, {
+    method: "POST",
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({ expectedRevision, note }),
+  });
+}
+
 export function archiveActivity(
   activityId: string,
   expectedRevision: number,

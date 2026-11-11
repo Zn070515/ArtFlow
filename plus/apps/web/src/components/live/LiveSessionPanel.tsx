@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import {
+  closeJudgeEntry,
   closeSession,
   describeLiveError,
   judgeEntryUrl,
@@ -23,6 +24,7 @@ export function LiveSessionPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entry, setEntry] = useState<{ readonly version: number; readonly url: string } | null>(null);
+  const [closeReason, setCloseReason] = useState("");
   const session = state.session;
   const ticketingEnabled = state.activity.enabledCapabilities.includes("ticketing");
   // Entry links are only claimable once a panel has created judge seats. Before
@@ -55,6 +57,15 @@ export function LiveSessionPanel({
       await closeSession(state.activity.id, session.id, session.revision);
       onChanged();
     }, "关闭评分会话失败。");
+  }
+
+  function closeEntry(): Promise<void> {
+    return run(async () => {
+      await closeJudgeEntry(state.activity.id, closeReason.trim());
+      setCloseReason("");
+      setEntry(null);
+      onChanged();
+    }, "关闭评委入口失败。");
   }
 
   function generateLink(): Promise<void> {
@@ -115,6 +126,22 @@ export function LiveSessionPanel({
               先在回合里激活评委组；席位就绪前生成的链接无法被评委使用。
             </p>
           )}
+          <label className="field">
+            <span>关闭评委入口的原因</span>
+            <input
+              value={closeReason}
+              onChange={(event) => setCloseReason(event.target.value)}
+              placeholder="例如：本场评委已全部入场"
+            />
+          </label>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy || closeReason.trim() === ""}
+            onClick={() => void closeEntry()}
+          >
+            关闭评委入口
+          </button>
         </div>
       )}
       {entry === null ? null : (
