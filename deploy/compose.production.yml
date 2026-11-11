@@ -7,7 +7,10 @@ services:
       POSTGRES_USER: ${PLUS_POSTGRES_USER:?Set PLUS_POSTGRES_USER}
       POSTGRES_PASSWORD: ${PLUS_POSTGRES_PASSWORD:?Set PLUS_POSTGRES_PASSWORD}
     volumes:
-      - plus_postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 18 keeps the major version under this directory. Mounting
+      # /var/lib/postgresql/data is reported as an unused mount and the
+      # server does not start. See docs/development-baseline.md.
+      - plus_postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
