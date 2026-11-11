@@ -83,6 +83,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 契约测试与消费者故障注入任务书 | [specs/2026-11-11-contract-testing-program-design.md](specs/2026-11-11-contract-testing-program-design.md) |
 | 契约测试现状审核（P0） | [analysis/2026-11-11-contract-testing-audit.md](analysis/2026-11-11-contract-testing-audit.md) |
 | 契约测试实施计划 | [plans/2026-11-11-contract-testing-plan.md](plans/2026-11-11-contract-testing-plan.md) |
+| 外部审核驱动的测试体系加固 | [analysis/2026-11-11-external-review-test-hardening.md](analysis/2026-11-11-external-review-test-hardening.md) |
 | 领域模型 | [domains](../domains/) |
 | 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT） | [invariants](../invariants/README.md) |
 | 真实事故库 | [incidents](../incidents/) |
