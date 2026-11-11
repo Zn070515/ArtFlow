@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
+  blockLiveState,
   closeDb,
   createDb,
   insertJudgeEntrySeat,
@@ -13,6 +14,7 @@ import {
   migrate,
   readValidVoteTally,
   readEventsSince,
+  upsertLiveState,
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import type { ActorContext, ExecutionSession } from "@artflow-plus/domain";
@@ -32,9 +34,11 @@ import {
   openVoteSession,
   relayOutboxOnce,
   rebuildVotingLiveProjection,
+  readVotingSessionsState,
   reissueJudgeCapability,
   redeemTicketCredential,
   revokeTicket,
+  revokeTicketAccessSession,
   rotateTicketCredential,
   submitJudgeScore,
   submitBallot,
@@ -356,6 +360,56 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     expect(rebuilt.state).toMatchObject({ status: "closed", counts: { [option?.id ?? ""]: 1 }, authoritative: false });
   });
 
+  it("keeps a blocked live projection sticky until an explicit rebuild", async () => {
+    const activityId = await seedActivity(`act-live-block-${randomUUID()}`, false, "anonymous");
+    const opened = await openVoteSession(db, deps(staff), {
+      commandId: "live-block-open",
+      activityId,
+      sessionId: "live-block-session",
+      scope: "voting",
+      candidateIds: ["singer-a", "singer-b"],
+    });
+    const optionId = opened.body.options[0]?.id ?? "";
+    await submitBallot(db, deps(judgeA), {
+      commandId: "live-block-ballot",
+      activityId,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [optionId],
+      identity: { type: "anonymous" },
+    });
+    await relayOutboxOnce(db);
+    const live = await getLiveState(db, activityId, "vote_session", opened.body.session.id);
+    expect(live?.status).toBe("running");
+    const blockedState = live?.state;
+
+    await blockLiveState(db, {
+      activityId,
+      aggregateType: "vote_session",
+      aggregateId: opened.body.session.id,
+      sequence: (live?.lastSequence ?? 0) + 1,
+      reason: "simulated projection failure",
+    });
+    await upsertLiveState(db, {
+      activityId,
+      aggregateType: "vote_session",
+      aggregateId: opened.body.session.id,
+      lastSequence: (live?.lastSequence ?? 0) + 2,
+      state: blockedState,
+    });
+
+    const stillBlocked = await getLiveState(db, activityId, "vote_session", opened.body.session.id);
+    expect(stillBlocked).toMatchObject({ status: "blocked", state: blockedState });
+    const snapshot = await readVotingSessionsState(db, activityId);
+    expect(snapshot?.sessions.find((session) => session.id === opened.body.session.id)?.live)
+      .toMatchObject({ stale: true });
+
+    const rebuilt = await rebuildVotingLiveProjection(db, activityId, opened.body.session.id, "formal");
+    expect(rebuilt.state?.status).toBe("open");
+    await expect(getLiveState(db, activityId, "vote_session", opened.body.session.id))
+      .resolves.toMatchObject({ status: "running" });
+  });
+
   it("enforces the frozen identity policy and rejects client downgrade to anonymous", async () => {
     const browserActivity = await seedActivity("act-browser-policy", false, "browser");
     const opened = await openVoteSession(db, deps(staff), {
@@ -502,6 +556,80 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "", new Date("2027-01-01T00:00:00Z")))
       .rejects.toMatchObject({ code: "TICKET_SESSION_EXPIRED" });
     await expect(authenticateTicketSession(db, redeemed.body.accessToken ?? "", authNow())).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+  });
+
+  it("replays a judge claim with a usable session token", async () => {
+    const activityId = await seedActivity(`act-judge-replay-${randomUUID()}`, true);
+    await insertJudgeEntrySeat(db, {
+      id: "judge-replay-seat",
+      activityId,
+      seatKey: "seat-1",
+      state: "available",
+      revision: 0,
+    });
+    const capability = capabilityCredential("J", activityId, 1, secret);
+    const first = await claimJudgeSeat(db, deps(judgeA), {
+      commandId: "judge-replay-claim",
+      publicCode: activityId,
+      capability,
+    });
+    const replay = await claimJudgeSeat(db, deps(judgeA), {
+      commandId: "judge-replay-claim",
+      publicCode: activityId,
+      capability,
+    });
+    expect(replay.replayed).toBe(true);
+    expect(replay.body.sessionToken).toEqual(expect.any(String));
+    await expect(authenticateJudgeSession(db, replay.body.sessionToken ?? "", authNow()))
+      .resolves.toMatchObject({ activityId, seatId: first.body.seatId });
+  });
+
+  it("rejects ticket and judge capability writes after the activity is archived", async () => {
+    const activityId = await seedActivity(`act-archived-${randomUUID()}`, true);
+    await insertJudgeEntrySeat(db, {
+      id: "archived-seat",
+      activityId,
+      seatKey: "seat-1",
+      state: "available",
+      revision: 0,
+    });
+    const issued = await issueTicket(db, deps(staff), { commandId: "archived-issue", activityId });
+    const redeemable = await issueTicket(db, deps(staff), { commandId: "archived-redeemable", activityId });
+    const redeemed = await redeemTicketCredential(db, deps(judgeA), {
+      commandId: "archived-redeem",
+      credential: redeemable.body.credential ?? "",
+    });
+    await db.updateTable("activity").set({ status: "archived" }).where("id", "=", activityId).execute();
+
+    await expect(issueTicket(db, deps(staff), { commandId: "archived-issue-after", activityId }))
+      .rejects.toMatchObject({ code: "ACTIVITY_NOT_ACTIVE" });
+    await expect(rotateTicketCredential(db, deps(staff), {
+      commandId: "archived-rotate",
+      activityId,
+      ticketId: issued.body.ticket.id,
+    })).rejects.toMatchObject({ code: "ACTIVITY_NOT_ACTIVE" });
+    await expect(revokeTicket(db, deps(staff), {
+      commandId: "archived-revoke",
+      activityId,
+      ticketId: issued.body.ticket.id,
+      reason: "archived",
+    })).rejects.toMatchObject({ code: "ACTIVITY_ARCHIVED" });
+    await expect(revokeTicketAccessSession(db, deps(staff), {
+      commandId: "archived-session-revoke",
+      activityId,
+      sessionId: redeemed.body.sessionId,
+      reason: "archived",
+    })).rejects.toMatchObject({ code: "ACTIVITY_ARCHIVED" });
+    await expect(reissueJudgeCapability(db, deps(staff), {
+      commandId: "archived-reissue",
+      activityId,
+      reason: "archived",
+    })).rejects.toMatchObject({ code: "ACTIVITY_NOT_ACTIVE" });
+    await expect(closeJudgeEntry(db, deps(staff), {
+      commandId: "archived-close",
+      activityId,
+      reason: "archived",
+    })).rejects.toMatchObject({ code: "ACTIVITY_ARCHIVED" });
   });
 
   it("does not close a judge entry twice", async () => {

@@ -362,7 +362,7 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
     expect(body.rounds[0]?.performances[0]).toMatchObject({ scoreCount: 1, expectedJudges: 1 });
   });
 
-  it("replays a redacted judge claim without writing a null cookie", async () => {
+  it("replays a judge claim with a usable cookie", async () => {
     const capability = capabilityCredential("J", activityId, 1, credentialSecret);
     const commandId = `claim-${randomUUID()}`;
     const request = {
@@ -380,6 +380,8 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
 
     const replay = await app.inject(request);
     expect(replay.statusCode).toBe(200);
-    expect(replay.headers["set-cookie"]).toBeUndefined();
+    const replayCookie = String(replay.headers["set-cookie"]);
+    expect(replayCookie).toContain("artflow_judge_session=");
+    expect(replayCookie).not.toContain("artflow_judge_session=null");
   });
 });

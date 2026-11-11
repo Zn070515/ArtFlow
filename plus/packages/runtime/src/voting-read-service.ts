@@ -31,6 +31,9 @@ export interface VotingSessionsState {
       readonly seq: number;
       readonly counts: Readonly<Record<string, number>>;
       readonly lastEventType: string;
+      /** True when the relay blocked this projection; counts are not current. */
+      readonly stale: boolean;
+      readonly blockedReason?: string;
     } | null;
   }[];
 }
@@ -66,6 +69,8 @@ export async function readVotingSessionsState(
               seq: live.lastSequence,
               counts: state.counts,
               lastEventType: state.lastEventType,
+              stale: live.status === "blocked",
+              ...(live.blockedReason === undefined ? {} : { blockedReason: live.blockedReason }),
             },
     });
   }

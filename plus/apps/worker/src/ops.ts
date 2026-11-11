@@ -2,6 +2,7 @@ import { closeDb, createDb } from "@artflow-plus/db";
 import type { ExecutionMode } from "@artflow-plus/domain";
 import {
   rebuildExecutionProjection,
+  rebuildVotingLiveProjection,
   retryBlockedProjection,
 } from "@artflow-plus/runtime";
 
@@ -13,6 +14,7 @@ function usage(): never {
       "Usage:",
       "  pnpm --filter @artflow-plus/worker ops retry   --activity <id> --mode <test|rehearsal|formal>",
       "  pnpm --filter @artflow-plus/worker ops rebuild --activity <id> --mode <test|rehearsal|formal>",
+      "  pnpm --filter @artflow-plus/worker ops rebuild-voting-live --activity <id> --session <id> --mode <test|rehearsal|formal>",
     ].join("\n"),
   );
   process.exit(2);
@@ -26,6 +28,7 @@ function flag(name: string): string | undefined {
 async function main(): Promise<void> {
   const command = process.argv[2];
   const activityId = flag("activity");
+  const sessionId = flag("session");
   const mode = flag("mode") as ExecutionMode | undefined;
   if (
     command === undefined ||
@@ -59,6 +62,19 @@ async function main(): Promise<void> {
           mode,
           lastSequence: result.lastSequence,
           sessions: Object.keys(result.state.sessions).length,
+        }),
+      );
+      return;
+    }
+    if (command === "rebuild-voting-live") {
+      if (sessionId === undefined) usage();
+      const result = await rebuildVotingLiveProjection(db, activityId, sessionId, mode);
+      console.log(
+        JSON.stringify({
+          activityId,
+          sessionId,
+          mode,
+          lastSequence: result.lastSequence,
         }),
       );
       return;

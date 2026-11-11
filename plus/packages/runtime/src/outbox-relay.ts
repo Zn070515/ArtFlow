@@ -88,6 +88,10 @@ async function applyToLiveProjection(
 ): Promise<void> {
   if (!isVotingLiveEvent(event)) return;
   const current = await getLiveState(trx, event.activityId, "vote_session", event.aggregateId);
+  // A blocked projection is stale until an operator rebuilds it from the
+  // durable event history. Applying later events on top of the incomplete
+  // state would silently clear the block and produce wrong counts.
+  if (current?.status === "blocked") return;
   const next = applyVotingLiveEvent(current?.state as Parameters<typeof applyVotingLiveEvent>[0] ?? null, event);
   if (next !== null) {
     await upsertLiveState(trx, {
