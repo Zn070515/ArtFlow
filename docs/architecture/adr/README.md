@@ -45,6 +45,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0038](0038-attendance-observational-authority.md) | 签到是独立的观测 capability；票据签到与 redeem 分离；绑定 check-in session | accepted |
 | [0039](0039-judge-session-replay.md) | judge session token 由 session id 确定性派生；重放返回同一 session 的可用凭证 | accepted |
 | [0040](0040-live-projection-sticky-recovery.md) | Live Projection block 必须 sticky；读面暴露 stale；显式 rebuild 恢复 | accepted |
+| [0041](0041-contract-harness.md) | 契约测试用仓库内小型 Descriptor + Adapter harness；真实 PostgreSQL；不引入 Pact Broker | accepted |
 
 新增 ADR 的规则：
 
