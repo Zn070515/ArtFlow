@@ -1,5 +1,9 @@
 # ArtFlow 私测数据排练手册
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 这份手册只适用于 `SYNTHETIC_TEST_ONLY` 私测活动，不适用于正式活动、生产发布或公开结果。
 
 ## 数据边界

@@ -1,5 +1,9 @@
 # Singer questionnaire workflow
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 How a singer contest's registration form is produced, filled, reviewed, and carried across
 a ruleset change. The form is not code: it is part of the frozen ruleset, so changing the
 questions is a ruleset edit with a version, a freeze, and an authority hash.

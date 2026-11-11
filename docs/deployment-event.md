@@ -1,5 +1,9 @@
 # ArtFlow 现场事件部署
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 本文是面向购买者的本机现场运行路径。它适合一台 Windows 主机运行 Docker Desktop，工作人员在这台主机上操作；如需让同一私人 Wi-Fi/LAN 中的手机访问，再显式启用 LAN 模式。
 
 公网 HTTPS 部署不使用本文件的事件 Compose，而使用 [`deploy/compose.production.yml`](../deploy/compose.production.yml) 和 [生产部署说明](deployment-production.md)。事件启动壳不提供 TLS、公网入口或 DDoS 防护。

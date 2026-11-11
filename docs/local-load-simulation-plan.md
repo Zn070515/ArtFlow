@@ -1,5 +1,9 @@
 # 本地大规模浏览器现场模拟 — 策划
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 > 状态：**已执行**（第二次运行的结果见 `logs/load-sim/report-run2.md`）。执行对象固定为 `bebcb949`。
 >
 > 这份文档写给"跑之前先定清楚"用：证明什么、不证明什么、谁来演、材料从哪来、按什么顺序、拿什么当通过标准。

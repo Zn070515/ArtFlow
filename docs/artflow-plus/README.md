@@ -7,10 +7,14 @@
 完整源码保存在 tag `v1.0.2`，功能记录见 [`docs/archive/v1/`](../archive/v1/README.md)。
 仓库不再维护双线，也不再提供 legacy bundle 导入、运营接管、参与者认领或 v1 媒体桥。
 
-## 当前阶段（2026-11-06）
+## 当前阶段（2026-11-12）
 
 v2 已完成 **M0–M15.3**（含 M13.1–M13.3、票据投票、运营分析、Tasks 与签到），并完成单线化与 v1 兼容层移除；
 1.x 的功能覆盖审计已进入执行清单。逐项出口与证据在 [roadmap.md](roadmap.md)。
+
+工程质量线（契约测试、Consumer Graph、缺口棘轮、变异审计、L3 模型测试与 L4
+Journey runner）同样在 `main` 上持续推进；契约工具只用于开发/CI，不进入运行时
+镜像依赖闭包。
 
 | 里程碑 | 状态 | 主要交付 |
 |---|---|---|
@@ -86,6 +90,9 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 外部审核驱动的测试体系加固 | [analysis/2026-11-11-external-review-test-hardening.md](analysis/2026-11-11-external-review-test-hardening.md) |
 | 自审计测试体系设计 | [specs/2026-11-11-self-auditing-test-system-design.md](specs/2026-11-11-self-auditing-test-system-design.md) |
 | 变异审计结果 | [analysis/2026-11-11-mutation-audit-findings.md](analysis/2026-11-11-mutation-audit-findings.md) |
+| 工程加固（拆分、L3/L4、DB 生成链、文档口径） | [plans/2026-11-12-engineering-hardening.md](plans/2026-11-12-engineering-hardening.md) |
+| 文档口径审计 | [analysis/2026-11-12-documentation-consistency.md](analysis/2026-11-12-documentation-consistency.md) |
+| Journey spec 目录 | [tools/contracts/journeys](../../plus/tools/contracts/journeys/) |
 | 领域模型 | [domains](../domains/) |
 | 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT） | [invariants](../invariants/README.md) |
 | 真实事故库 | [incidents](../incidents/) |

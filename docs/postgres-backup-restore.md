@@ -1,5 +1,9 @@
 # PostgreSQL 备份与恢复演练
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
+
 Archive Package 是活动资料交付物，不是数据库灾难恢复备份。生产 PostgreSQL 必须定期执行“创建逻辑备份、校验、在隔离目标恢复、运行应用检查”这一闭环。
 
 ## Compose 演练
