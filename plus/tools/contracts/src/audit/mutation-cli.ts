@@ -21,7 +21,7 @@ if (databaseUrl === undefined || databaseUrl.trim() === "") {
 }
 
 function quote(value: string): string {
-  return `"${value.replace(/"/g, '\\"')}"`;
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function runFocusedTest(mutation: Mutation): void {
