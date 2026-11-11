@@ -20,5 +20,17 @@
     "graph": "pnpm run build && node dist/graph/cli.js graph",
     "graph:check": "pnpm run build && node dist/graph/cli.js graph --check",
     "impact": "pnpm run build && node dist/graph/cli.js impact"
+  },
+  "dependencies": {
+    "@artflow-plus/contracts": "workspace:*",
+    "@artflow-plus/db": "workspace:*",
+    "@artflow-plus/domain": "workspace:*",
+    "@artflow-plus/runtime": "workspace:*",
+    "kysely": "0.29.7",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "@types/pg": "8.23.1"
   }
 }
