@@ -367,7 +367,7 @@ export interface OutboxRow {
   revision: number | null;
   mode: string | null;
   scope: string | null;
-  occurred_at: ColumnType<Date, Date | string | undefined, never>;
+  occurred_at: ColumnType<Date, Date | string, never>;
   attempts: ColumnType<number, number | undefined, number>;
   last_error: string | null;
   dead_lettered_at: ColumnType<Date | null, Date | null | undefined, Date | null>;

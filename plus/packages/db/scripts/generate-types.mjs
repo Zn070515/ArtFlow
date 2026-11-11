@@ -22,7 +22,7 @@ const overrides = {
   "stage_result.source": "ColumnType<unknown, string | null | undefined, string | null>",
   "stage_result.stale_at": "ColumnType<Date | null, Date | string | null | undefined, Date | string | null>",
   "task_item.due_at": "ColumnType<Date | null, Date | string | null | undefined, Date | string | null>",
-  "outbox.occurred_at": "ColumnType<Date, Date | string | undefined, never>",
+  "outbox.occurred_at": "ColumnType<Date, Date | string, never>",
   "outbox.published_at": "ColumnType<Date | null, Date | null | undefined, Date | null>",
   "outbox.dead_lettered_at": "ColumnType<Date | null, Date | null | undefined, Date | null>",
   "local_account.roles": "ColumnType<string[] | string, string, string>",
@@ -97,6 +97,8 @@ function columnType(table, column) {
   }
 
   if (column.dataType === "numeric" || column.dataType === "decimal") {
+    if (nullable) return "ColumnType<string | null, string | null, string | null>";
+    if (hasDefault) return "ColumnType<string, string | undefined, string>";
     return "ColumnType<string, string, string>";
   }
 
@@ -133,9 +135,13 @@ lines.push("}", "");
 
 const rendered = lines.join("\n");
 if (process.argv.includes("--check")) {
-  const current = readFileSync(typesPath, "utf8");
+  // `core.autocrlf=true` (the documented Windows dev setup) checks this file out
+  // with CRLF even though the generator writes LF, so compare normalized text.
+  const current = readFileSync(typesPath, "utf8").replace(/\r\n/g, "\n");
   if (current !== rendered) {
-    console.error("src/types.ts is stale: run schema:snapshot then schema:types.");
+    console.error(
+      "src/types.ts is stale: run `pnpm -C plus --filter @artflow-plus/db run schema:snapshot` then `... run schema:types`.",
+    );
     process.exit(1);
   }
   console.log("src/types.ts matches schema.snapshot.json.");

@@ -2,12 +2,13 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { sql, type Kysely } from "kysely";
+import type { Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDb, createDb, migrate } from "../src/index.js";
 import type { Database } from "../src/index.js";
+import { buildSchemaSnapshot, readSchemaRows } from "../scripts/schema-snapshot.js";
 
 /**
  * Migrations are the single source of truth for the schema:
@@ -49,40 +50,9 @@ describe.skipIf(!connectionString)("schema generation", () => {
   });
 
   it("committed schema.snapshot.json matches the migrated schema", async () => {
-    const result = await sql<{
-      table_name: string;
-      column_name: string;
-      data_type: string;
-      is_nullable: string;
-      column_default: string | null;
-      is_identity: string;
-    }>`
-      select table_name, column_name, data_type, is_nullable, column_default, is_identity
-        from information_schema.columns
-       where table_schema = current_schema()
-         and table_name not like 'kysely_%'
-       order by table_name, ordinal_position
-    `.execute(db);
-
-    const tables = new Map<string, unknown[]>();
-    for (const row of result.rows) {
-      const list = tables.get(row.table_name) ?? [];
-      list.push({
-        name: row.column_name,
-        dataType: row.data_type,
-        nullable: row.is_nullable === "YES",
-        default: row.column_default,
-        identity: row.is_identity === "YES",
-      });
-      tables.set(row.table_name, list);
-    }
-    const snapshot = {
-      version: 1,
-      source: "packages/db/src/migrations",
-      tables: [...tables.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([name, list]) => ({ name, columns: list })),
-    };
+    // Use the same projection as the generator: a second copy of the query
+    // would let the script and this gate drift apart while staying green.
+    const snapshot = buildSchemaSnapshot(await readSchemaRows(db));
     expect(snapshot).toEqual(committed);
   });
 

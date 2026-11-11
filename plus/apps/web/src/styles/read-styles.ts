@@ -8,7 +8,11 @@ async function readEntry(stylesDirectory: string, name: string): Promise<string>
   const parts = await Promise.all(
     imported.map((entry) => readEntry(stylesDirectory, entry ?? "global.css")),
   );
-  return [text, ...parts].join("\n");
+  // CSS inlines each `@import` at its position, and every entry file declares
+  // its imports first. Concatenate the partials first and the entry's own rules
+  // (everything except the imports) after them, as the bundler does.
+  const ownRules = text.replace(/@import\s+"\.\/[^"]+";/g, "");
+  return [...parts, ownRules].join("\n");
 }
 
 /**

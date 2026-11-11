@@ -217,6 +217,11 @@ describe.skipIf(!connectionString)("singer registration journey", () => {
         });
         expect(response.statusCode).toBeLessThan(400);
         expect(response.json()).toMatchObject({ status: "final", approvedCount: 1 });
+      } else {
+        // JOURNEY_ACTIONS can grow in @artflow-plus/contracts without this
+        // runner growing with it; fail loudly instead of silently skipping the
+        // step and leaving the journey green.
+        throw new Error(`The journey runner does not implement action ${String(step.action)}.`);
       }
     }
 

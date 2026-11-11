@@ -37,9 +37,11 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   pnpm run schema:check
   ```
 
-- **Schema source of truth**: migrations are the source. `pnpm run schema:snapshot`
-  writes `packages/db/schema.snapshot.json` from a disposable migrated schema;
-  `pnpm run schema:types` derives `packages/db/src/types.ts` from that snapshot.
+- **Schema source of truth**: migrations are the source.
+  `pnpm --filter @artflow-plus/db run schema:snapshot` writes
+  `packages/db/schema.snapshot.json` from a disposable migrated schema;
+  `pnpm --filter @artflow-plus/db run schema:types` derives `packages/db/src/types.ts`
+  from that snapshot.
   `schema:check` fails when either artifact is stale, so do not edit the snapshot or
   the row types by hand. Add migrations under `packages/db/src/migrations/` and keep
   the ordered list in `migrations.ts`.

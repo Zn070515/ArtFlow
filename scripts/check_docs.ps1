@@ -161,7 +161,7 @@ $forbiddenPatterns = @(
     @{ Description = 'the removed seed_data command'; Pattern = '(?i)(?<![A-Za-z0-9_])seed_data(?![A-Za-z0-9_])' },
     @{ Description = 'the obsolete docker-compose detached startup command'; Pattern = '(?im)^\s*docker-compose\s+up\s+-d(?:\s|$)' },
     @{ Description = 'hardcoded administrator sample credentials'; Pattern = '(?i)admin\s*/\s*admin123' },
-    @{ Description = 'aggregate model, view, or route counts'; Pattern = '(?im)(?:\b\d+\s+(?:Django\s+)?(?:models?|views?|routes?)\b|\b(?:models?|views?|routes?)\s*\(\s*\d+\s+(?:total|total\s+models?)\s*\)|\b\d+\s*个\s*(?:模型|视图|路由))' }
+    @{ Description = 'aggregate model, view, or route counts'; Pattern = '(?im)(?:\b\d+\s+(?:Django\s+)?(?:models?|views?|routes?)\b|\b(?:models?|views?|routes?)\s*\(\s*\d+\s+(?:total|total\s+models?)\s*\)|(?<![A-Za-z0-9])\d+\s*(?:个)?\s*(?:模型|视图|路由))' }
 )
 $violations = @()
 
@@ -189,7 +189,12 @@ $authoritativeDocuments = @(
     'docs/development-baseline.md',
     'docs/deployment-production.md',
     'docs/artflow-plus/README.md',
-    'docs/artflow-plus/roadmap.md'
+    'docs/artflow-plus/roadmap.md',
+    'docs/artflow-plus/backup-restore.md',
+    'docs/artflow-plus/self-build-checklist.md',
+    'docs/artflow-plus/k8s-deployment-test.md',
+    'docs/artflow-plus/rehearsal-runbook.md',
+    'docs/school-onboarding.md'
 )
 $legacyPatterns = @(
     @{ Description = 'the removed Django management command'; Pattern = '(?i)\bmanage\.py\b' },
