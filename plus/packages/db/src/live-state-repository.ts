@@ -45,8 +45,20 @@ export async function getLiveState(
 
 export async function upsertLiveState(
   trx: Kysely<Database>,
-  input: { readonly activityId: string; readonly aggregateType: string; readonly aggregateId: string; readonly lastSequence: number; readonly state: unknown },
+  input: {
+    readonly activityId: string;
+    readonly aggregateType: string;
+    readonly aggregateId: string;
+    readonly lastSequence: number;
+    readonly state: unknown;
+    /** Only an explicit rebuild may clear a blocked projection. */
+    readonly force?: boolean;
+  },
 ): Promise<void> {
+  if (input.force !== true) {
+    const current = await getLiveState(trx, input.activityId, input.aggregateType, input.aggregateId);
+    if (current?.status === "blocked") return;
+  }
   await trx.insertInto("live_state").values({
     activity_id: input.activityId,
     aggregate_type: input.aggregateType,

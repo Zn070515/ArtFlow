@@ -1,3 +1,4 @@
+import { defaultCapabilityRegistry } from "@artflow-plus/domain";
 import { Value } from "@sinclair/typebox/value";
 import { expect, it } from "vitest";
 
@@ -244,6 +245,21 @@ it("validates a capability manifest and its surfaces", () => {
   expect(
     Value.Check(CapabilityManifestSchema, { ...manifest, surfaces: [] }),
   ).toBe(false);
+  expect(
+    Value.Check(CapabilityManifestSchema, { ...manifest, events: ["tasks.changed"] }),
+  ).toBe(true);
+  expect(
+    Value.Check(CapabilityManifestSchema, { ...manifest, events: ["tasks"] }),
+  ).toBe(false);
+});
+
+it("keeps every registered capability manifest compatible with the shared schema", () => {
+  for (const registration of defaultCapabilityRegistry.list()) {
+    expect(
+      Value.Check(CapabilityManifestSchema, registration.manifest),
+      `${registration.manifest.identity} manifest drifted from CapabilityManifestSchema`,
+    ).toBe(true);
+  }
 });
 
 it("accepts the attendance check-in union and rejects mixed ticket inputs", () => {

@@ -34,6 +34,30 @@ activity/权限字段。
 
 `packages/realtime` 不 import domain/db/runtime；业务通过 `RealtimeTopic` 接入。
 
+## RT-09 关闭与异步订阅的竞态
+
+**规则**：连接关闭是单向终态。关闭后，任何 in-flight 的 `authorize` / `snapshot`
+回调都不得重新注册订阅或把 peer 加回 hub；hub 不得保留幽灵订阅者。
+
+**必须攻击的形状**：subscribe 后立即关闭；authorize/snapshot 延迟完成；关闭后
+再 unsubscribe；重连洪峰。
+
+**Plus 要求**：`RealtimeConnection` 维护 `closed` 标志，每个 await 后检查；
+`send` 和 `onMessage` 在关闭后 no-op。
+
+## RT-10 派生投影失败必须 sticky
+
+**规则**：投票 Live Projection 更新失败时，block 状态必须保持到显式 rebuild；
+后续成功事件不得清除 block；读面必须暴露 stale/blocked；rebuild 从 durable
+event history 重放。
+
+**必须攻击的形状**：失败事件后紧跟成功事件；读面把 blocked 当 running；
+rebuild 与 relay 并发；重复 rebuild。
+
+**Plus 要求**：`upsertLiveState` 在 blocked 时拒绝普通写入，只有显式 rebuild
+可清除；`readVotingSessionsState` 返回 `stale` 与 `blockedReason`；Worker ops
+提供 `rebuild-voting-live`。
+
 ## 变更流程
 
 修改以上任一条，必须先写 ADR 并更新核心契约测试。业务 PR 不得修改

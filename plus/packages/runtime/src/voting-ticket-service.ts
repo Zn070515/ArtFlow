@@ -93,6 +93,19 @@ function ticketAccessToken(sessionId: string, signingSecret: string): string {
   return `AF1.S.${sessionId}.${tokenSignature}`;
 }
 
+/**
+ * Judge-session tokens are deterministic from the session id and the server
+ * secret. The raw token is never persisted, but a replay can rebuild the same
+ * token after the first response is lost.
+ */
+function judgeSessionToken(sessionId: string, signingSecret: string): string {
+  const tokenSignature = createHmac("sha256", signingSecret)
+    .update(`AF1.JS.${sessionId}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `AF1.JS.${sessionId}.${tokenSignature}`;
+}
+
 function parseCredential(raw: unknown, kind: CredentialKind, signingSecret: string): ParsedCredential | null {
   if (typeof raw !== "string") return null;
   const parts = raw.split(".");
@@ -123,6 +136,17 @@ function validCredentialForRow(
 
 function requireActive(activity: { readonly status: string }, label: string): void {
   if (activity.status !== "active") throw new DomainError("ACTIVITY_NOT_ACTIVE", `${label} requires an active activity.`);
+}
+
+/**
+ * Archived is the terminal state: an archived activity may not produce or
+ * mutate credentials. `closed` is deliberately left available for incident
+ * revocation, but it can never issue, rotate, or reissue.
+ */
+function requireNotArchived(activity: { readonly status: string }, label: string): void {
+  if (activity.status === "archived") {
+    throw new DomainError("ACTIVITY_ARCHIVED", `${label} is not allowed on an archived activity.`);
+  }
 }
 
 function requireReason(value: string): string {
@@ -509,6 +533,7 @@ export async function rotateTicketCredential(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     requireCapability(activity, "ticketing");
+    requireActive(activity, "Ticket rotation");
     const current = await getTicketForUpdate(trx, input.ticketId);
     if (current === null) throw new DomainError("NOT_FOUND", "The ticket was not found.");
     if (current.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The ticket belongs to another activity.");
@@ -552,6 +577,7 @@ export async function revokeTicket(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     requireCapability(activity, "ticketing");
+    requireNotArchived(activity, "Ticket revocation");
     const ticket = await getTicketForUpdate(trx, input.ticketId);
     if (ticket === null) throw new DomainError("NOT_FOUND", "The ticket was not found.");
     if (ticket.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The ticket belongs to another activity.");
@@ -748,6 +774,7 @@ export async function revokeTicketAccessSession(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     requireCapability(activity, "ticketing");
+    requireNotArchived(activity, "Ticket access-session revocation");
     const session = await getTicketAccessSessionByIdForUpdate(trx, input.sessionId);
     if (session === null || session.activity_id !== input.activityId) throw new DomainError("NOT_FOUND", "The ticket access session was not found.");
     if (session.revoked_at !== null) throw new DomainError("INVALID_TRANSITION", "The ticket access session is already revoked.");
@@ -789,6 +816,7 @@ export async function reissueJudgeCapability(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     requireCapability(activity, "ticketing");
+    requireActive(activity, "Judge capability reissue");
     const entry = await getJudgeEntryForUpdate(trx, input.activityId);
     if (entry === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     const version = entry.version + 1;
@@ -826,6 +854,7 @@ export async function closeJudgeEntry(
     const activity = await getActivityForUpdate(trx, input.activityId);
     if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     requireCapability(activity, "ticketing");
+    requireNotArchived(activity, "Judge entry closure");
     const entry = await getJudgeEntryForUpdate(trx, input.activityId);
     if (entry === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
     if (!entry.open) throw new DomainError("INVALID_TRANSITION", "The judge entry is already closed.");
@@ -888,7 +917,7 @@ export async function claimJudgeSeat(
     const seat = seats[0];
     if (seat === undefined) throw new DomainError("SEAT_UNAVAILABLE", "No judge seat is available.");
     const sessionId = idFromCommand("judge-session", input.commandId);
-    const sessionToken = `AF1.S.${sessionId}.${deps.newEventId()}`;
+    const sessionToken = judgeSessionToken(sessionId, signingSecret);
     const expiresAt = new Date(Date.parse(deps.now()) + DEFAULT_TICKET_TTL_MS).toISOString();
     await insertJudgeSession(trx, {
       id: sessionId,
@@ -912,6 +941,11 @@ export async function claimJudgeSeat(
     });
     const body: ClaimedJudgeSeatResult = { activityId: candidate.activityId, seatId: seat.id, seatKey: seat.seatKey, sessionId, sessionToken, expiresAt };
     return { body, persistedBody: { ...body, sessionToken: null } };
+  }, {
+    onReplay: (_trx, result) => ({
+      ...result,
+      sessionToken: judgeSessionToken(result.sessionId, signingSecret),
+    }),
   });
 }
 

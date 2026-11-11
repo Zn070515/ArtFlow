@@ -18,5 +18,8 @@
   },
   "dependencies": {
     "@sinclair/typebox": "0.34.52"
+  },
+  "devDependencies": {
+    "@artflow-plus/domain": "workspace:*"
   }
 }

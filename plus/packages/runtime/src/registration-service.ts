@@ -124,6 +124,20 @@ async function requireRegistrationOpen(
   }
 }
 
+/**
+ * A final roster freezes the participant set and every write that could change
+ * it. The explicit supplement seam is separate and must not be blocked here.
+ */
+async function requireRosterOpen(
+  trx: Kysely<Database>,
+  activityId: string,
+): Promise<void> {
+  const roster = await getRosterForUpdate(trx, activityId);
+  if (roster.status === "final") {
+    throw new DomainError("ROSTER_FINAL", "The roster is final; registration writes are frozen.");
+  }
+}
+
 function requireOwnerOrManager(
   actor: ReturnType<typeof runtimeActor>,
   participantId: string,
@@ -161,6 +175,7 @@ export async function startRegistration(
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
       await requireRegistrationOpen(trx, activity);
+      await requireRosterOpen(trx, input.activityId);
       const existing = await getRegistrationByParticipantForUpdate(trx, input.activityId, input.participantId);
       if (existing !== null) {
         throw new DomainError("INVALID_TRANSITION", "This participant already has a registration.");
@@ -227,6 +242,7 @@ export async function saveRegistrationAnswer(
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
       await requireRegistrationOpen(trx, activity);
+      await requireRosterOpen(trx, input.activityId);
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");
@@ -291,6 +307,7 @@ export async function submitRegistration(
       if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       requireActive(activity);
       await requireRegistrationOpen(trx, activity);
+      await requireRosterOpen(trx, input.activityId);
       const registration = await getRegistrationForUpdate(trx, input.registrationId);
       if (registration === null) throw new DomainError("NOT_FOUND", `Registration ${input.registrationId} was not found.`);
       if (registration.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The registration belongs to another activity.");

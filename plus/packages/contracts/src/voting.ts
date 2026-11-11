@@ -86,6 +86,8 @@ export const VotingSessionSnapshotSchema = Type.Object(
           seq: Type.Integer({ minimum: 0 }),
           counts: Type.Record(Type.String(), Type.Integer({ minimum: 0 })),
           lastEventType: Type.String({ minLength: 1, maxLength: 100 }),
+          stale: Type.Optional(Type.Boolean()),
+          blockedReason: Type.Optional(Type.String({ maxLength: 500 })),
         },
         { additionalProperties: false },
       ),

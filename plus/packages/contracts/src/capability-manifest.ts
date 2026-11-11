@@ -21,13 +21,35 @@ export const CapabilityManifestSchema = Type.Object(
     definitionSchemaVersion: Type.Integer({ minimum: 1 }),
     commands: Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_.]*$" })),
     queries: Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_.]*$" })),
-    events: Type.Array(Type.String({ pattern: "^[A-Z][A-Za-z0-9]+$" })),
+    /**
+     * Domain events are CamelCase (`RoundPrepared`). A capability may also
+     * declare a dotted lowercase invalidation signal (`tasks.changed`) that it
+     * emits through the same outbox. Both are part of the manifest contract.
+     */
+    events: Type.Array(
+      Type.String({
+        pattern: "^(?:[A-Z][A-Za-z0-9]+|[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+)$",
+      }),
+    ),
     permissions: Type.Array(Type.String({ minLength: 1 })),
     surfaces: Type.Array(CapabilitySurfaceSchema, { uniqueItems: true, minItems: 1 }),
     scopes: Type.Optional(
       Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]*$", maxLength: 100 }), {
         uniqueItems: true,
       }),
+    ),
+    /**
+     * Execution-scoped commands owned by this capability and the scopes each
+     * may run in. The domain registry freezes this map into the release; the
+     * shared schema must describe the same field or the two declarations drift.
+     */
+    commandScopes: Type.Optional(
+      Type.Record(
+        Type.String({ pattern: "^[a-z][a-z0-9_.]*$" }),
+        Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]*$", maxLength: 100 }), {
+          minItems: 1,
+        }),
+      ),
     ),
   },
   { additionalProperties: false },

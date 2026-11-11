@@ -28,6 +28,7 @@ interface Subscription {
 export class RealtimeConnection implements RealtimePeer {
   readonly id: string;
   private readonly subscriptions = new Map<string, Subscription>();
+  private closed = false;
   private alive = true;
   private lastPingAt = 0;
   private violations = 0;
@@ -71,13 +72,14 @@ export class RealtimeConnection implements RealtimePeer {
       this.alive = true;
     });
     this.socket.on("close", () => {
+      this.closed = true;
       clearInterval(this.tokenTimer);
       this.hub.remove(this.id);
     });
   }
 
   send(message: ServerMessage): void {
-    if (this.socket.readyState !== OPEN_STATE) return;
+    if (this.closed || this.socket.readyState !== OPEN_STATE) return;
     this.socket.send(JSON.stringify(message));
   }
 
@@ -97,6 +99,7 @@ export class RealtimeConnection implements RealtimePeer {
   }
 
   close(code: number, reason: string): void {
+    this.closed = true;
     this.socket.close(code, reason);
   }
 
@@ -112,6 +115,7 @@ export class RealtimeConnection implements RealtimePeer {
   }
 
   private async onMessage(raw: unknown): Promise<void> {
+    if (this.closed) return;
     let message: ClientMessage;
     try {
       const text = String(raw);
@@ -146,6 +150,7 @@ export class RealtimeConnection implements RealtimePeer {
   }
 
   private async subscribe(id: string, topic: string): Promise<void> {
+    if (this.closed) return;
     if (this.subscribeTokens <= 0) {
       this.error(id, "RATE_LIMITED", "subscribe rate exceeded");
       this.socket.close(CLOSE_CODES.limit, "subscribe rate exceeded");
@@ -178,7 +183,9 @@ export class RealtimeConnection implements RealtimePeer {
       return;
     }
     const target: RealtimeTarget = { topic, ...parsedTarget };
-    if (!(await definition.authorize(this.actor, target))) {
+    const allowed = await definition.authorize(this.actor, target);
+    if (this.closed) return;
+    if (!allowed) {
       this.error(id, "FORBIDDEN", "not allowed to subscribe");
       return;
     }
@@ -186,10 +193,12 @@ export class RealtimeConnection implements RealtimePeer {
     try {
       snapshot = await definition.snapshot(target);
     } catch (error) {
+      if (this.closed) return;
       this.logger.error({ topic, error }, "snapshot failed on subscribe");
       this.error(id, "SNAPSHOT_UNAVAILABLE", "snapshot unavailable");
       return;
     }
+    if (this.closed) return;
     if (snapshot === null) {
       this.error(id, "SNAPSHOT_UNAVAILABLE", "snapshot unavailable");
       return;
@@ -199,6 +208,7 @@ export class RealtimeConnection implements RealtimePeer {
       this.error(id, "SNAPSHOT_UNAVAILABLE", "snapshot unavailable");
       return;
     }
+    if (this.closed) return;
     this.subscriptions.set(topic, { definition, target });
     this.hub.add(this, definition, target, snapshot.seq);
     this.send({

@@ -142,3 +142,27 @@ ticket/ballot 身份保证；无票投票才使用浏览器身份，且只能作
 
 **Plus 要求**：限流器有明确语义（per-actor/per-IP/窗口）；key 包含租户/活动；
 后端故障策略是显式的；测试会清理计数。
+
+---
+
+## TICK-08 一次性凭证响应必须可重放恢复
+
+**规则**：当命令的响应携带一次性凭证（ticket access token、judge session
+token）时，同一 `commandId` 的重放必须返回**同一个 session** 的可用凭证；不得
+返回 null，也不得创建第二个 session；原始 token 仍不落库。
+
+**为什么**：judge claim 事务提交成功但 HTTP 响应丢失后，客户端用同一
+`commandId` 重试会命中回执并拿到 `sessionToken: null`；席位已经被占用，客户端
+没有可用凭证，也没有重新签发入口。Ticket redeem 已有 `onReplay` 重建 access
+token，judge claim 曾遗漏。
+
+**必须攻击的形状**：
+
+- 事务提交成功后丢响应，再用同一 commandId 重试；
+- 并发重试同一 claim；
+- 重放时席位已被占用；
+- 重放创建第二个 judge session；
+- 重放响应缓存了明文 token。
+
+**Plus 要求**：凭证从 `sessionId` + 服务端 secret 确定性派生（HMAC），或提供
+等价的、不持久化明文的恢复 seam；首次响应与重放返回同一 session 的可用 token。

@@ -313,6 +313,8 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       status: "approved",
       note: "ok",
     });
+    const second: ActorContext = { ...participant, actorId: "student-2" };
+    const secondRegistration = await submitFor(second, "roster-second");
     const roster = await finalizeRoster(db, deps(staff), {
       commandId: "finalize-roster-lock",
       activityId,
@@ -320,8 +322,6 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     });
     expect(roster.body).toMatchObject({ status: "final", approvedCount: 1 });
 
-    const second: ActorContext = { ...participant, actorId: "student-2" };
-    const secondRegistration = await submitFor(second, "roster-second");
     const before = await readEventsSince(db, { activityId, after: 0, limit: 100 });
     await expect(reviewRegistration(db, deps(staff), {
       commandId: "review-after-final",
@@ -333,6 +333,43 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     })).rejects.toMatchObject({ code: "ROSTER_FINAL" });
     expect(await readEventsSince(db, { activityId, after: 0, limit: 100 })).toEqual(before);
     expect(await listApprovedParticipantIds(db, activityId)).toEqual([participant.actorId]);
+  });
+
+  it("refuses to start, answer, or submit after the roster is final", async () => {
+    const activityId = await seedActivity();
+    const draft = await startRegistration(db, deps(participant), {
+      commandId: "start-before-final",
+      activityId,
+      participantId: participant.actorId,
+    });
+    await finalizeRoster(db, deps(staff), {
+      commandId: "finalize-empty-roster",
+      activityId,
+      expectedRevision: 0,
+    });
+    const before = await readEventsSince(db, { activityId, after: 0, limit: 100 });
+    const late: ActorContext = { ...participant, actorId: "student-late" };
+
+    await expect(startRegistration(db, deps(late), {
+      commandId: "start-after-final",
+      activityId,
+      participantId: late.actorId,
+    })).rejects.toMatchObject({ code: "ROSTER_FINAL" });
+    await expect(saveRegistrationAnswer(db, deps(participant), {
+      commandId: "answer-after-final",
+      activityId,
+      registrationId: draft.body.id,
+      expectedRevision: draft.body.revision,
+      questionKey: "name",
+      value: "late answer",
+    })).rejects.toMatchObject({ code: "ROSTER_FINAL" });
+    await expect(submitRegistration(db, deps(participant), {
+      commandId: "submit-after-final",
+      activityId,
+      registrationId: draft.body.id,
+      expectedRevision: draft.body.revision,
+    })).rejects.toMatchObject({ code: "ROSTER_FINAL" });
+    expect(await readEventsSince(db, { activityId, after: 0, limit: 100 })).toEqual(before);
   });
 
   it("requires every required released question before submission", async () => {
