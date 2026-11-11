@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readAllStyles } from "../../styles/read-styles.js";
+
 const webSource = join(process.cwd(), "src");
 
 describe("Ops style contracts", () => {
@@ -17,7 +19,7 @@ describe("Ops style contracts", () => {
   });
 
   it("declares layout rules for the voting controls", async () => {
-    const global = await readFile(join(webSource, "styles", "global.css"), "utf8");
+    const global = await readAllStyles(join(webSource, "styles"));
 
     expect(global).toContain(".voting-sessions");
     expect(global).toContain(".voting-new");

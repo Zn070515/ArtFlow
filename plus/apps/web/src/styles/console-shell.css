@@ -1,0 +1,233 @@
+/* Console shell: topbar, sidebar and page frame. */
+
+/* Console shell, operational surfaces and console overrides. */
+
+/* Console shell: operational density and information hierarchy stay separate from Portal. */
+.console-shell {
+  min-height: 100vh;
+  overflow-x: clip;
+  background: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-console);
+  font-variant-numeric: tabular-nums;
+}
+
+.console-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.console-brand,
+.console-account-link,
+.console-nav-link,
+.console-return-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.console-brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+}
+
+.console-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  color: var(--color-accent-strong);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.console-brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+}
+
+.console-brand-copy strong {
+  font-size: 0.76rem;
+  letter-spacing: 0.2em;
+}
+
+.console-brand-copy small {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+.console-context {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.console-account-link,
+.console-menu-toggle {
+  display: inline-grid;
+  min-width: 40px;
+  min-height: 40px;
+  place-items: center;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.console-account-link:hover,
+.console-menu-toggle:hover {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.console-menu-toggle {
+  display: none;
+}
+
+.console-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: calc(100vh - 56px);
+}
+
+.console-sidebar {
+  position: sticky;
+  top: 56px;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  padding: 24px 16px;
+  border-right: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.console-sidebar-label {
+  padding: 0 12px 10px;
+  color: var(--color-text-subtle);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.console-nav {
+  display: grid;
+  gap: 4px;
+}
+
+.console-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.console-nav-link:hover,
+.console-nav-link.is-current {
+  border-color: var(--color-line);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.console-nav-link.is-current {
+  border-left-color: var(--color-accent);
+}
+
+.console-nav-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-subtle);
+}
+
+.console-nav-link.is-current .console-nav-mark {
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 14%, transparent);
+}
+
+.console-return-link {
+  margin-top: auto;
+  padding: 12px;
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+}
+
+.console-return-link:hover {
+  color: var(--color-accent-strong);
+}
+
+.console-main {
+  min-width: 0;
+  padding: 24px;
+}
+
+.console-page {
+  width: min(100%, 1440px);
+  margin: 0 auto;
+}
+
+.console-page .auth-card {
+  border-color: var(--color-line);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  animation: none;
+}
+
+.console-page .auth-title {
+  color: var(--color-text);
+  font-family: var(--font-console);
+  font-size: clamp(1.7rem, 3vw, 2.25rem);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.console-page .auth-copy,
+.console-page .auth-loading,
+.console-page .field,
+.console-page .question-label {
+  color: var(--color-text-muted);
+}
+
+.console-page .auth-switch {
+  color: var(--color-accent-strong);
+}

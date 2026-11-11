@@ -1,12 +1,13 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+
+import { readAllStyles } from "./read-styles.js";
 
 const stylesDirectory = join(process.cwd(), "src", "styles");
 
 describe("Studio Console layout styles", () => {
   it("declares the main column and sticky operational rail", async () => {
-    const global = await readFile(join(stylesDirectory, "global.css"), "utf8");
+    const global = await readAllStyles(stylesDirectory);
 
     expect(global).toContain(".studio-main-column");
     expect(global).toContain(".studio-rail");
@@ -15,7 +16,7 @@ describe("Studio Console layout styles", () => {
   });
 
   it("moves the Studio rail below the editor at the Console breakpoint", async () => {
-    const global = await readFile(join(stylesDirectory, "global.css"), "utf8");
+    const global = await readAllStyles(stylesDirectory);
     const studioStyles = global.slice(global.indexOf(".console-page .studio-grid"));
 
     expect(studioStyles).toContain("position: sticky");

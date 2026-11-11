@@ -1,12 +1,13 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+
+import { readAllStyles } from "./read-styles.js";
 
 const stylesDirectory = join(process.cwd(), "src", "styles");
 
 describe("Live and Judge Console layout styles", () => {
   it("declares the Live workspace and sticky control rail", async () => {
-    const global = await readFile(join(stylesDirectory, "global.css"), "utf8");
+    const global = await readAllStyles(stylesDirectory);
 
     expect(global).toContain(".live-workspace");
     expect(global).toContain(".live-main-column");
@@ -19,7 +20,7 @@ describe("Live and Judge Console layout styles", () => {
   });
 
   it("declares a focused 720px Judge workspace and mobile fallback", async () => {
-    const global = await readFile(join(stylesDirectory, "global.css"), "utf8");
+    const global = await readAllStyles(stylesDirectory);
 
     expect(global).toContain(".judge-workspace");
     expect(global).toContain(".judge-score-column");
