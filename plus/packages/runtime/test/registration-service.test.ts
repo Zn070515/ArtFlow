@@ -192,6 +192,24 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     expect(after).toEqual(before);
   });
 
+  it("rejects a material whose extension is not accepted", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-registration-wrong-extension",
+      activityId,
+      participantId: participant.actorId,
+    });
+    await expect(uploadMaterial(db, deps(participant), {
+      commandId: "upload-wrong-extension",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "song.txt",
+      contentType: "text/plain",
+      byteLength: 10,
+    })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
+  });
+
   it("runs draft, submit, staff review, and server-derived roster finalization", async () => {
     const activityId = await seedActivity();
     const started = await startRegistration(db, deps(participant), {

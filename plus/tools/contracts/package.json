@@ -22,7 +22,8 @@
     "impact": "pnpm run build && node dist/graph/cli.js impact",
     "readiness": "tsx src/harness/readiness-cli.ts",
     "audit": "tsx src/audit/cli.ts",
-    "audit:check": "tsx src/audit/cli.ts --check"
+    "audit:check": "tsx src/audit/cli.ts --check",
+    "mutation:audit": "tsx src/audit/mutation-cli.ts"
   },
   "dependencies": {
     "@artflow-plus/contracts": "workspace:*",

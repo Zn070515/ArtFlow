@@ -231,7 +231,10 @@ journey，要么显式声明 `notInJourney`。
 3. 测试必须失败；存活变异进入 backlog；
 4. 恢复副本，不污染主工作树。
 
-手工验证已完成一次（移除 `insertAudit` 后契约测试失败）；下一阶段把它自动化。
+已自动化：`mutation:audit` 通过临时修改 + `finally` 恢复运行 8 个关键变异。
+首次运行 6/8 caught，发现材料扩展名没有测试、Realtime 只测了 authorize 阶段关闭；
+补测试后 8/8 caught。详见
+[变异审计结果](../analysis/2026-11-11-mutation-audit-findings.md)。
 
 ## 9. 已实现与下一步
 
@@ -242,14 +245,17 @@ journey，要么显式声明 `notInJourney`。
 - `checkPackReadiness`；
 - 本地缺口报告（本轮改为 baseline 棘轮）；
 - 契约 harness（P2）；
-- 六个已知缺陷的回归测试（P3）。
+- 六个已知缺陷的回归测试（P3）；
+- `audit:check` 已接入 CI（L1/L2）；
+- 变异审计 `mutation:audit`（L5）：8 个关键变异，首次跑出 2 个测试缺口，
+  补测后 8/8 caught。
 
 下一步：
 
-1. `audit:check` 接入 CI（L1/L2）；
-2. fast-check lifecycle model（L3）；
-3. Journey spec runner（L4）；
-4. 变异审计自动化（L5）。
+1. fast-check lifecycle model、随机命令序列、确定性并发（L3）；
+2. Journey spec runner（L4）；
+3. 把变异审计接入夜间任务，扩展 publishing/outbox/material/mode 变异（L5）；
+4. 逐步清理 baseline：先修 P0 产品缺口，再收紧对应类别的 `--strict`。
 
 ## 10. 验收标准
 

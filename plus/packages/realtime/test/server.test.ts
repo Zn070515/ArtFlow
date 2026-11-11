@@ -254,6 +254,58 @@ describe("realtime server", () => {
     expect(add).not.toHaveBeenCalled();
   });
 
+  it("does not re-add a subscription when the socket closes during snapshot", async () => {
+    let snapshotStarted = false;
+    let releaseSnapshot: (value: { seq: number; data: unknown }) => void = () => {};
+    const snapshot = new Promise<{ seq: number; data: unknown }>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const topic: RealtimeTopic = {
+      namespace: "probe",
+      parse: () => ({ activityId: "act-1", aggregateId: "act-1" }),
+      authorize: async () => true,
+      snapshot: async () => {
+        snapshotStarted = true;
+        return snapshot;
+      },
+    };
+    const handlers = new Map<string, (...args: any[]) => void>();
+    const socket = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+      ping: vi.fn(),
+      terminate: vi.fn(),
+      close: vi.fn(),
+      on: (event: string, handler: (...args: any[]) => void) => {
+        handlers.set(event, handler);
+      },
+    } as unknown as WebSocket;
+    const logger = { error: () => {}, info: () => {} };
+    const hub = new RealtimeHub({ pollIntervalMs: 1000, logger });
+    const add = vi.spyOn(hub, "add");
+    const connection = new RealtimeConnection(
+      socket,
+      actor,
+      new Map([["probe", topic]]),
+      hub,
+      logger,
+      "closing-during-snapshot",
+    );
+    connection.start();
+    handlers.get("message")?.(JSON.stringify({
+      v: 1,
+      type: "subscribe",
+      id: "s1",
+      topic: "probe:act-1",
+    }));
+    await vi.waitFor(() => expect(snapshotStarted).toBe(true));
+    handlers.get("close")?.();
+    releaseSnapshot({ seq: 1, data: { label: "late" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(add).not.toHaveBeenCalled();
+  });
+
   it("terminates a connection that misses a pong", () => {
     const socket = {
       readyState: 1,
