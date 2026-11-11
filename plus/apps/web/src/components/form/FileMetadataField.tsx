@@ -26,6 +26,8 @@ export function FileMetadataField({
         {question.required ? <em className="required-mark"> *</em> : null}
       </span>
       <input
+        id={`question-${question.key}`}
+        name={question.key}
         type="file"
         accept={question.file?.accepts.join(",")}
         disabled={disabled || busy}

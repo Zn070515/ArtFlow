@@ -1,9 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+const submitRegistrationMock = vi.hoisted(() => vi.fn());
+
 vi.mock("../../api/registrations.js", () => ({
   saveAnswer: vi.fn(),
-  submitRegistration: vi.fn(),
+  submitRegistration: submitRegistrationMock,
   uploadMaterialContent: vi.fn(),
   uploadMaterialMetadata: vi.fn(),
 }));
@@ -64,5 +66,16 @@ describe("RegistrationForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
 
     expect(await screen.findByText("草稿已保存")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("names the missing field in Chinese instead of exposing its schema key", async () => {
+    render(<RegistrationForm detail={detail} onChanged={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "提交报名" }));
+
+    expect(await screen.findByText("请填写「姓名」")).toBeInTheDocument();
+    expect(screen.queryByText(/Required question/)).toBeNull();
+    expect(document.activeElement).toHaveAttribute("id", "question-name");
+    expect(submitRegistrationMock).not.toHaveBeenCalled();
   });
 });

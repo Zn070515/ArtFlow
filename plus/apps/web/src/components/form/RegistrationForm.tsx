@@ -32,9 +32,41 @@ function initialAnswers(detail: RegistrationDetail): Record<string, string> {
 function messageFor(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "STALE_REVISION") return "数据已更新，请刷新页面后重试";
+    // The API keeps question keys internal; the detail payload carries the
+    // participant-facing label so the form never shows an English schema key.
+    if (error.code === "INVALID_INPUT" && typeof error.details === "object" && error.details !== null) {
+      const label = (error.details as { label?: unknown }).label;
+      if (typeof label === "string" && label.trim()) return `请填写「${label.trim()}」`;
+    }
     return error.message;
   }
   return "网络或服务暂时不可用，请稍后重试";
+}
+
+interface MissingQuestion {
+  readonly key: string;
+  readonly label: string;
+  readonly type: "text" | "file";
+}
+
+function firstMissingQuestion(
+  detail: RegistrationDetail,
+  answers: Readonly<Record<string, string>>,
+): MissingQuestion | null {
+  for (const question of detail.questionnaire.questions) {
+    if (!question.required || question.type === "notice") continue;
+    if (question.type === "file") {
+      const material = detail.materials.find((item) => item.questionKey === question.key);
+      if (material === undefined || !material.contentReady) {
+        return { key: question.key, label: question.label, type: "file" };
+      }
+      continue;
+    }
+    if ((answers[question.key] ?? "").trim() === "") {
+      return { key: question.key, label: question.label, type: "text" };
+    }
+  }
+  return null;
 }
 
 export function RegistrationForm({
@@ -99,6 +131,16 @@ export function RegistrationForm({
   }
 
   async function submit(): Promise<void> {
+    // Validate locally first so the participant sees a Chinese label and the
+    // focus lands on the missing field, never an internal question key.
+    const missing = firstMissingQuestion(detail, answers);
+    if (missing !== null) {
+      setError(missing.type === "file" ? `请上传「${missing.label}」` : `请填写「${missing.label}」`);
+      const field = document.getElementById(`question-${missing.key}`);
+      field?.scrollIntoView?.({ block: "center" });
+      field?.focus();
+      return;
+    }
     const current = await save();
     if (current === null) return;
     setBusy(true);
