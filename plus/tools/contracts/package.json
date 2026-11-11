@@ -20,7 +20,9 @@
     "graph": "pnpm run build && node dist/graph/cli.js graph",
     "graph:check": "pnpm run build && node dist/graph/cli.js graph --check",
     "impact": "pnpm run build && node dist/graph/cli.js impact",
-    "readiness": "tsx src/harness/readiness-cli.ts"
+    "readiness": "tsx src/harness/readiness-cli.ts",
+    "audit": "tsx src/audit/cli.ts",
+    "audit:check": "tsx src/audit/cli.ts --check"
   },
   "dependencies": {
     "@artflow-plus/contracts": "workspace:*",
