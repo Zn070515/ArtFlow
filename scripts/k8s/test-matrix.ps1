@@ -178,7 +178,7 @@ function Test-T10 {
   $me = Invoke-Curl -Path "/api/auth/me" -CookieJar $jar
   if ($me -ne "200") { throw "authenticated me=$me" }
 
-  $upgrade = & curl.exe -k -s -i -N --http1.1 --max-time 10 --resolve "artflow.local:30443:$($script:ProxyNode)" -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" "$($script:ProxyUrl)/api/realtime"
+  $upgrade = & curl.exe -k -s -i -N --http1.1 --max-time 10 --resolve "artflow.local:30443:$($script:ProxyNode)" -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" "$($script:ProxyUrl)/api/realtime" # gitleaks:allow (RFC 6455 example nonce, not a secret)
   $upgradeText = ($upgrade -join "`n")
   if ($upgradeText -notmatch "101") { throw "websocket upgrade failed: $upgradeText" }
 
