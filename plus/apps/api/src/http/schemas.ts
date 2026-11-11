@@ -220,6 +220,14 @@ export const SubmitBody = Type.Object(
   { additionalProperties: false },
 );
 
+export const ReopenRosterBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    reason: Type.String({ minLength: 1, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);
+
 export const ReviewRegistrationBody = Type.Object(
   {
     expectedRevision: Type.Integer({ minimum: 0 }),

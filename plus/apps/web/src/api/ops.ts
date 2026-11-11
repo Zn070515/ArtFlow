@@ -105,3 +105,16 @@ export function finalizeRoster(
   });
 }
 
+export function reopenRoster(
+  activityId: string,
+  commandId: string,
+  expectedRevision: number,
+  reason: string,
+): Promise<OpsRoster> {
+  return apiFetch<OpsRoster>(`/api/activities/${activityId}/roster/reopen`, {
+    method: "POST",
+    headers: { "idempotency-key": commandId },
+    body: JSON.stringify({ expectedRevision, reason }),
+  });
+}
+

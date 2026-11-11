@@ -1,7 +1,7 @@
 import type { ApiContext } from "../http/context.js";
 import { DomainError } from "@artflow-plus/domain";
-import { attachMaterialContent, finalizeRoster, getMyRegistration, getRegistrationDetail, getRosterForReview, issueSupplementGrant, listRegistrationsForReview, readMaterialContent, readMaterialForActor, reviewMaterial, reviewRegistration, saveRegistrationAnswer, startRegistration, submitRegistration, uploadMaterial } from "@artflow-plus/runtime";
-import { ActivityParams, AnswerBody, MaterialBody, MaterialParams, RegistrationBody, RegistrationMaterialParams, RegistrationParams, ReviewMaterialBody, ReviewRegistrationBody, SubmitBody } from "../http/schemas.js";
+import { attachMaterialContent, finalizeRoster, getMyRegistration, getRegistrationDetail, getRosterForReview, issueSupplementGrant, listRegistrationsForReview, readMaterialContent, readMaterialForActor, reopenRoster, reviewMaterial, reviewRegistration, saveRegistrationAnswer, startRegistration, submitRegistration, uploadMaterial } from "@artflow-plus/runtime";
+import { ActivityParams, AnswerBody, MaterialBody, MaterialParams, RegistrationBody, RegistrationMaterialParams, RegistrationParams, ReopenRosterBody, ReviewMaterialBody, ReviewRegistrationBody, SubmitBody } from "../http/schemas.js";
 import { requireIdempotency } from "../http/helpers.js";
 
 export function registerRegistrationRoutes(ctx: ApiContext): void {
@@ -182,6 +182,23 @@ export function registerRegistrationRoutes(ctx: ApiContext): void {
         commandId,
         activityId: id,
         expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/roster/reopen",
+    { schema: { params: ActivityParams, body: ReopenRosterBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as { expectedRevision: number; reason: string };
+      const outcome = await reopenRoster(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        expectedRevision: body.expectedRevision,
+        reason: body.reason,
       });
       return reply.status(outcome.status).send(outcome.body);
     },

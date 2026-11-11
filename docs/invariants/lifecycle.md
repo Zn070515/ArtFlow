@@ -210,6 +210,14 @@ supplement 被误当作重新报名。
 `registration.submit` 都在锁内读取 roster；`final` 后三者一律返回
 `ROSTER_FINAL`。只有 `registration.supplement.*` 的显式补交 seam 例外。
 
+**2026-11-11 狗粮走查补强**：`registration.roster.finalize` 在事务内统计
+`approved` 与待审核（`submitted`/`need_supplement`）数量。没有已通过报名返回
+`ROSTER_EMPTY`；仍有待审核报名返回 `ROSTER_HAS_PENDING`（details 带
+`pendingCount`）。两者都 fail closed，因为 final 会立即冻结审核，投影延迟时
+“定稿 0 人”会把已提交报名永久卡住。recovery 是受控的
+`registration.roster.reopen`（需要 reason、写 `RosterReopened` 事件、沿用
+finalize 权限），不允许直接改库。
+
 ---
 
 ## LIFE-10 材料字节就绪前不得切换 current

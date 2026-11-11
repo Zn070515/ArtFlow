@@ -180,6 +180,21 @@ export async function listApprovedRegistrationCount(
   return result.rows[0]?.count ?? 0;
 }
 
+/**
+ * Submissions that still need a staff decision. Finalizing while any exist
+ * would freeze them permanently, because review is refused on a final roster.
+ */
+export async function listPendingRegistrationCount(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<number> {
+  const result = await sql<{ count: number }>`
+    select count(*)::int as count from registration
+     where activity_id = ${activityId} and status in ('submitted', 'need_supplement')
+  `.execute(db);
+  return result.rows[0]?.count ?? 0;
+}
+
 export async function listApprovedParticipantIds(
   db: Kysely<Database>,
   activityId: string,

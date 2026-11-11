@@ -60,6 +60,19 @@ function OpsActivityContent() {
     return <p className="form-error" role="alert">当前账号不能访问 Ops。</p>;
   }
   const activity = activities.data?.find((item) => item.id === activityId);
+  // The roster and registration list load independently. Finalization must not
+  // be offered against a projection that has not arrived yet, so the summary
+  // stays `null` (and the control stays blocked) until registrations resolve.
+  const rosterSummary =
+    registrations.data === undefined
+      ? null
+      : {
+          approved: registrations.data.filter((registration) => registration.status === "approved").length,
+          pending: registrations.data.filter(
+            (registration) =>
+              registration.status === "submitted" || registration.status === "need_supplement",
+          ).length,
+        };
 
   return (
     <section className="ops-page">
@@ -106,7 +119,7 @@ function OpsActivityContent() {
             <p className="form-error" role="alert">名单状态暂时无法加载。</p>
           </section>
         ) : (
-          <RosterCard activityId={activityId} roster={roster.data!} />
+          <RosterCard activityId={activityId} roster={roster.data!} summary={rosterSummary} />
         )}
         {activity?.enabledCapabilities.includes("grouping") &&
         (session?.actor.permissions.includes("grouping.manage") ?? false) ? (

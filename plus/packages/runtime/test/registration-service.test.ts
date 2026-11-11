@@ -27,6 +27,7 @@ import {
   finalizeRoster,
   getMyRegistration,
   prepareCompetitionRound,
+  reopenRoster,
   reviewMaterial,
   reviewRegistration,
   saveRegistrationAnswer,
@@ -93,6 +94,42 @@ async function uploadWithContent(
     materialId: uploaded.body.id,
     bytes: audioBytes(input.byteLength),
   });
+}
+
+async function submitForReview(
+  activityId: string,
+  actor: ActorContext,
+  suffix: string,
+): Promise<string> {
+  const started = await startRegistration(db, deps(actor), {
+    commandId: `start-${suffix}`,
+    activityId,
+    participantId: actor.actorId,
+  });
+  const answered = await saveRegistrationAnswer(db, deps(actor), {
+    commandId: `answer-${suffix}`,
+    activityId,
+    registrationId: started.body.id,
+    expectedRevision: 0,
+    questionKey: "name",
+    value: `name-${suffix}`,
+  });
+  await uploadWithContent(actor, {
+    commandId: `upload-${suffix}`,
+    activityId,
+    registrationId: started.body.id,
+    questionKey: "audio",
+    originalName: "song.mp3",
+    contentType: "audio/mpeg",
+    byteLength: 100,
+  });
+  await submitRegistration(db, deps(actor), {
+    commandId: `submit-${suffix}`,
+    activityId,
+    registrationId: started.body.id,
+    expectedRevision: answered.body.revision,
+  });
+  return started.body.id;
 }
 
 const questionnaireArtifact = {
@@ -364,6 +401,15 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     });
     const second: ActorContext = { ...participant, actorId: "student-2" };
     const secondRegistration = await submitFor(second, "roster-second");
+    // Every submission must have a decision before the roster can be frozen.
+    const rejected = await reviewRegistration(db, deps(staff), {
+      commandId: "reject-roster-second",
+      activityId,
+      registrationId: secondRegistration,
+      expectedRevision: 2,
+      status: "rejected",
+      note: "not selected",
+    });
     const roster = await finalizeRoster(db, deps(staff), {
       commandId: "finalize-roster-lock",
       activityId,
@@ -376,12 +422,112 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       commandId: "review-after-final",
       activityId,
       registrationId: secondRegistration,
-      expectedRevision: 2,
+      expectedRevision: rejected.body.revision,
       status: "approved",
       note: "late",
     })).rejects.toMatchObject({ code: "ROSTER_FINAL" });
     expect(await readEventsSince(db, { activityId, after: 0, limit: 100 })).toEqual(before);
     expect(await listApprovedParticipantIds(db, activityId)).toEqual([participant.actorId]);
+  });
+
+  it("refuses to finalize an empty roster", async () => {
+    const activityId = await seedActivity();
+
+    await expect(finalizeRoster(db, deps(staff), {
+      commandId: "finalize-empty",
+      activityId,
+      expectedRevision: 0,
+    })).rejects.toMatchObject({ code: "ROSTER_EMPTY" });
+  });
+
+  it("refuses to finalize while a submission still awaits review", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-pending",
+      activityId,
+      participantId: participant.actorId,
+    });
+    const answered = await saveRegistrationAnswer(db, deps(participant), {
+      commandId: "answer-pending",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: 0,
+      questionKey: "name",
+      value: "Pending",
+    });
+    await uploadWithContent(participant, {
+      commandId: "upload-pending",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "song.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 100,
+    });
+    await submitRegistration(db, deps(participant), {
+      commandId: "submit-pending",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: answered.body.revision,
+    });
+
+    await expect(finalizeRoster(db, deps(staff), {
+      commandId: "finalize-pending",
+      activityId,
+      expectedRevision: 0,
+    })).rejects.toMatchObject({ code: "ROSTER_HAS_PENDING", details: { pendingCount: 1 } });
+  });
+
+  it("reopens a final roster and re-enables review", async () => {
+    const activityId = await seedActivity();
+    const first: ActorContext = { ...participant, actorId: "student-first" };
+    const submitted = await submitForReview(activityId, first, "reopen-first");
+    await reviewRegistration(db, deps(staff), {
+      commandId: "review-reopen-first",
+      activityId,
+      registrationId: submitted,
+      expectedRevision: 2,
+      status: "approved",
+      note: "ok",
+    });
+    const finalized = await finalizeRoster(db, deps(staff), {
+      commandId: "finalize-reopen",
+      activityId,
+      expectedRevision: 0,
+    });
+
+    await expect(reopenRoster(db, deps(staff), {
+      commandId: "reopen-requires-reason",
+      activityId,
+      expectedRevision: finalized.body.revision,
+      reason: "   ",
+    })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+    const reopened = await reopenRoster(db, deps(staff), {
+      commandId: "reopen-roster",
+      activityId,
+      expectedRevision: finalized.body.revision,
+      reason: "roster finalized before a late submission",
+    });
+    expect(reopened.body).toMatchObject({ status: "unknown", revision: finalized.body.revision + 1 });
+
+    const late: ActorContext = { ...participant, actorId: "student-late" };
+    const lateRegistration = await submitForReview(activityId, late, "reopen-late");
+    const approved = await reviewRegistration(db, deps(staff), {
+      commandId: "review-after-reopen",
+      activityId,
+      registrationId: lateRegistration,
+      expectedRevision: 2,
+      status: "approved",
+      note: "late but valid",
+    });
+    expect(approved.body.status).toBe("approved");
+    const events = await readEventsSince(db, { activityId, after: 0, limit: 200 });
+    expect(events.map((event) => event.type)).toEqual(expect.arrayContaining([
+      "RosterFinalized",
+      "RosterReopened",
+      "RegistrationReviewed",
+    ]));
   });
 
   it("refuses to start, answer, or submit after the roster is final", async () => {
@@ -391,8 +537,48 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       activityId,
       participantId: participant.actorId,
     });
+    // A final roster must contain at least one approved participant, so the
+    // freeze is tested with a real approved registration rather than an empty
+    // roster (which the domain now refuses outright).
+    const winner: ActorContext = { ...participant, actorId: "student-winner" };
+    const started = await startRegistration(db, deps(winner), {
+      commandId: "start-winner",
+      activityId,
+      participantId: winner.actorId,
+    });
+    const answered = await saveRegistrationAnswer(db, deps(winner), {
+      commandId: "answer-winner",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: 0,
+      questionKey: "name",
+      value: "Winner",
+    });
+    await uploadWithContent(winner, {
+      commandId: "upload-winner",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "song.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 100,
+    });
+    const submitted = await submitRegistration(db, deps(winner), {
+      commandId: "submit-winner",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: answered.body.revision,
+    });
+    await reviewRegistration(db, deps(staff), {
+      commandId: "review-winner",
+      activityId,
+      registrationId: started.body.id,
+      expectedRevision: submitted.body.revision,
+      status: "approved",
+      note: "ok",
+    });
     await finalizeRoster(db, deps(staff), {
-      commandId: "finalize-empty-roster",
+      commandId: "finalize-roster-with-winner",
       activityId,
       expectedRevision: 0,
     });
