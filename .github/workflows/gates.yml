@@ -86,6 +86,11 @@ jobs:
       - name: Run structural gates
         run: uv run pytest tests/gates -q
 
+      - name: Audit test coverage gaps
+        # The baseline is a ratchet: new gaps fail, and a fixed gap must have
+        # its accepted entry removed. Do not update it silently in CI.
+        run: pnpm -C plus --filter @artflow-plus/contract-tools run audit:check
+
       - name: Validate golden fixtures
         run: uv run python tests/golden/validate_fixtures.py
 
