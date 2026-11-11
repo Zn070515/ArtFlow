@@ -192,8 +192,22 @@ export function finalizeRoster(
   if (state.revision !== expectedRevision) fail("STALE_REVISION", "The roster changed since it was read.");
   if (state.status !== "unknown") fail("INVALID_TRANSITION", "The roster is already final.");
   if (!Number.isInteger(approvedCount) || approvedCount < 0) fail("INVALID_INPUT", "approvedCount must be a non-negative integer.");
+  // An empty final roster freezes every later review, so it is never a valid
+  // state to enter. Organizers must approve at least one participant.
+  if (approvedCount === 0) fail("ROSTER_EMPTY", "The roster has no approved participants.");
   if (!finalizedAt.trim()) fail("INVALID_INPUT", "finalizedAt is required.");
   return deepFreeze({ status: "final", revision: state.revision + 1, approvedCount, finalizedAt });
+}
+
+/**
+ * Reopen a final roster. This is the controlled recovery path for a roster
+ * finalized by mistake: it returns the roster to `unknown` at a new revision,
+ * which re-enables review without deleting the roster row or its history.
+ */
+export function reopenRoster(state: RosterState, expectedRevision: number): RosterUnknown {
+  if (state.revision !== expectedRevision) fail("STALE_REVISION", "The roster changed since it was read.");
+  if (state.status !== "final") fail("INVALID_TRANSITION", "The roster is not final.");
+  return deepFreeze({ status: "unknown", revision: state.revision + 1 });
 }
 
 export function requireFinalRoster(state: RosterState): RosterFinal {
@@ -214,11 +228,12 @@ export const registrationCapability: CapabilityRegistration = deepFreeze({
       "registration.submit",
       "registration.review",
       "registration.roster.finalize",
+      "registration.roster.reopen",
       "registration.supplement.issue",
       "registration.supplement.submit",
     ],
     queries: ["registration.read", "registration.roster"],
-    events: ["RegistrationStarted", "RegistrationSubmitted", "RegistrationReviewed", "RosterFinalized"],
+    events: ["RegistrationStarted", "RegistrationSubmitted", "RegistrationReviewed", "RosterFinalized", "RosterReopened"],
     permissions: ["registration.manage", "registration.review", "registration.roster.finalize"],
     surfaces: ["studio", "ops", "portal", "live"],
     scopes: ["registration", "checkin"],

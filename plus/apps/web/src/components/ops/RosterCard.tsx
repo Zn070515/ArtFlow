@@ -1,48 +1,181 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
-import { finalizeRoster, type OpsRoster } from "../../api/ops.js";
+import { ApiError } from "../../api/client.js";
+import { finalizeRoster, reopenRoster, type OpsRoster } from "../../api/ops.js";
 
+export interface RosterRegistrationSummary {
+  readonly approved: number;
+  readonly pending: number;
+}
+
+function pendingCountFrom(error: ApiError): number | null {
+  if (typeof error.details !== "object" || error.details === null) return null;
+  const pendingCount = (error.details as { pendingCount?: unknown }).pendingCount;
+  return typeof pendingCount === "number" ? pendingCount : null;
+}
+
+function rosterErrorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) return "操作失败，请稍后重试";
+  if (error.code === "ROSTER_HAS_PENDING") {
+    const pending = pendingCountFrom(error);
+    return pending === null
+      ? "还有报名待审核，先审核完再定稿。"
+      : `还有 ${pending} 条报名待审核，先审核完再定稿。`;
+  }
+  if (error.code === "ROSTER_EMPTY") return "还没有已通过的报名，不能定稿空名单。";
+  if (error.code === "ROSTER_FINAL") return "名单已定稿；如需修改，请先重新打开名单。";
+  if (error.code === "STALE_REVISION") return "名单已被其他人更新，请刷新后重试。";
+  return error.message;
+}
+
+/**
+ * Roster finalization is a one-way freeze in the domain. The UI must therefore
+ * (a) refuse to offer it while registrations are still loading or waiting for
+ * review, (b) describe exactly what will be locked, and (c) keep a controlled
+ * reopen path so a mistaken finalization is recoverable.
+ */
 export function RosterCard({
   activityId,
   roster,
+  summary,
 }: {
   readonly activityId: string;
   readonly roster: OpsRoster;
+  /** `null` while the registration list is still loading or failed. */
+  readonly summary: RosterRegistrationSummary | null;
 }) {
   const queryClient = useQueryClient();
-  const mutation = useMutation({
+  const [confirming, setConfirming] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const [reason, setReason] = useState("");
+  const finalize = useMutation({
     mutationFn: () => finalizeRoster(activityId, crypto.randomUUID(), roster.revision),
     onSuccess: (saved) => {
+      setConfirming(false);
       queryClient.setQueryData(["ops-roster", activityId], saved);
       void queryClient.invalidateQueries({ queryKey: ["ops-registrations", activityId] });
     },
   });
+  const reopen = useMutation({
+    mutationFn: () =>
+      reopenRoster(activityId, crypto.randomUUID(), roster.revision, reason.trim()),
+    onSuccess: (saved) => {
+      setReopening(false);
+      setReason("");
+      queryClient.setQueryData(["ops-roster", activityId], saved);
+      void queryClient.invalidateQueries({ queryKey: ["ops-registrations", activityId] });
+    },
+  });
+
+  const pending = summary?.pending ?? 0;
+  const approved = summary?.approved ?? 0;
+  const blockedReason =
+    summary === null
+      ? "正在读取最新报名，加载完成后才能定稿。"
+      : pending > 0
+        ? `还有 ${pending} 条报名待审核，先审核完再定稿。`
+        : approved === 0
+          ? "还没有已通过的报名，不能定稿空名单。"
+          : null;
+  const error = finalize.error ?? reopen.error;
 
   return (
     <section className="ops-card">
       <p className="eyebrow">ROSTER · 名单</p>
       <h2>名单状态</h2>
       {roster.status === "final" ? (
-        <p className="state-copy">
-          已定稿 · {roster.approvedCount} 人 ·{" "}
-          {new Date(roster.finalizedAt).toLocaleString("zh-CN")}
-        </p>
-      ) : (
         <>
-          <p className="state-copy">尚未定稿。定稿后将锁定通过名单。</p>
+          <p className="state-copy">
+            已定稿 · {roster.approvedCount} 人 ·{" "}
+            {new Date(roster.finalizedAt).toLocaleString("zh-CN")}
+          </p>
+          <p className="state-copy">定稿后审核已冻结；确需修改时先重新打开名单。</p>
+          {reopening ? (
+            <div className="session-controls">
+              <label className="field">
+                <span>重新打开的原因</span>
+                <textarea
+                  rows={2}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="例如：误把名单定稿成 0 人，需要重新审核报名"
+                />
+              </label>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={reopen.isPending || reason.trim().length === 0}
+                onClick={() => reopen.mutate()}
+              >
+                {reopen.isPending ? "正在重新打开…" : "确认重新打开"}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={reopen.isPending}
+                onClick={() => {
+                  setReopening(false);
+                  setReason("");
+                }}
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setReopening(true)}
+            >
+              重新打开名单
+            </button>
+          )}
+        </>
+      ) : confirming ? (
+        <div className="session-controls">
+          <p className="state-copy">
+            将定稿 {approved} 名已通过者。定稿后审核会被冻结，未审核的报名必须先处理。
+          </p>
           <button
             className="primary-button"
             type="button"
-            disabled={mutation.isPending}
-            onClick={() => mutation.mutate()}
+            disabled={finalize.isPending}
+            onClick={() => finalize.mutate()}
           >
-            {mutation.isPending ? "正在定稿…" : "定稿名单"}
+            {finalize.isPending ? "正在定稿…" : `确认定稿 ${approved} 人`}
           </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={finalize.isPending}
+            onClick={() => setConfirming(false)}
+          >
+            取消
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="state-copy">
+            {summary === null
+              ? "正在读取最新报名…"
+              : `尚未定稿。已通过 ${approved} 人，待审核 ${pending} 人。`}
+          </p>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={blockedReason !== null}
+            title={blockedReason ?? undefined}
+            onClick={() => setConfirming(true)}
+          >
+            定稿名单
+          </button>
+          {blockedReason === null ? null : <p className="state-copy">{blockedReason}</p>}
         </>
       )}
-      {mutation.error === null ? null : (
+      {error === null ? null : (
         <p className="form-error" role="alert">
-          {mutation.error instanceof Error ? mutation.error.message : "定稿失败，请稍后重试"}
+          {rosterErrorMessage(error)}
         </p>
       )}
     </section>

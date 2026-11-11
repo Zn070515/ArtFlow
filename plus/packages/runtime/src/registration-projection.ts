@@ -64,7 +64,8 @@ export function applyRegistrationEvent(
     event.type !== "RegistrationReviewed" &&
     event.type !== "MaterialUploaded" &&
     event.type !== "MaterialReviewed" &&
-    event.type !== "RosterFinalized"
+    event.type !== "RosterFinalized" &&
+    event.type !== "RosterReopened"
   ) {
     return state;
   }
@@ -137,6 +138,14 @@ export function applyRegistrationEvent(
         approvedCount: numberField(payload, "approvedCount"),
         finalizedAt: stringField(payload, "finalizedAt"),
       },
+    });
+  }
+
+  if (event.type === "RosterReopened") {
+    if (state.roster.status === "unknown" && state.roster.revision >= event.revision) return state;
+    return deepFreeze({
+      ...state,
+      roster: { status: "unknown", revision: event.revision },
     });
   }
 

@@ -876,6 +876,39 @@ input {
   color: var(--bone-dim);
 }
 
+.definition-summary {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.definition-summary-section h3 {
+  margin: 0 0 4px;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.definition-summary-section ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.definition-raw {
+  margin-top: 16px;
+}
+
+.definition-raw summary {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
 .release-list,
 .session-list {
   margin: 1rem 0;
@@ -1026,7 +1059,7 @@ a.primary-button {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;
   padding: 0 0 28px;
-  color: rgba(245, 239, 230, 0.42);
+  color: var(--bone-subtle);
   font-size: 0.72rem;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -1086,7 +1119,7 @@ a.primary-button {
 
 .footnote {
   margin: 1.6rem 0 0;
-  color: rgba(245, 239, 230, 0.38);
+  color: var(--bone-subtle);
   font-size: 0.76rem;
   letter-spacing: 0.04em;
 }
@@ -1121,7 +1154,7 @@ a.primary-button {
 }
 
 .code-field input::placeholder {
-  color: rgba(245, 239, 230, 0.38);
+  color: var(--bone-subtle);
 }
 
 .code-field button {
@@ -1640,6 +1673,7 @@ a.primary-button {
   background: transparent;
   color: var(--color-text-muted);
   font-size: 0.82rem;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
@@ -2094,6 +2128,24 @@ a.primary-button {
 
   .console-page-title {
     font-size: 1.45rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .console-topbar {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  /* At 320px the brand, workspace label, account action and menu cannot all
+     fit; the workspace label is the least actionable of the four. */
+  .console-context,
+  .console-brand-copy small {
+    display: none;
+  }
+
+  .console-account-link {
+    padding: 0 8px;
   }
 }
 

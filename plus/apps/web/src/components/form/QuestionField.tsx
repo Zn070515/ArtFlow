@@ -25,6 +25,8 @@ export function QuestionField({
         {question.required ? <em className="required-mark"> *</em> : null}
       </span>
       <textarea
+        id={`question-${question.key}`}
+        name={question.key}
         rows={2}
         value={value}
         disabled={disabled}

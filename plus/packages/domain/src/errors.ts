@@ -7,6 +7,8 @@ export type DomainErrorCode =
   | "MATERIAL_NOT_ALLOWED"
   | "ROSTER_UNKNOWN"
   | "ROSTER_FINAL"
+  | "ROSTER_EMPTY"
+  | "ROSTER_HAS_PENDING"
   | "STALE_REVISION"
   | "INVALID_TRANSITION"
   | "COMMAND_ID_CONFLICT"
@@ -126,6 +128,12 @@ export class DomainError extends Error {
   constructor(
     readonly code: DomainErrorCode,
     message: string,
+    /**
+     * Structured, non-secret context a UI can localize with (for example the
+     * question key that blocked a submission). It is optional so every
+     * existing refusal keeps its single-argument shape.
+     */
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = "DomainError";

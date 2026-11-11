@@ -74,6 +74,9 @@ describeDb("registration command contract", () => {
     const adapter = createRegistrationContractAdapter(context().db, clock);
     await adapter.setup();
     await adapter.execute("start", 0);
+    await adapter.execute("answer", 0);
+    await adapter.execute("submit", 1);
+    await adapter.execute("review", 2);
     await finalizeRoster(context().db, clock.deps(adapter.staff), {
       commandId: `contract-roster-final-${clock.newEventId()}`,
       activityId: adapter.activityId,

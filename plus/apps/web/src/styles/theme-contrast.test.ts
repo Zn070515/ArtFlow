@@ -47,10 +47,51 @@ function expectReadableTheme(tokens: string, theme: "signal" | "violet"): void {
   expect(contrast(focus, surface), `${theme}: focus on surface`).toBeGreaterThanOrEqual(3);
 }
 
+function rgbaValue(css: string, name: string): { red: number; green: number; blue: number; alpha: number } {
+  const match = css.match(
+    new RegExp(`--${name}:\\s*rgba\\((\\d+),\\s*(\\d+),\\s*(\\d+),\\s*([\\d.]+)\\)`),
+  );
+  expect(match, `missing rgba token --${name}`).not.toBeNull();
+  return {
+    red: Number(match?.[1]),
+    green: Number(match?.[2]),
+    blue: Number(match?.[3]),
+    alpha: Number(match?.[4]),
+  };
+}
+
+function compositeOver(
+  foreground: { red: number; green: number; blue: number; alpha: number },
+  backgroundHex: string,
+): string {
+  const background = {
+    red: Number.parseInt(backgroundHex.slice(1, 3), 16),
+    green: Number.parseInt(backgroundHex.slice(3, 5), 16),
+    blue: Number.parseInt(backgroundHex.slice(5, 7), 16),
+  };
+  const blend = (front: number, back: number): number =>
+    Math.round(front * foreground.alpha + back * (1 - foreground.alpha));
+  return `#${[blend(foreground.red, background.red), blend(foreground.green, background.green), blend(foreground.blue, background.blue)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
 describe("theme contrast", () => {
   it("meets readable text and control contrast thresholds", async () => {
     const tokens = await readFile(`${stylesDirectory}/tokens.css`, "utf8");
     expectReadableTheme(tokens, "signal");
     expectReadableTheme(tokens, "violet");
+  });
+
+  it("keeps the lowest-emphasis portal text above WCAG AA", async () => {
+    const tokens = await readFile(`${stylesDirectory}/tokens.css`, "utf8");
+    const global = await readFile(`${stylesDirectory}/global.css`, "utf8");
+    const root = tokens.slice(0, tokens.indexOf('[data-theme="afterglow"]'));
+    const violet = tokens.slice(tokens.indexOf('[data-theme="violet"]'));
+
+    expect(contrast(compositeOver(rgbaValue(root, "bone-subtle"), "#07070a"), "#07070a")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(compositeOver(rgbaValue(violet, "bone-subtle"), "#0b0916"), "#0b0916")).toBeGreaterThanOrEqual(4.5);
+    expect(global).toMatch(/\.footnote\s*\{[^}]*color:\s*var\(--bone-subtle\)/s);
+    expect(global).toMatch(/\.site-footer\s*\{[^}]*color:\s*var\(--bone-subtle\)/s);
   });
 });

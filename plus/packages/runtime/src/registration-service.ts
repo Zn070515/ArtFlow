@@ -9,6 +9,7 @@ import {
   insertRegistration,
   listApprovedRegistrationCount,
   listMaterials,
+  listPendingRegistrationCount,
   updateRegistration,
   upsertRoster,
 } from "@artflow-plus/db";
@@ -24,6 +25,7 @@ import {
   createRegistration,
   DomainError,
   finalizeRoster as finalizeRosterDomain,
+  reopenRoster as reopenRosterDomain,
   requirePermission,
   reviewRegistration as reviewRegistrationDomain,
   saveRegistrationAnswer as saveRegistrationAnswerDomain,
@@ -318,13 +320,19 @@ export async function submitRegistration(
         if (!question.required || question.type === "notice") continue;
         if (question.type === "file") {
           if (!materials.some((material) => material.questionKey === question.key && material.current)) {
-            throw new DomainError("INVALID_INPUT", `Required file question ${question.key} is incomplete.`);
+            throw new DomainError("INVALID_INPUT", `Required file question ${question.key} is incomplete.`, {
+              questionKey: question.key,
+              label: question.label,
+            });
           }
           continue;
         }
         const value = registration.answers[question.key];
         if (typeof value !== "string" || !value.trim()) {
-          throw new DomainError("INVALID_INPUT", `Required question ${question.key} is incomplete.`);
+          throw new DomainError("INVALID_INPUT", `Required question ${question.key} is incomplete.`, {
+            questionKey: question.key,
+            label: question.label,
+          });
         }
       }
       const next = submitRegistrationDomain(registration, input.expectedRevision);
@@ -432,6 +440,18 @@ export async function finalizeRoster(
       requireActive(activity);
       const roster = await getRosterForUpdate(trx, input.activityId);
       const approvedCount = await listApprovedRegistrationCount(trx, input.activityId);
+      // A final roster freezes review, so it may only be entered once every
+      // submission has a staff decision. Without this guard an Ops page that
+      // happened to read an empty projection could finalize a 0-person roster
+      // and permanently strand the submissions it had not loaded yet.
+      const pendingCount = await listPendingRegistrationCount(trx, input.activityId);
+      if (pendingCount > 0) {
+        throw new DomainError(
+          "ROSTER_HAS_PENDING",
+          "The roster still has submissions awaiting review.",
+          { pendingCount },
+        );
+      }
       const next = finalizeRosterDomain(roster, input.expectedRevision, approvedCount, deps.now());
       const saved = await upsertRoster(trx, input.activityId, next, input.expectedRevision);
       await appendEngineEvent(trx, deps, {
@@ -447,6 +467,59 @@ export async function finalizeRoster(
           finalizedAt: (saved as RosterFinal).finalizedAt,
           revision: saved.revision,
         },
+      });
+      return { body: saved };
+    },
+  );
+}
+
+export interface ReopenRosterInput {
+  readonly commandId: string;
+  readonly activityId: string;
+  readonly expectedRevision: number;
+  readonly reason: string;
+}
+
+/**
+ * Controlled recovery for a roster finalized by mistake. Reopening is its own
+ * audited command (with a required reason) so the reversal is visible in the
+ * event log instead of requiring direct database surgery.
+ */
+export async function reopenRoster(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: ReopenRosterInput,
+): Promise<CommandOutcome<StoredRoster>> {
+  const actor = runtimeActor(deps);
+  const reason = input.reason.trim();
+  if (!reason) throw new DomainError("INVALID_INPUT", "A reason is required to reopen the roster.");
+  return executeCommand(
+    db,
+    {
+      commandId: input.commandId,
+      activityId: input.activityId,
+      capability: "registration",
+      commandType: "registration.roster.reopen",
+      actor,
+      payload: { expectedRevision: input.expectedRevision, reason },
+    },
+    async (trx) => {
+      // Reopening is the inverse of finalization, so it reuses that authority.
+      requirePermission(actor, "registration.roster.finalize");
+      const activity = await getActivityForUpdate(trx, input.activityId);
+      if (activity === null) throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
+      requireActive(activity);
+      const roster = await getRosterForUpdate(trx, input.activityId);
+      const next = reopenRosterDomain(roster, input.expectedRevision);
+      const saved = await upsertRoster(trx, input.activityId, next, input.expectedRevision);
+      await appendEngineEvent(trx, deps, {
+        type: "RosterReopened",
+        activityId: input.activityId,
+        aggregateType: "roster",
+        aggregateId: input.activityId,
+        revision: saved.revision,
+        capability: "registration",
+        payload: { activityId: input.activityId, reason, revision: saved.revision },
       });
       return { body: saved };
     },

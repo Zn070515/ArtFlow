@@ -25,6 +25,11 @@
       "eventType": "VoteSessionClosed",
       "consumer": "packages/runtime/src/outbox-relay.ts#applyToLiveProjection",
       "reason": "The voting live projection is maintained by the relay, not by the command."
+    },
+    {
+      "eventType": "RosterReopened",
+      "consumer": "packages/runtime/src/registration-projection.ts#applyRegistrationEvent",
+      "reason": "The registration projection reducer is the declared consumer seam for roster events; it must return a reopened roster to unknown."
     }
   ],
   "commands": [

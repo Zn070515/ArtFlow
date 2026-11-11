@@ -9,6 +9,7 @@ import {
   createRegistration,
   defaultCapabilityRegistry,
   finalizeRoster,
+  reopenRoster,
   instantiateActivityPack,
   reviewRegistration,
   saveRegistrationAnswer,
@@ -90,9 +91,18 @@ it("keeps registration lifecycle transitions explicit", () => {
   expect(() => submitRegistration(state, 5)).toThrowError(/changed since/);
 });
 
-it("represents a not-yet-final roster as unknown rather than zero", () => {
-  const roster = finalizeRoster({ status: "unknown", revision: 0 }, 0, 0, "2026-10-19T10:00:00Z");
-  expect(roster).toMatchObject({ status: "final", approvedCount: 0 });
+it("refuses to finalize an empty roster", () => {
+  expect(() =>
+    finalizeRoster({ status: "unknown", revision: 0 }, 0, 0, "2026-10-19T10:00:00Z"),
+  ).toThrowError(/no approved participants/);
+});
+
+it("finalizes an approved roster and reopens it at a new revision", () => {
+  const roster = finalizeRoster({ status: "unknown", revision: 0 }, 0, 1, "2026-10-19T10:00:00Z");
+  expect(roster).toMatchObject({ status: "final", approvedCount: 1, revision: 1 });
+
+  expect(() => reopenRoster(roster, 0)).toThrowError(/changed since/);
+  expect(reopenRoster(roster, 1)).toMatchObject({ status: "unknown", revision: 2 });
 });
 
 it("default Singer Pack instantiates with all M4 capabilities", () => {

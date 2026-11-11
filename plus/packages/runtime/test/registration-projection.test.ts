@@ -26,4 +26,21 @@ describe("registration projection", () => {
     expect(() => applyRegistrationEvent(state, event("ProbeRecorded", 1))).not.toThrow();
     expect(applyRegistrationEvent(state, event("ProbeRecorded", 1))).toEqual(state);
   });
+
+  it("returns a reopened roster to unknown", () => {
+    const finalized = applyRegistrationEvent(
+      emptyRegistrationProjection("activity-1"),
+      {
+        ...event("RosterFinalized", { approvedCount: 3, finalizedAt: "2026-11-11T10:00:00Z" }),
+        revision: 1,
+      },
+    );
+    expect(finalized.roster).toMatchObject({ status: "final", approvedCount: 3 });
+
+    const reopened = applyRegistrationEvent(finalized, {
+      ...event("RosterReopened", { reason: "mistake" }),
+      revision: 2,
+    });
+    expect(reopened.roster).toEqual({ status: "unknown", revision: 2 });
+  });
 });

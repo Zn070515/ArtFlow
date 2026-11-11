@@ -122,8 +122,11 @@ export function errorCode(error: unknown): string | null {
 }
 
 export function errorDetails(error: unknown): unknown {
-  if (typeof error === "object" && error !== null && "issues" in error) {
-    return (error as { issues: unknown }).issues;
+  if (typeof error === "object" && error !== null) {
+    if ("issues" in error) return (error as { issues: unknown }).issues;
+    // Domain refusals may carry UI-localizable context (a question key, a
+    // pending count). It is never a secret; the error code still decides.
+    if ("details" in error) return (error as { details: unknown }).details;
   }
   return undefined;
 }

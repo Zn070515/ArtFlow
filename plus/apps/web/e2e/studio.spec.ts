@@ -30,4 +30,14 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   await expect(page.getByText(/rehearsal · running/)).toBeVisible();
   await page.getByRole("button", { name: "关闭" }).first().click();
   await expect(page.getByText(/rehearsal · closed/)).toBeVisible();
+
+  // A list row must navigate to the detail route (regression: rows rendered
+  // the right href but clicks did not change the URL).
+  await page.goto("/studio");
+  await page.getByRole("link", { name: title, exact: true }).click();
+  await expect(page).toHaveURL(/\/studio\/act/);
+
+  await page.goto("/live");
+  await page.getByRole("link", { name: title, exact: true }).click();
+  await expect(page).toHaveURL(/\/live\/act/);
 });

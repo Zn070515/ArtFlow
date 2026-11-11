@@ -11,6 +11,27 @@ import {
 } from "../api/studio.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
+import { summarizeDefinition } from "../components/studio/definitionSummary.js";
+
+function SummarySection({
+  title,
+  items,
+}: {
+  readonly title: string;
+  readonly items: readonly string[];
+}) {
+  if (items.length === 0) return null;
+  return (
+    <section className="definition-summary-section">
+      <h3>{title}</h3>
+      <ul>
+        {items.map((item, index) => (
+          <li key={`${title}-${index}`}>{item}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 export function StudioNewPage() {
   return (
@@ -96,6 +117,8 @@ function StudioNewContent() {
     return <p className="form-error" role="alert">Pack 列表暂时无法加载。</p>;
   }
 
+  const summary = summarizeDefinition(preview?.definition, preview?.enabledCapabilities ?? []);
+
   return (
     <section className="studio-page">
       <header className="studio-header console-page-header">
@@ -156,13 +179,24 @@ function StudioNewContent() {
           <p className="eyebrow">PREVIEW</p>
           <h2 className="console-card-title">生成的组合</h2>
           {preview === null ? (
-            <p className="state-copy">点击“预览定义”查看 enabled capabilities 与生成的 Package。</p>
+            <p className="state-copy">点击“预览定义”查看启用的能力与规则摘要。</p>
           ) : (
             <>
               <p className="state-copy">
-                {preview.enabledCapabilities.join(", ")}
+                已启用：{preview.enabledCapabilities.join("、")}
               </p>
-              <pre className="preview-json">{JSON.stringify(preview.definition, null, 2)}</pre>
+              <div className="definition-summary">
+                <SummarySection title="报名字段" items={summary.registration} />
+                <SummarySection title="回合与评委" items={summary.rounds} />
+                <SummarySection title="评分方式" items={summary.scoring} />
+                <SummarySection title="材料限制" items={summary.materials} />
+                <SummarySection title="发布阶段" items={summary.publishing} />
+                <SummarySection title="投票" items={summary.voting} />
+              </div>
+              <details className="definition-raw">
+                <summary>高级：原始 JSON</summary>
+                <pre className="preview-json">{JSON.stringify(preview.definition, null, 2)}</pre>
+              </details>
             </>
           )}
         </section>
