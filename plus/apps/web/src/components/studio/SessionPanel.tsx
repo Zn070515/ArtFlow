@@ -18,7 +18,10 @@ export function SessionPanel({
 }) {
   const active = state.releases.find((release) => release.active);
   const [scope, setScope] = useState(active?.declaredScopes[0] ?? "");
-  const [mode, setMode] = useState<Mode>("rehearsal");
+  // test is the least consequential mode, so an unchanged form never starts a
+  // rehearsal or formal session by accident.
+  const [mode, setMode] = useState<Mode>("test");
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +36,7 @@ export function SessionPanel({
     setError(null);
     try {
       await startStudioSession(state.activity.id, crypto.randomUUID(), scope, mode);
+      setConfirming(false);
       onChanged();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "启动会话失败。");
@@ -64,7 +68,13 @@ export function SessionPanel({
         <div className="session-controls">
           <label className="field">
             <span>Scope</span>
-            <select value={scope} onChange={(event) => setScope(event.target.value)}>
+            <select
+              value={scope}
+              onChange={(event) => {
+                setScope(event.target.value);
+                setConfirming(false);
+              }}
+            >
               {active.declaredScopes.map((item) => (
                 <option key={item} value={item}>
                   {item}
@@ -74,20 +84,55 @@ export function SessionPanel({
           </label>
           <label className="field">
             <span>Mode</span>
-            <select value={mode} onChange={(event) => setMode(event.target.value as Mode)}>
+            <select
+              value={mode}
+              onChange={(event) => {
+                setMode(event.target.value as Mode);
+                setConfirming(false);
+              }}
+            >
               <option value="test">test</option>
               <option value="rehearsal">rehearsal</option>
               <option value="formal">formal</option>
             </select>
           </label>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={busy || scope === ""}
-            onClick={() => void start()}
-          >
-            启动会话
-          </button>
+          {confirming ? (
+            <div className="session-confirm" role="group" aria-label="确认启动会话">
+              <p className="state-copy">
+                将启动 {scope} · {mode} 会话。
+                {mode === "formal"
+                  ? " formal 会话会写入正式事实，不能当作彩排重复运行。"
+                  : mode === "rehearsal"
+                    ? " 彩排事实与正式事实分开保存。"
+                    : " test 只用于试跑，建议先确认流程。"}
+              </p>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={busy}
+                onClick={() => void start()}
+              >
+                {busy ? "正在启动…" : `确认启动 ${mode} 会话`}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirming(false)}
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <button
+              className="primary-button"
+              type="button"
+              disabled={busy || scope === ""}
+              onClick={() => setConfirming(true)}
+            >
+              启动会话
+            </button>
+          )}
         </div>
       )}
       {state.sessions.length === 0 ? null : (

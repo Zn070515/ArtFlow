@@ -24,6 +24,11 @@ export function LiveSessionPanel({
   const [error, setError] = useState<string | null>(null);
   const [entry, setEntry] = useState<{ readonly version: number; readonly url: string } | null>(null);
   const session = state.session;
+  const ticketingEnabled = state.activity.enabledCapabilities.includes("ticketing");
+  // Entry links are only claimable once a panel has created judge seats. Before
+  // that the link resolves to SEAT_UNAVAILABLE with no visible warning, so the
+  // control stays disabled and explains the prerequisite.
+  const seatsReady = state.rounds.some((round) => round.seats.length > 0);
 
   async function run(action: () => Promise<void>, fallback: string): Promise<void> {
     setBusy(true);
@@ -93,11 +98,23 @@ export function LiveSessionPanel({
           </button>
         </div>
       )}
-      {session === null ? null : (
+      {session === null || !ticketingEnabled ? null : (
         <div className="session-controls">
-          <button className="secondary-button" type="button" disabled={busy} onClick={() => void generateLink()}>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy || !seatsReady}
+            onClick={() => void generateLink()}
+          >
             生成评委入口链接
           </button>
+          {seatsReady ? (
+            <p className="state-copy">重新生成会让之前发出的旧链接失效。</p>
+          ) : (
+            <p className="state-copy">
+              先在回合里激活评委组；席位就绪前生成的链接无法被评委使用。
+            </p>
+          )}
         </div>
       )}
       {entry === null ? null : (
