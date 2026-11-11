@@ -119,6 +119,13 @@ export function findStartNodes(
   });
 }
 
+function markdownCell(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/\r\n|\r|\n/g, " ");
+}
+
 export function formatImpactReport(report: ImpactReport, title: string): string {
   const lines: string[] = [`# Consumer impact: ${title}`, ""];
   if (report.starts.length === 0) {
@@ -139,7 +146,7 @@ export function formatImpactReport(report: ImpactReport, title: string): string 
   for (const item of report.nodes) {
     if (report.starts.some((start) => start.id === item.node.id)) continue;
     lines.push(
-      `| ${item.node.kind} | ${item.node.name.replace(/\|/g, "\\|")} | ${item.node.file ?? ""} | ${item.node.line ?? ""} | ${item.direction} | ${item.depth} | ${item.via?.kind ?? ""} |`,
+      `| ${item.node.kind} | ${markdownCell(item.node.name)} | ${markdownCell(item.node.file ?? "")} | ${item.node.line ?? ""} | ${item.direction} | ${item.depth} | ${item.via?.kind ?? ""} |`,
     );
   }
   lines.push("");
