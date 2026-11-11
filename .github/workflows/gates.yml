@@ -59,7 +59,7 @@ jobs:
           version: 12.14.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: pnpm
@@ -90,6 +90,9 @@ jobs:
         # The baseline is a ratchet: new gaps fail, and a fixed gap must have
         # its accepted entry removed. Do not update it silently in CI.
         run: pnpm -C plus --filter @artflow-plus/contract-tools run audit:check
+
+      - name: Check documentation links and stale content
+        run: pwsh -NoProfile -File scripts/check_docs.ps1
 
       - name: Validate golden fixtures
         run: uv run python tests/golden/validate_fixtures.py
@@ -127,7 +130,7 @@ jobs:
           version: 12.14.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: pnpm

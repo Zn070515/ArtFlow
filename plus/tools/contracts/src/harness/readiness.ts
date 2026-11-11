@@ -40,12 +40,15 @@ export function checkPackReadiness(packs: readonly ActivityPack[]): ReadinessFin
       });
     }
 
-    if (definitions.competition !== undefined && definitions.ticketing === undefined) {
+    const ticketingAvailable =
+      definitions.ticketing !== undefined ||
+      pack.questions.some((question) => question.capability === "ticketing" && question.default);
+    if (definitions.competition !== undefined && !ticketingAvailable) {
       findings.push({
         pack: pack.identity,
         code: "JUDGING_WITHOUT_TICKETING",
         message:
-          "The pack defines competition judging but not ticketing; the Live judge-entry link has no credential capability.",
+          "The pack defines competition judging but neither defines ticketing nor enables it by default; the Live judge-entry link has no credential capability.",
       });
     }
 

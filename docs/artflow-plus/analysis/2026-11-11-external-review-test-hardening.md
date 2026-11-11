@@ -111,10 +111,11 @@ pnpm -C plus --filter @artflow-plus/contract-tools run graph:check
 - competition 是否同时提供 ticketing 或明确替代入口（#54）；
 - 暴露 voting 选项时是否有显式 voting definition / identity policy（#59）。
 
-首次运行发现 **6 条** finding：
+首次运行发现 **6 条** finding；PR #68 让 singer-competition 通过默认启用的
+ticketing 问题提供评委入口后，readiness 规则也同步接受“default-on ticketing
+question”作为有效路径，当前剩 **5 条**：
 
-- singer-competition：materials 无 file question、judging 无 ticketing、voting
-  identity 隐式；
+- singer-competition：materials 无 file question、voting identity 隐式；
 - stage-show：voting identity 隐式；
 - review-awards：judging 无 ticketing、voting identity 隐式。
 
@@ -129,18 +130,27 @@ pnpm -C plus --filter @artflow-plus/contract-tools run readiness
 
 ## 5. 后续加固优先级
 
+### 已关闭的产品缺口（2026-11-11 PR 处理）
+
+- #51：PR #66 把 Compose 的 PostgreSQL 18 数据卷改到 `/var/lib/postgresql`，
+  并在 `tests/gates/test_release_artifacts.py` 增加对应 gate。
+- #53：PR #67 在 README、开发基线和 `plus/README.md` 记录
+  `create-account` 开户步骤，并在登录页提示工作人员账号不在这里注册。
+- #54：PR #68 让 singer-competition 默认启用 ticketing；Live 可生成评委入口。
+- 缺口棘轮自动把已修复的 `deploy-manifest:compose.plus-db.volume-path` 与
+  `pack-readiness:singer-competition:JUDGING_WITHOUT_TICKETING` 标为 stale；
+  baseline 从 170 降到 168，pack findings 从 6 降到 5。
+
 ### P0：阻断发布
 
 1. **Organizer journey E2E**：一条浏览器旅程覆盖创建、发布、名单、评委入口/
-   代录、评分、排名、公示、关闭、归档。它应直接覆盖 #54、#60、#61。
+   代录、评分、排名、公示、关闭、归档。它应直接覆盖 #60、#61。
 2. **API boundary contract**：Idempotency-Key 长度、稳定错误码、永不透出
    SQLSTATE；覆盖 #63。复用 `assertAuthorization` / `assertAtomicSuccess` 的
    模式，但断言在 HTTP 层。
-3. **Deployment manifest gate**：Compose、k8s、开发基线的 PostgreSQL 18 挂载
-   路径一致；覆盖 #51。
-4. **Pack readiness strict**：先修 Pack 定义，再把 `readiness --strict` 接入 CI；
-   覆盖 #54、#55、#59。
-5. **Mode default contract**：任何能写 formal 的入口必须显式选择 mode；默认
+3. **Pack readiness strict**：先修剩余 Pack 定义（#55、#59），再把
+   `readiness --strict` 接入 CI。
+4. **Mode default contract**：任何能写 formal 的入口必须显式选择 mode；默认
    rehearsal 或拒绝；覆盖 #58。
 
 ### P1：可用性与一致性
