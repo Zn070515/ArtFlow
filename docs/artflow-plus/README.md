@@ -80,6 +80,9 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 前端视觉方向（Portal / Console 双壳） | [frontend-design-direction.md](frontend-design-direction.md) |
 | M7→M13.3 代码 review（high） | [reviews/2026-10-27-m7-m13-high-review.md](reviews/2026-10-27-m7-m13-high-review.md) |
 | 架构决策 | [architecture/adr](../architecture/adr/README.md) |
+| 契约测试与消费者故障注入任务书 | [specs/2026-11-11-contract-testing-program-design.md](specs/2026-11-11-contract-testing-program-design.md) |
+| 契约测试现状审核（P0） | [analysis/2026-11-11-contract-testing-audit.md](analysis/2026-11-11-contract-testing-audit.md) |
+| 契约测试实施计划 | [plans/2026-11-11-contract-testing-plan.md](plans/2026-11-11-contract-testing-plan.md) |
 | 领域模型 | [domains](../domains/) |
 | 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT） | [invariants](../invariants/README.md) |
 | 真实事故库 | [incidents](../incidents/) |
