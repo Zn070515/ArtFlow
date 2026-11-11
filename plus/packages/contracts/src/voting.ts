@@ -71,11 +71,18 @@ export const VotingCandidateSnapshotSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const VotingIdentityPolicySchema = Type.Union([
+  Type.Literal("browser"),
+  Type.Literal("ticket"),
+  Type.Literal("anonymous"),
+]);
+
 export const VotingSessionSnapshotSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 100 }),
     status: Type.Union([Type.Literal("open"), Type.Literal("closed")]),
     mode: Type.String({ minLength: 1, maxLength: 20 }),
+    identityPolicy: VotingIdentityPolicySchema,
     revision: Type.Integer({ minimum: 0 }),
     candidateCount: Type.Integer({ minimum: 0 }),
     candidates: Type.Array(VotingCandidateSnapshotSchema),
@@ -99,6 +106,7 @@ export const VotingSessionSnapshotSchema = Type.Object(
 export const VotingSessionsSnapshotSchema = Type.Object(
   {
     activityId: Type.String({ minLength: 1, maxLength: 100 }),
+    identityPolicy: Type.Optional(VotingIdentityPolicySchema),
     sessions: Type.Array(VotingSessionSnapshotSchema),
   },
   { additionalProperties: false },

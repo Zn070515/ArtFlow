@@ -19,6 +19,8 @@ import {
 import type { VoteResultCandidateView } from "../../api/voting.js";
 import { useRealtimeTopic } from "../../realtime/useRealtimeTopic.js";
 
+const BROWSER_IDENTITY_NOTICE = "本场观众票使用浏览器身份，换设备可以再投。";
+
 function humanError(error: unknown): string {
   const code = error instanceof ApiError ? error.code : "";
   if (code === "VOTE_SESSION_NOT_OPEN") return "投票场次还没有关闭。";
@@ -102,6 +104,7 @@ export function VotingCard(props: {
   });
 
   const sessions = sessionsQuery.data?.sessions ?? [];
+  const releaseUsesBrowserIdentity = sessionsQuery.data?.identityPolicy === "browser";
   const executions = executionsQuery.data ?? [];
   const stages = publishingQuery.data?.stages ?? [];
   const effectiveStage = stages.some((stage) => stage.key === stageKey)
@@ -215,6 +218,9 @@ export function VotingCard(props: {
       </div>
 
       <div className="voting-new">
+        {releaseUsesBrowserIdentity ? (
+          <p className="state-copy" role="note">{BROWSER_IDENTITY_NOTICE}</p>
+        ) : null}
         <label>
           候选（每行一个）
           <textarea
@@ -296,6 +302,9 @@ export function VotingCard(props: {
           ) : null}
           {props.canManageResults ? (
             <div className="voting-publish">
+              {sessions.find((session) => session.id === preview.sessionId)?.identityPolicy === "browser" ? (
+                <p className="state-copy" role="note">{BROWSER_IDENTITY_NOTICE}</p>
+              ) : null}
               <label>
                 阶段
                 <select value={effectiveStage} onChange={(event) => setStageKey(event.target.value)}>

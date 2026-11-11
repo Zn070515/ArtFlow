@@ -47,7 +47,7 @@ function stubCapability(
     version: "1",
     dependencies: options.dependencies ?? [],
     conflicts: options.conflicts ?? [],
-    definitionSchemaVersion: 1,
+    definitionSchemaVersion: identity === "voting" ? 2 : 1,
     commands: [`${identity}.configure`],
     queries: [`${identity}.describe`],
     events: [`${identity[0]?.toUpperCase() ?? "X"}${identity.slice(1)}Configured`],
@@ -58,7 +58,10 @@ function stubCapability(
   return {
     manifest,
     compiler: passthroughCompiler(identity),
-    emptyDefinition: () => ({ schemaVersion: 1, payload: { schemaVersion: 1 } }),
+    emptyDefinition: () => ({
+      schemaVersion: 1,
+      payload: { schemaVersion: identity === "voting" ? 2 : 1 },
+    }),
   };
 }
 
@@ -261,6 +264,64 @@ it("guided answers enable and disable pack capabilities", () => {
   expect(result.instantiation.enabledCapabilities).not.toContain("materials");
 });
 
+function votingIdentity(result: ReturnType<typeof instantiateActivityPack>): string | undefined {
+  if (!result.ok) return undefined;
+  const payload = result.instantiation.definition.capabilities.voting?.payload;
+  if (typeof payload !== "object" || payload === null || !("identityPolicy" in payload)) return undefined;
+  const policy = (payload as { identityPolicy?: unknown }).identityPolicy;
+  return typeof policy === "string" ? policy : undefined;
+}
+
+it("guided audience voting defaults to a ticket and opts into browser identity only when asked", () => {
+  const ticket = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry, {
+    answers: { "audience-voting": true, "judge-entry": false },
+  });
+  expect(ticket.ok, JSON.stringify(ticket)).toBe(true);
+  if (!ticket.ok) return;
+  expect(votingIdentity(ticket)).toBe("ticket");
+  expect(ticket.instantiation.enabledCapabilities).toContain("ticketing");
+
+  const browser = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry, {
+    answers: {
+      "audience-voting": true,
+      "judge-entry": false,
+      "audience-browser-identity": true,
+    },
+  });
+  expect(browser.ok, JSON.stringify(browser)).toBe(true);
+  if (!browser.ok) return;
+  expect(votingIdentity(browser)).toBe("browser");
+  expect(browser.instantiation.enabledCapabilities).not.toContain("ticketing");
+
+  const unused = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry, {
+    answers: { "audience-browser-identity": true, "judge-entry": false },
+  });
+  expect(unused.ok).toBe(true);
+  if (!unused.ok) return;
+  expect(unused.instantiation.enabledCapabilities).not.toContain("voting");
+  expect(unused.instantiation.definition.capabilities.voting).toBeUndefined();
+
+  for (const pack of [STAGE_SHOW_PACK, REVIEW_AWARDS_PACK]) {
+    const audience = instantiateActivityPack(pack, defaultCapabilityRegistry, {
+      answers: { "audience-voting": true },
+    });
+    expect(audience.ok, JSON.stringify(audience)).toBe(true);
+    if (!audience.ok) continue;
+    expect(votingIdentity(audience)).toBe("ticket");
+    expect(audience.instantiation.enabledCapabilities).toContain("ticketing");
+  }
+
+  const poll = instantiateActivityPack(VOTE_POLL_PACK, defaultCapabilityRegistry);
+  expect(poll.ok, JSON.stringify(poll)).toBe(true);
+  if (!poll.ok) return;
+  expect(votingIdentity(poll)).toBe("ticket");
+  const browserPoll = instantiateActivityPack(VOTE_POLL_PACK, defaultCapabilityRegistry, {
+    answers: { "audience-browser-identity": true },
+  });
+  expect(browserPoll.ok, JSON.stringify(browserPoll)).toBe(true);
+  expect(votingIdentity(browserPoll)).toBe("browser");
+});
+
 it("a pack refuses an unknown guided answer", () => {
   const result = instantiateActivityPack(SINGER_COMPETITION_PACK, singerRegistry(), {
     answers: { "not-a-question": true },
@@ -407,6 +468,7 @@ it("instantiates the vote-poll pack without competition", () => {
   expect(result.instantiation.enabledCapabilities).toEqual([
     "archive",
     "publishing",
+    "ticketing",
     "voting",
   ]);
   expect(result.instantiation.enabledCapabilities).not.toContain("competition");

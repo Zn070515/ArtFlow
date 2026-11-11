@@ -6,7 +6,41 @@ import { createQuestionnaireDefinition } from "./capabilities/questionnaire.js";
 import { createVotingDefinition } from "./capabilities/voting.js";
 import { createTasksDefinition } from "./capabilities/tasks.js";
 import { deepFreeze } from "./model.js";
-import type { ActivityPack } from "./packs.js";
+import type { ActivityPack, ActivityPackDefinitionChoice, ActivityPackQuestion } from "./packs.js";
+import type { CapabilityDefinition } from "./model.js";
+
+function audienceVotingDefinition(identityPolicy: "ticket" | "browser"): CapabilityDefinition {
+  return createVotingDefinition({
+    purpose: "popularity",
+    selectionType: "single",
+    maxSelections: 1,
+    identityPolicy,
+    scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+  });
+}
+
+/** Official audience votes. Another browser is not a new ballot. */
+const TICKET_AUDIENCE_VOTING = audienceVotingDefinition("ticket");
+
+/**
+ * Organizer-selected browser identity. The prompt is the setup-time notice
+ * that a different device can vote again.
+ */
+const AUDIENCE_BROWSER_QUESTION: ActivityPackQuestion = {
+  id: "audience-browser-identity",
+  prompt: "观众投票使用浏览器身份（换设备可以再投）",
+  capability: "voting",
+  default: false,
+  enables: false,
+};
+
+const AUDIENCE_VOTING_CHOICE: Readonly<Record<string, ActivityPackDefinitionChoice>> = {
+  voting: {
+    questionId: AUDIENCE_BROWSER_QUESTION.id,
+    whenTrue: audienceVotingDefinition("browser"),
+    enableWhenFalse: ["ticketing"],
+  },
+};
 
 /**
  * The concrete guided catalog. `packs.ts` stays capability-agnostic; this module
@@ -54,6 +88,7 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       capability: "voting",
       default: false,
     },
+    AUDIENCE_BROWSER_QUESTION,
     {
       id: "publish-results",
       prompt: "是否需要公开发布结果？",
@@ -114,6 +149,7 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
     ]),
     materials: createMaterialsDefinition(25 * 1024 * 1024, ["audio"]),
     grouping: createGroupingDefinition(5),
+    voting: TICKET_AUDIENCE_VOTING,
     tasks: createTasksDefinition([
       { key: "registration.review", title: "审核报名", sourceCapability: "registration", sourceKey: "review", required: true },
       { key: "materials.audio", title: "确认音频材料", sourceCapability: "materials", sourceKey: "audio", required: true },
@@ -122,6 +158,7 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
     ]),
   },
+  definitionChoices: AUDIENCE_VOTING_CHOICE,
 });
 
 export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
@@ -136,6 +173,7 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       capability: "voting",
       default: false,
     },
+    AUDIENCE_BROWSER_QUESTION,
     {
       id: "tasks",
       prompt: "是否需要运营任务清单？",
@@ -150,6 +188,7 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
     },
   ],
   definitions: {
+    voting: TICKET_AUDIENCE_VOTING,
     questionnaire: createQuestionnaireDefinition("stage-v1", [
       { key: "name", label: "负责人", type: "text", required: true },
       { key: "program", label: "节目名称", type: "text", required: true },
@@ -174,6 +213,7 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
     ]),
   },
+  definitionChoices: AUDIENCE_VOTING_CHOICE,
 });
 
 export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
@@ -206,6 +246,7 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
       capability: "voting",
       default: false,
     },
+    AUDIENCE_BROWSER_QUESTION,
     {
       id: "tasks",
       prompt: "是否需要运营任务清单？",
@@ -214,6 +255,7 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
     },
   ],
   definitions: {
+    voting: TICKET_AUDIENCE_VOTING,
     competition: createCompetitionDefinition(
       [
         { key: "roster", type: "roster" },
@@ -266,6 +308,7 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
       { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
     ]),
   },
+  definitionChoices: AUDIENCE_VOTING_CHOICE,
 });
 
 export const VOTE_POLL_PACK: ActivityPack = deepFreeze({
@@ -274,6 +317,7 @@ export const VOTE_POLL_PACK: ActivityPack = deepFreeze({
   title: "Vote Poll",
   baselineCapabilities: ["voting", "publishing"],
   questions: [
+    AUDIENCE_BROWSER_QUESTION,
     {
       id: "archive",
       prompt: "结束后是否归档？",
@@ -288,13 +332,7 @@ export const VOTE_POLL_PACK: ActivityPack = deepFreeze({
     },
   ],
   definitions: {
-    voting: createVotingDefinition({
-      purpose: "popularity",
-      selectionType: "single",
-      maxSelections: 1,
-      identityPolicy: "browser",
-      scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
-    }),
+    voting: TICKET_AUDIENCE_VOTING,
     publishing: createPublishingDefinition([{ key: "vote_result", label: "投票结果" }]),
     tasks: createTasksDefinition([
       { key: "voting.ballots", title: "核对投票记录", sourceCapability: "voting", sourceKey: "ballots", required: true },
@@ -302,4 +340,5 @@ export const VOTE_POLL_PACK: ActivityPack = deepFreeze({
       { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
     ]),
   },
+  definitionChoices: AUDIENCE_VOTING_CHOICE,
 });

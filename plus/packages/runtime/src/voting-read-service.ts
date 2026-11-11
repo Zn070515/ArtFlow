@@ -2,6 +2,7 @@ import type { Database } from "@artflow-plus/db";
 import {
   getActivity,
   getLiveState,
+  getRelease,
   getVoteSession,
   hasBallotForIdentity,
   hasBallotForTicket,
@@ -16,10 +17,13 @@ import type { AuthenticatedTicketSession } from "./voting-ticket-service.js";
 
 export interface VotingSessionsState {
   readonly activityId: string;
+  /** Identity frozen by the active release. Absent until a voting release exists. */
+  readonly identityPolicy?: "browser" | "ticket" | "anonymous";
   readonly sessions: readonly {
     readonly id: string;
     readonly status: "open" | "closed";
     readonly mode: string;
+    readonly identityPolicy: "browser" | "ticket" | "anonymous";
     readonly revision: number;
     readonly candidateCount: number;
     readonly candidates: readonly {
@@ -38,6 +42,13 @@ export interface VotingSessionsState {
   }[];
 }
 
+function releasedIdentityPolicy(artifact: unknown): "browser" | "ticket" | "anonymous" | undefined {
+  if (typeof artifact !== "object" || artifact === null || !("identityPolicy" in artifact)) return undefined;
+  const policy = (artifact as { identityPolicy?: unknown }).identityPolicy;
+  if (policy === "ticket" || policy === "browser" || policy === "anonymous") return policy;
+  return undefined;
+}
+
 /** Permission checks belong to the route/topic caller; this reads the projection. */
 export async function readVotingSessionsState(
   db: Kysely<Database>,
@@ -45,6 +56,10 @@ export async function readVotingSessionsState(
 ): Promise<VotingSessionsState | null> {
   const activity = await getActivity(db, activityId);
   if (activity === null) return null;
+  const release = activity.activeDefinitionVersion > 0
+    ? await getRelease(db, activity.id, activity.activeDefinitionVersion)
+    : null;
+  const identityPolicy = releasedIdentityPolicy(release?.capabilities.voting?.artifact);
   const sessions = await listVoteSessionsForActivity(db, activityId);
   const result: Array<VotingSessionsState["sessions"][number]> = [];
   for (const session of sessions) {
@@ -55,6 +70,7 @@ export async function readVotingSessionsState(
       id: session.id,
       status: session.status === "closed" ? "closed" : "open",
       mode: session.mode,
+      identityPolicy: session.identityPolicy,
       revision: session.revision,
       candidateCount: options.length,
       candidates: options.map((option) => ({
@@ -74,7 +90,11 @@ export async function readVotingSessionsState(
             },
     });
   }
-  return { activityId, sessions: result };
+  return {
+    activityId,
+    ...(identityPolicy === undefined ? {} : { identityPolicy }),
+    sessions: result,
+  };
 }
 
 export interface PublicVoteSessionState {

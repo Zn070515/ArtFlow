@@ -4,14 +4,30 @@ import { deepFreeze } from "./model.js";
 import type { CapabilityRegistry, RegistryIssue } from "./registry.js";
 
 /**
- * One Guided Mode question. Answering yes enables the capability; the answer
- * is composition input, never a capability definition by itself.
+ * One Guided Mode question. Answering yes enables the capability unless
+ * `enables` is false. A non-enabling question only selects a definition
+ * choice. Either way the answer is composition input, never a capability
+ * definition by itself.
  */
 export interface ActivityPackQuestion {
   readonly id: string;
   readonly prompt: string;
   readonly capability: string;
   readonly default: boolean;
+  /** When false, the answer does not add `capability`. Default true. */
+  readonly enables?: boolean;
+}
+
+/**
+ * Replaces one capability definition when a guided answer is true.
+ * A false answer keeps `definitions[capability]` (or the empty definition)
+ * and may enable the capabilities listed in `enableWhenFalse`.
+ */
+export interface ActivityPackDefinitionChoice {
+  readonly questionId: string;
+  readonly whenTrue: CapabilityDefinition;
+  readonly enableWhenTrue?: readonly string[];
+  readonly enableWhenFalse?: readonly string[];
 }
 
 /**
@@ -27,6 +43,11 @@ export interface ActivityPack {
   readonly questions: readonly ActivityPackQuestion[];
   /** Optional capability definitions that replace emptyDefinition(). */
   readonly definitions?: Readonly<Record<string, CapabilityDefinition>>;
+  /**
+   * Applied only when that capability is already enabled. A true answer
+   * selects `whenTrue`; a false answer keeps the pack or empty definition.
+   */
+  readonly definitionChoices?: Readonly<Record<string, ActivityPackDefinitionChoice>>;
 }
 
 export interface PackInstantiationInput {
@@ -84,12 +105,33 @@ export function instantiateActivityPack(
 
   const enabled = new Set(pack.baselineCapabilities);
   for (const question of pack.questions) {
+    if (question.enables === false) continue;
     const answer = input.answers?.[question.id] ?? question.default;
     if (answer) enabled.add(question.capability);
   }
   for (const identity of input.enable ?? []) enabled.add(identity);
   const disabled = [...new Set(input.disable ?? [])].sort();
   for (const identity of disabled) enabled.delete(identity);
+  const disabledSet = new Set(disabled);
+  for (const [capability, choice] of Object.entries(pack.definitionChoices ?? {})) {
+    if (!enabled.has(capability)) continue;
+    const question = questions.get(choice.questionId);
+    if (question === undefined) {
+      issues.push(
+        issue(
+          "PACK_DEFINITION_CHOICE_UNKNOWN",
+          `Pack ${pack.identity} chooses ${capability} with unknown question ${choice.questionId}.`,
+          `definitionChoices.${capability}`,
+        ),
+      );
+      continue;
+    }
+    const selected = input.answers?.[choice.questionId] ?? question.default;
+    const extras = selected ? choice.enableWhenTrue : choice.enableWhenFalse;
+    for (const extra of extras ?? []) {
+      if (!disabledSet.has(extra)) enabled.add(extra);
+    }
+  }
 
   const composition = registry.validateComposition({
     enable: [...enabled].sort(),
@@ -116,7 +158,14 @@ export function instantiateActivityPack(
   for (const identity of composition.plan.enabledCapabilities) {
     const registration = registry.get(identity);
     if (registration === undefined) continue;
-    const definition = pack.definitions?.[identity] ?? registration.emptyDefinition();
+    const fallback = pack.definitions?.[identity] ?? registration.emptyDefinition();
+    const choice = pack.definitionChoices?.[identity];
+    const choiceQuestion = choice === undefined ? undefined : questions.get(choice.questionId);
+    const definition = choice !== undefined &&
+      choiceQuestion !== undefined &&
+      (input.answers?.[choice.questionId] ?? choiceQuestion.default)
+      ? choice.whenTrue
+      : fallback;
     // The CapabilityDefinition envelope is always schemaVersion 1; the
     // capability's own definition language is versioned on its payload.
     const payload = definition.payload;

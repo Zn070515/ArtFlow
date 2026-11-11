@@ -60,6 +60,7 @@ const studioHeaders = (id = `cmd-${randomUUID()}`) => ({
 });
 
 function stubCapability(identity: string): CapabilityRegistration {
+  const definitionSchemaVersion = identity === "voting" ? 2 : 1;
   const compiler: CapabilityCompiler = {
     capabilityKey: identity,
     compile: (definition) => ({
@@ -75,7 +76,7 @@ function stubCapability(identity: string): CapabilityRegistration {
       version: "1",
       dependencies: [],
       conflicts: [],
-      definitionSchemaVersion: 1,
+      definitionSchemaVersion,
       commands: [],
       queries: [],
       events: [],
@@ -83,7 +84,7 @@ function stubCapability(identity: string): CapabilityRegistration {
       surfaces: ["studio"],
     },
     compiler,
-    emptyDefinition: () => ({ schemaVersion: 1, payload: { schemaVersion: 1 } }),
+    emptyDefinition: () => ({ schemaVersion: 1, payload: { schemaVersion: definitionSchemaVersion } }),
   };
 }
 

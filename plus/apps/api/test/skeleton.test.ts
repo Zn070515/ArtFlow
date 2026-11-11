@@ -45,6 +45,7 @@ const deps: RuntimeDeps = {
 const dbIt = connectionString ? it : it.skip;
 
 function stubCapability(identity: string): CapabilityRegistration {
+  const definitionSchemaVersion = identity === "voting" ? 2 : 1;
   const compiler: CapabilityCompiler = {
     capabilityKey: identity,
     compile: (definition) => ({
@@ -60,7 +61,7 @@ function stubCapability(identity: string): CapabilityRegistration {
       version: "1",
       dependencies: [],
       conflicts: [],
-      definitionSchemaVersion: 1,
+      definitionSchemaVersion,
       commands: [],
       queries: [],
       events: [],
@@ -68,7 +69,7 @@ function stubCapability(identity: string): CapabilityRegistration {
       surfaces: ["studio", "ops"],
     },
     compiler,
-    emptyDefinition: () => ({ schemaVersion: 1, payload: { schemaVersion: 1 } }),
+    emptyDefinition: () => ({ schemaVersion: 1, payload: { schemaVersion: definitionSchemaVersion } }),
   };
 }
 
