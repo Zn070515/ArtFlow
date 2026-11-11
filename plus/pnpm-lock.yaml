@@ -325,6 +325,10 @@ importers:
       '@sinclair/typebox':
         specifier: 0.34.52
         version: 0.34.52
+    devDependencies:
+      '@artflow-plus/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/db:
     dependencies:
@@ -391,6 +395,8 @@ importers:
       pg:
         specifier: 8.23.1
         version: 8.23.1
+
+  tools/contracts: {}
 
 packages:
 
