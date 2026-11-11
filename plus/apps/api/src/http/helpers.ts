@@ -7,13 +7,32 @@ import type { ActivityDefinitionPackage } from "@artflow-plus/domain";
 
 import { isProductionEnvironment, sessionCookie } from "../cookies.js";
 
+/** `command_receipt.command_id` is `varchar(100)`. Longer keys never reach PostgreSQL. */
+export const IDEMPOTENCY_KEY_MAX_LENGTH = 100;
+
+const APPLICATION_ERROR_NAMES: ReadonlySet<string> = new Set([
+  "DomainError",
+  "CompositionError",
+  "DefinitionInvalidError",
+  "StaleRevisionError",
+  "CommandIdConflictError",
+  "CommandInProgressError",
+]);
+
 export function requireIdempotency(request: FastifyRequest): string {
   const header = request.headers["idempotency-key"];
   const value = Array.isArray(header) ? header[0] : header;
   if (typeof value !== "string" || !value.trim()) {
     throw new DomainError("INVALID_INPUT", "An Idempotency-Key header is required.");
   }
-  return value.trim();
+  const key = value.trim();
+  if (key.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `Idempotency-Key must be at most ${IDEMPOTENCY_KEY_MAX_LENGTH} characters.`,
+    );
+  }
+  return key;
 }
 
 export function bearerToken(request: FastifyRequest): string | undefined {
@@ -102,9 +121,16 @@ export function asPackage(value: unknown): ActivityDefinitionPackage {
 }
 
 export function errorCode(error: unknown): string | null {
-  if (typeof error !== "object" || error === null || !("code" in error)) return null;
+  if (typeof error !== "object" || error === null || !("code" in error) || !("name" in error)) return null;
+  const name = (error as { name: unknown }).name;
+  if (typeof name !== "string" || !APPLICATION_ERROR_NAMES.has(name)) return null;
   const code = (error as { code: unknown }).code;
-  return typeof code === "string" ? code : null;
+  return typeof code === "string" && code.length > 0 ? code : null;
+}
+
+/** PostgreSQL SQLSTATE values are five characters. They are not domain codes. */
+export function isDriverErrorCode(code: unknown): boolean {
+  return typeof code === "string" && /^[0-9A-Z]{5}$/.test(code);
 }
 
 export function errorDetails(error: unknown): unknown {

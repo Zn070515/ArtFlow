@@ -13,7 +13,7 @@ import { createRealtimeServer } from "@artflow-plus/realtime/server";
 import { isProductionEnvironment, sessionCookie } from "./cookies.js";
 import { createActivityRealtimeTopic, createVotingRealtimeTopic } from "./realtime-topics.js";
 import type { ApiContext } from "./http/context.js";
-import { bearerToken, cookieValue, errorCode, errorDetails, publicErrorMessage } from "./http/helpers.js";
+import { bearerToken, cookieValue, errorCode, errorDetails, isDriverErrorCode, publicErrorMessage } from "./http/helpers.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
@@ -446,8 +446,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       validation?: unknown;
       statusCode?: number;
       message?: string;
+      code?: unknown;
     };
-    if (failure.validation !== undefined || (failure.statusCode !== undefined && failure.statusCode < 500)) {
+    if (
+      !isDriverErrorCode(failure.code) &&
+      (failure.validation !== undefined || (failure.statusCode !== undefined && failure.statusCode < 500))
+    ) {
       const status = failure.validation === undefined ? failure.statusCode ?? 400 : 400;
       return reply
         .status(status)
