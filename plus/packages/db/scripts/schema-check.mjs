@@ -5,9 +5,13 @@ if (!process.env.ARTFLOW_PLUS_DATABASE_URL) {
   process.exit(1);
 }
 
-const result = spawnSync("pnpm", ["exec", "vitest", "run", "test/schema-drift.test.ts"], {
-  stdio: "inherit",
-  env: { ...process.env, REQUIRE_DB: "1" },
-  shell: process.platform === "win32",
-});
+const result = spawnSync(
+  "pnpm",
+  ["exec", "vitest", "run", "test/schema-drift.test.ts", "test/schema-generation.test.ts"],
+  {
+    stdio: "inherit",
+    env: { ...process.env, REQUIRE_DB: "1" },
+    shell: process.platform === "win32",
+  },
+);
 process.exit(result.status ?? 1);
