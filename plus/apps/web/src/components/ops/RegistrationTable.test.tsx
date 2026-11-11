@@ -49,4 +49,39 @@ describe("RegistrationTable", () => {
     expect(screen.getByRole("link", { name: "alice" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "bob" })).not.toBeInTheDocument();
   });
+
+  it("shows and searches name, student id, and song instead of only the participant id", () => {
+    const participantId = "participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4";
+    render(
+      <RegistrationTable
+        activityId="activity-1"
+        registrations={[
+          {
+            id: "registration-1",
+            activityId: "activity-1",
+            participantId,
+            questionnaireVersion: "v1",
+            questionnaireHash: "hash-1",
+            status: "submitted",
+            answers: { name: "林晓雨", student_id: "20210001", song: "夜空中最亮的星" },
+            revision: 2,
+            reviewNote: "",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "林晓雨 · 20210001 · 夜空中最亮的星" })).toBeInTheDocument();
+    expect(screen.getByText(participantId)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索报名" }), {
+      target: { value: "夜空中最亮的星" },
+    });
+    expect(screen.getByRole("link", { name: "林晓雨 · 20210001 · 夜空中最亮的星" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索报名" }), {
+      target: { value: "不存在的人" },
+    });
+    expect(screen.queryByRole("link", { name: /林晓雨/ })).not.toBeInTheDocument();
+  });
 });

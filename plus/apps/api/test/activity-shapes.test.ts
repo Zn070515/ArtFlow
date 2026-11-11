@@ -136,6 +136,7 @@ async function registerAndApprove(shape: Shape, answers: Record<string, string>,
   readonly originalName: string;
   readonly contentType: string;
   readonly byteLength: number;
+  readonly bytes?: Uint8Array;
 }): Promise<{ registrationId: string; participantId: string }> {
   const started = await postJson(participantApp, `/api/activities/${shape.activityId}/registrations`, {});
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -158,7 +159,7 @@ async function registerAndApprove(shape: Shape, answers: Record<string, string>,
         "content-type": "application/octet-stream",
         "idempotency-key": `cmd-${randomUUID()}`,
       },
-      payload: Buffer.alloc(file.byteLength as number, 1),
+      payload: file.bytes === undefined ? Buffer.alloc(file.byteLength, 1) : Buffer.from(file.bytes),
     });
     expect(content.statusCode, content.body).toBe(201);
   }
@@ -288,7 +289,14 @@ describe.skipIf(!connectionString)("three activity shapes", () => {
 
   it("runs a judged singer competition from the guided pack", async () => {
     const shape = await createShape("singer-competition", "Shape Singer");
-    await registerAndApprove(shape, { name: "Alice", student_id: "20250001", song: "夜空中最亮的星" });
+    const audition = Uint8Array.from([0xff, 0xfb, 0x90, 0x00, 0, 0, 0, 0]);
+    await registerAndApprove(shape, { name: "Alice", student_id: "20250001", song: "夜空中最亮的星" }, {
+      questionKey: "audio",
+      originalName: "demo.mp3",
+      contentType: "audio/mpeg",
+      byteLength: audition.byteLength,
+      bytes: audition,
+    });
     await finalizeRoster(shape.activityId);
     await startSession(shape.activityId, "judging");
     await runCompetitionRound(shape, "final", { 演唱技巧: 90, 舞台表现: 92, 情感表达: 91 });

@@ -1,10 +1,46 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 
-import { fetchRegistrationDetail, type RegistrationDetail } from "../api/registrations.js";
+import { fetchRegistrationDetail, type RegistrationDetail, type RegistrationMaterial } from "../api/registrations.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { ReviewPanel } from "../components/ops/ReviewPanel.js";
+
+function materialContentUrl(activityId: string, materialId: string): string {
+  return `/api/activities/${activityId}/materials/${materialId}/content`;
+}
+
+function MaterialAnswer({
+  activityId,
+  material,
+  purpose,
+}: {
+  readonly activityId: string;
+  readonly material: RegistrationMaterial | undefined;
+  readonly purpose: string | undefined;
+}) {
+  if (material === undefined) return <span className="answer-value">未登记</span>;
+  const stored = material.contentReady !== false;
+  const href = materialContentUrl(activityId, material.id);
+  const playable = stored && (material.contentType.startsWith("audio/") || purpose === "audio");
+  return (
+    <div className="answer-value material-answer">
+      <span>{material.originalName} · {material.byteLength} B</span>
+      {stored ? (
+        <span className="material-actions">
+          <a className="table-link" href={href} download={material.originalName}>下载</a>
+          {playable ? (
+            <audio controls preload="none" src={href} aria-label={`试听 ${material.originalName}`} />
+          ) : (
+            <a className="table-link" href={href} target="_blank" rel="noreferrer">打开</a>
+          )}
+        </span>
+      ) : (
+        <span>仅元数据</span>
+      )}
+    </div>
+  );
+}
 
 export function OpsRegistrationPage() {
   return (
@@ -14,7 +50,13 @@ export function OpsRegistrationPage() {
   );
 }
 
-function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
+function DetailView({
+  activityId,
+  detail,
+}: {
+  readonly activityId: string;
+  readonly detail: RegistrationDetail;
+}) {
   return (
     <section className="ops-card">
       <p className="eyebrow">REGISTRATION · 报名</p>
@@ -32,18 +74,20 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
           .map((question) => {
             const raw = detail.registration.answers[question.key];
             const material = detail.materials.find((item) => item.questionKey === question.key);
-            const value =
-              question.type === "file"
-                ? material === undefined
-                  ? "未登记"
-                  : `${material.originalName}（${material.byteLength} B，仅元数据）`
-                : typeof raw === "string" && raw.trim()
-                  ? raw
-                  : "—";
             return (
               <div className="answer-row" key={question.key}>
                 <span className="answer-label">{question.label}</span>
-                <span className="answer-value">{value}</span>
+                {question.type === "file" ? (
+                  <MaterialAnswer
+                    activityId={activityId}
+                    material={material}
+                    purpose={question.file?.purpose}
+                  />
+                ) : (
+                  <span className="answer-value">
+                    {typeof raw === "string" && raw.trim() ? raw : "—"}
+                  </span>
+                )}
               </div>
             );
           })}
@@ -89,7 +133,7 @@ function OpsRegistrationContent() {
         </div>
       </header>
       <div className="ops-grid">
-        <DetailView detail={query.data} />
+        <DetailView activityId={activityId} detail={query.data} />
         <ReviewPanel
           detail={query.data}
           onReviewed={() => {

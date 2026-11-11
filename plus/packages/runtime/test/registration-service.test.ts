@@ -75,6 +75,14 @@ function deps(actor: ActorContext): RuntimeDeps {
   };
 }
 
+function materialBytes(originalName: string, byteLength: number): Uint8Array {
+  const bytes = new Uint8Array(byteLength).fill(1);
+  if (originalName.toLowerCase().endsWith(".mp3") && byteLength >= 4) {
+    bytes.set([0xff, 0xfb, 0x90, 0x00]);
+  }
+  return bytes;
+}
+
 async function uploadWithContent(
   actor: ActorContext,
   input: Parameters<typeof uploadMaterial>[2],
@@ -84,7 +92,7 @@ async function uploadWithContent(
     commandId: `${input.commandId}-content`,
     activityId: input.activityId,
     materialId: uploaded.body.id,
-    bytes: new Uint8Array(input.byteLength).fill(1),
+    bytes: materialBytes(input.originalName, input.byteLength),
   });
 }
 
@@ -190,6 +198,33 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     })).rejects.toMatchObject({ code: "QUESTION_UNKNOWN" });
     const after = await readEventsSince(db, { activityId, after: 0, limit: 100 });
     expect(after).toEqual(before);
+  });
+
+  it("rejects non-audio bytes that only borrow an accepted extension", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-registration-junk-audio",
+      activityId,
+      participantId: participant.actorId,
+    });
+    const junk = new TextEncoder().encode("not-audio-content");
+    expect(junk.byteLength).toBe(17);
+    const uploaded = await uploadMaterial(db, deps(participant), {
+      commandId: "upload-junk-audio",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "夜空中最亮的星.mp3",
+      contentType: "audio/mpeg",
+      byteLength: junk.byteLength,
+    });
+    await expect(attachMaterialContent(db, deps(participant), {
+      commandId: "upload-junk-audio-content",
+      activityId,
+      materialId: uploaded.body.id,
+      bytes: junk,
+    })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
+    await expect(createLocalMaterialStorage({ root: materialRoot }).read(uploaded.body.storageKey)).rejects.toThrow();
   });
 
   it("rejects a material whose extension is not accepted", async () => {

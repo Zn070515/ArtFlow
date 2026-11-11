@@ -42,6 +42,7 @@ export interface RegistrationMaterialDto {
   readonly byteLength: number;
   readonly status: string;
   readonly revision: number;
+  readonly contentReady: boolean;
 }
 
 export interface RegistrationFormDto {
@@ -141,6 +142,7 @@ function materialDto(material: StoredMaterial): RegistrationMaterialDto {
     byteLength: material.byteLength,
     status: material.status,
     revision: material.revision,
+    contentReady: material.contentReady !== false,
   };
 }
 

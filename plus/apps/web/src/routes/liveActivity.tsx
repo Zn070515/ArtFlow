@@ -7,6 +7,7 @@ import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
+import { liveContestantLabel } from "../participantLabel.js";
 import { useRealtimeTopic } from "../realtime/useRealtimeTopic.js";
 
 export function LiveActivityPage() {
@@ -102,9 +103,17 @@ function LiveActivityContent() {
               <p className="state-copy">尚未有最终名单。</p>
             ) : (
               <ul className="seat-list">
-                {state.participantIds.map((participantId) => (
-                  <li key={participantId}>{participantId}</li>
-                ))}
+                {state.participantIds.map((participantId) => {
+                  const label = liveContestantLabel(state.participants, participantId);
+                  return (
+                    <li key={participantId}>
+                      <span>{label}</span>
+                      {label === participantId ? null : (
+                        <span className="participant-id">{participantId}</span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

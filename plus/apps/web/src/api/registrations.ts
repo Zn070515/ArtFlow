@@ -44,6 +44,7 @@ export interface RegistrationMaterial {
   readonly byteLength: number;
   readonly status: string;
   readonly revision: number;
+  readonly contentReady?: boolean;
 }
 
 export interface RegistrationDetail {

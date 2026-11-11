@@ -111,6 +111,18 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       { key: "student_id", label: "学号", type: "text", required: true },
       { key: "song", label: "演唱曲目", type: "text", required: true },
       { key: "description", label: "自我介绍", type: "text", required: false },
+      {
+        key: "audio",
+        label: "试唱/伴奏音频",
+        type: "file",
+        required: true,
+        file: {
+          slot: "audio",
+          purpose: "audio",
+          accepts: [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"],
+          maxBytes: 25 * 1024 * 1024,
+        },
+      },
     ]),
     materials: createMaterialsDefinition(25 * 1024 * 1024, ["audio"]),
     grouping: createGroupingDefinition(5),

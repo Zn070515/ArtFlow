@@ -111,12 +111,20 @@ export interface LiveRound {
   readonly ranking: LiveRanking | null;
 }
 
+export interface LiveParticipant {
+  readonly participantId: string;
+  readonly name: string;
+  readonly studentId: string;
+  readonly song: string;
+}
+
 export interface LiveState {
   readonly activity: LiveActivity;
   readonly config: LiveConfig;
   readonly session: LiveSession | null;
   readonly rounds: readonly LiveRound[];
   readonly participantIds: readonly string[];
+  readonly participants: readonly LiveParticipant[];
 }
 
 function commandHeaders(commandId: string): Record<string, string> {

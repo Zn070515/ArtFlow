@@ -132,7 +132,7 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
       questionnaireVersion: "v1",
       questionnaireHash: "v1",
       status: "approved",
-      answers: {},
+      answers: { name: "林晓雨", student_id: "20210001", song: "夜空中最亮的星" },
       revision: 1,
     });
     await upsertRoster(db, activityId, {
@@ -258,11 +258,18 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
         performances: { scoreCount: number; expectedJudges: number }[];
       }[];
       participantIds: string[];
+      participants: { participantId: string; name: string; studentId: string; song: string }[];
     };
     expect(body.config.rounds.map((round) => round.key)).toEqual(["round-1"]);
     expect(body.rounds[0]?.round).toMatchObject({ state: "scoring" });
     expect(body.rounds[0]?.performances[0]).toMatchObject({ scoreCount: 0, expectedJudges: 1 });
     expect(body.participantIds).toEqual(["singer-a"]);
+    expect(body.participants).toEqual([{
+      participantId: "singer-a",
+      name: "林晓雨",
+      studentId: "20210001",
+      song: "夜空中最亮的星",
+    }]);
   });
 
   it("requires a judge session for the judge context", async () => {

@@ -84,4 +84,61 @@ describe("OpsRegistrationPage", () => {
     expect(screen.getByRole("heading", { name: "报名信息" })).toHaveClass("console-card-title");
     expect(document.querySelector(".review-note")).toBeNull();
   });
+
+  it("plays a stored audition through the controlled material API", () => {
+    useQueryMock.mockReturnValue({
+      data: {
+        activity: {
+          id: "activity-1",
+          title: "春季现场",
+          publicCode: "SPRING-1",
+          status: "active",
+        },
+        registration: {
+          id: "registration-1",
+          activityId: "activity-1",
+          participantId: "participant:1",
+          questionnaireVersion: "v1",
+          questionnaireHash: "hash",
+          status: "submitted",
+          answers: { name: "林晓雨" },
+          revision: 1,
+          reviewNote: "",
+        },
+        questionnaire: {
+          version: "v1",
+          questions: [{
+            key: "audio",
+            label: "试唱/伴奏音频",
+            type: "file",
+            required: true,
+            file: { slot: "audio", purpose: "audio", accepts: [".mp3"] },
+          }],
+          fileSlots: [],
+        },
+        materials: [{
+          id: "material-1",
+          questionKey: "audio",
+          originalName: "夜空中最亮的星.mp3",
+          contentType: "audio/mpeg",
+          byteLength: 128,
+          status: "uploaded",
+          revision: 1,
+          contentReady: true,
+        }],
+      },
+      error: null,
+      isPending: false,
+    });
+
+    render(<OpsRegistrationPage />);
+
+    const player = screen.getByLabelText("试听 夜空中最亮的星.mp3");
+    expect(player).toHaveAttribute("src", "/api/activities/activity-1/materials/material-1/content");
+    expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute(
+      "href",
+      "/api/activities/activity-1/materials/material-1/content",
+    );
+    expect(screen.queryByText(/仅元数据/)).not.toBeInTheDocument();
+  });
 });

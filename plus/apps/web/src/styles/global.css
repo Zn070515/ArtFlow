@@ -704,6 +704,26 @@ input {
   text-decoration: none;
 }
 
+.participant-id {
+  display: block;
+  margin-top: 2px;
+  color: var(--bone-dim);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.material-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.material-actions audio {
+  width: min(100%, 360px);
+}
+
 .table-link:hover {
   text-decoration: underline;
 }

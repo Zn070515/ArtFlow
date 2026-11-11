@@ -322,6 +322,32 @@ it("instantiates the three guided shapes with runnable defaults", () => {
   }
 });
 
+it("the default singer questionnaire includes a required audio file when materials are collected", () => {
+  const result = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.instantiation.enabledCapabilities).toContain("materials");
+  const payload = result.instantiation.definition.capabilities.questionnaire?.payload as {
+    questions?: readonly {
+      readonly key?: string;
+      readonly type?: string;
+      readonly required?: boolean;
+      readonly file?: { readonly purpose?: string; readonly accepts?: readonly string[]; readonly maxBytes?: number };
+    }[];
+  };
+  const audio = payload.questions?.find((question) => question.type === "file");
+  expect(audio).toMatchObject({
+    key: "audio",
+    required: true,
+    file: {
+      slot: "audio",
+      purpose: "audio",
+      accepts: [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"],
+      maxBytes: 25 * 1024 * 1024,
+    },
+  });
+});
+
 it("the singer pack enables judge entry unless the guided answer turns it off", () => {
   const enabled = instantiateActivityPack(SINGER_COMPETITION_PACK, defaultCapabilityRegistry);
   expect(enabled.ok).toBe(true);

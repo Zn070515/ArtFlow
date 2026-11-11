@@ -13,6 +13,7 @@ import {
   type LiveRound,
   type LiveState,
 } from "../../api/live.js";
+import { liveContestantLabel } from "../../participantLabel.js";
 import { liveDisplayRanks } from "./ranking.js";
 
 interface JudgeDraft {
@@ -207,11 +208,14 @@ export function LiveRoundPanel({
           <label className="field">
             <span>开表演选手</span>
             <select value={contestantId} onChange={(event) => setContestantId(event.target.value)}>
-              {state.participantIds.map((participantId) => (
-                <option key={participantId} value={participantId}>
-                  {participantId}
-                </option>
-              ))}
+              {state.participantIds.map((participantId) => {
+                const label = liveContestantLabel(state.participants, participantId);
+                return (
+                  <option key={participantId} value={participantId}>
+                    {label === participantId ? participantId : `${label}（${participantId}）`}
+                  </option>
+                );
+              })}
             </select>
           </label>
           <button
@@ -242,7 +246,7 @@ export function LiveRoundPanel({
               {live.performances.map((performance) => (
                 <tr key={performance.id}>
                   <td>{performance.sequence}</td>
-                  <td>{performance.contestantId}</td>
+                  <td>{liveContestantLabel(state.participants, performance.contestantId)}</td>
                   <td>{performance.state}</td>
                   <td data-testid={`score-count-${performance.contestantId}`}>
                     {performance.scoreCount}/{performance.expectedJudges}
@@ -317,7 +321,7 @@ export function LiveRoundPanel({
                 {live.ranking.rows.map((row, index) => (
                   <tr key={row.contestantId}>
                     <td>{displayRanks[index] ?? index + 1}</td>
-                    <td>{row.contestantId}</td>
+                    <td>{liveContestantLabel(state.participants, row.contestantId)}</td>
                     <td>{row.total}</td>
                     <td>{row.judgeCount}</td>
                   </tr>
@@ -327,7 +331,7 @@ export function LiveRoundPanel({
           </div>
           {live.ranking.tieGroups.length === 0 ? null : (
             <p className="form-error" role="alert">
-              存在同分：{live.ranking.tieGroups.map((group) => group.contestants.join(" / ")).join("；")}
+              存在同分：{live.ranking.tieGroups.map((group) => group.contestants.map((contestantId) => liveContestantLabel(state.participants, contestantId)).join(" / ")).join("；")}
             </p>
           )}
         </div>

@@ -26,6 +26,7 @@ import {
 } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
+import { audioBytesMatchSlot, slotAcceptsAudio } from "./audio-bytes.js";
 import { executeCommand, type CommandOutcome } from "./command.js";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 import { appendEngineEvent } from "./events.js";
@@ -252,6 +253,14 @@ export async function attachMaterialContent(
         }
         if (input.bytes.byteLength !== material.byteLength) {
           throw new DomainError("MATERIAL_NOT_ALLOWED", "The uploaded content does not match the registered size.");
+        }
+        const { questionnaire } = await releasedMaterialRules(trx, activity, registration.questionnaireHash);
+        const slot = fileSlotFor(questionnaire, material.questionKey);
+        if (slotAcceptsAudio(slot) && !audioBytesMatchSlot(slot.accepts, input.bytes)) {
+          throw new DomainError(
+            "MATERIAL_NOT_ALLOWED",
+            "The material content does not match an accepted audio format.",
+          );
         }
         await storage.put(material.storageKey, input.bytes);
         writtenKey = material.storageKey;

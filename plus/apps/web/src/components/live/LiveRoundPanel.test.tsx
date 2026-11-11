@@ -33,7 +33,13 @@ const state: LiveState = {
   },
   session: null,
   rounds: [],
-  participantIds: ["singer-a"],
+  participantIds: ["participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4"],
+  participants: [{
+    participantId: "participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4",
+    name: "林晓雨",
+    studentId: "20210001",
+    song: "夜空中最亮的星",
+  }],
 };
 
 const live: LiveRound = {
@@ -74,7 +80,7 @@ const live: LiveRound = {
   }],
   performances: [{
     id: "performance-1",
-    contestantId: "singer-a",
+    contestantId: "participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4",
     sequence: 1,
     state: "open",
     contextVersion: 1,
@@ -84,7 +90,7 @@ const live: LiveRound = {
   ranking: {
     id: "ranking-1",
     status: "ready",
-    rows: [{ contestantId: "singer-a", total: "90.00", judgeCount: 1 }],
+    rows: [{ contestantId: "participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4", total: "90.00", judgeCount: 1 }],
     tieGroups: [],
     revision: 1,
     sourceScoreVersion: 1,
@@ -99,5 +105,7 @@ describe("LiveRoundPanel", () => {
     expect(document.querySelectorAll(".console-table-wrap")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "锁轮" })).toBeVisible();
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "林晓雨 · 20210001 · 夜空中最亮的星（participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4）" })).toBeInTheDocument();
+    expect(screen.getAllByText("林晓雨 · 20210001 · 夜空中最亮的星").length).toBeGreaterThan(0);
   });
 });

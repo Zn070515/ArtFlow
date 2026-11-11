@@ -22,6 +22,7 @@ import {
   getRound,
   listApprovedParticipantIds,
   listCurrentPanelMembersBySeatKey,
+  listRegistrations,
   listCurrentScoreFactsForJudge,
   listJudgeSeatsForPanel,
   listRoundPerformances,
@@ -57,6 +58,13 @@ export interface LiveRoundState {
   readonly ranking: StoredRankingSnapshot | null;
 }
 
+export interface LiveParticipant {
+  readonly participantId: string;
+  readonly name: string;
+  readonly studentId: string;
+  readonly song: string;
+}
+
 export interface LiveState {
   readonly activity: {
     readonly id: string;
@@ -71,6 +79,12 @@ export interface LiveState {
   readonly session: SessionRecord | null;
   readonly rounds: readonly LiveRoundState[];
   readonly participantIds: readonly string[];
+  readonly participants: readonly LiveParticipant[];
+}
+
+function textAnswer(answers: Readonly<Record<string, unknown>>, key: string): string {
+  const value = answers[key];
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function requireLiveAccess(actor: Parameters<typeof hasPermission>[0]): void {
@@ -152,7 +166,31 @@ export async function getLiveState(
     config,
     session,
     rounds,
-    participantIds: await listApprovedParticipantIds(db, activityId),
+    ...await approvedParticipants(db, activityId),
+  };
+}
+
+async function approvedParticipants(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<{ readonly participantIds: readonly string[]; readonly participants: readonly LiveParticipant[] }> {
+  const answersByParticipant = new Map(
+    (await listRegistrations(db, activityId))
+      .filter((registration) => registration.status === "approved")
+      .map((registration) => [registration.participantId, registration.answers]),
+  );
+  const participantIds = await listApprovedParticipantIds(db, activityId);
+  return {
+    participantIds,
+    participants: participantIds.map((participantId) => {
+      const answers = answersByParticipant.get(participantId) ?? {};
+      return {
+        participantId,
+        name: textAnswer(answers, "name"),
+        studentId: textAnswer(answers, "student_id"),
+        song: textAnswer(answers, "song"),
+      };
+    }),
   };
 }
 

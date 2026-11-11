@@ -545,11 +545,6 @@
       "issue": "#59"
     },
     {
-      "id": "pack-readiness:singer-competition:MATERIALS_WITHOUT_FILE_QUESTION",
-      "reason": "Starter pack readiness gap; accepted in the 2026-11-11 baseline.",
-      "issue": "#55"
-    },
-    {
       "id": "pack-readiness:singer-competition:VOTING_IDENTITY_IMPLICIT",
       "reason": "Starter pack readiness gap; accepted in the 2026-11-11 baseline.",
       "issue": "#59"

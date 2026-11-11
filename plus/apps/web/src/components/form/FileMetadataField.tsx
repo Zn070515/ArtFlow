@@ -19,6 +19,7 @@ export function FileMetadataField({
   readonly busy: boolean;
   readonly onFile: (file: File) => void;
 }) {
+  const stored = material !== undefined && material.contentReady !== false;
   return (
     <label className="field question question-file question-full-row">
       <span className="question-label">
@@ -37,10 +38,12 @@ export function FileMetadataField({
       />
       {material === undefined ? null : (
         <p className="file-meta">
-          已登记：{material.originalName} · {formatBytes(material.byteLength)}
+          {stored ? "字节已保存" : "已登记"}：{material.originalName} · {formatBytes(material.byteLength)}
         </p>
       )}
-      <p className="file-warning">仅登记文件信息；字节存储将在媒体切片开放。</p>
+      {material !== undefined && !stored ? (
+        <p className="file-warning">仅登记文件信息；字节存储将在媒体切片开放。</p>
+      ) : null}
     </label>
   );
 }

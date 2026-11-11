@@ -70,7 +70,13 @@ describe("LiveActivityPage", () => {
           performances: [],
           ranking: null,
         }],
-        participantIds: ["singer-a"],
+        participantIds: ["participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4"],
+        participants: [{
+          participantId: "participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4",
+          name: "林晓雨",
+          studentId: "20210001",
+          song: "夜空中最亮的星",
+        }],
       },
       error: null,
       isPending: false,
@@ -85,5 +91,7 @@ describe("LiveActivityPage", () => {
     expect(document.querySelector(".live-workspace")).not.toBeNull();
     expect(document.querySelector(".live-main-column")).not.toBeNull();
     expect(document.querySelector(".live-control-rail")).not.toBeNull();
+    expect(screen.getByText("林晓雨 · 20210001 · 夜空中最亮的星")).toBeInTheDocument();
+    expect(screen.getByText("participant:9e5c1116-fffc-4b8a-b092-4a02bb1773d4")).toHaveClass("participant-id");
   });
 });

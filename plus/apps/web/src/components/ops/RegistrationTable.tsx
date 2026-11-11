@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import type { OpsRegistration } from "../../api/ops.js";
+import { answerIdentity } from "../../participantLabel.js";
 import { ConsolePagination } from "../console/ConsolePagination.js";
 
 const PAGE_SIZE = 25;
@@ -32,8 +33,11 @@ export function RegistrationTable({
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
   const statuses = [...new Set(registrations.map((registration) => registration.status))].sort();
   const filteredRegistrations = registrations.filter((registration) => {
+    const label = answerIdentity(registration.answers, registration.participantId);
     const matchesSearch = normalizedSearch.length === 0 ||
-      `${registration.participantId} ${registration.reviewNote ?? ""}`.toLocaleLowerCase().includes(normalizedSearch);
+      `${label} ${registration.participantId} ${registration.reviewNote ?? ""}`
+        .toLocaleLowerCase()
+        .includes(normalizedSearch);
     return matchesSearch && (statusFilter.length === 0 || registration.status === statusFilter);
   });
   const totalPages = Math.max(1, Math.ceil(filteredRegistrations.length / PAGE_SIZE));
@@ -48,7 +52,7 @@ export function RegistrationTable({
             type="search"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="搜索参与者或审核意见"
+            placeholder="搜索姓名、学号、曲目或审核意见"
           />
         </label>
         <label className="console-filter-field">
@@ -74,7 +78,9 @@ export function RegistrationTable({
               </tr>
             </thead>
             <tbody>
-              {paginatedRegistrations.map((registration) => (
+              {paginatedRegistrations.map((registration) => {
+                const label = answerIdentity(registration.answers, registration.participantId);
+                return (
                 <tr key={registration.id}>
                   <td>
                     <Link
@@ -82,8 +88,11 @@ export function RegistrationTable({
                       params={{ activityId, registrationId: registration.id }}
                       className="table-link"
                     >
-                      {registration.participantId}
+                      {label}
                     </Link>
+                    {label === registration.participantId ? null : (
+                      <span className="participant-id">{registration.participantId}</span>
+                    )}
                   </td>
                   <td>
                     <span className={`status-badge status-${registration.status}`}>
@@ -93,7 +102,8 @@ export function RegistrationTable({
                   <td>{registration.revision}</td>
                   <td>{registration.reviewNote ?? "—"}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           <ConsolePagination page={currentPage} totalPages={totalPages} onPageChange={setPage} />
