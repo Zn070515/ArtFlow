@@ -37,6 +37,12 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
       default: true,
     },
     {
+      id: "judge-entry",
+      prompt: "现场评委是否使用入口链接评分？",
+      capability: "ticketing",
+      default: true,
+    },
+    {
       id: "grouping",
       prompt: "需要第一轮分组/合唱吗？",
       capability: "grouping",

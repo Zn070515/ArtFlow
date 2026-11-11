@@ -93,6 +93,7 @@ function skeletonRegistry() {
       "publishing",
       "archive",
       "grouping",
+      "ticketing",
     ].map(stubCapability),
   ];
   const result = createCapabilityRegistry(registrations);
@@ -171,6 +172,7 @@ dbIt("runs the full skeleton journey on the new architecture", async () => {
       "publishing",
       "archive",
       "probe",
+      "ticketing",
     ]),
   );
 

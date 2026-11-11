@@ -431,6 +431,18 @@ dbIt("lists the registered capabilities using the shared manifest contract", asy
   ]);
 });
 
+dbIt("the singer pack turns on judge entry by default", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/packs/singer-competition/instantiate",
+    headers: { "content-type": "application/json" },
+    payload: { title: "十佳" },
+  });
+  expect(response.statusCode).toBe(200);
+  const body = response.json() as { enabledCapabilities: string[] };
+  expect(body.enabledCapabilities).toContain("ticketing");
+});
+
 dbIt("lists activity packs and explains missing capabilities", async () => {
   const packs = await app.inject({ method: "GET", url: "/api/packs" });
   const identities = (packs.json() as { packs: { identity: string }[] }).packs.map(
@@ -463,6 +475,7 @@ dbIt("instantiates a pack once every capability is registered", async () => {
     "voting",
     "publishing",
     "archive",
+    "ticketing",
   ];
   const registry = createCapabilityRegistry(identities.map(stubCapability));
   expect(registry.ok).toBe(true);
