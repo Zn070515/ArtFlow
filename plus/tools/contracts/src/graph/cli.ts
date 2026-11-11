@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { apiOnlyKeys, loadApiOnly, validateApiOnly } from "../audit/api-only.js";
 import { buildConsumerGraph } from "./build.js";
 import { loadDynamicDependencies } from "./dynamic.js";
 import { findStartNodes, formatImpactReport, impactOf } from "./impact.js";
@@ -83,6 +84,11 @@ function main(): void {
   const root = typeof args.flags.get("root") === "string" ? String(args.flags.get("root")) : defaultRoot();
   const dynamic = loadDynamicDependencies(dynamicPath());
   const graph = buildConsumerGraph(root, dynamic);
+  const apiOnly = loadApiOnly(path.resolve(import.meta.dirname, "../../api-only.json"));
+  const apiOnlyProblems = validateApiOnly(apiOnly, graph);
+  if (apiOnlyProblems.length > 0) {
+    for (const problem of apiOnlyProblems) process.stderr.write(`api-only: ${problem}\n`);
+  }
   const summary = summarizeGraph(graph);
 
   if (args.command === "graph") {
@@ -90,7 +96,7 @@ function main(): void {
       ? String(args.flags.get("out"))
       : artifactPath(root, "consumer-graph.json");
     writeJson(output, graph);
-    const uiGaps = findUnreferencedMutationRoutes(graph);
+    const uiGaps = findUnreferencedMutationRoutes(graph, apiOnlyKeys(apiOnly));
     const gapPath = artifactPath(root, "ui-gaps.json");
     writeJson(gapPath, uiGaps);
     process.stdout.write(`${JSON.stringify({ output, uiGaps: uiGaps.length, uiGapsOutput: gapPath, ...summary }, null, 2)}\n`);

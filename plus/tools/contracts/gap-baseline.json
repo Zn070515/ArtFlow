@@ -510,34 +510,11 @@
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "pack-readiness:review-awards:JUDGING_WITHOUT_TICKETING",
-      "reason": "Starter pack readiness gap; accepted in the 2026-11-11 baseline.",
-      "issue": "#54"
-    },
-    {
-      "id": "pack-readiness:review-awards:VOTING_IDENTITY_IMPLICIT",
-      "reason": "Starter pack readiness gap; accepted in the 2026-11-11 baseline.",
-      "issue": "#59"
-    },
-    {
-      "id": "pack-readiness:stage-show:VOTING_IDENTITY_IMPLICIT",
-      "reason": "Starter pack readiness gap; accepted in the 2026-11-11 baseline.",
-      "issue": "#59"
-    },
-    {
       "id": "ui-route:PATCH /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
       "id": "ui-route:PATCH /api/activities/:id/publishing/publications/:stageKey",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:PATCH /api/activities/:id/registrations/:registrationId",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:PATCH /api/activities/:id/title",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
@@ -574,19 +551,6 @@
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "ui-route:POST /api/activities/:id/judge-entry/close",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline.",
-      "issue": "#60"
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/materials",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/materials/:materialId/review",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "ui-route:POST /api/activities/:id/publishing/releases/:releaseId/revoke",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
@@ -603,14 +567,6 @@
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "ui-route:POST /api/activities/:id/rounds/:roundKey/prepare",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/runtime-facts",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "ui-route:POST /api/activities/:id/ticket-sessions/:sessionId/revoke",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
@@ -624,10 +580,6 @@
     },
     {
       "id": "ui-route:POST /api/activities/:id/tickets/:ticketId/rotate",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/unarchive",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     }
   ]

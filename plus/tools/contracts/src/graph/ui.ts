@@ -132,6 +132,7 @@ export function extractWebCalls(files: readonly SourceFile[]): WebCall[] {
  */
 export function findUnreferencedMutationRoutes(
   graph: ConsumerGraph,
+  apiOnly: ReadonlySet<string> = new Set(),
 ): UiGap[] {
   const referenced = new Set(
     graph.edges
@@ -146,6 +147,7 @@ export function findUnreferencedMutationRoutes(
     if (!MUTATION_METHODS.has(method)) continue;
     if (referenced.has(node.id)) continue;
     if (API_ONLY_PREFIXES.some((prefix) => path.startsWith(prefix))) continue;
+    if (apiOnly.has(`${method} ${path}`)) continue;
     gaps.push({ method, path, ...(node.file === undefined ? {} : { file: node.file }), ...(node.line === undefined ? {} : { line: node.line }) });
   }
   return gaps.sort((left, right) =>

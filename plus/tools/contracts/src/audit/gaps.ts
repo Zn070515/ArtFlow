@@ -42,8 +42,8 @@ function read(root: string, relative: string): string | null {
   }
 }
 
-export function uiGaps(graph: ConsumerGraph): TestGap[] {
-  return findUnreferencedMutationRoutes(graph).map((route) =>
+export function uiGaps(graph: ConsumerGraph, apiOnly: ReadonlySet<string> = new Set()): TestGap[] {
+  return findUnreferencedMutationRoutes(graph, apiOnly).map((route) =>
     gap(
       "ui-route",
       `${route.method} ${route.path}`,
@@ -220,9 +220,10 @@ export function runGapAudit(
     readonly invariants?: boolean;
   } = {},
   repoRoot = path.dirname(plusRoot),
+  apiOnly: ReadonlySet<string> = new Set(),
 ): TestGap[] {
   const all = [
-    ...(include.ui === false ? [] : uiGaps(graph)),
+    ...(include.ui === false ? [] : uiGaps(graph, apiOnly)),
     ...(include.packs === false ? [] : packReadinessGaps()),
     ...(include.manifest === false ? [] : manifestGaps(graph)),
     ...(include.docs === false ? [] : docDriftGaps(repoRoot)),
