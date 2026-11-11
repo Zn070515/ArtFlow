@@ -23,6 +23,7 @@
 | GATE-ARTIFACT-01 | AUTH-04/DEPL-06 | Git 不得跟踪 `.env`、SQLite、media/staticfiles/backups/logs、zip/log/密钥 | `tests/gates/test_no_tracked_artifacts.py` |
 | GATE-PLUS-BOUNDARY-01 | ADR-0009/0010/0011 | Plus capability 只能导入 engine 模块与自身；domain 不导入 persistence；engine assembly 不硬编码具体 capability；runtime/API/worker 不直接 import 具体 capability；API/worker 不得 import DB mutator | `tests/gates/test_plus_capability_boundaries.py` |
 | GATE-REALTIME-CORE-01 | RT-01…RT-08 / ADR-0027 | 只有 `packages/realtime` 可 import `ws` / `@fastify/websocket`；只有 `src/client` 与该包测试可 `new WebSocket`；realtime 不 import domain/db/runtime | `tests/gates/test_plus_realtime_core.py` |
+| GAP-RATCHET-01 | 自审计测试体系 | UI 消费者、Pack 就绪、Manifest 闭合、文档/部署漂移、不变量测试覆盖；新增缺口失败，修复后必须删除 baseline 条目 | `plus/tools/contracts/src/audit/gaps.ts`、`gap-baseline.json` |
 
 运行：
 

@@ -504,17 +504,20 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
   route，包括 tasks sync、podium recompute、close/archive、judge-entry close。
 - **Starter Pack 就绪诊断**：`checkPackReadiness` 检查 materials/file question、
   competition/ticketing、voting identity policy，首次运行发现 6 条 finding。
-- 两者默认非阻塞，产物在 `plus/.artifacts/ui-gaps.json` 与
-  `plus/.artifacts/pack-readiness.json`；`--strict` 留给修复后接入 CI。
+- **统一缺口棘轮**：`audit:check` 把 UI、Pack、Manifest、文档、部署、不变量覆盖
+  合成一个缺口集合，并与 `gap-baseline.json` 比较。当前 baseline 接受 170 条
+  缺口（ui-route 31、pack-readiness 6、manifest 68、doc-drift 5、
+  deploy-manifest 1、invariant-coverage 59）；**新增缺口失败，修复后必须删除
+  baseline 条目**。该步骤已接入 `.github/workflows/gates.yml`。
+- 设计文档：[自审计测试体系设计](../specs/2026-11-11-self-auditing-test-system-design.md)。
 
 后续优先级：
 
-1. P0：Organizer journey E2E、API boundary contract（Idempotency-Key /
-   SQLSTATE）、deployment manifest gate、pack readiness strict、mode default
-   contract。
-2. P1：read-model display contract、material content contract、active docs
-   drift gate、public code contract。
-3. P2：受控导出、只读节目单/主持手卡。
+1. L3：fast-check lifecycle model、随机命令序列（禁止 500 / SQLSTATE 泄漏）、
+   确定性并发、读模型差分。
+2. L4：Journey spec runner（organizer / participant / judge）。
+3. L5：变异审计自动化（删除 audit/receipt/guard，确认测试失败）。
+4. 逐步清理 baseline：先修 P0 产品缺口，再收紧对应类别的 `--strict`。
 
 完整映射与验收建议见
 [外部审核驱动的测试体系加固](../analysis/2026-11-11-external-review-test-hardening.md)。
