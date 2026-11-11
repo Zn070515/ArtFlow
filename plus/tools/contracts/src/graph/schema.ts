@@ -26,7 +26,8 @@ export type EdgeKind =
   | "subscribes"
   | "reads"
   | "writes"
-  | "serves";
+  | "serves"
+  | "consumes-route";
 
 export interface GraphNode {
   readonly id: string;
