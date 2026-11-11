@@ -1,0 +1,79 @@
+name: Feature request
+description: Propose a product capability or an engineering improvement.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ArtFlow-Plus is organized by capabilities and four product surfaces.
+        Describe the problem before the solution, and state which authority or
+        invariant the change touches.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or engineering problem is not solved today?
+      placeholder: During a live show, the operator cannot ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior. Include commands, read models, events, and failure behavior where relevant.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Primary product surface
+      options:
+        - Studio
+        - Ops
+        - Live
+        - Portal
+        - Shared / engine / API
+        - Worker / realtime / infrastructure
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: capability
+    attributes:
+      label: Capability
+      description: Existing or new capability identity, if applicable.
+      placeholder: attendance, publishing, tasks, or a new identity
+
+  - type: textarea
+    id: authority
+    attributes:
+      label: Authority and invariant impact
+      description: Does this change a lifecycle, write path, permission, idempotency rule, event, projection, or recovery path? Link the relevant docs/invariants entry.
+      placeholder: No new authority; this is a read-only projection over existing facts.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What simpler option or existing capability did you rule out, and why?
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: How should reviewers verify this? Name the test layer (domain, runtime + PostgreSQL, API, browser E2E) and the observable outcome.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the roadmap and existing capabilities first.
+          required: true
+        - label: This request does not require exposing private media or committing secrets.
+          required: true
