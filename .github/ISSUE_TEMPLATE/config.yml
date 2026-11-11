@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: ArtFlow-Plus development documentation
+    url: https://github.com/Zn070515/ArtFlow/blob/main/docs/artflow-plus/README.md
+    about: Read the development baseline, roadmap, specs, and current operating procedures.
+  - name: Domain invariants and golden fixtures
+    url: https://github.com/Zn070515/ArtFlow/blob/main/docs/invariants/README.md
+    about: Check whether the behavior is already covered by a documented invariant before filing.
+  - name: Contract testing and consumer fault injection
+    url: https://github.com/Zn070515/ArtFlow/blob/main/docs/artflow-plus/specs/2026-11-11-contract-testing-program-design.md
+    about: The design for consumers, contracts, lifecycle templates, fault injection, and impact gates.
+  - name: Report a security vulnerability
+    url: https://github.com/Zn070515/ArtFlow/security/advisories/new
+    about: Do not file security issues publicly. Use the private advisory channel.

@@ -1,0 +1,82 @@
+name: Invariant or contract violation
+description: Report a case where a domain invariant, golden fixture, or consumer contract is violated.
+title: "[invariant] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when the system still "works" but a documented rule is
+        broken. The rule lives in `docs/invariants/`, a golden fixture, or the
+        contract-testing program. A failing test is the preferred artifact.
+
+  - type: input
+    id: rule
+    attributes:
+      label: Invariant or contract ID
+      description: Use the documented ID when one exists.
+      placeholder: LIFE-05, TICK-03, AUTH-01, or the provider contract name
+    validations:
+      required: true
+
+  - type: textarea
+    id: violation
+    attributes:
+      label: Rule and observed violation
+      description: Quote or summarize the rule, then state exactly how the current behavior breaks it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the failing test, command sequence, seed data, and the relevant IDs. If a test does not exist yet, say so explicitly.
+      placeholder: |
+        Test: plus/packages/runtime/test/...
+        Run: REQUIRE_DB=1 pnpm --filter @artflow-plus/runtime test -- ...
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: consumers
+    attributes:
+      label: Consumer impact
+      description: Which consumers depend on this provider? Name capabilities, services, API routes, realtime topics, or projections.
+      placeholder: |
+        Provider: executeCommand / claimJudgeSeat / outbox relay
+        Consumers: ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Evidence type
+      options:
+        - Failing automated test
+        - Golden fixture mismatch
+        - Manual reproduction on a disposable schema
+        - CI or production observation
+    validations:
+      required: true
+
+  - type: textarea
+    id: recovery
+    attributes:
+      label: Required final state and recovery
+      description: What must be true after the fix? If data was already corrupted, describe the recovery or rebuild path.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked whether this is already covered by an existing invariant or golden fixture.
+          required: true
+        - label: I did not include secrets, tokens, or private participant data.
+          required: true

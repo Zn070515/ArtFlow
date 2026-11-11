@@ -1,0 +1,108 @@
+name: Bug report
+description: Report a reproducible defect in ArtFlow-Plus.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a defect. Please search existing issues first.
+        Do not paste credentials, session tokens, ticket capabilities, private
+        participant data, or unredacted production logs. Security issues should
+        go through the private advisory link instead of a public issue.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observable behavior, including the affected activity or capability.
+      placeholder: When I ... the API returned ... and the UI showed ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: State the expected behavior and, if applicable, the invariant or contract it violates.
+      placeholder: The roster is final, so a new registration must be rejected with ROSTER_FINAL.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Give the smallest sequence that reproduces the defect. Include seed data, schema, command IDs, and the exact commands.
+      placeholder: |
+        1. Set ARTFLOW_PLUS_DATABASE_URL ...
+        2. Run pnpm --filter @artflow-plus/api start
+        3. POST /api/... with body ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Studio
+        - Ops
+        - Live
+        - Portal
+        - API
+        - Worker / outbox relay
+        - Realtime
+        - Database / migrations
+        - Build / CI / deployment
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: invariant
+    attributes:
+      label: Invariant, contract, or capability
+      description: Optional. Use IDs from docs/invariants (for example LIFE-05 or TICK-03) and name the capability.
+      placeholder: LIFE-09 / registration
+
+  - type: input
+    id: revision
+    attributes:
+      label: Commit, tag, or image digest
+      description: The revision where the defect was observed.
+      placeholder: main @ 1a2b3c4, or ghcr.io/...@sha256:...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Local development (pnpm + local PostgreSQL)
+        - Compose production profile
+        - CI (Gates / Security / E2E)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and evidence
+      description: Redact secrets, tokens, personal data, and private media before pasting. Link a failing test or artifact where possible.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I removed credentials, tokens, personal data, and private logs from this report.
+          required: true
+        - label: I can reproduce this on the current main branch or a named release.
+          required: true
