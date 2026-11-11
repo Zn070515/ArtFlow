@@ -70,6 +70,29 @@ export async function reviewRegistration(
   );
 }
 
+export function closeActivity(
+  activityId: string,
+  expectedRevision: number,
+): Promise<unknown> {
+  return apiFetch(`/api/activities/${activityId}/close`, {
+    method: "POST",
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({ expectedRevision }),
+  });
+}
+
+export function archiveActivity(
+  activityId: string,
+  expectedRevision: number,
+  note: string,
+): Promise<unknown> {
+  return apiFetch(`/api/activities/${activityId}/archive`, {
+    method: "POST",
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({ expectedRevision, note }),
+  });
+}
+
 export function finalizeRoster(
   activityId: string,
   commandId: string,

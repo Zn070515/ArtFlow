@@ -71,6 +71,7 @@ describe("LiveActivityPage", () => {
           ranking: null,
         }],
         participantIds: ["singer-a"],
+        participantNames: { "singer-a": "林晓雨" },
       },
       error: null,
       isPending: false,

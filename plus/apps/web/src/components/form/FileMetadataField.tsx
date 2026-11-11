@@ -40,7 +40,11 @@ export function FileMetadataField({
           已登记：{material.originalName} · {formatBytes(material.byteLength)}
         </p>
       )}
-      <p className="file-warning">仅登记文件信息；字节存储将在媒体切片开放。</p>
+      {material === undefined ? null : material.contentReady ? (
+        <p className="file-meta">字节已保存，审核时可以播放或下载。</p>
+      ) : (
+        <p className="file-warning">字节尚未保存；请重新上传。</p>
+      )}
     </label>
   );
 }

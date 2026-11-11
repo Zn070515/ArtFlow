@@ -5,9 +5,11 @@ import { fetchAttendance } from "../../api/attendance.js";
 export function AttendanceSummary({
   activityId,
   mode,
+  rehearsal,
 }: {
   readonly activityId: string;
   readonly mode: "formal" | "test";
+  readonly rehearsal: boolean;
 }) {
   const query = useQuery({
     queryKey: ["live-attendance", activityId, mode],
@@ -21,6 +23,9 @@ export function AttendanceSummary({
   return (
     <section className="ops-card" data-testid="live-attendance-summary">
       <p className="eyebrow">ATTENDANCE · 到场</p>
+      {rehearsal ? (
+        <p className="state-copy">签到只有正式 / 测试分区；当前显示正式数据。</p>
+      ) : null}
       <ul>
         {query.data.summary.map((item) => (
           <li key={item.subjectType}>

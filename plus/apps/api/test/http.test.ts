@@ -75,7 +75,7 @@ function stubCapability(identity: string): CapabilityRegistration {
       version: "1",
       dependencies: [],
       conflicts: [],
-      definitionSchemaVersion: 1,
+      definitionSchemaVersion: identity === "voting" ? 2 : 1,
       commands: [],
       queries: [],
       events: [],
@@ -225,6 +225,19 @@ dbIt("requires an idempotency key", async () => {
   });
   expect(response.statusCode).toBe(400);
   expect(response.json()).toMatchObject({ code: "INVALID_INPUT" });
+});
+
+dbIt("rejects an overlong Idempotency-Key before the database", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/activities/not-real/registrations",
+    headers: studioHeaders("x".repeat(120)),
+    payload: {},
+  });
+  expect(response.statusCode).toBe(400);
+  expect(response.json()).toMatchObject({ code: "INVALID_INPUT" });
+  expect(response.body).not.toContain("22001");
+  expect(response.body).not.toContain("value too long");
 });
 
 dbIt("uses local bearer sessions for registration routes", async () => {

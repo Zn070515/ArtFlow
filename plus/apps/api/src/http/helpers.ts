@@ -7,13 +7,27 @@ import type { ActivityDefinitionPackage } from "@artflow-plus/domain";
 
 import { isProductionEnvironment, sessionCookie } from "../cookies.js";
 
+const IDEMPOTENCY_KEY_MAX_LENGTH = 100;
+
 export function requireIdempotency(request: FastifyRequest): string {
   const header = request.headers["idempotency-key"];
   const value = Array.isArray(header) ? header[0] : header;
   if (typeof value !== "string" || !value.trim()) {
     throw new DomainError("INVALID_INPUT", "An Idempotency-Key header is required.");
   }
-  return value.trim();
+  const key = value.trim();
+  // command_receipt.command_id is varchar(100). Reject before the database so
+  // a malformed client cannot surface a Postgres SQLSTATE through the API.
+  if (key.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `An Idempotency-Key header must be at most ${IDEMPOTENCY_KEY_MAX_LENGTH} characters.`,
+    );
+  }
+  if (!/^[\x21-\x7E]+$/.test(key)) {
+    throw new DomainError("INVALID_INPUT", "An Idempotency-Key header contains invalid characters.");
+  }
+  return key;
 }
 
 export function bearerToken(request: FastifyRequest): string | undefined {

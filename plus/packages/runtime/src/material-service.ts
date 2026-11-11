@@ -109,6 +109,54 @@ function validateMaterial(
   }
 }
 
+function bytesAt(bytes: Uint8Array, offset: number, text: string): boolean {
+  if (bytes.byteLength < offset + text.length) return false;
+  for (let index = 0; index < text.length; index += 1) {
+    if (bytes[offset + index] !== text.charCodeAt(index)) return false;
+  }
+  return true;
+}
+
+function bytesIn(bytes: Uint8Array, offset: number, values: readonly number[]): boolean {
+  if (bytes.byteLength < offset + values.length) return false;
+  return values.every((value, index) => bytes[offset + index] === value);
+}
+
+function purposeCategory(purpose: string): string {
+  if (purpose === "accompaniment" || purpose.includes("audio")) return "audio";
+  if (purpose === "work" || purpose.includes("video")) return "video";
+  if (purpose === "photo" || purpose.includes("image")) return "image";
+  if (purpose === "pdf" || purpose.includes("document")) return "document";
+  return purpose;
+}
+
+function matchesPurpose(bytes: Uint8Array, purpose: string): boolean {
+  const category = purposeCategory(purpose);
+  if (category === "audio") {
+    return bytesAt(bytes, 0, "ID3") ||
+      (bytes[0] === 0xff && bytes[1] !== undefined && (bytes[1] & 0xe0) === 0xe0) ||
+      bytesAt(bytes, 0, "OggS") ||
+      bytesAt(bytes, 0, "fLaC") ||
+      (bytesAt(bytes, 0, "RIFF") && bytesAt(bytes, 8, "WAVE")) ||
+      bytesAt(bytes, 4, "ftyp");
+  }
+  if (category === "video") {
+    return bytesAt(bytes, 4, "ftyp") ||
+      (bytesAt(bytes, 0, "RIFF") && bytesAt(bytes, 8, "AVI ")) ||
+      bytesIn(bytes, 0, [0x1a, 0x45, 0xdf, 0xa3]);
+  }
+  if (category === "image") {
+    return bytesIn(bytes, 0, [0x89, 0x50, 0x4e, 0x47]) ||
+      bytesIn(bytes, 0, [0xff, 0xd8, 0xff]) ||
+      bytesAt(bytes, 0, "GIF8") ||
+      (bytesAt(bytes, 0, "RIFF") && bytesAt(bytes, 8, "WEBP"));
+  }
+  if (category === "document") {
+    return bytesAt(bytes, 0, "%PDF") || bytesIn(bytes, 0, [0x50, 0x4b, 0x03, 0x04]);
+  }
+  return true;
+}
+
 export interface UploadMaterialInput {
   readonly commandId: string;
   readonly activityId: string;
@@ -252,6 +300,18 @@ export async function attachMaterialContent(
         }
         if (input.bytes.byteLength !== material.byteLength) {
           throw new DomainError("MATERIAL_NOT_ALLOWED", "The uploaded content does not match the registered size.");
+        }
+        const { questionnaire, materials } = await releasedMaterialRules(
+          trx,
+          activity,
+          registration.questionnaireHash,
+        );
+        const slot = fileSlotFor(questionnaire, material.questionKey);
+        if (!matchesPurpose(input.bytes, slot.purpose)) {
+          throw new DomainError(
+            "MATERIAL_NOT_ALLOWED",
+            "The material content does not match the released purpose.",
+          );
         }
         await storage.put(material.storageKey, input.bytes);
         writtenKey = material.storageKey;

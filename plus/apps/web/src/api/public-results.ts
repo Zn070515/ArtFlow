@@ -25,11 +25,36 @@ export interface PublicResults {
   readonly results: readonly PublicResult[];
 }
 
+export interface PublicProgramEntry {
+  readonly order: number;
+  readonly participantId: string;
+  readonly name: string;
+  readonly song: string;
+  readonly note: string;
+}
+
+export interface PublicProgram {
+  readonly activity: { readonly publicCode: string; readonly title: string };
+  readonly entries: readonly PublicProgramEntry[];
+}
+
 export class PublicResultsNotFound extends Error {
   constructor(publicCode: string) {
     super(`No public results for ${publicCode}`);
     this.name = "PublicResultsNotFound";
   }
+}
+
+export async function fetchPublicProgram(
+  publicCode: string,
+  signal?: AbortSignal,
+): Promise<PublicProgram> {
+  const response = await fetch(`/api/public/programs/${encodeURIComponent(publicCode)}`, {
+    signal,
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`加载节目单失败（${response.status}）`);
+  return (await response.json()) as PublicProgram;
 }
 
 export async function fetchPublicResults(

@@ -12,8 +12,27 @@ export interface ExecutionSessionView {
   readonly revision: number;
 }
 
+export interface PodiumCandidateView {
+  readonly id: string;
+  readonly revision: number;
+  readonly status: "candidate" | "hold";
+  readonly inputFingerprint: string;
+  readonly placements: readonly {
+    readonly place: number;
+    readonly contestantId: string;
+    readonly total: string;
+  }[];
+}
+
 export interface PublishingStateView {
   readonly stages: readonly { readonly key: string; readonly label: string }[];
+  readonly podiumCandidate: PodiumCandidateView | null;
+  readonly stageResults: readonly {
+    readonly stageKey: string;
+    readonly status: "confirmed" | "ready_to_confirm";
+    readonly candidateRevision: number;
+    readonly inputFingerprint: string;
+  }[];
 }
 
 export interface VoteResultCandidateView {
@@ -51,7 +70,7 @@ export async function fetchExecutions(activityId: string): Promise<readonly Exec
 export async function startExecution(
   activityId: string,
   scope: string,
-  mode: "formal" | "test" = "formal",
+  mode: "formal" | "test" | "rehearsal" = "rehearsal",
 ): Promise<ExecutionSessionView> {
   return apiFetch<ExecutionSessionView>(`/api/activities/${activityId}/executions`, {
     method: "POST",
@@ -104,6 +123,54 @@ export async function closeVoteSession(
 
 export async function fetchPublishingState(activityId: string): Promise<PublishingStateView> {
   return apiFetch<PublishingStateView>(`/api/activities/${activityId}/publishing/state`);
+}
+
+export async function recomputePodiumCandidate(
+  activityId: string,
+  roundIds: readonly string[],
+): Promise<PodiumCandidateView> {
+  return apiFetch<PodiumCandidateView>(
+    `/api/activities/${activityId}/competition/podium/recompute`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": commandId("podium") },
+      body: JSON.stringify({
+        scope: "judging",
+        roundIds,
+        expectedInputFingerprint: "*",
+      }),
+    },
+  );
+}
+
+export async function confirmPodiumResult(
+  activityId: string,
+  stageKey: string,
+  candidate: PodiumCandidateView,
+): Promise<{ readonly candidateRevision: number }> {
+  return apiFetch(`/api/activities/${activityId}/publishing/stage-results/${stageKey}/confirm`, {
+    method: "POST",
+    headers: { "idempotency-key": commandId("podium-confirm") },
+    body: JSON.stringify({
+      scope: "publishing",
+      expectedSourceRevision: candidate.revision,
+      expectedInputFingerprint: candidate.inputFingerprint,
+      awards: [],
+    }),
+  });
+}
+
+export async function releasePodiumResult(
+  activityId: string,
+  stageKey: string,
+  expectedCandidateRevision: number,
+  note: string,
+): Promise<unknown> {
+  return apiFetch(`/api/activities/${activityId}/publishing/releases`, {
+    method: "POST",
+    headers: { "idempotency-key": commandId("podium-release") },
+    body: JSON.stringify({ stageKey, scope: "publishing", expectedCandidateRevision, note }),
+  });
 }
 
 export async function previewVoteResult(

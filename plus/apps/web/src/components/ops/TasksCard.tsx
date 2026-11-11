@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ApiError } from "../../api/client.js";
-import { fetchReadiness, fetchTasks, mutateTask } from "../../api/tasks.js";
+import { fetchReadiness, fetchTasks, mutateTask, syncTasks } from "../../api/tasks.js";
 
 function taskStatusLabel(status: TaskResponse["status"]): string {
   return {
@@ -44,6 +44,17 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
     queryKey: ["ops-readiness", activityId],
     queryFn: () => fetchReadiness(activityId),
     retry: false,
+  });
+  const syncMutation = useMutation({
+    mutationFn: () => {
+      const definitionVersion = tasksQuery.data?.definitionVersion;
+      if (definitionVersion === undefined) throw new Error("任务定义版本不可用。");
+      return syncTasks(activityId, definitionVersion);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ops-tasks", activityId] });
+      void queryClient.invalidateQueries({ queryKey: ["ops-readiness", activityId] });
+    },
   });
   const mutation = useMutation({
     mutationFn: ({ task, action }: { readonly task: TaskResponse; readonly action: TaskAction }) => {
@@ -89,14 +100,26 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
           <span>逾期 {summary.overdue}</span>
         </div>
       )}
-      {summary === undefined || summary.total - summary.done === 0 ? (
+      {tasks.length === 0 ? (
+        <div className="tasks-empty-block">
+          <p className="tasks-empty">当前版本还没有同步任务模板。</p>
+          {canManage ? (
+            <button
+              type="button"
+              className="primary-button"
+              disabled={syncMutation.isPending || tasksQuery.data?.definitionVersion === undefined}
+              onClick={() => syncMutation.mutate()}
+            >
+              同步任务模板
+            </button>
+          ) : null}
+        </div>
+      ) : summary === undefined || summary.total - summary.done === 0 ? (
         <p className="tasks-clear">当前没有未完成的任务。</p>
       ) : (
         <p className="tasks-attention">还有 {summary.total - summary.done} 个任务未完成</p>
       )}
-      {tasks.length === 0 ? (
-        <p className="tasks-empty">当前版本还没有同步任务模板。</p>
-      ) : (
+      {tasks.length === 0 ? null : (
         <ul className="tasks-list">
           {tasks.map((task) => (
             <li key={task.id} className="task-row">
@@ -134,6 +157,7 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
         </div>
       ) : null}
       {mutation.error === null || mutation.error === undefined ? null : <p className="form-error" role="alert">{humanError(mutation.error)}</p>}
+      {syncMutation.error === null || syncMutation.error === undefined ? null : <p className="form-error" role="alert">{humanError(syncMutation.error)}</p>}
     </section>
   );
 }

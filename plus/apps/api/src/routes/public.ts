@@ -3,7 +3,7 @@ import { sessionCookie } from "../cookies.js";
 import { JudgeEntryBodySchema, PublicResultsParamsSchema, PublicResultsQuerySchema } from "@artflow-plus/contracts";
 import { selectPublicResults } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
-import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getSupplementContext, readPublicVoteSession, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
+import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicProgram, getSupplementContext, readPublicVoteSession, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
 import { Type } from "@sinclair/typebox";
 import { ActivityParams, PublicActivityParams, PublicVoteParams } from "../http/schemas.js";
 import { cookieValue, requireIdempotency, sessionTokenValue, setSessionCookie } from "../http/helpers.js";
@@ -162,6 +162,21 @@ export function registerPublicRoutes(ctx: ApiContext): void {
         return reply.status(404).send({ code: "NOT_FOUND", message: "The public results were not found." });
       }
       return results;
+    },
+  );
+
+  app.get(
+    "/api/public/programs/:publicCode",
+    { schema: { params: PublicActivityParams }, config: { access: "public" } },
+    async (request, reply) => {
+      const { publicCode } = request.params as { publicCode: string };
+      await requirePublicRateLimit(request, `public-program:${publicCode}`, 120);
+      const program = await getPublicProgram(db, publicCode);
+      reply.header("cache-control", "no-store");
+      if (program === null) {
+        return reply.status(404).send({ code: "NOT_FOUND", message: "The program was not found." });
+      }
+      return program;
     },
   );
 

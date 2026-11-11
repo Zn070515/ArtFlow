@@ -41,6 +41,7 @@ export interface RegistrationMaterialDto {
   readonly contentType: string;
   readonly byteLength: number;
   readonly status: string;
+  readonly contentReady: boolean;
   readonly revision: number;
 }
 
@@ -140,6 +141,7 @@ function materialDto(material: StoredMaterial): RegistrationMaterialDto {
     contentType: material.contentType,
     byteLength: material.byteLength,
     status: material.status,
+    contentReady: material.contentReady === true,
     revision: material.revision,
   };
 }
@@ -204,6 +206,48 @@ export async function listRegistrationsForReview(
 ): Promise<readonly StoredRegistration[]> {
   requireAny(runtimeActor(deps), ["registration.review", "registration.manage"]);
   return listRegistrations(db, activityId);
+}
+
+export interface PublicProgramEntry {
+  readonly order: number;
+  readonly participantId: string;
+  readonly name: string;
+  readonly song: string;
+  readonly note: string;
+}
+
+export interface PublicProgram {
+  readonly activity: { readonly publicCode: string; readonly title: string };
+  readonly entries: readonly PublicProgramEntry[];
+}
+
+function programAnswer(answers: Readonly<Record<string, unknown>>, keys: readonly string[]): string {
+  for (const key of keys) {
+    const value = answers[key];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return "";
+}
+
+/** Read-only program/host sheet; approved registrations only, no private material data. */
+export async function getPublicProgram(
+  db: Kysely<Database>,
+  publicCode: string,
+): Promise<PublicProgram | null> {
+  const activity = await getActivityByPublicCode(db, publicCode);
+  if (activity === null || activity.status === "archived") return null;
+  const registrations = (await listRegistrations(db, activity.id))
+    .filter((registration) => registration.status === "approved");
+  return {
+    activity: { publicCode: activity.publicCode, title: activity.title },
+    entries: registrations.map((registration, index) => ({
+      order: index + 1,
+      participantId: registration.participantId,
+      name: programAnswer(registration.answers, ["name", "displayName", "title"]) || registration.participantId,
+      song: programAnswer(registration.answers, ["song", "program", "program_name"]),
+      note: programAnswer(registration.answers, ["description", "note"]),
+    })),
+  };
 }
 
 export async function getRosterForReview(

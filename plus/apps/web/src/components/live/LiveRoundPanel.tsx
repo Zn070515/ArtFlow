@@ -209,7 +209,7 @@ export function LiveRoundPanel({
             <select value={contestantId} onChange={(event) => setContestantId(event.target.value)}>
               {state.participantIds.map((participantId) => (
                 <option key={participantId} value={participantId}>
-                  {participantId}
+                  {state.participantNames[participantId] ?? participantId}
                 </option>
               ))}
             </select>

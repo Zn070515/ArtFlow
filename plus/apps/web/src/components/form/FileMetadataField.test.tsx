@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FileMetadataField } from "./FileMetadataField.js";
 
 describe("FileMetadataField", () => {
-  it("shows registered metadata and the metadata-only warning", () => {
+  it("shows registered metadata and a stored-bytes confirmation", () => {
     render(
       <FileMetadataField
         question={{
@@ -21,6 +21,7 @@ describe("FileMetadataField", () => {
           contentType: "audio/mpeg",
           byteLength: 2048,
           status: "uploaded",
+          contentReady: true,
           revision: 0,
         }}
         disabled={false}
@@ -29,6 +30,6 @@ describe("FileMetadataField", () => {
       />,
     );
     expect(screen.getByText(/demo\.mp3/)).toBeInTheDocument();
-    expect(screen.getByText(/仅登记文件信息/)).toBeInTheDocument();
+    expect(screen.getByText(/字节已保存/)).toBeInTheDocument();
   });
 });

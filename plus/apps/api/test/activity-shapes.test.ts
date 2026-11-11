@@ -124,11 +124,26 @@ async function createShape(packId: string, title: string, answers: Record<string
   });
   expect(released.statusCode, JSON.stringify(released.body)).toBe(201);
   const studio = await getJson(opsApp, `/api/activities/${activity.id}/studio`);
+  const publicCode = (studio.activity as unknown as { publicCode: string }).publicCode;
+  expect(publicCode).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+  expect(publicCode).not.toBe(activity.id);
   return {
     activityId: activity.id,
-    publicCode: (studio.activity as unknown as { publicCode: string }).publicCode,
+    publicCode,
     definition: preview.body.definition as Record<string, unknown>,
   };
+}
+
+function materialBytes(contentType: string, length: number): Buffer {
+  const bytes = Buffer.alloc(length, 1);
+  if (contentType.startsWith("video/")) {
+    bytes.write("\x00\x00\x00\x20ftyp", 0, "latin1");
+  } else if (contentType.startsWith("audio/")) {
+    bytes.write("ID3", 0, "ascii");
+  } else if (contentType.startsWith("image/")) {
+    bytes.write("\x89PNG", 0, "latin1");
+  }
+  return bytes;
 }
 
 async function registerAndApprove(shape: Shape, answers: Record<string, string>, file?: {
@@ -158,7 +173,7 @@ async function registerAndApprove(shape: Shape, answers: Record<string, string>,
         "content-type": "application/octet-stream",
         "idempotency-key": `cmd-${randomUUID()}`,
       },
-      payload: Buffer.alloc(file.byteLength as number, 1),
+      payload: materialBytes(file.contentType, file.byteLength as number),
     });
     expect(content.statusCode, content.body).toBe(201);
   }

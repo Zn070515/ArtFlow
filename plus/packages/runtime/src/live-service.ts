@@ -24,6 +24,7 @@ import {
   listCurrentPanelMembersBySeatKey,
   listCurrentScoreFactsForJudge,
   listJudgeSeatsForPanel,
+  listRegistrations,
   listRoundPerformances,
   listRoundsForActivity,
 } from "@artflow-plus/db";
@@ -71,6 +72,8 @@ export interface LiveState {
   readonly session: SessionRecord | null;
   readonly rounds: readonly LiveRoundState[];
   readonly participantIds: readonly string[];
+  /** Human-readable labels from the approved registration answers. */
+  readonly participantNames: Readonly<Record<string, string>>;
 }
 
 function requireLiveAccess(actor: Parameters<typeof hasPermission>[0]): void {
@@ -139,6 +142,23 @@ export async function getLiveState(
     });
   }
 
+  const participantIds = await listApprovedParticipantIds(db, activityId);
+  const approvedRegistrations = (await listRegistrations(db, activityId))
+    .filter((registration) => registration.status === "approved");
+  const displayName = (answers: Readonly<Record<string, unknown>>, fallback: string): string => {
+    for (const key of ["name", "displayName", "title", "program"]) {
+      const value = answers[key];
+      if (typeof value === "string" && value.trim() !== "") return value.trim();
+    }
+    return fallback;
+  };
+  const participantNames = Object.fromEntries(
+    approvedRegistrations.map((registration) => [
+      registration.participantId,
+      displayName(registration.answers, registration.participantId),
+    ]),
+  );
+
   return {
     activity: {
       id: activity.id,
@@ -152,7 +172,8 @@ export async function getLiveState(
     config,
     session,
     rounds,
-    participantIds: await listApprovedParticipantIds(db, activityId),
+    participantIds,
+    participantNames,
   };
 }
 

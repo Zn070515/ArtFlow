@@ -75,6 +75,7 @@ export function VotingCard(props: {
   const [preview, setPreview] = useState<VoteResultCandidateView | null>(null);
   const [stageKey, setStageKey] = useState("vote_result");
   const [note, setNote] = useState("");
+  const [startMode, setStartMode] = useState<"rehearsal" | "formal">("rehearsal");
 
   const onRealtimeData = (data: VotingSessionsSnapshot): void => {
     queryClient.setQueryData(["voting-sessions", props.activityId], data);
@@ -112,7 +113,7 @@ export function VotingCard(props: {
     executions.find((session) => session.scope === scope && session.status === "running");
 
   const start = useMutation({
-    mutationFn: (scope: string) => startExecution(props.activityId, scope),
+    mutationFn: (scope: string) => startExecution(props.activityId, scope, startMode),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["executions", props.activityId] });
     },
@@ -193,12 +194,22 @@ export function VotingCard(props: {
           return (
             <div key={scope} className="voting-session-row">
               <span>{scope} 会话</span>
-              <span>{session === undefined ? "未启动" : "运行中"}</span>
+              <span>{session === undefined ? "未启动" : `运行中 · ${session.mode === "formal" ? "正式" : session.mode === "test" ? "测试" : "彩排"}`}</span>
               {props.canManageSessions ? (
                 session === undefined ? (
-                  <button type="button" className="secondary-button" onClick={() => start.mutate(scope)}>
-                    启动
-                  </button>
+                  <>
+                    <select
+                      aria-label="启动模式"
+                      value={startMode}
+                      onChange={(event) => setStartMode(event.target.value as "rehearsal" | "formal")}
+                    >
+                      <option value="rehearsal">彩排</option>
+                      <option value="formal">正式</option>
+                    </select>
+                    <button type="button" className="secondary-button" onClick={() => start.mutate(scope)}>
+                      启动
+                    </button>
+                  </>
                 ) : (
                   <button
                     type="button"

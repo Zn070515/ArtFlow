@@ -10,6 +10,7 @@ import { LoginPage } from "./routes/login.js";
 import { OpsPage } from "./routes/ops.js";
 import { OpsActivityPage } from "./routes/opsActivity.js";
 import { OpsRegistrationPage } from "./routes/opsRegistration.js";
+import { ProgramPage } from "./routes/program.js";
 import { ResultsRoute } from "./routes/results.js";
 import { RootLayout } from "./routes/__root.js";
 import { StudioPage } from "./routes/studio.js";
@@ -29,6 +30,12 @@ const resultsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/results/$publicCode",
   component: ResultsRoute,
+});
+
+const programRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/program/$publicCode",
+  component: ProgramPage,
 });
 
 const loginRoute = createRoute({
@@ -118,6 +125,7 @@ const judgeRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   resultsRoute,
+  programRoute,
   loginRoute,
   joinRoute,
   joinActivityRoute,

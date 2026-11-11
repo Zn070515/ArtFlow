@@ -43,7 +43,10 @@ export function AttendanceCard({
   const [tab, setTab] = useState<AttendanceTab>("participant");
   const [search, setSearch] = useState("");
   const [note, setNote] = useState("");
-  const [sessionMode, setSessionMode] = useState<"formal" | "test">("formal");
+  // Rehearsal has no attendance partition; default to the test partition so a
+  // casual click cannot write formal attendance. The organizer must choose
+  // formal explicitly.
+  const [sessionMode, setSessionMode] = useState<"formal" | "test">("test");
   const [pointKey, setPointKey] = useState("");
   const [pointName, setPointName] = useState("");
   const [staffName, setStaffName] = useState("");
@@ -59,7 +62,7 @@ export function AttendanceCard({
   const session = executions.data?.find(
     (item) => item.scope === "checkin" && item.status === "running",
   );
-  const mode = session?.mode === "test" ? "test" : "formal";
+  const mode = session?.mode === "formal" ? "formal" : "test";
 
   const attendance = useQuery({
     queryKey: ["ops-attendance", activityId, point, tab, search, mode],
@@ -166,7 +169,7 @@ export function AttendanceCard({
           <p className="eyebrow">ATTENDANCE · 现场签到</p>
           <h2>签到</h2>
         </div>
-        {session !== undefined ? <span>签到已开放（{session.mode === "test" ? "测试" : "正式"}）</span> : null}
+        {session !== undefined ? <span>签到已开放（{session.mode === "formal" ? "正式" : "测试"}）</span> : null}
       </div>
 
       {canManageSession ? (
@@ -179,6 +182,7 @@ export function AttendanceCard({
             <option value="formal">正式</option>
             <option value="test">测试</option>
           </select>
+          <p className="state-copy">彩排不写入签到；正式签到请显式选择“正式”。</p>
           {session === undefined ? (
             <button onClick={() => sessionMutation.mutate("open")} disabled={sessionMutation.isPending}>
               打开签到

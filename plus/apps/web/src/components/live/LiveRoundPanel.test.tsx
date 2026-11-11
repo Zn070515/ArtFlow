@@ -34,6 +34,7 @@ const state: LiveState = {
   session: null,
   rounds: [],
   participantIds: ["singer-a"],
+  participantNames: { "singer-a": "林晓雨" },
 };
 
 const live: LiveRound = {

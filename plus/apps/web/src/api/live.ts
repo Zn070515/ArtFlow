@@ -117,6 +117,7 @@ export interface LiveState {
   readonly session: LiveSession | null;
   readonly rounds: readonly LiveRound[];
   readonly participantIds: readonly string[];
+  readonly participantNames: Readonly<Record<string, string>>;
 }
 
 function commandHeaders(commandId: string): Record<string, string> {

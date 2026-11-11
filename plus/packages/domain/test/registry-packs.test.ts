@@ -40,6 +40,7 @@ function stubCapability(
     conflicts?: readonly string[];
     surfaces?: readonly CapabilitySurface[];
     scopes?: readonly string[];
+    definitionSchemaVersion?: number;
   } = {},
 ): CapabilityRegistration {
   const manifest: CapabilityManifest = {
@@ -47,7 +48,7 @@ function stubCapability(
     version: "1",
     dependencies: options.dependencies ?? [],
     conflicts: options.conflicts ?? [],
-    definitionSchemaVersion: 1,
+    definitionSchemaVersion: options.definitionSchemaVersion ?? 1,
     commands: [`${identity}.configure`],
     queries: [`${identity}.describe`],
     events: [`${identity[0]?.toUpperCase() ?? "X"}${identity.slice(1)}Configured`],
@@ -68,7 +69,7 @@ const SINGER_CAPABILITIES: readonly CapabilityRegistration[] = [
   stubCapability("questionnaire"),
   stubCapability("materials"),
   stubCapability("evaluation", { dependencies: ["competition"] }),
-  stubCapability("voting", { dependencies: ["competition"] }),
+  stubCapability("voting", { dependencies: ["competition"], definitionSchemaVersion: 2 }),
   stubCapability("publishing", { dependencies: ["competition"] }),
   stubCapability("archive"),
   stubCapability("grouping", { dependencies: ["registration", "competition"] }),
@@ -259,6 +260,10 @@ it("guided answers enable and disable pack capabilities", () => {
   if (!result.ok) return;
   expect(result.instantiation.enabledCapabilities).toContain("voting");
   expect(result.instantiation.enabledCapabilities).not.toContain("materials");
+  const questionnaire = result.instantiation.definition.capabilities.questionnaire as {
+    readonly payload: { readonly questions: readonly { readonly type?: string }[] };
+  };
+  expect(questionnaire.payload.questions.some((question) => question.type === "file")).toBe(false);
 });
 
 it("a pack refuses an unknown guided answer", () => {
