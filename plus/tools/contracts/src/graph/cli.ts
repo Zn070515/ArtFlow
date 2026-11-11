@@ -7,6 +7,7 @@ import { loadDynamicDependencies } from "./dynamic.js";
 import { findStartNodes, formatImpactReport, impactOf } from "./impact.js";
 import { summarizeGraph } from "./schema.js";
 import type { NodeKind } from "./schema.js";
+import { plusRelative } from "./paths.js";
 import { findUnreferencedMutationRoutes, formatUiGaps } from "./ui.js";
 
 interface Arguments {
@@ -136,14 +137,21 @@ function main(): void {
     const changed = changedFiles(root, base);
     title = `${base}...HEAD (${changed.length} changed files)`;
     for (const file of changed) {
-      const fileNode = graph.nodes.find((node) => node.kind === "file" && (node.name === file || node.file === file));
+      const relative = plusRelative(file);
+      const fileNode = graph.nodes.find((node) => node.kind === "file" && (node.name === relative || node.file === relative));
       if (fileNode !== undefined) startIds.add(fileNode.id);
       for (const node of graph.nodes) {
-        if (node.kind === "symbol" && node.file === file) startIds.add(node.id);
+        if (node.kind === "symbol" && node.file === relative) startIds.add(node.id);
       }
     }
     if (startIds.size === 0) {
-      process.stderr.write(`No graph nodes matched the changed files from ${base}...HEAD.\n`);
+      const message = `No graph nodes matched the changed files from ${base}...HEAD.\n`;
+      if (args.flags.get("allow-empty") === true) {
+        process.stdout.write(message);
+        writeFileSync(artifactPath(root, "contract-impact.md"), message, "utf8");
+        return;
+      }
+      process.stderr.write(message);
       process.exitCode = 1;
       return;
     }
