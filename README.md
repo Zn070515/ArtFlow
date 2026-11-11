@@ -91,6 +91,15 @@ pnpm --filter @artflow-plus/api start   # 启动时自动 migrate，默认 127.0
 pnpm --filter @artflow-plus/web dev     # Vite 代理 /api 到 API
 ```
 
+`/login` 的注册只创建参与者，不能进入 Studio、Ops 或 Live。数据库迁移之后，用下面的命令创建组织者。口令放在环境变量里，不要写进仓库，也不要复用开发库口令到生产环境：
+
+```powershell
+$env:ARTFLOW_PLUS_ACCOUNT_PASSWORD = "<至少 8 位>"
+pnpm --filter @artflow-plus/api create-account --username organizer
+```
+
+再次执行会更新这个用户名。默认权限覆盖建活动、审核报名、定稿、评分、评委入口、投票、公示、归档、材料和签到。需要收窄时加上 `--permissions a,b`。生产环境对生产库执行同一命令，口令由密钥管理提供。步骤与权限列表见[开发基线](docs/development-baseline.md)。
+
 环境变量：`ARTFLOW_PLUS_DATABASE_URL`（必填）、`ARTFLOW_PLUS_DB_SCHEMA`、`PORT` / `HOST`、`ARTFLOW_PLUS_CREDENTIAL_SECRET`、`ARTFLOW_PLUS_ARCHIVE_DIR`、`ARTFLOW_PLUS_MEDIA_DIR`、`ARTFLOW_PLUS_INLINE_RELAY=1`（单进程/E2E 时在 API 内跑 relay）、`VITE_API_TARGET`。浏览器 E2E 使用独立 schema `artflow_e2e`。
 
 ### 文档入口

@@ -110,6 +110,21 @@ pnpm -C plus --filter @artflow-plus/api start     # Fastify on 127.0.0.1:3000
 pnpm -C plus --filter @artflow-plus/worker start  # outbox relay + pg-boss backstop
 ```
 
+`/login` registers a participant only. Create the first organizer after the
+database is reachable. The script migrates if needed. Put the password in
+`ARTFLOW_PLUS_ACCOUNT_PASSWORD` (at least 8 characters) and do not commit it:
+
+```powershell
+pnpm -C plus --filter @artflow-plus/api create-account --username organizer
+```
+
+Running it again updates that username. The default permissions cover Studio,
+registration review, competition, judge entry, ticketing, voting, results,
+archive, materials, and attendance. `--permissions` replaces that set. Use the
+production database URL and a secret-managed password outside local
+development. The [development baseline](../docs/development-baseline.md)
+has the same step.
+
 Local start uses `tsx` so workspace packages resolve TypeScript sources directly;
 production packaging is part of the M8 deployment slice.
 
