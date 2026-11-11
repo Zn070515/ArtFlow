@@ -1,204 +1,84 @@
-# 生产部署说明
+# 生产部署说明（ArtFlow-Plus）
 
-本文档说明 **1.x 生产线**（`main`，Django）的生产运行拓扑。它针对的是面向真实活动的部署；本地开发、Docker Compose 联调和 CI 见 [开发基线](development-baseline.md)。
+本文档只描述当前 `main` 上的 **ArtFlow-Plus（v2）** 生产拓扑。1.x Django 源码已从
+`main` 删除，保存在 tag `v1.0.2`；不要把本文档当成 v1 部署说明。
 
-> **v2（ArtFlow-Plus）不适用本文档。** `main` 只交付 v2；本节保留的 1.x 部署说明只用于审核历史源码，v1→v2 的 cutover 流程已按 ADR-0036 移除。
+本地开发、Docker 联调和 CI 见 [开发基线](development-baseline.md)。备份与隔离恢复见
+[Plus 备份与恢复](artflow-plus/backup-restore.md)。
 
-## docker-compose.yml 不是生产部署文件
-
-根目录的 `docker-compose.yml` 是**本地/联调 Compose**，只用于本机开发：
-
-- `APP_ENV: development`、`DEBUG: "False"`、`ALLOWED_HOSTS: localhost,127.0.0.1`
-- 数据库口令 `artflow-local-container-password` 是本地占位值
-- 端口仅绑定 `127.0.0.1:8000`
-- 没有 TLS、没有反向代理、没有持久化备份目标
-
-**不要把它当作生产 manifest**。在它之上套 `.env.production` 也不能让它变成生产配置——Compose 里硬编码的 `environment` 值仍会生效。生产部署使用明确的 [`deploy/compose.production.yml`](../deploy/compose.production.yml)；它是独立的生产契约，不与根 Compose 合并。
-
-## 生产拓扑
+## 拓扑
 
 ```text
-公网 / 局域网客户端
-        ↓ HTTPS 443
-production `proxy`（Caddy，负责删除或覆盖客户端传入的 X-Forwarded-For）
-        ↓ `artflow_internal` 私有网络
-        ├── /*        → Gunicorn `web`（不发布主机端口）
-        ├── /ws/*     → `realtime`（Daphne）
-        └── /media/*  → Gunicorn `media`
+客户端
+  ↓ HTTPS 443
+proxy（Caddy，唯一发布主机端口的服务）
+  ↓ artflow_internal
+  ├── plus-web   静态前端 + /api 反向代理（不发布主机端口）
+  ├── plus-api   Fastify HTTP + WebSocket（不发布主机端口）
+  └── plus-worker outbox relay（不发布端口）
         ↓
-PostgreSQL（持久化）+ Media 持久化卷
+plus-db（PostgreSQL 18，持久卷 plus_postgres_data）
 ```
 
-`media` 是为了**把字节从回答现场请求的 worker 里挪走**：一个下载会占住一个 Gunicorn
-sync worker 直到传输结束，演练实测三个慢下载就会把整个应用拖停（见
-[生产准备演练](production-readiness.md)「媒体下载负载演练」）。它跑的是**同一个
-`controlled_media` 视图、同一个数据库、同一个 media 卷**——授权判定完全没变，只是
-worker 池独立；私密文件仍然在产生任何字节之前被拒。`proxy` 的 `/media/*` 路由到
-`media:8002`。
+三个 Plus 镜像（`artflow-plus-api`、`artflow-plus-worker`、`artflow-plus-web`）必须
+来自同一个 `v*` release，并在 `.env.production` 中用 `@sha256:...` digest 固定。
+`GET /healthz` 匿名可用且只返回通用状态。
 
-> 这不是 ADR-012 seam 的终点。等对象存储可用后，`DeliveryBackend` 换成签名 URL 重定向，
-> `media` 服务可以整体退役，而授权仍然留在 Django。
+## 启动前
 
-关键约束：**Gunicorn 不能直接暴露给客户端**，必须经过一个可信反向代理。理由见「来源 IP 与 X-Forwarded-For」一节。
+1. 从 `.env.production.example` 复制 `.env.production`，替换所有 `replace-me` /
+   `set-a-` 占位值。
+2. 为 `plus-db` 设置强数据库口令；`ARTFLOW_PLUS_CREDENTIAL_SECRET` 至少 32 字节，
+   不要复用数据库口令或 v1 密钥。
+3. 三个 Plus 镜像、PostgreSQL 和 Caddy 都必须是 digest 引用；`ARTFLOW_RELEASE_SHA`
+   与镜像的 OCI revision 一致。
+4. `CADDY_SITE_ADDRESS` 的 DNS 必须已经指向本机，并允许 ACME 流量。
+5. `ARTFLOW_PLUS_MEDIA_DIR` 和 `ARTFLOW_PLUS_ARCHIVE_DIR` 指向持久卷；不要把它们
+   暴露为静态目录，私有材料只能经 Plus 受控 API 读取。
 
-生产启动前，把 `.env.production.example` 复制为未提交的 `.env.production`，替换全部占位值。
-生产主机不现场构建：在受控构建机用固定的 Python 基础镜像 digest 构建并导出 web
-镜像，再把 tar 导入生产主机。然后仅启动显式 manifest：
+## 启动
 
-```bash
-# 在受控构建机（WSL/Git Bash/CI）执行；ARTFLOW_PYTHON_IMAGE 必须是 digest 引用
-export ARTFLOW_PYTHON_IMAGE='python:3.12-slim@sha256:<verified-digest>'
-bash scripts/build_release.sh release-artifacts
-
-# 在生产主机执行；<sha> 必须与构建产物和 .env.production 一致
-docker load --input release-artifacts/artflow-web-<sha>.tar
-bash scripts/deploy.sh .env.production
+```powershell
+docker compose -f deploy/compose.production.yml --env-file .env.production up -d --wait
 ```
 
-`.env.production` 的 `ARTFLOW_WEB_IMAGE` 应指向 `artflow-web:<完整 SHA>`（可附带 registry digest）；
-`scripts/deploy.sh` 是唯一的 canonical production deployment path：它会渲染配置、校验
-release SHA、web 镜像 OCI revision、PostgreSQL/Caddy digest，使用 `--no-build --pull never --wait`
-启动，并执行 `doctor` 和外部 HTTPS health smoke。容器启动还会把环境中的 `ARTFLOW_RELEASE_SHA`
-与镜像 OCI revision 比较。`proxy` 是唯一发布 `80/443` 的服务；`web` 和 PostgreSQL
-没有主机端口，且数据库只在 `artflow_internal` 中。Caddy 用 `CADDY_SITE_ADDRESS` 申请
-TLS 证书，因此该 DNS 名称必须在启动前指向此主机并允许 ACME 流量。不得用根 Compose
-或 `docker compose down --volumes` 管理生产卷。
+如果部署环境启用了 Compose profile，按环境文档追加 `--profile plus`。只通过
+`proxy` 访问服务；`plus-api`、`plus-worker`、`plus-db` 不发布主机端口。
 
-## 首个管理员注册
+检查：
 
-镜像启动会自动执行迁移，但不会创建管理员，也不会在生产环境运行开发用的
-`seed_dev_admin`。首次部署完成并确认 `doctor --require-access-keys` 通过后，在浏览器打开：
-
-```text
-https://<CADDY_SITE_ADDRESS>/register/admin/
+```powershell
+docker compose -f deploy/compose.production.yml --env-file .env.production ps
+curl --noproxy "*" --fail https://<CADDY_SITE_ADDRESS>/healthz
 ```
 
-使用管理员用户名、密码和部署配置中的 `ADMIN_ACCESS_KEY` 完成首个管理员注册。该页面在
-首次安装时仍由同一个 `InstallationState` / `provision_first_admin` authority 原子完成初始化，
-不会创建 Django superuser；后续管理员也可以使用同一密钥注册。工作人员使用
-`/register/staff/` 和 `STAFF_ACCESS_KEY` 注册。两个密钥都应通过未提交的 secret 管理保存，
-不能写入审计记录、诊断输出或长期环境模板。
+## 第一个组织者账号
 
-无浏览器的受控恢复场景仍可使用 `provision_first_admin --password-stdin`，但它不是普通部署
-流程；不得把密码放进命令行参数、镜像或长期环境模板。
+`/login` 的注册只创建参与者，不能进入 Studio、Ops 或 Live。数据库迁移完成后，
+用 API 包里的开户命令创建组织者：
 
-如果轮换 `STAFF_ACCESS_KEY` 或 `ADMIN_ACCESS_KEY`，修改 secret 后重启 web，再执行：
-
-```bash
-docker compose --env-file .env.production -f deploy/compose.production.yml exec -T web \
-  python manage.py invalidate_sessions
+```powershell
+$env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://<user>:<password>@<host>:5432/<db>"
+$env:ARTFLOW_PLUS_ACCOUNT_PASSWORD = "<强口令，不要提交>"
+pnpm --filter @artflow-plus/api create-account --username organizer
 ```
 
-该命令会让所有当前浏览器会话失效，所有用户必须使用新配置重新登录。
+生产环境对生产库执行同一命令，口令由密钥管理提供；不要复用开发库口令。重复执行会
+更新同一用户名。默认权限覆盖 Studio、报名审核、名单定稿、比赛、评委入口、票据、
+投票、结果、归档、材料和签到；需要收窄时用 `--permissions a,b`。
 
-## 必填环境项（`.env.production.example` 字段清单）
+## 发布与升级
 
-以 `.env.production.example` 为字段清单，逐项替换为真实值，不能使用占位值（`change-me` / `set-a-` / `example.com` 等，`settings` 的 `validate_production_environment` 会拒绝）：
+- 发布只由 `v*` tag 触发；普通 push 不构建生产镜像。
+- 升级前先按 [备份与恢复](artflow-plus/backup-restore.md) 生成 Plus 备份。
+- 三个镜像必须来自同一个 tag，并在 `.env.production` 中同时替换 digest 和
+  `ARTFLOW_RELEASE_SHA`。
+- 不要用根目录的本地 Compose 管理生产卷；不要执行会删除 `plus_postgres_data`、
+  `plus_archive_data` 或 `plus_media_data` 的命令。
 
-| 变量 | 作用 |
-| --- | --- |
-| `APP_ENV` | 必须是 `production` |
-| `DEBUG` | 必须是 `False` |
-| `SECRET_KEY` | 长随机密钥 |
-| `QR_SIGNING_KEY` | 独立的长随机密钥，用于票券二维码凭证签名 |
-| `STAFF_ACCESS_KEY` | ArtFlow 工作人员注册与登录密钥 |
-| `ADMIN_ACCESS_KEY` | ArtFlow 管理员注册、登录与高风险操作认证密钥 |
-| `ARTFLOW_RELEASE_SHA` | 构建当前生产镜像的完整 Git commit SHA；用于备份 manifest 溯源 |
-| `ARTFLOW_WEB_IMAGE` | 已导入的、带该 SHA tag 的预构建 ArtFlow web 镜像；生产不现场 build |
-| `ARTFLOW_PYTHON_IMAGE` | 构建机使用的 digest-pinned Python 基础镜像；不在生产 Compose 中现场拉取 |
-| `ARTFLOW_POSTGRES_IMAGE` / `ARTFLOW_CADDY_IMAGE` | 生产运行时必须使用的 digest-pinned 基础镜像 |
-| `ALLOWED_HOSTS` | 真实主机名（含对外域名） |
-| `CSRF_TRUSTED_ORIGINS` | 真实来源（如 `https://artflow.example.com`） |
-| `CADDY_SITE_ADDRESS` | Caddy 申请 TLS 证书的单个 hostname（只填 `artflow.example.com`，不含 `http://`、端口或路径） |
-| `DATABASE_ENGINE` | 必须是 `postgresql` |
-| `POSTGRES_DB` / `USER` / `PASSWORD` / `HOST` / `PORT` | 生产数据库连接（口令不能是占位值） |
-| `TRUST_X_FORWARDED_FOR` | 生产 manifest 固定为 `true`（见下一节） |
+## 运行约束
 
-`RATE_LIMIT_BACKEND` 不在模板里，也不需要填写：生产 manifest 直接把它固定为 `database`，保证多 worker 共享限流桶。
-
-`DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`QR_SIGNING_KEY`、`STAFF_ACCESS_KEY`、`ADMIN_ACCESS_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
-
-## 来源 IP 与 X-Forwarded-For
-
-应用只在 `TRUST_X_FORWARDED_FOR=true` 时读取客户端提供的 `X-Forwarded-For`。默认（`False`）一律使用 Gunicorn 看到的 `REMOTE_ADDR`。
-
-显式生产 manifest 已固定 `TRUST_X_FORWARDED_FOR=true`，因为其唯一入口 Caddy 会覆盖客户端传入的该请求头；不要把它改成透传客户端值。manifest 也固定 `POSTGRES_HOST=db`，这是其私有 Compose 网络中的数据库服务名，不是公网数据库主机名。
-
-- 若客户端能直接访问 Gunicorn，它就能伪造 `X-Forwarded-For`，导致审计、投票去重依赖的来源 IP 失真。
-- 只有在**可信反向代理会覆盖**客户端传入的 `X-Forwarded-For`（追加/重写而非透传）时，才设置 `TRUST_X_FORWARDED_FOR=true`。
-- 使用该设置时，确保代理用 `REMOTE_ADDR` 的真实客户端 IP 填充第一个条目，并丢弃客户端提交的任何值。
-
-## 持久化要求
-
-- **数据库**：使用持久化的 PostgreSQL 卷，不允许容器重建后数据丢失。
-- **Media**：上传的文件、生成文档、导出档案存放在持久化卷，并纳入备份目标。
-- **应用备份暂存**：生产 manifest 将独立的 `backup_data` 卷挂载到 `/app/backups`，避免备份只留在
-  web 容器可写层；该卷仍不是异地主备份，必须按下文复制到独立存储。
-- **静态资源**：由构建产物（`collectstatic`）提供，并由 Gunicorn 前的 WhiteNoise 中间件
-  服务压缩、带 manifest 的静态文件；不依赖运行时 Tailwind CDN。
-
-## 备份目标
-
-事件资产（数据库、Media 上传、生成文档）必须有独立于运行卷的备份目标，并完成恢复演练。见 [PostgreSQL 备份与恢复演练](postgres-backup-restore.md) 和 [生产准备演练](production-readiness.md) 的「PostgreSQL 恢复」场景。
-
-应用级备份命令默认写入生产 `backup_data` 卷，并从 `ARTFLOW_RELEASE_SHA` 写入
-`manifest.json`；生产容器不依赖镜像内的 `.git`。完成备份后必须复制到异地主机、对象存储
-或其他独立故障域，再执行隔离恢复验证。若临时需要覆盖 manifest provenance，只能显式传入
-`--git-sha`，不得根据操作者本机 checkout 自动推断。
-
-仓库提供 `scripts/backup_artflow.ps1` 与 `scripts/backup.sh` 两套包装器。它们默认使用
-`/app/backups` 持久卷；设置 `ARTFLOW_OFFSITE_BUCKET` 和 `ARTFLOW_OFFSITE_PREFIX` 后，
-会调用 `ossutil`（凭据由主机上的 ossutil 配置或实例角色提供，不进入命令行/仓库），在上传
-前校验 database/media SHA，在对象存储中再确认 manifest 存在。生产必须配置私有 bucket、
-服务端加密、生命周期和跨故障域权限，并在另一目标执行 `verify_app_backup_restore`；
-没有这些外部证据时，异地备份状态仍为 HOLD。
-
-## 健康检查与大小/超时
-
-- 健康检查按观察对象拆分为三个匿名 `GET` 路由，都只返回通用状态，不泄露配置细节：
-  `/livez/`（进程存活，不查数据库、不跑 system checks）、
-  `/readyz/`（执行轻量 `SELECT 1` 验证数据库可用）、`/healthz/`（readiness 的历史别名，容器/Caddy/CI 探针沿用）。
-- 应用容器的 liveness 探针使用 `/livez/`，因此临时数据库故障不会把运行中的进程判死；
-  数据库 readiness 仍由 Caddy 代理探针经真实请求路径访问 `/healthz/` 覆盖。
-  完整 Django system checks 属于启动阶段（`manage.py check`，容器入口在 migrate 前执行）、
-  `doctor` 和部署 gate，不再每 10~15 秒随探针运行。
-- 上传最大值按用途在 `files/policies.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB），`files/services.py` 只按其执行校验。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
-- 生产 Caddy manifest 固定 `request_body max_size 120MB`；现场/event profile 才可使用更高的本地上限。应用层还会执行用途上限、文件 magic/container 校验、每报名配额、版本保留、上传限流和磁盘低水位检查。不得把该值误解为慢连接、连接数或 volumetric DDoS 防护。
-- 视频导出、评分模板生成等耗时操作应配置足够的 worker 超时；不能静默吞掉超时错误。
-- 内部提交文件和生成文档由 Django 受控媒体视图流式返回，且已隔离到上文的独立 `media`
-  worker 池：慢下载占满的只会是这个池，不再拖停回答现场请求的 worker。正式活动前仍应在
-  **实际部署配置与网络条件**下重测并发下载量；该演练已实现为
-  `scripts/media_download_load_rehearsal.mjs`（配套 fixture 生命周期命令
-  `prepare_media_download_rehearsal` / `cleanup_media_download_rehearsal`），结论与数据见
-  [生产准备演练](production-readiness.md) 的「媒体下载负载演练」一节。对象存储与签名 URL
-  是后续演进（见上文 ADR-012 seam），不是当前生产 blocker；在那之前 `/media/` 目录不得
-  直接暴露，授权必须始终留在 Django。
-
-## 二维码打印前提（GOAL §11.5）
-
-- 交给印刷的二维码只能从正式 HTTPS 域名下的 `/staff/qr/` 生成：二维码的地址由发起请求的 host
-  拼出，非正式来源（`127.0.0.1`、Compose 的 `localhost`、LAN IP、临时 tunnel）得到的是观众
-  打不开的地址。这两个页面在非 production HTTPS 来源下会显示明确警告。
-- 备案审批完成并把正式域名接入 443 之前不要印刷任何二维码；彩排与内部走查可以用本地或 LAN
-  二维码验证流程，但该 PNG 不是印刷件。完整流程见
-  [生产准备演练](production-readiness.md) 的「二维码打印前提」。
-
-## 公网入口的滥用与 DDoS 边界
-
-- 登录和注册 POST 在进入密码哈希/表单深处理前按客户端 IP 限流；生产限流桶必须使用 PostgreSQL，不能使用每个 Gunicorn worker 独立的本地缓存。
-- Caddy 删除上游 `Server` 指纹并拒绝超过 manifest 体积上限的请求；应用仍会再次按业务用途校验文件大小、扩展名和媒体类型。
-- volumetric DDoS、TLS 握手洪泛、慢客户端连接和公网连接数保护必须由学校网络、云负载均衡或 WAF/边缘服务提供，并在正式接入前完成限速、连接超时、黑名单/挑战和告警契约验证。仅依赖 Django/Caddy 或本机 Gunicorn 不满足学校公网接入条件。
-- Ticket redeem 的应用层 JSON 上限、IP 限流和 HttpOnly cookie 只保护应用边界；它们不替代边缘 DDoS/WAF/连接保护。正式接入学校前还必须演练 Ticket 重放、跨活动票、未检票票和并发投票，并确认边缘层不会把原始 secret/token 写入访问日志、trace 或告警载荷。
-
-## 宿主机日志与运行监控
-
-宿主机应按 [`deploy/docker-daemon.json.example`](../deploy/docker-daemon.json.example) 配置
-Docker 日志轮转（`local` driver、20 MiB、5 个文件），再按发行版规范重启 Docker；这不是
-应用容器内的配置。可以用 `scripts/monitor.sh .env.production` 接入 cron/CloudMonitor，
-它检查 db/web/media/proxy 健康状态、外部 HTTPS `/healthz/`、宿主机低水位和最新应用备份年龄。
-`realtime` 刻意不在硬失败列表里：它本来就设计成可降级到 HTTP。
-监控脚本只读，不会停止服务、删除卷或打印凭据。
-
-## 发布门禁
-
-上传前在本地跑完整门禁，见 [生产准备演练](production-readiness.md) 的「发布门禁」。部署用镜像安装 `production` extra。
+- `plus-api` 的 `ARTFLOW_PLUS_INLINE_RELAY=0`；outbox 由 `plus-worker` 消费。
+- 只有 `proxy` 发布端口；内部服务只在 `artflow_internal` 网络。
+- `ARTFLOW_PLUS_TRUST_PROXY` 只填写直接反向代理的可信 IP/CIDR，默认留空。
+- 私有媒体和归档包只能经 `/api/.../materials/.../content`、归档下载等受控路由读取。

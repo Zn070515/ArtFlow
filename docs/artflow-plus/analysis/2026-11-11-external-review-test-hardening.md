@@ -169,6 +169,28 @@ pnpm -C plus --filter @artflow-plus/contract-tools run readiness
 10. 报名/材料/评分/投票的受控导出（#64）。
 11. 只读节目单与主持手卡（#65）。
 
+### 全部 Issue 修复结果（2026-11-11）
+
+| Issue | 修复 |
+| ---: | --- |
+| #52 | `docs/deployment-production.md` 改写为 Plus 拓扑；活跃文档漂移归零 |
+| #55 | Singer Pack 问卷增加可选音频文件题；materials 就绪缺口归零 |
+| #56 | 材料页显示字节已保存；审核页可播放/下载；上传时按 purpose 做 magic-byte 校验 |
+| #57 | 报名列表、搜索、Live 名单和选手下拉使用姓名/学号/曲目，UUID 仅作次要标识 |
+| #58 | 投票启动默认 rehearsal 并增加模式选择；签到默认 test，正式需显式选择 |
+| #59 | Singer Pack 的 voting definition 使用 ticket identity |
+| #60 | Live 增加生成领奖候选、启动发布会话、确认/发布赛果、关闭/归档活动 |
+| #61 | TasksCard 空状态提供“同步任务模板”；新增 syncTasks API client |
+| #62 | 新活动生成 8 位可朗读 public code，与内部 activity id 分离 |
+| #63 | Idempotency-Key 前置长度/字符校验；错误映射不再透出 SQLSTATE |
+| #64 | 新增受控 CSV 导出：报名、材料、评分、观众票；权限 + 审计 |
+| #65 | 新增公开节目单 `/program/<publicCode>`，支持主持大字和打印 |
+| #69 | Live 在 rehearsal 评分会话下明确标注“当前显示正式签到数据” |
+
+结果：全量 **611 tests** 通过；缺口 baseline 从 168 降到 **156**
+（ui-route 26、pack-readiness 3、doc-drift 0、deploy-manifest 0、
+manifest 68、invariant-coverage 59）。
+
 ## 6. 与任务书原则的对应
 
 - **Consumer 定义包含 UI**：API route 没有 Web 调用方，就是消费者缺口。新增的
