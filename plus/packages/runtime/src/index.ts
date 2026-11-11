@@ -28,6 +28,7 @@ export * from "./voting-ticket-service.js";
 export * from "./supplement-service.js";
 export * from "./live-projection.js";
 export * from "./publishing-service.js";
+export * from "./result-candidate-service.js";
 export * from "./rate-limit.js";
 export * from "./release-provenance.js";
 export * from "./grouping-service.js";

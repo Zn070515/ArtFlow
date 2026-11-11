@@ -38,7 +38,7 @@ import { DomainError, hasPermission } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
-import { authenticateJudgeSession } from "./voting-ticket-service.js";
+import { authenticateJudgeSession } from "./ticket-service.js";
 
 export interface LivePerformance extends StoredPerformance {
   readonly scoreCount: number;

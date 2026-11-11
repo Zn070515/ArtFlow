@@ -49,7 +49,7 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: "ticketing.judge-replay-removed",
-    file: "packages/runtime/src/voting-ticket-service.ts",
+    file: "packages/runtime/src/judge-entry-service.ts",
     find: "onReplay: (_trx, result) => ({\n      ...result,\n      sessionToken: judgeSessionToken(result.sessionId, signingSecret),\n    }),",
     replace: "onReplay: undefined,",
     package: "@artflow-plus/contract-tools",
@@ -80,7 +80,7 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: "ticketing.archive-revoke-guard-removed",
-    file: "packages/runtime/src/voting-ticket-service.ts",
+    file: "packages/runtime/src/ticket-service.ts",
     find: 'requireNotArchived(activity, "Ticket revocation");',
     replace: "// mutation: archive revoke guard removed",
     package: "@artflow-plus/runtime",
