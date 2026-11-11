@@ -187,6 +187,13 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       },
     ]),
     materials: createMaterialsDefinition(100 * 1024 * 1024, ["video", "image", "document"]),
+    voting: createVotingDefinition({
+      purpose: "popularity",
+      selectionType: "single",
+      maxSelections: 1,
+      identityPolicy: "browser",
+      scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+    }),
     tasks: createTasksDefinition([
       { key: "registration.review", title: "审核报名", sourceCapability: "registration", sourceKey: "review", required: true },
       { key: "materials.work", title: "确认作品材料", sourceCapability: "materials", sourceKey: "work", required: true },
@@ -217,6 +224,12 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
       id: "collect-materials",
       prompt: "是否需要提交作品文件？",
       capability: "materials",
+      default: true,
+    },
+    {
+      id: "judge-entry",
+      prompt: "现场评委是否使用入口链接评分？",
+      capability: "ticketing",
       default: true,
     },
     {
@@ -277,6 +290,13 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
       },
     ]),
     materials: createMaterialsDefinition(100 * 1024 * 1024, ["video", "image", "document"]),
+    voting: createVotingDefinition({
+      purpose: "popularity",
+      selectionType: "single",
+      maxSelections: 1,
+      identityPolicy: "browser",
+      scoringRule: { kind: "ballot_share_percent", scale: 100, decimals: 2 },
+    }),
     tasks: createTasksDefinition([
       { key: "registration.review", title: "审核报名", sourceCapability: "registration", sourceKey: "review", required: true },
       { key: "materials.work", title: "确认作品材料", sourceCapability: "materials", sourceKey: "work", required: true },
