@@ -76,6 +76,7 @@ const migratedFiles = [
   join(process.cwd(), "src", "components", "ui", "Toolbar.tsx"),
   join(process.cwd(), "src", "components", "ui", "EmptyState.tsx"),
   join(process.cwd(), "src", "components", "ui", "ErrorState.tsx"),
+  join(process.cwd(), "src", "components", "console", "ConsolePagination.tsx"),
   join(process.cwd(), "src", "routes", "ops.tsx"),
 ];
 
