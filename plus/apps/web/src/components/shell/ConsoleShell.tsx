@@ -2,6 +2,8 @@ import { Link, useLocation } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { hasLiveAccess, hasOpsAccess, hasStudioAccess, hasWorkspaceAccess, useSession } from "../../auth/SessionProvider.js";
+import { ThemeToggle } from "../../theme/ThemeToggle.js";
+import { useTheme } from "../../theme/ThemeProvider.js";
 
 interface ConsoleNavItem {
   readonly label: string;
@@ -13,6 +15,7 @@ interface ConsoleNavItem {
 export function ConsoleShell({ children }: { readonly children: ReactNode }) {
   const { pathname } = useLocation();
   const { session, logout } = useSession();
+  const { theme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const items: readonly ConsoleNavItem[] = [
@@ -61,7 +64,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
               : "工作区";
 
   return (
-    <div className="console-shell" data-shell="console" data-theme="signal">
+    <div className="console-shell" data-shell="console" data-theme={theme}>
       <header className="console-topbar">
         <Link to="/" className="console-brand" aria-label="ArtFlow Portal 首页">
           <span className="console-brand-mark" aria-hidden="true">
@@ -76,6 +79,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
           {contextLabel}
         </span>
         <div className="console-topbar-actions">
+          <ThemeToggle />
           {session === null ? (
             <Link to="/login" search={{ next: pathname }} className="console-account-link">
               登录

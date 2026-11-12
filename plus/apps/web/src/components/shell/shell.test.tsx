@@ -54,7 +54,7 @@ describe("PortalShell and ConsoleShell", () => {
       </ConsoleShell>,
     );
 
-    expect(document.querySelector('[data-shell="console"][data-theme="signal"]')).not.toBeNull();
+    expect(document.querySelector('[data-shell="console"][data-theme="graphite"]')).not.toBeNull();
     expect(screen.getByRole("navigation", { name: "Console 主导航" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ops" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Workspace" })).toBeInTheDocument();
@@ -70,7 +70,7 @@ describe("PortalShell and ConsoleShell", () => {
       </PortalShell>,
     );
 
-    expect(document.querySelector('[data-shell="portal"][data-theme="violet"]')).not.toBeNull();
+    expect(document.querySelector('[data-shell="portal"][data-theme="afterglow"]')).not.toBeNull();
     expect(screen.getByLabelText("ArtFlow 赛果公示首页")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "报名" })).toBeInTheDocument();
     expect(screen.getByTestId("aurora-scene")).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe("PortalShell and ConsoleShell", () => {
       </PortalShell>,
     );
 
-    expect(document.querySelector('[data-theme="violet"]')).not.toBeNull();
+    expect(document.querySelector('[data-theme="afterglow"]')).not.toBeNull();
     expect(screen.getByTestId("static-backdrop")).toBeInTheDocument();
     expect(screen.queryByTestId("aurora-scene")).not.toBeInTheDocument();
   });
