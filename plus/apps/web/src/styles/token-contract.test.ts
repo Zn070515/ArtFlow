@@ -104,4 +104,12 @@ describe("migrated surface", () => {
       expect(match[1]?.trim(), "radius").toMatch(/^(var\(--radius-[1-5]\)|var\(--radius-pill\)|50%)$/);
     }
   });
+
+  it("declares the mobile card-table contract", async () => {
+    const css = await readFile(join(stylesDirectory, "ui.css"), "utf8");
+    expect(css).toContain("@media (max-width: 767px)");
+    expect(css).toContain(".ui-table thead");
+    expect(css).toContain("content: attr(data-label)");
+    expect(css).toContain("display: block");
+  });
 });
