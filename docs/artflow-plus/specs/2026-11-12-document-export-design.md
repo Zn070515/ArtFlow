@@ -29,7 +29,9 @@ reads the database, applies permissions, and writes the audit entry.
    keep the existing permission mapping. Formats are `csv`, `docx`, and `xlsx`.
 4. **Fail closed.** If the sidecar is not configured, unreachable, slow, or
    returns an unexpected type/size, the request returns `503 EXPORT_UNAVAILABLE`
-   and no partial file. CSV stays available without the sidecar.
+   and no partial file. A body/row limit is reported as `413 EXPORT_TOO_LARGE`,
+   and a rejected payload as `422 EXPORT_INVALID`, so the operator can tell a
+   size problem from a down renderer. CSV stays available without the sidecar.
 5. **Audit only successful exports.** The table is read, the file is rendered,
    and only then is the existing `export.<kind>` audit entry written. A failed
    render leaves no audit row that would suggest data left the system.
@@ -61,6 +63,9 @@ reads the database, applies permissions, and writes the audit entry.
 - Every successful response carries
   `content-disposition: attachment; filename="activity-<id>-<kind>.<ext>"` and
   `cache-control: no-store`.
+- `GET /api/exports/formats` (session access) returns the formats this
+  deployment can actually render (`["csv"]` or `["csv","docx","xlsx"]`), so the
+  Ops card never offers a link that would download a `503` body.
 
 ## Service contract
 
@@ -111,6 +116,12 @@ returns stack traces or request content.
   token, filename, rows, or cell values.
 - The Node client sends the token from `ARTFLOW_PLUS_EXPORT_TOKEN` and never
   accepts it from a request.
+- Operator text is flattened to spaces for every control character before the
+  table reaches any renderer. Review notes and free-form answers can contain
+  newlines; OOXML text runs cannot. The sidecar still rejects control characters
+  as a second line of defence.
+- Setting only one of the URL/token pair is a startup error, not a silent
+  "sidecar disabled"; both empty intentionally keeps CSV-only exports.
 
 ## Configuration
 
@@ -161,10 +172,12 @@ values from that fixture, not from the renderer output. The .NET tests open the
 generated package and assert the values, then the Node tests assert the HTTP
 boundary separately.
 
-**Fault cases.** Sidecar unset, sidecar returns 401/500, connection refused,
-timeout, wrong content type, oversize body, and a malformed row (mismatched cell
-count). Each is asserted to produce `503 EXPORT_UNAVAILABLE`, no audit row, and
-no partial response. CSV is asserted to keep working while the sidecar is down.
+**Fault cases.** Sidecar unset, sidecar returns 400/401/413/500, connection
+refused, pre-header timeout, post-header stream failure, wrong content type,
+oversize response, and a malformed row (mismatched cell count). Unavailable and
+malformed-output cases assert `503 EXPORT_UNAVAILABLE`; 413 and 400 assert
+`EXPORT_TOO_LARGE` and `EXPORT_INVALID`. None writes an audit row or a partial
+response. CSV is asserted to keep working while the sidecar is down.
 
 **Anti-bloat decision.** Extend the existing `ExportKind` path with one
 `TableExport` builder and one serializer; do not add a kind-specific route or

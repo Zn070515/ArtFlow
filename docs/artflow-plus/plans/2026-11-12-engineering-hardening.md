@@ -123,5 +123,23 @@ packages/db/src/types.ts
   - Studio「重命名活动」；
   - Live/Ops「取消归档」。
 - `gap-baseline.json` 从 **156 → 145**；`uiGaps` 从 26 → 18。
-- 验证：641 tests、check、schema:check、build:prod、结构门禁 26、Golden、
-  `audit:check`（145）、`graph:check`（0 unresolved）、`check_docs` 全绿。
+- 验证（该轮快照）：641 tests、check、schema:check、build:prod、结构门禁 26、Golden、
+  `audit:check`（145）、`graph:check`（0 unresolved）、`check_docs` 全绿。当前仓库为
+  结构门禁 27、baseline 130；本段保留为当轮记录，不随之后续变动。
+
+## Test architecture
+
+- **契约/能力**：schema 迁移 → `schema.snapshot.json` → `src/types.ts` 的生成链是
+  单一事实源；契约 harness 与 Journey spec 是测试输入，不是运行时依赖。
+- **消费者/读模型**：`db/src/types.ts`、所有 repository、API 路由与 Web 查询都消费
+  同一 schema；文件拆分不改变 read model 形状。
+- **生命周期/模式**：本计划不新增聚合生命周期；可靠性由 `schema:check`、L3
+  lifecycle model、随机命令序列与 Journey runner 覆盖。
+- **Adapter**：registration/ticketing 契约 Adapter 复用共享模板；新增能力必须提供
+  Adapter 或具体豁免理由。
+- **故障与恢复**：确定性并发、事务回滚与 outbox 重放沿用既有模板；本计划不改变
+  故障语义。
+- **防臃肿**：拆分文件、递归读取样式、生成类型，都是删除重复而不是新增抽象；
+  没有为单个函数建立独立套件。
+- **聚焦门禁**：`check`、全量 test、`schema:check`、`build:prod`、结构门禁、
+  Golden、`audit:check`、`graph:check`、`check_docs`。

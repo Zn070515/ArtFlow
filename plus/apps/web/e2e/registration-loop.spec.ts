@@ -47,7 +47,7 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await expect(ops).toHaveURL(/\/ops$/);
     await ops.getByRole("link", { name: "2026 院十佳报名" }).click();
     await expect(ops.getByRole("table")).toBeVisible();
-    await ops.getByRole("link", { name: /^participant:/ }).first().click();
+    await ops.getByRole("table").getByRole("link").first().click();
     await expect(
       ops.getByRole("heading", { name: "2026 院十佳报名", exact: true }),
     ).toBeVisible();
@@ -56,6 +56,7 @@ test("participant submits and Ops approves the registration", async ({ browser }
 
     await ops.goto("/ops/act-e2e-registration");
     await ops.getByRole("button", { name: "定稿名单" }).click();
+    await ops.getByRole("button", { name: "确认定稿 1 人" }).click();
     await expect(ops.getByText(/已定稿 · 1 人/)).toBeVisible();
   } finally {
     await participantContext.close();

@@ -181,7 +181,6 @@ export const VOTING_COMMAND_SCOPES: Readonly<Record<string, readonly string[]>> 
   "voting.session.open": ["voting"],
   "voting.ballot.submit": ["voting"],
   "voting.session.close": ["voting"],
-  "voting.scores.compute": ["voting"],
 });
 
 export const votingCapability: CapabilityRegistration = deepFreeze({
@@ -195,15 +194,12 @@ export const votingCapability: CapabilityRegistration = deepFreeze({
       "voting.session.open",
       "voting.ballot.submit",
       "voting.session.close",
-      "voting.scores.compute",
     ],
     queries: ["voting.session.read", "voting.live.read"],
     events: [
       "VoteSessionOpened",
       "BallotSubmitted",
       "VoteSessionClosed",
-      "VoteScoresComputed",
-      "LiveStateUpdated",
     ],
     permissions: ["voting.manage", "voting.ballot.submit"],
     surfaces: ["studio", "ops", "portal", "live"],
