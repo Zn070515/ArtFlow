@@ -144,6 +144,28 @@ describe.skipIf(!connectionString)("controlled document exports", () => {
     }
   });
 
+  it("advertises the formats this deployment can render", async () => {
+    const configured = await app.inject({
+      method: "GET",
+      url: "/api/exports/formats",
+      headers: headers(organizerToken),
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.json()).toEqual({ formats: ["csv", "docx", "xlsx"] });
+
+    const scoped = await buildTestApp(null);
+    try {
+      const csvOnly = await scoped.inject({
+        method: "GET",
+        url: "/api/exports/formats",
+        headers: headers(organizerToken),
+      });
+      expect(csvOnly.json()).toEqual({ formats: ["csv"] });
+    } finally {
+      await scoped.close();
+    }
+  });
+
   it("keeps the CSV export and writes one audit entry", async () => {
     const before = await auditCount();
     const response = await app.inject({

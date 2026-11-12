@@ -1,3 +1,4 @@
+import type { ContractDescriptor } from "@artflow-plus/contracts";
 import { insertRelease } from "@artflow-plus/db";
 import type { Database, StoredRegistration } from "@artflow-plus/db";
 import type { ActorContext } from "@artflow-plus/domain";
@@ -11,7 +12,7 @@ import type { CommandOutcome } from "@artflow-plus/runtime";
 import type { Kysely } from "kysely";
 
 import type { ContractClock } from "../clock.js";
-import type { CommandAdapter } from "../command.js";
+import { commandCounters, type CommandAdapter } from "../command.js";
 import type {
   LifecycleAdapter,
   LifecycleOutcome,
@@ -19,6 +20,7 @@ import type {
 } from "../lifecycle.js";
 
 export interface RegistrationContractAdapter extends LifecycleAdapter {
+  readonly descriptor: ContractDescriptor;
   readonly activityId: string;
   readonly participant: ActorContext;
   readonly staff: ActorContext;
@@ -26,6 +28,26 @@ export interface RegistrationContractAdapter extends LifecycleAdapter {
   readonly startCommand: CommandAdapter<StoredRegistration>;
   rollbackDeps(): ReturnType<ContractClock["deps"]>;
 }
+
+export const REGISTRATION_CONTRACT_DESCRIPTOR: ContractDescriptor = {
+  id: "registration",
+  version: 1,
+  kind: "lifecycle",
+  provider: "registration.start",
+  consumers: ["ops registration list", "participant portal", "roster finalization"],
+  preconditions: ["activity is active", "definition release is published"],
+  outputs: ["registration record", "RegistrationStarted event"],
+  invariants: [
+    "one current registration per participant and activity",
+    "answers only change with the expected revision",
+    "a final roster rejects start, answer, and submit",
+  ],
+  errors: ["STALE_REVISION", "INVALID_TRANSITION", "ROSTER_FINAL", "ROSTER_EMPTY"],
+  sideEffects: ["command receipt", "audit entry", "outbox event"],
+  idempotency: "the same command id and payload replays the stored body",
+  concurrency: "row lock plus expected revision; the loser gets STALE_REVISION",
+  recovery: "retry the same command id; a new command id starts a new transition",
+};
 
 const participant: ActorContext = {
   actorId: "contract-participant",
@@ -131,32 +153,13 @@ export function createRegistrationContractAdapter(
         participantId: typeof payload === "string" ? payload : participant.actorId,
       });
     },
-    async countReceipts(commandId) {
-      const row = await db.selectFrom("command_receipt")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async countAudits(commandId) {
-      const row = await db.selectFrom("audit_entry")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async eventCount() {
-      const row = await db.selectFrom("outbox")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("activity_id", "=", activityId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
+    ...commandCounters(db, () => activityId),
   };
 
   return {
     name: "registration",
-    provider: "registration.start",
+    provider: REGISTRATION_CONTRACT_DESCRIPTOR.provider,
+    descriptor: REGISTRATION_CONTRACT_DESCRIPTOR,
     revisionMode: "required",
     lifecycle: {
       states: ["draft", "submitted", "approved"],

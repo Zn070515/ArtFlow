@@ -12,6 +12,7 @@ test("a voter opens the shared link, votes, and sees the already-voted state", a
 
   await page.goto("/ops/act_e2e_vote_page");
   const sessionRows = page.locator(".voting-session-row");
+  await sessionRows.filter({ hasText: "voting 会话" }).getByLabel("启动模式").selectOption("formal");
   await sessionRows.filter({ hasText: "voting 会话" }).getByRole("button", { name: "启动" }).click();
   await expect(sessionRows.filter({ hasText: "voting 会话" }).getByText("运行中")).toBeVisible();
 
@@ -51,6 +52,7 @@ test("a ticket holder redeems a ticket and votes through the public page", async
   const activityId = "act_e2e_ticket_vote_page";
   await page.goto("/ops/" + activityId);
   const sessionRows = page.locator(".voting-session-row");
+  await sessionRows.filter({ hasText: "voting 会话" }).getByLabel("启动模式").selectOption("formal");
   await sessionRows.filter({ hasText: "voting 会话" }).getByRole("button", { name: "启动" }).click();
   await expect(sessionRows.filter({ hasText: "voting 会话" }).getByText("运行中")).toBeVisible();
   await page.getByLabel("候选（每行一个）").fill("alice\nbob");
