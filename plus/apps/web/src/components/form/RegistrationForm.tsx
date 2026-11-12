@@ -8,6 +8,7 @@ import {
   uploadMaterialMetadata,
   type RegistrationDetail,
 } from "../../api/registrations.js";
+import { Button } from "../ui/Button.js";
 import { FileMetadataField } from "./FileMetadataField.js";
 import { QuestionField } from "./QuestionField.js";
 
@@ -198,9 +199,8 @@ export function RegistrationForm({
       {showHeader ? (
         <header className="registration-header">
           <div>
-            <p className="eyebrow">REGISTRATION · 报名</p>
-            <h1 className="console-page-title">{detail.activity.title}</h1>
-            <p className="state-copy">参与者 {detail.registration.participantId}</p>
+            <h1 className="ui-page-title">{detail.activity.title}</h1>
+            <p className="ui-page-meta">参与者 {detail.registration.participantId}</p>
           </div>
           <span className={`status-badge status-${detail.registration.status}`}>
             {STATUS_LABELS[detail.registration.status] ?? detail.registration.status}
@@ -246,18 +246,18 @@ export function RegistrationForm({
       </div>
       {message === null ? null : <p className="form-success" aria-live="polite">{message}</p>}
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {error}
         </p>
       )}
       {editable ? (
         <div className="form-actions registration-actions">
-          <button className="secondary-button" type="button" disabled={busy} onClick={() => void save()}>
+          <Button variant="secondary" disabled={busy} onClick={() => void save()}>
             保存草稿
-          </button>
-          <button className="primary-button" type="button" disabled={busy} onClick={() => void submit()}>
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={() => void submit()}>
             提交报名
-          </button>
+          </Button>
         </div>
       ) : (
         <p className="auth-loading">报名已锁定，不能继续编辑。</p>

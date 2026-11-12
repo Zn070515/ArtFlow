@@ -49,7 +49,7 @@ describe("RegistrationForm", () => {
   it("uses a Console form workspace with full-row file slots", () => {
     render(<RegistrationForm detail={detail} onChanged={vi.fn()} />);
 
-    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
     expect(document.querySelector(".registration-question-grid")).not.toBeNull();
     expect(document.querySelector(".question-file")).toHaveClass("question-full-row");
