@@ -25,6 +25,7 @@ vi.mock("../api/ops.js", () => ({
   fetchOpsRoster: vi.fn(),
 }));
 vi.mock("../api/analytics.js", () => ({ fetchActivityAnalytics: vi.fn() }));
+vi.mock("../api/exports.js", () => ({ fetchExportFormats: vi.fn() }));
 
 vi.mock("../auth/RequireSession.js", () => ({
   RequireSession: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
@@ -91,7 +92,8 @@ describe("OpsActivityPage", () => {
         },
         error: null,
         isPending: false,
-      });
+      })
+      .mockReturnValueOnce({ data: ["csv"], error: null, isPending: false });
   });
 
   it("uses a compact detail header and wraps the registration table", () => {
@@ -135,7 +137,8 @@ describe("OpsActivityPage", () => {
         },
         error: null,
         isPending: false,
-      });
+      })
+      .mockReturnValueOnce({ data: ["csv"], error: null, isPending: false });
 
     render(<OpsActivityPage />);
 

@@ -169,6 +169,8 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   ARCHIVE_NOT_FOUND: 404,
   RATE_LIMITED: 429,
   EXPORT_UNAVAILABLE: 503,
+  EXPORT_INVALID: 422,
+  EXPORT_TOO_LARGE: 413,
 };
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {

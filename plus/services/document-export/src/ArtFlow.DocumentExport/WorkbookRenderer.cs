@@ -14,10 +14,10 @@ public static class WorkbookRenderer
             var workbookPart = document.AddWorkbookPart();
             workbookPart.Workbook = new S.Workbook();
             var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
-            var sheetData = BuildSheetData(request);
+            var (sheetData, widths) = BuildSheetData(request);
             worksheetPart.Worksheet = new S.Worksheet(
                 SheetViews(),
-                Columns(request),
+                Columns(widths),
                 sheetData);
             var sheets = workbookPart.Workbook.AppendChild(new S.Sheets());
             sheets.Append(new S.Sheet
@@ -32,26 +32,33 @@ public static class WorkbookRenderer
         return stream.ToArray();
     }
 
-    private static S.SheetData BuildSheetData(ExportRequest request)
+    private static (S.SheetData Data, int[] Widths) BuildSheetData(ExportRequest request)
     {
         var sheetData = new S.SheetData();
+        var widths = new int[request.Headers.Count];
         var header = new S.Row();
-        foreach (var name in request.Headers)
+        for (var index = 0; index < request.Headers.Count; index += 1)
         {
+            var name = request.Headers[index];
+            widths[index] = name.Length;
             header.Append(TextCell(name, header: true));
         }
         sheetData.Append(header);
         foreach (var row in request.Rows)
         {
             var line = new S.Row();
-            foreach (var element in row)
+            for (var index = 0; index < row.Count; index += 1)
             {
-                ExportCells.TryRead(element, out var cell);
+                ExportCells.TryRead(row[index], out var cell);
+                if (cell.Kind == ExportCellKind.Text && cell.Text.Length > widths[index])
+                {
+                    widths[index] = cell.Text.Length;
+                }
                 line.Append(Cell(cell));
             }
             sheetData.Append(line);
         }
-        return sheetData;
+        return (sheetData, widths);
     }
 
     private static S.Cell Cell(ExportCell cell)
@@ -96,25 +103,16 @@ public static class WorkbookRenderer
             { WorkbookViewId = 0 });
     }
 
-    private static S.Columns Columns(ExportRequest request)
+    private static S.Columns Columns(int[] widths)
     {
         var columns = new S.Columns();
-        for (var index = 0; index < request.Headers.Count; index += 1)
+        for (var index = 0; index < widths.Length; index += 1)
         {
-            var longest = request.Headers[index].Length;
-            foreach (var row in request.Rows)
-            {
-                ExportCells.TryRead(row[index], out var cell);
-                if (cell.Kind == ExportCellKind.Text && cell.Text.Length > longest)
-                {
-                    longest = cell.Text.Length;
-                }
-            }
             columns.Append(new S.Column
             {
                 Min = (uint)(index + 1),
                 Max = (uint)(index + 1),
-                Width = Math.Clamp(longest + 2, 10, 40),
+                Width = Math.Clamp(widths[index] + 2, 10, 40),
                 CustomWidth = true,
             });
         }

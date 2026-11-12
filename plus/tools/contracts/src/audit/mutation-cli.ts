@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { MUTATIONS } from "./mutations.js";
@@ -19,12 +19,38 @@ const databaseUrl = process.env.ARTFLOW_PLUS_DATABASE_URL;
 if (databaseUrl === undefined || databaseUrl.trim() === "") {
   throw new Error("ARTFLOW_PLUS_DATABASE_URL is required for the mutation audit.");
 }
+const directory = path.join(plusRoot, ".artifacts");
+mkdirSync(directory, { recursive: true });
+const journalPath = path.join(directory, "mutation-journal.json");
 
 function quote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function runFocusedTest(mutation: Mutation): void {
+interface Journal {
+  readonly file: string;
+  readonly original: string;
+}
+
+/** A killed run must not leave the source tree mutated for the next build. */
+function recoverInterruptedMutation(): void {
+  if (!existsSync(journalPath)) return;
+  let journal: Partial<Journal> = {};
+  try {
+    journal = JSON.parse(readFileSync(journalPath, "utf8")) as Partial<Journal>;
+  } catch {
+    // An unreadable journal cannot restore anything; remove it and continue.
+  }
+  if (typeof journal.file === "string" && typeof journal.original === "string") {
+    writeFileSync(path.join(plusRoot, journal.file), journal.original, "utf8");
+  }
+  rmSync(journalPath, { force: true });
+  throw new Error(
+    "Recovered an interrupted mutation and restored the source file. Re-run the audit.",
+  );
+}
+
+function runFocusedTest(mutation: Mutation): string {
   const args = [
     "--filter",
     mutation.package,
@@ -34,17 +60,41 @@ function runFocusedTest(mutation: Mutation): void {
     mutation.testFile,
   ];
   if (mutation.testName !== undefined) args.push("-t", mutation.testName);
-  execSync(["pnpm", ...args].map(quote).join(" "), {
+  return execSync(["pnpm", ...args].map(quote).join(" "), {
     cwd: plusRoot,
     env: {
       ...process.env,
       ARTFLOW_PLUS_DATABASE_URL: databaseUrl,
       REQUIRE_DB: "1",
+      NO_COLOR: "1",
     },
     stdio: "pipe",
     timeout: 120_000,
-  });
+  }).toString();
 }
+
+/**
+ * The focused test must pass before the mutation. Otherwise a broken database,
+ * a renamed test, or a missing dependency makes every mutation look CAUGHT.
+ */
+function requireFocusedTestPasses(mutation: Mutation, phase: string): void {
+  let output: string;
+  try {
+    output = runFocusedTest(mutation);
+  } catch {
+    throw new Error(
+      `Focused test ${mutation.testFile} (${mutation.testName ?? "all"}) failed ${phase}; refusing to record a mutation result. Fix the environment first.`,
+    );
+  }
+  const passed = /Tests\s+(\d+) passed/.exec(output);
+  if (passed === null || Number(passed[1]) < 1) {
+    throw new Error(
+      `Focused test ${mutation.testFile} (${mutation.testName ?? "all"}) ran zero tests ${phase}; the mutation would be meaningless.`,
+    );
+  }
+}
+
+recoverInterruptedMutation();
 
 const results: MutationResult[] = [];
 for (const mutation of MUTATIONS) {
@@ -73,6 +123,9 @@ for (const mutation of MUTATIONS) {
   const mutated = mutation.replaceAll === true
     ? normalized.split(mutation.find).join(mutation.replace)
     : normalized.replace(mutation.find, mutation.replace);
+
+  requireFocusedTestPasses(mutation, "before mutation");
+  writeFileSync(journalPath, `${JSON.stringify({ file: mutation.file, original })}\n`, "utf8");
   writeFileSync(file, mutated, "utf8");
   let caught = false;
   try {
@@ -81,6 +134,12 @@ for (const mutation of MUTATIONS) {
     caught = true;
   } finally {
     writeFileSync(file, original, "utf8");
+    rmSync(journalPath, { force: true });
+  }
+  if (caught) {
+    // A failure that survives the restore is an environment problem, not a
+    // killed mutation. Do not report it as coverage.
+    requireFocusedTestPasses(mutation, "after the mutation was restored");
   }
   results.push({
     id: mutation.id,
@@ -90,8 +149,6 @@ for (const mutation of MUTATIONS) {
   });
 }
 
-const directory = path.join(plusRoot, ".artifacts");
-mkdirSync(directory, { recursive: true });
 const output = path.join(directory, "mutation-audit.json");
 writeFileSync(output, `${JSON.stringify({ results }, null, 2)}\n`, "utf8");
 

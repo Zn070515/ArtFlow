@@ -306,7 +306,6 @@ export function createEmptyCompetitionDefinition(): CapabilityDefinition {
 }
 
 const COMPETITION_COMMANDS = [
-  "competition.configure",
   "competition.round.prepare",
   "competition.panel.activate",
   "competition.performance.open",
@@ -347,7 +346,6 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
     commands: COMPETITION_COMMANDS,
     queries: ["competition.describe"],
     events: [
-      "CompetitionConfigured",
       "CompetitionRoundPrepared",
       "PanelSnapshotActivated",
       "PerformanceAdvanced",
@@ -363,6 +361,7 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
       "AdvancementFinalized",
       "TieDecisionRecorded",
       "StageResultCandidateProduced",
+      "RehearsalRoundReset",
     ],
     permissions: ["competition.manage", "competition.round.prepare", "competition.score.write"],
     surfaces: ["studio", "ops", "live"],

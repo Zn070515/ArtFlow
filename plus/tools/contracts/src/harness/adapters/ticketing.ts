@@ -1,3 +1,4 @@
+import type { ContractDescriptor } from "@artflow-plus/contracts";
 import { insertJudgeEntrySeat, insertRelease } from "@artflow-plus/db";
 import type { Database, StoredTicket } from "@artflow-plus/db";
 import type { ActorContext } from "@artflow-plus/domain";
@@ -18,7 +19,7 @@ import type {
 import type { Kysely } from "kysely";
 
 import type { ContractClock } from "../clock.js";
-import type { CommandAdapter } from "../command.js";
+import { commandCounters, type CommandAdapter } from "../command.js";
 import type {
   LifecycleAdapter,
   LifecycleOutcome,
@@ -28,6 +29,7 @@ import type {
 const CREDENTIAL_SECRET = "contract-credential-secret";
 
 export interface TicketingContractAdapter extends LifecycleAdapter {
+  readonly descriptor: ContractDescriptor;
   readonly activityId: string;
   readonly staff: ActorContext;
   readonly judge: ActorContext;
@@ -36,6 +38,26 @@ export interface TicketingContractAdapter extends LifecycleAdapter {
   authenticate(token: string): Promise<unknown>;
   archive(): Promise<void>;
 }
+
+export const TICKETING_CONTRACT_DESCRIPTOR: ContractDescriptor = {
+  id: "ticketing",
+  version: 1,
+  kind: "lifecycle",
+  provider: "ticketing.ticket.issue",
+  consumers: ["judge entry", "voting redeem", "ops ticket list"],
+  preconditions: ["activity is active", "ticketing capability is enabled"],
+  outputs: ["ticket record", "one-time credential"],
+  invariants: [
+    "a rotated credential retires the previous one",
+    "an archived activity rejects ticket writes",
+    "a judge session is bound to one claimed seat",
+  ],
+  errors: ["INVALID_TICKET", "TICKET_REPLAYED", "ACTIVITY_ARCHIVED", "SEAT_UNAVAILABLE"],
+  sideEffects: ["command receipt", "audit entry", "outbox event"],
+  idempotency: "the same command id and payload replays the stored body",
+  concurrency: "row locks serialize rotate and redeem; the second redeem fails",
+  recovery: "retry the same command id; a lost claim response is re-signed on replay",
+};
 
 const staff: ActorContext = {
   actorId: "contract-ticket-staff",
@@ -140,32 +162,13 @@ export function createTicketingContractAdapter(
     async execute({ commandId, actor }) {
       return issueTicket(db, deps(actor ?? staff), { commandId, activityId });
     },
-    async countReceipts(commandId) {
-      const row = await db.selectFrom("command_receipt")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async countAudits(commandId) {
-      const row = await db.selectFrom("audit_entry")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async eventCount() {
-      const row = await db.selectFrom("outbox")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("activity_id", "=", activityId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
+    ...commandCounters(db, () => activityId),
   };
 
   return {
     name: "ticketing",
-    provider: "ticketing.ticket.issue",
+    provider: TICKETING_CONTRACT_DESCRIPTOR.provider,
+    descriptor: TICKETING_CONTRACT_DESCRIPTOR,
     revisionMode: "none",
     lifecycle: {
       states: ["issued", "redeemed"],
@@ -177,6 +180,17 @@ export function createTicketingContractAdapter(
         { command: "redeem", from: "issued", to: "redeemed", revisionDelta: 0 },
       ],
     },
+    variants: [
+      {
+        name: "revoke",
+        transitions: [
+          { command: "issue", from: "none", to: "issued", revisionDelta: 0 },
+          { command: "rotate", from: "issued", to: "issued", revisionDelta: 1 },
+          { command: "revoke", from: "issued", to: "revoked", revisionDelta: 0 },
+        ],
+        terminal: ["revoked"],
+      },
+    ],
     illegal: [
       { command: "rotate", expectedRevision: 0, code: "INVALID_TRANSITION" },
       { command: "redeem", expectedRevision: 0, code: "TICKET_REPLAYED" },
