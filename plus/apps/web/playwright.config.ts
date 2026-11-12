@@ -29,16 +29,30 @@ export default defineConfig({
   snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   use: {
     baseURL: webUrl,
+    // The suite only talks to 127.0.0.1. On developer machines with a system
+    // proxy (including one that intercepts loopback), Chromium otherwise sends
+    // these requests through it and loads hang or return 502.
+    launchOptions: { args: ["--no-proxy-server"] },
     trace: "on-first-retry",
     // Business journeys must not depend on a WebGL renderer. The Aurora scene
     // falls back to a static backdrop under reduced motion; visual coverage of
     // the shader belongs in its own smoke test, not in authority E2E.
     reducedMotion: "reduce",
   },
-  projects: [{
-    name: "chromium",
-    use: { ...devices["Desktop Chrome"], ...(channel === undefined ? {} : { channel }) },
-  }],
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], ...(channel === undefined ? {} : { channel }) },
+      testIgnore: ["**/mobile.spec.ts"],
+    },
+    {
+      name: "mobile",
+      // CI installs Chromium only; the device descriptor otherwise defaults to
+      // WebKit. Keep the iPhone viewport and touch emulation on Chromium.
+      use: { ...devices["iPhone 13"], browserName: "chromium", ...(channel === undefined ? {} : { channel }) },
+      testMatch: ["**/mobile.spec.ts"],
+    },
+  ],
   webServer: [
     {
       command: "pnpm --filter @artflow-plus/api seed:e2e && pnpm --filter @artflow-plus/api start",

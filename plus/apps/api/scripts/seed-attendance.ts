@@ -89,6 +89,9 @@ if (existing === null) {
 }
 
 await db.transaction().execute(async (trx) => {
+  // A check-in session is a command session, not an attendance fact row, so
+  // the fact reset alone leaves yesterday's session open across local runs.
+  await trx.deleteFrom("execution_session").where("activity_id", "=", activityId).execute();
   await trx.deleteFrom("attendance_current").where("activity_id", "=", activityId).execute();
   await trx.deleteFrom("attendance_fact").where("activity_id", "=", activityId).execute();
   await trx.deleteFrom("attendance_point").where("activity_id", "=", activityId).execute();

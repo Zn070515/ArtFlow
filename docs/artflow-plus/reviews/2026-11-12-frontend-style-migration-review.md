@@ -36,3 +36,4 @@
 - **已解决**：Portal 展示字族改为 `PortalShell` 挂载时动态 import；Console 主包不含 Instrument Serif / Noto Serif SC，构建产物中是独立的 CSS chunk。
 - **已补**：token sheet 增加 1440/390 Playwright 像素基线（平台中立 snapshot，5% 容差）；Ops 保留 1440/1024/390 布局断言。
 - **仍待**：其他页面的逐像素基线；`impact` job 的阻塞化需要 2 周误报率数据。
+- **2026-11-13 移动端布局门禁**：新增 `mobile` Playwright project（iPhone 13 视口跑在 Chromium 上，CI 只装 Chromium），`mobile.spec.ts` 断言 Console 各表面在 390px 无横向滚动、可见控件 ≥40px，Portal 头部在 390px 折成两行且品牌/导航 ≥44px、结果页表格链接 ≥44px。Portal 头部与列表单元格链接此前在 390px 换行拥挤、点击目标只有 19–20px；tokens-390 基线随之更新。本地 E2E 另加 `--no-proxy-server`，避免系统代理劫持 127.0.0.1 造成偶发空白页。

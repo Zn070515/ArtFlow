@@ -59,14 +59,14 @@ test("rehearses, resets, then runs the same round formally", async ({ browser })
     await round.getByRole("button", { name: "锁轮" }).click();
     await expect(round.getByRole("heading", { name: /round-1 · locked/ })).toBeVisible();
     await round.getByRole("button", { name: "生成排名" }).click();
-    await expect(round.getByText(/RANKING · READY/)).toBeVisible();
+    await expect(round.getByRole("table", { name: /当前排名（revision \d+）/ })).toBeVisible();
     await expect(round.getByRole("cell", { name: "273.00", exact: true })).toBeVisible();
 
     staff.once("dialog", (dialog) => void dialog.accept());
     await round.getByRole("button", { name: "重置排练" }).click();
     await expect(round.getByRole("heading", { name: /round-1 · prepared/ })).toBeVisible();
     await expect(round.getByTestId("score-count-singer-a")).toHaveCount(0);
-    await expect(round.getByText(/RANKING/)).toHaveCount(0);
+    await expect(round.getByRole("table", { name: /当前排名/ })).toHaveCount(0);
 
     await staff.getByRole("button", { name: "关闭会话" }).click();
     await staff.getByLabel("Mode").selectOption("formal");

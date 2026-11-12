@@ -253,4 +253,8 @@
   .form-actions {
     flex-direction: column;
   }
+
+  .auth-switch {
+    min-height: 40px;
+  }
 }

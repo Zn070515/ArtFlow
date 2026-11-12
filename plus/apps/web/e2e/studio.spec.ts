@@ -18,13 +18,14 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "激活活动" }).click();
-  await expect(page.getByText(/STUDIO · active/)).toBeVisible();
+  // Activation removes the draft-only control instead of rendering a status line.
+  await expect(page.getByRole("button", { name: "激活活动" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "编译定义" }).click();
   await expect(page.getByText(/编译成功/)).toBeVisible();
 
   await page.getByRole("button", { name: "发布当前编译" }).click();
-  await expect(page.locator(".active-badge").first()).toBeVisible();
+  await expect(page.getByText("ACTIVE", { exact: true }).first()).toBeVisible();
 
   await page.getByLabel("Mode").selectOption("rehearsal");
   await page.getByRole("button", { name: "启动会话" }).click();

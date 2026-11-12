@@ -26,7 +26,7 @@ test("ops opens check-in, checks in a participant, staff member, and ticket", as
 
   await card.getByRole("button", { name: "打开签到" }).click();
   await expect(card.getByText(/签到已开放/)).toBeVisible();
-  await card.getByLabel("签到点").selectOption(fixture.pointKey);
+  await card.getByLabel("签到点", { exact: true }).selectOption(fixture.pointKey);
 
   const participantRow = card.locator("li", { hasText: "选手甲" });
   await participantRow.getByRole("button", { name: "签到" }).click();
