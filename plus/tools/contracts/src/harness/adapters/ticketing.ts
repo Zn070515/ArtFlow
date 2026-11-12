@@ -241,7 +241,10 @@ export function createTicketingContractAdapter(
       });
     },
     async authenticate(token: string) {
-      return authenticateJudgeSession(db, token);
+      // Validate against the same contract clock that minted the session, not
+      // wall time: the fixed 2026-11-11 start would otherwise expire the
+      // eight-hour judge session as soon as the real date moved on.
+      return authenticateJudgeSession(db, token, new Date(clock.now()));
     },
     async archive() {
       await db.updateTable("activity").set({ status: "archived" })
