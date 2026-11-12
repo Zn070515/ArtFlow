@@ -38,6 +38,36 @@ async function count(
   return Number(row.count);
 }
 
+export interface CommandCounters {
+  countReceipts(commandId: string): Promise<number>;
+  countAudits(commandId: string): Promise<number>;
+  eventCount(): Promise<number>;
+}
+
+/**
+ * The three durable counters every command adapter exposes. `activityId` is a
+ * getter because adapters create their activity in setup().
+ */
+export function commandCounters(
+  db: Kysely<Database>,
+  activityId: () => string,
+): CommandCounters {
+  return {
+    async countReceipts(commandId) {
+      return count(db, "command_receipt", (query) =>
+        query.where("command_id", "=", commandId));
+    },
+    async countAudits(commandId) {
+      return count(db, "audit_entry", (query) =>
+        query.where("command_id", "=", commandId));
+    },
+    async eventCount() {
+      return count(db, "outbox", (query) =>
+        query.where("activity_id", "=", activityId()));
+    },
+  };
+}
+
 export async function assertReplay<T>(adapter: CommandAdapter<T>): Promise<{
   readonly commandId: string;
   readonly first: CommandOutcome<T>;

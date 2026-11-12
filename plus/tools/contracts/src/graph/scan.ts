@@ -437,10 +437,13 @@ export function enclosingSymbol(
   symbols: readonly SymbolDecl[],
   index: number,
 ): SymbolDecl | undefined {
+  // extractSymbols appends consts and classes after functions, so the list is
+  // not index-sorted. Pick the closest declaration before the index, never the
+  // previous array element.
   let found: SymbolDecl | undefined;
   for (const symbol of symbols) {
-    if (symbol.index >= index) break;
-    found = symbol;
+    if (symbol.index >= index) continue;
+    if (found === undefined || symbol.index > found.index) found = symbol;
   }
   return found;
 }
