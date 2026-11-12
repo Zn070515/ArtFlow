@@ -39,13 +39,62 @@ Plus runs through `deploy/compose.production.yml` with the `plus` profile. Three
 - Keep releases immutable and partition facts, events, and projections by mode.
 - Route internal files through the controlled material/archive APIs; never expose private media directly.
 - **HTTP routes live in `plus/apps/api/src/routes/<surface>.ts`.** Each module exports `registerXRoutes(ctx: ApiContext)`; `app.ts` is composition only (construction, hooks, CSRF, error mapping, realtime server). Never register a route directly in `app.ts`; `tests/gates/test_plus_route_modules.py` rejects it, unreferenced modules, duplicate method+URL pairs, and a module growing past 900 lines.
-- **`db/src/types.ts` and `db/src/migrations.ts` describe one schema.** Any migration, column, or nullability change must update both and pass `pnpm -C plus run schema:check` against PostgreSQL. The gate compares every table/column and nullable flag; adding a column to one side only is a CI failure. `ColumnType<unknown, …>` is treated as nullability-indeterminate.
+- **The schema has one source.** Migrations define it; `db/schema.snapshot.json` is generated from a migrated database; `db/src/types.ts` is generated from the snapshot. Any migration, column, or nullability change must regenerate both (`schema:snapshot`, `schema:types`) and pass `pnpm -C plus run schema:check` against PostgreSQL. The gate compares the snapshot with migrations and the types with the snapshot; editing a generated file by hand is a CI failure. `ColumnType<unknown, …>` is treated as nullability-indeterminate.
 - **Worker changes must preserve drained shutdown and bounded retry.** Keep the ready file for the compose healthcheck, the dead-letter queue, and the `startRelayLoop` drain; run `pnpm -C plus --filter @artflow-plus/worker test`.
 - Do not commit `.env`, secrets, uploads, exports, archives, or generated media.
 - Run `pwsh -NoProfile -File scripts/check_docs.ps1` after user-facing documentation changes.
 - After each change round, sweep the configuration files for anything that change made stale: the pyright/ruff/mypy lists, the `tsconfig*.json` `include` lists, the Tailwind `content` globs, the `.env` templates, `.dockerignore`, and `dependabot.yml`. A file that exists but appears in no list is checked by nothing.
 - Do not let claude get into Co-Authored commits; it is a code reviewer, not a code author. Use `git commit --author` to correct any misattribution.
 - Keep reviewer/advice documents under `docs/advices/`; never place a `ChatGPT.md` (or any large reviewer-note dump) at the repository root.
+
+## Test architecture rules
+
+The test system is part of the architecture, not a follow-on. The design record is
+`docs/artflow-plus/specs/2026-11-11-self-auditing-test-system-design.md` and
+`docs/artflow-plus/specs/2026-11-11-contract-testing-program-design.md`; the tooling lives in
+`plus/tools/contracts/`. These rules apply to every capability change.
+
+- **Lifecycle contracts are reusable templates.** Cover the initial state, legal and illegal
+  transitions, terminal states and their write protection, version conflicts, duplicate/replayed
+  commands, concurrent transitions, cross-capability preconditions, `test`/`rehearsal`/`formal`
+  isolation, and archive/revoke/republish/recovery. A capability supplies an adapter (construct
+  state, execute command, read state, declare business constraints); it must not re-copy the
+  template per module.
+- **One contract distribution.** Compose small, orthogonal schemas from
+  `packages/contracts/src/contracts/` (descriptor, lifecycle, authorization, idempotency,
+  transaction, event, recovery). Capability manifests, shared schemas, and runtime behavior must
+  agree; extend the shared contract instead of adding a surface-local shape. Never build a
+  monolithic schema that restates the business.
+- **Adapters are the integration seam.** Each capability plugs into the harness through
+  `plus/tools/contracts/src/harness/adapters/`. Use real PostgreSQL and the real command path, not
+  repository mocks. Keep the adapter thinner than the production path and never freeze
+  implementation details into a contract.
+- **The Consumer Graph is a gate.** `graph:check` must keep zero unresolved edges, and new routes,
+  events, topics, and read models must be discoverable or explicitly declared (`api-only.json`,
+  `dynamic-dependencies.json`) with a reason. Consult reverse and transitive impact before changing
+  a shared seam; review new warnings instead of letting them accumulate.
+- **Fault injection is required, not optional.** Exercise call, transaction, event, state,
+  concurrency, and dependency faults. A fault case must be reproducible, controllable, located,
+  isolated from other tests, free of arbitrary sleeps, able to print the parameters needed to
+  reproduce, and must assert both behavior during the fault and the recovered final state. Inject
+  through dependency injection, clocks, schedulers, and test seams; do not pollute production code.
+- **Do not let the test system grow into a second business system.** No per-function suites, no
+  cartesian-product matrices, no copy-pasted templates, no contracts that encode implementation
+  details, no over-mocking, and no unit-test-only claims. Tier the work by cost and risk: fast
+  static/contract checks, medium database/API integration, high-cost concurrency/recovery/E2E, and
+  periodic state-space exploration. Test count, coverage, and line count are not completion
+  evidence; a new abstraction must repay its maintenance cost.
+- **Expectations come from outside the implementation.** Derive them from invariants, golden
+  fixtures, journey specs, and consumer contracts — never generate the expected result from the code
+  under test and then assert it back. A test that cannot fail is not evidence; prove the red before
+  declaring the green.
+- **Specs and plans must carry a test-architecture section.** Every document under
+  `docs/artflow-plus/specs/` and `docs/artflow-plus/plans/` names: the contracts and capabilities
+  touched; the consumers and read models affected (from the graph); the lifecycle edges, terminal
+  guards, and mode isolation; the adapter(s) and whether an existing one extends; the fault and
+  recovery cases; why existing tests are insufficient; the anti-bloat decision (extend versus add);
+  and the focused gates to run. A spec without this section is incomplete, and a plan must schedule
+  proof before scale.
 
 ## Git workflow
 

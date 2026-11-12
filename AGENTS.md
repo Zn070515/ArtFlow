@@ -17,6 +17,7 @@ v2 is a pnpm 12 workspace with Node 24, Fastify 5, Kysely/PostgreSQL 18, and Rea
 - `plus/packages/db/`: Kysely schema, module-owned migrations, repositories.
 - `plus/packages/contracts/`: shared TypeBox schemas.
 - `plus/packages/realtime/`: the protected WebSocket core (`/protocol`, `/server`, `/client`); read `CORE.md` before touching it. Feature code registers `RealtimeTopic` definitions and must not open sockets directly (`GATE-REALTIME-CORE-01`).
+- `plus/tools/contracts/`: development/CI-only Consumer Graph, contract schemas and adapters, journey specs, audit and mutation tooling. It must not enter the runtime image dependency closure.
 
 Commands (from the repository root):
 
@@ -38,16 +39,75 @@ The API migrates on start. Browser E2E uses the `artflow_e2e` schema and `worker
 - TypeScript: strict, ESM, `.js` import suffixes. Keep capability code dependent on its own module and the engine only; never import another capability's internals.
 - Domain logic stays pure; runtime services own transactions and projections; API routes translate HTTP and never invent authority.
 - HTTP registration lives in `plus/apps/api/src/routes/<surface>.ts`; each module exports `registerXRoutes(ctx: ApiContext)`. `app.ts` keeps construction, hooks, CSRF, error mapping, and the realtime server only. `tests/gates/test_plus_route_modules.py` enforces the boundary.
-- `db/src/types.ts` and `db/src/migrations.ts` are two descriptions of one schema. Update both for any schema change and run `pnpm -C plus run schema:check`; the drift gate compares tables, columns, and nullability against a migrated PostgreSQL schema.
+- The schema has one source: migrations → `db/schema.snapshot.json` → `db/src/types.ts`. After any schema change run `pnpm -C plus run schema:snapshot` and `schema:types`, then `pnpm -C plus run schema:check`; the gate compares the snapshot with migrations and the types with the snapshot. Do not hand-edit generated files.
 - React components use PascalCase files for routes/components and camelCase for helpers; shared contracts come from `@artflow-plus/contracts`.
 - Python is gate-only: pytest/ruff over `tests/gates`, `tests/golden`, and `scripts/tests`.
 
 ## Testing Guidelines
 
 - Add a focused test beside the behavior: domain unit tests, runtime database tests, API route tests, and browser E2E for user journeys.
-- Database tests use `REQUIRE_DB=1` and a disposable schema; never let a skipped database test pass silently.
+- Database tests use `REQUIRE_DB=1` and a disposable schema; never let a skipped database test pass silently. A standalone run that skipped its database cases is not evidence of passing.
 - Golden fixtures are implementation-independent and must keep passing through the v2 runtime.
 - A fixed defect should become a regression test or an invariant entry.
+
+### Test architecture rules
+
+The test system is part of the architecture. The design record is
+`docs/artflow-plus/specs/2026-11-11-self-auditing-test-system-design.md` and
+`docs/artflow-plus/specs/2026-11-11-contract-testing-program-design.md`; the tooling lives in
+`plus/tools/contracts/`.
+
+1. **Lifecycle templates, not per-capability copies.** The shared harness covers initial state,
+   legal and illegal transitions, terminal states and post-terminal write protection, version
+   conflicts, duplicate/replayed commands, concurrent transitions, cross-capability preconditions,
+   `test`/`rehearsal`/`formal` isolation, and archive/revoke/republish/recovery. Each capability
+   contributes an adapter that constructs state, executes a command, reads state, and declares its
+   business constraints.
+2. **One contract distribution.** Compose small, orthogonal schemas from
+   `plus/packages/contracts/src/contracts/` (descriptor, lifecycle, authorization, idempotency,
+   transaction, event, recovery). Manifest, shared schema, and runtime behavior must agree; extend
+   the shared contract instead of adding a surface-local shape. Never write one schema that restates
+   the whole business.
+3. **Adapters are the only integration seam.** Register each capability in
+   `plus/tools/contracts/src/harness/adapters/`. Use real PostgreSQL and the real command path; do
+   not mock repositories. The adapter must stay thinner than the production path and must not encode
+   implementation details as expectations.
+4. **The Consumer Graph is a gate.** `graph:check` must stay at zero unresolved edges. New routes,
+   events, topics, and read models must be discoverable or explicitly declared in `api-only.json` or
+   `dynamic-dependencies.json` with a reason. Check reverse and transitive impact before changing a
+   shared seam, and review new warnings rather than letting them accumulate.
+5. **Fault injection covers failure and recovery.** Exercise call, transaction, event, state,
+   concurrency, and dependency faults. A case must be reproducible, controllable, located, isolated,
+   free of arbitrary sleeps, able to print its reproduction parameters, and must assert both the
+   behavior during the fault and the recovered final state. Inject through dependency injection,
+   clocks, schedulers, and test seams; do not add test-only branches to production code.
+6. **Expectations are independent.** Derive them from invariants, golden fixtures, journey specs,
+   and consumer contracts — never from the implementation under test. Prove the red before claiming
+   the green.
+7. **Do not let the test system become a second business system.** No per-function suites, no
+   cartesian-product matrices, no copy-pasted templates, no contracts that encode implementation
+   details, no over-mocking, and no unit-test-only claims. Tier by cost and risk: fast
+   static/contract checks, medium database/API integration, high-cost concurrency/recovery/E2E, and
+   periodic state-space exploration. Test count, coverage, and line count are not completion
+   evidence; a new abstraction must repay its maintenance cost.
+
+## Spec & Plan Requirements
+
+Every document under `docs/artflow-plus/specs/` and `docs/artflow-plus/plans/` must include a
+**Test architecture** section written before implementation starts:
+
+- contracts and capabilities touched, and whether an existing contract extends;
+- consumers, read models, routes, events, and topics affected, taken from `graph:check`;
+- lifecycle edges, terminal guards, and `test`/`rehearsal`/`formal` isolation;
+- the adapter(s) used and why they stay thin;
+- fault-injection cases with the recovery state each one asserts;
+- why the existing tests are insufficient;
+- the anti-bloat decision: which template or adapter is extended instead of adding a test;
+- the focused gates to run and the evidence that will count as proof.
+
+A spec without this section is incomplete. A plan must order the work as
+prove-the-failure → fix/extend → regression → expand, and must not scale a mechanism before its
+usefulness has been demonstrated on a real defect.
 
 ## Commit & Pull Request Guidelines
 
