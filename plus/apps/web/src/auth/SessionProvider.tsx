@@ -115,8 +115,11 @@ export function hasLiveAccess(session: SessionResponse | null): boolean {
   );
 }
 
+export function hasWorkspaceAccess(session: SessionResponse | null): boolean {
+  return hasOpsAccess(session) || hasStudioAccess(session) || hasLiveAccess(session);
+}
+
 export function defaultLanding(session: SessionResponse): string {
-  if (hasOpsAccess(session)) return "/ops";
-  if (hasStudioAccess(session)) return "/studio";
+  if (hasWorkspaceAccess(session)) return "/workspace";
   return "/join";
 }
