@@ -14,6 +14,10 @@ import {
 } from "../../api/grouping.js";
 import type { GroupingStage, GroupingWindow } from "../../api/grouping.js";
 import { fetchOpsRegistrations } from "../../api/ops.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Input } from "../ui/Input.js";
+import { Select } from "../ui/Select.js";
 
 const STAGE_KEY = "chorus";
 const STAGE_NAME = "分组合唱";
@@ -180,7 +184,13 @@ export function GroupingCard(props: { readonly activityId: string }) {
   });
 
   if (state.isError) return null;
-  if (state.isLoading) return <section className="ops-card">正在读取分组…</section>;
+  if (state.isLoading) {
+    return (
+      <Card className="grouping-card">
+        <p className="auth-loading">正在读取分组…</p>
+      </Card>
+    );
+  }
 
   const groups =
     draft ??
@@ -189,7 +199,6 @@ export function GroupingCard(props: { readonly activityId: string }) {
       participantIds: group.members.map((member) => member.participantId),
     })) ??
     [];
-
   const assigned = groups.reduce((total, group) => total + group.participantIds.length, 0);
   const noGroups = groups.length === 0;
   const hasEmptyGroup = groups.some((group) => group.participantIds.length === 0);
@@ -212,35 +221,31 @@ export function GroupingCard(props: { readonly activityId: string }) {
     changeWindow.error;
 
   return (
-    <section className="ops-card grouping-card">
-      <p className="eyebrow">GROUPING · 分组</p>
-      <h2>第一轮分组</h2>
+    <Card className="grouping-card">
+      <h2 className="ui-card__title">第一轮分组</h2>
 
       {stage === undefined ? (
-        <button type="button" className="primary-button" onClick={() => create.mutate()}>
+        <Button variant="primary" onClick={() => create.mutate()}>
           创建分组赛段
-        </button>
+        </Button>
       ) : (
         <>
-          <p className="state-copy">
+          <p className="ui-card__description">
             状态：{stage.status} · 已分 {assigned}/{approved.length} 人
             {stage.groupCount === null ? "" : ` · 规则要求 ${stage.groupCount} 组`}
           </p>
 
           {stage.status === "draft" || editing ? (
             <>
-              <label>
-                组数
-                <input
-                  type="number"
-                  min={1}
-                  value={groupCount}
-                  onChange={(event) => setGroupCount(Number(event.target.value))}
-                />
-              </label>
-              <button
-                type="button"
-                className="secondary-button"
+              <Input
+                type="number"
+                min={1}
+                label="组数"
+                value={groupCount}
+                onChange={(event) => setGroupCount(Number(event.target.value))}
+              />
+              <Button
+                variant="secondary"
                 disabled={participants.isPending}
                 onClick={() =>
                   setDraft(
@@ -255,7 +260,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                 }
               >
                 自动平均分组
-              </button>
+              </Button>
             </>
           ) : null}
 
@@ -269,6 +274,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
                       {labels.get(participantId) ?? participantId}
                       {stage.status === "draft" || editing ? (
                         <select
+                          className="ui-select"
                           aria-label={`调整 ${participantId}`}
                           value={group.name}
                           onChange={(event) => {
@@ -297,94 +303,81 @@ export function GroupingCard(props: { readonly activityId: string }) {
           </div>
 
           {stage.status === "draft" ? (
-            <button
-              type="button"
-              className="primary-button"
+            <Button
+              variant="primary"
               disabled={record.isPending || !canSave}
               onClick={() => record.mutate(groups)}
             >
               保存分组
-            </button>
+            </Button>
           ) : null}
           {noGroups ? (
-            <p className="state-copy">先点「自动平均分组」或手动把选手分到组里。</p>
+            <p className="ui-card__description">先点「自动平均分组」或手动把选手分到组里。</p>
           ) : hasEmptyGroup ? (
-            <p className="state-copy">有小组还没有成员，先调整再保存。</p>
+            <p className="ui-card__description">有小组还没有成员，先调整再保存。</p>
           ) : null}
           {stage.status === "draft" ? (
-            <button
-              type="button"
-              className="primary-button"
+            <Button
+              variant="primary"
               disabled={confirm.isPending || !canConfirm}
               onClick={() => confirm.mutate()}
             >
               确认分组
-            </button>
+            </Button>
           ) : null}
           {stage.status === "draft" && dirty && canSave ? (
-            <p className="state-copy">先保存当前分组，再确认。</p>
+            <p className="ui-card__description">先保存当前分组，再确认。</p>
           ) : null}
           {groupCountMismatch && stage.groupCount !== null ? (
-            <p className="state-copy">
+            <p className="ui-card__description">
               规则要求 {stage.groupCount} 组，当前是 {groups.length} 组；请调整分组或修改赛制。
             </p>
           ) : null}
           {stage.status === "confirmed" ? (
-            <button
-              type="button"
-              className="primary-button"
-              disabled={freeze.isPending || dirty}
-              onClick={() => freeze.mutate()}
-            >
+            <Button variant="primary" disabled={freeze.isPending || dirty} onClick={() => freeze.mutate()}>
               冻结分组
-            </button>
+            </Button>
           ) : null}
           {stage.status === "confirmed" && dirty ? (
-            <p className="state-copy">先保存当前修正，再冻结。</p>
+            <p className="ui-card__description">先保存当前修正，再冻结。</p>
           ) : null}
-          {stage.status === "frozen" ? <p className="state-copy">分组已冻结。</p> : null}
+          {stage.status === "frozen" ? <p className="ui-card__description">分组已冻结。</p> : null}
 
           {stage.status !== "cancelled" ? (
             <details className="grouping-more">
               <summary>更多操作</summary>
               {stage.status === "confirmed" || stage.status === "frozen" ? (
                 <>
-                  <label>
-                    材料窗口
-                    <select
-                      value={windowState}
-                      onChange={(event) => setWindowState(event.target.value as GroupingWindow)}
-                    >
-                      <option value="closed">关闭</option>
-                      <option value="open">开放提交</option>
-                      <option value="supplement_only">仅补交</option>
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Select
+                    label="材料窗口"
+                    value={windowState}
+                    onChange={(event) => setWindowState(event.target.value as GroupingWindow)}
+                  >
+                    <option value="closed">关闭</option>
+                    <option value="open">开放提交</option>
+                    <option value="supplement_only">仅补交</option>
+                  </Select>
+                  <Button
+                    variant="secondary"
                     disabled={changeWindow.isPending}
                     onClick={() => changeWindow.mutate()}
                   >
                     应用材料窗口
-                  </button>
+                  </Button>
                 </>
               ) : null}
 
-              <label>
-                原因
-                <input
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  placeholder="修正或取消必须填写"
-                />
-              </label>
+              <Input
+                label="原因"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="修正或取消必须填写"
+              />
 
               {stage.status === "confirmed" || stage.status === "frozen" ? (
                 editing ? (
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Button
+                    variant="secondary"
                     disabled={
                       correct.isPending ||
                       !canSave ||
@@ -394,30 +387,28 @@ export function GroupingCard(props: { readonly activityId: string }) {
                     onClick={() => correct.mutate()}
                   >
                     保存修正
-                  </button>
+                  </Button>
                 ) : (
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       setDraft(groups);
                       setEditing(true);
                     }}
                   >
                     修正分组
-                  </button>
+                  </Button>
                 )
               ) : null}
 
               {stage.status === "draft" || stage.status === "confirmed" ? (
-                <button
-                  type="button"
-                  className="secondary-button"
+                <Button
+                  variant="secondary"
                   disabled={cancel.isPending || reason.trim() === ""}
                   onClick={() => cancel.mutate()}
                 >
                   取消赛段
-                </button>
+                </Button>
               ) : null}
             </details>
           ) : null}
@@ -425,8 +416,8 @@ export function GroupingCard(props: { readonly activityId: string }) {
       )}
 
       {error === null || error === undefined ? null : (
-        <p className="form-error" role="alert">{errorMessage(error)}</p>
+        <p className="ui-field__error" role="alert">{errorMessage(error)}</p>
       )}
-    </section>
+    </Card>
   );
 }
