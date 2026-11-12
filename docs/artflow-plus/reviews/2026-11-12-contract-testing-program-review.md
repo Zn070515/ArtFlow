@@ -146,3 +146,11 @@ baseline。这些可以与前端的 Console 迁移并行推进，互不阻塞。
 
 建议把 P4.1 Voting Adapter 与当前前端 Console 迁移并行推进：前端改动不碰
 runtime，Adapter 只消费现有命令，二者没有写冲突；每天各自独立提交，互不阻塞。
+
+## 8. 实施进展（2026-11-12）
+
+- **Voting Adapter 已实现**：`plus/tools/contracts/src/harness/adapters/voting.ts`。
+  8 个契约测试覆盖生命周期、事务原子性、重放、命令 payload 冲突、actor 绑定、
+  重复 browser ballot、执行 release 变化和 mode 变化；`contract-tools` 105 tests
+  全绿。票据身份的 revoked/expired 分支仍由既有
+  `voting-ticket-service.test.ts` 覆盖，下一步再决定是否并入 Adapter。
