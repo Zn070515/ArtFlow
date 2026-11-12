@@ -1,4 +1,5 @@
 import type { ExportFormat } from "../../api/exports.js";
+import { Card } from "../ui/Card.js";
 
 const FORMATS = [
   { format: "csv", label: "CSV" },
@@ -39,10 +40,9 @@ export function ExportCard({
 
   if (links.length === 0) return null;
   return (
-    <section className="ops-card" data-testid="ops-export-card">
-      <p className="eyebrow">EXPORT · 导出</p>
-      <h2 className="console-card-title">受控导出</h2>
-      <p className="state-copy">导出会写审计；空数据也会生成表头。</p>
+    <Card data-testid="ops-export-card">
+      <h2 className="ui-card__title">受控导出</h2>
+      <p className="ui-card__description">导出会写审计；空数据也会生成表头。</p>
       <ul className="seat-list">
         {links.map((link) => (
           <li key={link.kind}>
@@ -61,6 +61,6 @@ export function ExportCard({
           </li>
         ))}
       </ul>
-    </section>
+    </Card>
   );
 }
