@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readAllStyles } from "./read-styles.js";
+
 const stylesDirectory = join(process.cwd(), "src", "styles");
 
 type ThemeName = "paper" | "graphite" | "afterglow";
@@ -78,5 +80,21 @@ describe("theme contrast", () => {
     expect(contrast(accentContrast, accent), `${theme}: text on accent`).toBeGreaterThanOrEqual(4.5);
     expect(contrast(focus, surface), `${theme}: focus on surface`).toBeGreaterThanOrEqual(3);
     expect(contrast(danger, surface), `${theme}: danger on surface`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("keeps the lowest-emphasis Portal text above WCAG AA", async () => {
+    const palette = declarations(await readFile(join(stylesDirectory, "palette.css"), "utf8"));
+    const themes = await readFile(join(stylesDirectory, "themes.css"), "utf8");
+    const local = declarations(themeBlock(themes, "afterglow"));
+    const subtle = hex(resolve("color-text-subtle", local, palette), "color-text-subtle");
+    const page = hex(resolve("color-page", local, palette), "color-page");
+    const surface = hex(resolve("color-surface", local, palette), "color-surface");
+
+    expect(contrast(subtle, page), "afterglow: subtle on page").toBeGreaterThanOrEqual(4.5);
+    expect(contrast(subtle, surface), "afterglow: subtle on surface").toBeGreaterThanOrEqual(4.5);
+
+    const global = await readAllStyles(stylesDirectory);
+    expect(global).toMatch(/\.footnote\s*\{[^}]*var\(--bone-subtle\)/s);
+    expect(global).toMatch(/\.site-footer\s*\{[^}]*var\(--bone-subtle\)/s);
   });
 });

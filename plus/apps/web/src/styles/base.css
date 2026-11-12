@@ -73,6 +73,8 @@
   position: relative;
   min-height: 100vh;
   overflow-x: clip;
+  background: var(--color-page);
+  color: var(--color-text);
 }
 
 .aurora,

@@ -26,7 +26,7 @@ export function WorkspaceNextAction({
   readonly pending: boolean;
 }) {
   return (
-    <Card className="workspace-next-action">
+    <Card className="workspace-next-action" aria-labelledby="workspace-next-action-title">
       <h2 className="ui-card__title" id="workspace-next-action-title">
         {pending ? "正在判断下一步" : action?.label ?? "暂无待处理事项"}
       </h2>

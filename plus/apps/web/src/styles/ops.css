@@ -11,22 +11,6 @@
   margin-bottom: var(--space-5);
 }
 
-.ui-page-title {
-  margin: 0;
-  font-family: var(--font-ui-display);
-  font-size: var(--text-6);
-  font-weight: var(--weight-semibold);
-  line-height: var(--leading-tight);
-  letter-spacing: -0.02em;
-}
-
-.ui-page-meta {
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: var(--text-2);
-  line-height: var(--leading-ui);
-}
-
 .ops-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
