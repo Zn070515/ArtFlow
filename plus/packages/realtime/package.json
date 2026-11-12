@@ -25,7 +25,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/websocket": "11.3.4",
+    "@fastify/websocket": "11.3.7",
     "@sinclair/typebox": "0.34.52",
     "ws": "8.22.1"
   },
