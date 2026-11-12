@@ -24,6 +24,10 @@
     --sans: var(--font-body);
     --radius: var(--radius-4);
     --shadow: var(--shadow-float);
+    --font-console: var(--font-body);
+    --color-accent-strong: var(--color-accent);
+    --shadow-sidebar: none;
+    --color-qr-background: var(--p-neutral-0);
   }
 
   [data-shell="console"] {
