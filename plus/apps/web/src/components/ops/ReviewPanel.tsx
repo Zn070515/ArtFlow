@@ -4,6 +4,9 @@ import { useState } from "react";
 import type { ReviewStatus } from "../../api/ops.js";
 import { reviewRegistration } from "../../api/ops.js";
 import type { RegistrationDetail } from "../../api/registrations.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Textarea } from "../ui/Textarea.js";
 
 const STATUS_LABELS: Readonly<Record<string, string>> = {
   draft: "草稿",
@@ -37,57 +40,51 @@ export function ReviewPanel({
   });
 
   return (
-    <section className="ops-card review-panel">
-      <p className="eyebrow">REVIEW · 审核</p>
-      <h2>审核报名</h2>
+    <Card className="review-panel">
+      <h2 className="ui-card__title">审核报名</h2>
       {detail.registration.status === "submitted" ? (
         <>
-          <label className="field">
-            <span>审核意见</span>
-            <textarea
-              rows={3}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder="可选；需补充时建议写明原因"
-            />
-          </label>
+          <Textarea
+            label="审核意见"
+            rows={3}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="可选；需补充时建议写明原因"
+          />
           <div className="review-actions">
-            <button
-              className="primary-button"
-              type="button"
+            <Button
+              variant="primary"
               disabled={mutation.isPending}
               onClick={() => mutation.mutate("approved")}
             >
               批准
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
               disabled={mutation.isPending}
               onClick={() => mutation.mutate("need_supplement")}
             >
               需补充
-            </button>
-            <button
-              className="danger-button"
-              type="button"
+            </Button>
+            <Button
+              variant="danger"
               disabled={mutation.isPending}
               onClick={() => mutation.mutate("rejected")}
             >
               拒绝
-            </button>
+            </Button>
           </div>
         </>
       ) : (
-        <p className="state-copy">
+        <p className="ui-card__description">
           当前状态「{STATUS_LABELS[detail.registration.status] ?? detail.registration.status}」不可审核。
         </p>
       )}
       {mutation.error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {mutation.error instanceof Error ? mutation.error.message : "审核失败，请稍后重试"}
         </p>
       )}
-    </section>
+    </Card>
   );
 }
