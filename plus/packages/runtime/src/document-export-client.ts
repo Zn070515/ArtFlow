@@ -68,7 +68,10 @@ async function readCapped(response: Response, maxBytes: number): Promise<Buffer>
 export function createHttpDocumentExporter(
   options: HttpDocumentExporterOptions,
 ): DocumentExporter {
-  const baseUrl = options.baseUrl.replace(/\/+$/, "");
+  // Strip trailing slashes without a regex: a trailing-anchor pattern is a
+  // CodeQL polynomial-ReDoS false positive, and the loop is exact.
+  let baseUrl = options.baseUrl;
+  while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 
