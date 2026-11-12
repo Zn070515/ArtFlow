@@ -18,9 +18,8 @@ export function fetchAttendance(
     if (value !== undefined && value !== "") params.set(key, value);
   }
   const suffix = params.toString();
-  return apiFetch<AttendanceListResponse>(
-    `/api/activities/${encodeURIComponent(activityId)}/attendance${suffix ? `?${suffix}` : ""}`,
-  );
+  const path = `/api/activities/${encodeURIComponent(activityId)}/attendance`;
+  return apiFetch<AttendanceListResponse>(suffix === "" ? path : `${path}?${suffix}`);
 }
 
 export function fetchAttendanceStaff(activityId: string): Promise<AttendanceStaffListResponse> {
