@@ -1,7 +1,7 @@
-import { useId, type TextareaHTMLAttributes } from "react";
+import { useId, type ReactNode, type TextareaHTMLAttributes } from "react";
 
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
-  readonly label: string;
+  readonly label: ReactNode;
   readonly error?: string;
 }
 
