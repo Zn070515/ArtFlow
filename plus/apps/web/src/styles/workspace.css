@@ -5,26 +5,24 @@
   margin: 0 auto;
 }
 
-.workspace-page .ops-card {
-  border-color: var(--color-line);
-  background: var(--color-surface);
-  box-shadow: none;
-  animation: none;
-}
-
-.workspace-header {
-  margin-bottom: 24px;
+.workspace-header,
+.workspace-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
 .workspace-activity-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .workspace-activity-card {
   display: grid;
-  gap: 18px;
+  gap: var(--space-4);
   min-width: 0;
 }
 
@@ -33,65 +31,47 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-}
-
-.workspace-card-header .console-card-title {
-  margin-bottom: 0;
+  gap: var(--space-4);
 }
 
 .workspace-public-code {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: var(--space-2) var(--space-3);
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: var(--text-1);
 }
 
 .workspace-public-code code {
-  padding: 5px 8px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-line);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   background: var(--color-page);
   color: var(--color-text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
   letter-spacing: 0.08em;
-}
-
-.workspace-public-code .secondary-button {
-  min-height: 36px;
-  padding: 7px 10px;
-  font-size: 0.76rem;
 }
 
 .workspace-capabilities {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
-.workspace-capabilities li {
-  padding: 5px 8px;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  color: var(--color-text-muted);
-  font-size: 0.72rem;
-}
-
 .workspace-card-footer {
   align-items: center;
-  padding-top: 4px;
+  padding-top: var(--space-1);
   border-top: 1px solid var(--color-line);
 }
 
 .workspace-attention-count {
   color: var(--color-warning);
-  font-size: 0.8rem;
+  font-size: var(--text-2);
 }
 
 .workspace-card-actions,
@@ -99,23 +79,12 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
-}
-
-.workspace-card-actions :is(a.primary-button, a.secondary-button),
-.workspace-link-list a.secondary-button {
-  min-height: 40px;
-  padding: 10px 12px;
-  font-size: 0.78rem;
+  gap: var(--space-2);
 }
 
 .workspace-next-action {
   display: grid;
-  gap: 10px;
-}
-
-.workspace-next-action .console-card-title {
-  margin-bottom: 0;
+  gap: var(--space-2);
 }
 
 .workspace-action-link {
@@ -124,11 +93,7 @@
 
 .workspace-progress {
   display: grid;
-  gap: 10px;
-}
-
-.workspace-progress .console-card-title {
-  margin-bottom: 4px;
+  gap: var(--space-2);
 }
 
 .workspace-progress-list {
@@ -143,9 +108,9 @@
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  min-height: 66px;
-  padding: 10px 0;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--color-line);
 }
 
@@ -178,41 +143,24 @@
 .workspace-progress-item h3 {
   margin: 0;
   color: var(--color-text);
-  font-size: 0.9rem;
-  font-weight: 650;
+  font-size: var(--text-3);
+  font-weight: var(--weight-semibold);
 }
 
 .workspace-progress-item p {
-  margin: 3px 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: var(--text-2);
 }
 
 .workspace-activity-switcher {
-  display: grid;
   min-width: 220px;
-  gap: 6px;
-  color: var(--color-text-muted);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-
-.workspace-activity-switcher select {
-  min-height: 40px;
-  padding: 8px 10px;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-surface-raised);
-  color: var(--color-text);
-  font-size: 0.86rem;
-  letter-spacing: normal;
 }
 
 .workspace-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 16px;
+  gap: var(--space-4);
   align-items: start;
 }
 
@@ -220,21 +168,17 @@
 .workspace-detail-rail {
   display: grid;
   min-width: 0;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .workspace-detail-rail {
   position: sticky;
-  top: 80px;
+  top: calc(56px + var(--space-5));
 }
 
 .workspace-quick-links {
   display: grid;
-  gap: 10px;
-}
-
-.workspace-quick-links .console-card-title {
-  margin-bottom: 4px;
+  gap: var(--space-3);
 }
 
 .workspace-link-list {
@@ -242,24 +186,9 @@
 }
 
 .workspace-inline-warning {
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-4);
   border-left: 2px solid var(--color-warning);
   background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-}
-
-.workspace-empty-state {
-  display: grid;
-  justify-items: start;
-  gap: 10px;
-}
-
-.workspace-empty-state .console-card-title {
-  margin-bottom: 0;
-}
-
-.console-page .status-active {
-  border-color: var(--color-success);
-  color: var(--color-success);
 }
 
 @media (max-width: 1023px) {
@@ -289,7 +218,7 @@
     justify-content: flex-start;
   }
 
-  .workspace-card-actions :is(a.primary-button, a.secondary-button) {
+  .workspace-card-actions .ui-button {
     flex: 1 1 auto;
   }
 

@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 
+import { Select } from "../ui/Select.js";
 import type { WorkspaceActivity } from "./workspaceState.js";
 
 export function ActivitySwitcher({
@@ -14,28 +15,27 @@ export function ActivitySwitcher({
   if (activities.length === 0) return null;
 
   return (
-    <label className="workspace-activity-switcher">
-      <span>当前活动</span>
-      <select
-        aria-label="当前活动"
-        value={activeActivityId ?? ""}
-        onChange={(event) => {
-          if (event.target.value === "") return;
-          void navigate({
-            to: "/workspace/$activityId",
-            params: { activityId: event.target.value },
-          });
-        }}
-      >
-        <option value="" disabled>
-          选择活动
+    <Select
+      label="当前活动"
+      aria-label="当前活动"
+      className="workspace-activity-switcher"
+      value={activeActivityId ?? ""}
+      onChange={(event) => {
+        if (event.target.value === "") return;
+        void navigate({
+          to: "/workspace/$activityId",
+          params: { activityId: event.target.value },
+        });
+      }}
+    >
+      <option value="" disabled>
+        选择活动
+      </option>
+      {activities.map((activity) => (
+        <option key={activity.id} value={activity.id}>
+          {activity.title}
         </option>
-        {activities.map((activity) => (
-          <option key={activity.id} value={activity.id}>
-            {activity.title}
-          </option>
-        ))}
-      </select>
-    </label>
+      ))}
+    </Select>
   );
 }
