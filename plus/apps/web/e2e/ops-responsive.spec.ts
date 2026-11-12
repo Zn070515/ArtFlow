@@ -14,6 +14,11 @@ test("Ops list keeps a table at 1440 and card rows without horizontal scroll at 
   const desktopHeadPosition = await page.locator(".ui-table thead").evaluate((element) => getComputedStyle(element).position);
   expect(desktopHeadPosition).not.toBe("absolute");
 
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(page.getByRole("table", { name: "活动列表" })).toBeVisible();
+  const tabletHeadPosition = await page.locator(".ui-table thead").evaluate((element) => getComputedStyle(element).position);
+  expect(tabletHeadPosition).not.toBe("absolute");
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('td[data-label="公开码"]').first()).toBeVisible();
   const mobileHeadPosition = await page.locator(".ui-table thead").evaluate((element) => getComputedStyle(element).position);
