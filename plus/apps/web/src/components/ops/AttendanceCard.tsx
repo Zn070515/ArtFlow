@@ -11,6 +11,11 @@ import {
 } from "../../api/attendance.js";
 import { ApiError } from "../../api/client.js";
 import { closeExecution, fetchExecutions, startExecution } from "../../api/voting.js";
+import { Badge, type BadgeTone } from "../ui/Badge.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Input } from "../ui/Input.js";
+import { Select } from "../ui/Select.js";
 
 type AttendanceTab = "participant" | "ticket" | "staff";
 
@@ -21,6 +26,12 @@ function tabLabel(tab: AttendanceTab): string {
 function statusLabel(status: AttendanceRow["status"]): string {
   return { present: "已到", undone: "已撤销", not_checked_in: "未到" }[status];
 }
+
+const STATUS_TONES: Readonly<Record<AttendanceRow["status"], BadgeTone>> = {
+  present: "success",
+  undone: "warning",
+  not_checked_in: "neutral",
+};
 
 function humanError(error: unknown): string {
   if (error instanceof ApiError && error.status === 409) {
@@ -148,13 +159,17 @@ export function AttendanceCard({
   });
 
   if (attendance.isPending) {
-    return <section className="ops-card attendance-card"><p className="auth-loading">正在加载签到…</p></section>;
+    return (
+      <Card className="attendance-card">
+        <p className="auth-loading">正在加载签到…</p>
+      </Card>
+    );
   }
   if (attendance.error !== null && attendance.error !== undefined) {
     return (
-      <section className="ops-card attendance-card">
-        <p className="form-error" role="alert">{humanError(attendance.error)}</p>
-      </section>
+      <Card className="attendance-card">
+        <p className="ui-field__error" role="alert">{humanError(attendance.error)}</p>
+      </Card>
     );
   }
 
@@ -163,18 +178,19 @@ export function AttendanceCard({
   const summary = data.summary.find((item) => item.subjectType === tab);
 
   return (
-    <section className="ops-card attendance-card" data-testid="attendance-card">
+    <Card className="attendance-card" data-testid="attendance-card">
       <div className="tasks-card-header">
         <div>
-          <p className="eyebrow">ATTENDANCE · 现场签到</p>
-          <h2>签到</h2>
+          <h2 className="ui-card__title">签到</h2>
         </div>
-        {session !== undefined ? <span>签到已开放（{session.mode === "formal" ? "正式" : "测试"}）</span> : null}
+        {session !== undefined ? <span className="ui-card__description">签到已开放（{session.mode === "formal" ? "正式" : "测试"}）</span> : null}
       </div>
 
       {canManageSession ? (
         <div className="attendance-session" data-testid="attendance-session">
           <select
+            className="ui-select"
+            aria-label="签到分区"
             value={sessionMode}
             onChange={(event) => setSessionMode(event.target.value as "formal" | "test")}
             disabled={session !== undefined}
@@ -182,54 +198,60 @@ export function AttendanceCard({
             <option value="formal">正式</option>
             <option value="test">测试</option>
           </select>
-          <p className="state-copy">彩排不写入签到；正式签到请显式选择“正式”。</p>
+          <p className="ui-card__description">彩排不写入签到；正式签到请显式选择“正式”。</p>
           {session === undefined ? (
-            <button onClick={() => sessionMutation.mutate("open")} disabled={sessionMutation.isPending}>
+            <Button variant="primary" size="sm" onClick={() => sessionMutation.mutate("open")} disabled={sessionMutation.isPending}>
               打开签到
-            </button>
+            </Button>
           ) : (
-            <button onClick={() => sessionMutation.mutate("close")} disabled={sessionMutation.isPending}>
+            <Button variant="secondary" size="sm" onClick={() => sessionMutation.mutate("close")} disabled={sessionMutation.isPending}>
               关闭签到
-            </button>
+            </Button>
           )}
         </div>
       ) : null}
 
       {canManage ? (
         <div className="attendance-management" data-testid="attendance-management">
-          <input value={pointKey} onChange={(event) => setPointKey(event.target.value)} placeholder="key（小写）" />
-          <input value={pointName} onChange={(event) => setPointName(event.target.value)} placeholder="签到点名称" />
-          <button
+          <Input label="签到点 key" value={pointKey} onChange={(event) => setPointKey(event.target.value)} placeholder="key（小写）" />
+          <Input label="签到点名称" value={pointName} onChange={(event) => setPointName(event.target.value)} placeholder="签到点名称" />
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => pointMutation.mutate()}
             disabled={pointKey === "" || pointName === "" || pointMutation.isPending}
           >
             新增签到点
-          </button>
-          <input value={staffName} onChange={(event) => setStaffName(event.target.value)} placeholder="工作人员姓名" />
-          <button onClick={() => staffMutation.mutate()} disabled={staffName === "" || staffMutation.isPending}>
+          </Button>
+          <Input label="工作人员姓名" value={staffName} onChange={(event) => setStaffName(event.target.value)} placeholder="工作人员姓名" />
+          <Button variant="secondary" size="sm" onClick={() => staffMutation.mutate()} disabled={staffName === "" || staffMutation.isPending}>
             添加工作人员
-          </button>
+          </Button>
         </div>
       ) : null}
 
       <div role="tablist" className="attendance-tabs">
         {(["participant", "ticket", "staff"] as const).map((item) => (
-          <button key={item} role="tab" aria-selected={tab === item} onClick={() => setTab(item)}>
+          <Button
+            key={item}
+            role="tab"
+            aria-selected={tab === item}
+            variant="ghost"
+            size="sm"
+            onClick={() => setTab(item)}
+          >
             {tabLabel(item)}
-          </button>
+          </Button>
         ))}
       </div>
 
       <div className="attendance-filters">
-        <label>
-          签到点
-          <select value={point} onChange={(event) => setPoint(event.target.value)}>
-            <option value="">全部</option>
-            {data.points.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
-          </select>
-        </label>
-        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索姓名 / 票据码" />
-        <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" maxLength={500} />
+        <Select label="签到点" value={point} onChange={(event) => setPoint(event.target.value)}>
+          <option value="">全部</option>
+          {data.points.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
+        </Select>
+        <Input label="搜索" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索姓名 / 票据码" />
+        <Input label="备注" value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" maxLength={500} />
       </div>
 
       {summary !== undefined ? (
@@ -240,21 +262,24 @@ export function AttendanceCard({
 
       {tab === "ticket" && canManage ? (
         <div className="attendance-ticket-credential">
-          <select value={ticketPoint} onChange={(event) => setTicketPoint(event.target.value)}>
+          <Select label="票据签到点" value={ticketPoint} onChange={(event) => setTicketPoint(event.target.value)}>
             <option value="">使用当前签到点</option>
             {data.points.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
-          </select>
-          <input
+          </Select>
+          <Input
+            label="票据 credential"
             value={ticketCredential}
             onChange={(event) => setTicketCredential(event.target.value)}
             placeholder="粘贴票据 credential"
           />
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => ticketMutation.mutate()}
             disabled={ticketCredential.trim() === "" || (ticketPoint === "" && point === "") || ticketMutation.isPending}
           >
             按凭证签到
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -262,24 +287,24 @@ export function AttendanceCard({
         {rows.map((row) => (
           <li key={`${row.pointKey}:${row.subjectType}:${row.subjectId}`}>
             <span>{row.label}</span>
-            <span>{statusLabel(row.status)}</span>
+            <Badge tone={STATUS_TONES[row.status]}>{statusLabel(row.status)}</Badge>
             {!row.eligible ? <span className="attendance-ineligible">已不可签到</span> : null}
             {row.eligible && canManage && row.status !== "present" ? (
-              <button onClick={() => mutation.mutate({ row, action: "checkin" })} disabled={mutation.isPending}>
+              <Button variant="primary" size="sm" onClick={() => mutation.mutate({ row, action: "checkin" })} disabled={mutation.isPending}>
                 签到
-              </button>
+              </Button>
             ) : null}
             {row.eligible && canManage && row.status === "present" ? (
-              <button onClick={() => mutation.mutate({ row, action: "undo" })} disabled={mutation.isPending}>
+              <Button variant="secondary" size="sm" onClick={() => mutation.mutate({ row, action: "undo" })} disabled={mutation.isPending}>
                 撤销
-              </button>
+              </Button>
             ) : null}
           </li>
         ))}
       </ul>
       {rows.length === 0 ? <p className="auth-loading">当前筛选下没有主体。</p> : null}
-      {mutation.error !== null && mutation.error !== undefined ? <p className="form-error" role="alert">{humanError(mutation.error)}</p> : null}
-      {sessionMutation.error !== null && sessionMutation.error !== undefined ? <p className="form-error" role="alert">{humanError(sessionMutation.error)}</p> : null}
-    </section>
+      {mutation.error !== null && mutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p> : null}
+      {sessionMutation.error !== null && sessionMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(sessionMutation.error)}</p> : null}
+    </Card>
   );
 }
