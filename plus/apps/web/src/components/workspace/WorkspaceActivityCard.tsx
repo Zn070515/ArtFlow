@@ -34,7 +34,7 @@ export function WorkspaceActivityCard({
   primaryAction,
 }: {
   readonly activity: WorkspaceActivity;
-  readonly attentionCount: number;
+  readonly attentionCount?: number;
   readonly primaryAction: NextAction | null;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -75,8 +75,12 @@ export function WorkspaceActivityCard({
         ))}
       </ul>
       <div className="workspace-card-footer">
-        <span className={attentionCount > 0 ? "workspace-attention-count" : "state-copy"}>
-          {attentionCount > 0 ? `${attentionCount} 项需要关注` : "暂无待处理事项"}
+        <span className={attentionCount !== undefined && attentionCount > 0 ? "workspace-attention-count" : "state-copy"}>
+          {attentionCount === undefined
+            ? "打开工作台查看状态"
+            : attentionCount > 0
+              ? `${attentionCount} 项需要关注`
+              : "暂无待处理事项"}
         </span>
         <div className="workspace-card-actions">
           {primaryAction === null ? null : (

@@ -17,6 +17,8 @@ import { StudioPage } from "./routes/studio.js";
 import { StudioActivityPage } from "./routes/studioActivity.js";
 import { StudioNewPage } from "./routes/studioNew.js";
 import { VotePage } from "./routes/vote.js";
+import { WorkspaceActivityPage } from "./routes/workspaceActivity.js";
+import { WorkspacePage } from "./routes/workspace.js";
 
 const rootRoute = createRootRoute({ component: RootLayout });
 
@@ -122,6 +124,18 @@ const judgeRoute = createRoute({
   component: JudgePage,
 });
 
+const workspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/workspace",
+  component: WorkspacePage,
+});
+
+const workspaceActivityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/workspace/$activityId",
+  component: WorkspaceActivityPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   resultsRoute,
@@ -139,6 +153,8 @@ const routeTree = rootRoute.addChildren([
   liveActivityRoute,
   voteRoute,
   judgeRoute,
+  workspaceRoute,
+  workspaceActivityRoute,
 ]);
 
 export const router = createRouter({

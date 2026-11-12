@@ -17,11 +17,11 @@ function targetLink(action: NextAction, activity: WorkspaceActivity) {
 
 export function WorkspaceNextAction({
   action,
-  activity,
+  activity = null,
   pending,
 }: {
   readonly action: NextAction | null;
-  readonly activity: WorkspaceActivity | null;
+  readonly activity?: WorkspaceActivity | null;
   readonly pending: boolean;
 }) {
   return (
