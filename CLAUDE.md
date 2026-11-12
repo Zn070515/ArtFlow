@@ -30,7 +30,7 @@ Python is used only for structural gates: `uv sync --locked --extra dev`, `uv ru
 
 ## Runtime operations
 
-Plus runs through `deploy/compose.production.yml` with the `plus` profile. Three images (`artflow-plus-api`, `artflow-plus-worker`, `artflow-plus-web`) are built from the same `v*` tag and must be pinned by `@sha256:...` digest in `.env.production`.
+Plus runs through `deploy/compose.production.yml` with the `plus` profile. Four images (`artflow-plus-api`, `artflow-plus-worker`, `artflow-plus-web`, `artflow-plus-export`) are built from the same `v*` tag and must be pinned by `@sha256:...` digest in `.env.production`. The export sidecar is behind the optional `export` compose profile.
 
 `GET /healthz/` is anonymous and intentionally returns only a generic status. Backups and restores follow [backup-restore](docs/artflow-plus/backup-restore.md).
 

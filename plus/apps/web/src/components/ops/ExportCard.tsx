@@ -1,16 +1,21 @@
+import type { ExportFormat } from "../../api/exports.js";
+
 const FORMATS = [
   { format: "csv", label: "CSV" },
   { format: "docx", label: "Word" },
   { format: "xlsx", label: "Excel" },
-] as const;
+] as const satisfies readonly { format: ExportFormat; label: string }[];
 
 export function ExportCard({
   activityId,
   permissions,
+  documentFormats = ["csv"],
 }: {
   readonly activityId: string;
   readonly permissions: readonly string[];
+  readonly documentFormats?: readonly ExportFormat[];
 }) {
+  const formats = FORMATS.filter((entry) => documentFormats.includes(entry.format));
   const can = (permission: string): boolean =>
     permissions.includes("*") || permissions.includes(permission);
   const links = [
@@ -42,7 +47,7 @@ export function ExportCard({
         {links.map((link) => (
           <li key={link.kind}>
             <span className="table-link">{link.label}</span>
-            {FORMATS.map(({ format, label }) => (
+            {formats.map(({ format, label }) => (
               <a
                 key={format}
                 className="table-link"

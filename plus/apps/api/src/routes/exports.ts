@@ -33,6 +33,18 @@ const ExportQuery = Type.Object(
 export function registerExportRoutes(ctx: ApiContext): void {
   const { app, db, requestDeps, documentExporter } = ctx;
 
+  // The Ops card needs a runtime signal: a build with no renderer must not
+  // offer links that would download a 503 JSON body.
+  app.get(
+    "/api/exports/formats",
+    { config: { access: "session" } },
+    async () => ({
+      formats: documentExporter === null
+        ? (["csv"] as const)
+        : (["csv", "docx", "xlsx"] as const),
+    }),
+  );
+
   app.get(
     "/api/activities/:id/exports/:kind",
     { schema: { params: ExportParams, querystring: ExportQuery }, config: { access: "session" } },
