@@ -51,7 +51,7 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await ops.getByRole("link", { name: "处理报名审核" }).click();
     await expect(ops).toHaveURL(/\/ops\/[^/]+$/);
     await expect(ops.getByRole("table")).toBeVisible();
-    await ops.getByRole("row").filter({ hasText: /^.*participant:/ }).getByRole("link").click();
+    await ops.getByRole("table").getByRole("link").first().click();
     await expect(
       ops.getByRole("heading", { name: "2026 院十佳报名", exact: true }),
     ).toBeVisible();

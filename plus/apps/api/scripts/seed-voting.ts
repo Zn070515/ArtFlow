@@ -114,7 +114,6 @@ async function seedActivity(
         "voting.session.open": ["voting"],
         "voting.ballot.submit": ["voting"],
         "voting.session.close": ["voting"],
-        "voting.scores.compute": ["voting"],
         "publishing.stage_result.confirm": ["publishing"],
         "publishing.stage_result.unlock": ["publishing"],
         "publishing.result.release": ["publishing"],

@@ -346,7 +346,6 @@ export const competitionCapability: CapabilityRegistration = deepFreeze({
     commands: COMPETITION_COMMANDS,
     queries: ["competition.describe"],
     events: [
-      "CompetitionConfigured",
       "CompetitionRoundPrepared",
       "PanelSnapshotActivated",
       "PerformanceAdvanced",

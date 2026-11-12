@@ -142,10 +142,6 @@
       "reason": "Invariant has no explicit test reference yet; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "invariant-coverage:LIFE-10",
-      "reason": "Invariant has no explicit test reference yet; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "invariant-coverage:RES-05",
       "reason": "Invariant has no explicit test reference yet; accepted in the 2026-11-11 baseline."
     },
@@ -238,22 +234,6 @@
       "reason": "Invariant has no explicit test reference yet; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "manifest:command-no-provider:archive.package.read",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:command-no-provider:questionnaire.answer",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:command-no-provider:questionnaire.configure",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:command-no-provider:voting.scores.compute",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "manifest:event-no-consumer:AdvancementFinalized",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
@@ -275,10 +255,6 @@
     },
     {
       "id": "manifest:event-no-consumer:AttendanceUndone",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:event-no-consumer:CompetitionConfigured",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
@@ -327,10 +303,6 @@
     },
     {
       "id": "manifest:event-no-consumer:JudgeSeatClaimed",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:event-no-consumer:LiveStateUpdated",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
@@ -474,23 +446,7 @@
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "manifest:event-no-consumer:VoteScoresComputed",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "manifest:event-no-consumer:tasks.changed",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:event-no-producer:CompetitionConfigured",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:event-no-producer:LiveStateUpdated",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:event-no-producer:VoteScoresComputed",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
