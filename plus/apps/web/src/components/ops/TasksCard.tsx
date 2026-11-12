@@ -4,6 +4,10 @@ import { useState } from "react";
 
 import { ApiError } from "../../api/client.js";
 import { fetchReadiness, fetchTasks, mutateTask, syncTasks } from "../../api/tasks.js";
+import { Badge, type BadgeTone } from "../ui/Badge.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Input } from "../ui/Input.js";
 
 function taskStatusLabel(status: TaskResponse["status"]): string {
   return {
@@ -13,6 +17,13 @@ function taskStatusLabel(status: TaskResponse["status"]): string {
     done: "已完成",
   }[status];
 }
+
+const TASK_STATUS_TONES: Readonly<Record<TaskResponse["status"], BadgeTone>> = {
+  pending: "neutral",
+  in_progress: "info",
+  blocked: "warning",
+  done: "success",
+};
 
 function taskDate(value: string | null): string {
   if (value === null) return "未设置";
@@ -74,20 +85,27 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
 
   const queryError = tasksQuery.error ?? readinessQuery.error;
   if (tasksQuery.isPending || readinessQuery.isPending) {
-    return <section className="ops-card tasks-card"><p className="auth-loading">正在加载任务准备度…</p></section>;
+    return (
+      <Card className="tasks-card">
+        <p className="auth-loading">正在加载任务准备度…</p>
+      </Card>
+    );
   }
   if (queryError !== null && queryError !== undefined) {
-    return <section className="ops-card tasks-card"><p className="form-error" role="alert">{humanError(queryError)}</p></section>;
+    return (
+      <Card className="tasks-card">
+        <p className="ui-field__error" role="alert">{humanError(queryError)}</p>
+      </Card>
+    );
   }
 
   const tasks = tasksQuery.data?.tasks ?? [];
   const summary = readinessQuery.data?.summary;
   return (
-    <section className="ops-card tasks-card" data-testid="tasks-card">
+    <Card className="tasks-card" data-testid="tasks-card">
       <div className="tasks-card-header">
         <div>
-          <p className="eyebrow">TASKS · 执行准备度</p>
-          <h2>执行任务</h2>
+          <h2 className="ui-card__title">执行任务</h2>
         </div>
         <span className="analytics-readonly">版本 {tasksQuery.data?.definitionVersion ?? "—"}</span>
       </div>
@@ -102,16 +120,15 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
       )}
       {tasks.length === 0 ? (
         <div className="tasks-empty-block">
-          <p className="tasks-empty">当前版本还没有同步任务模板。</p>
+          <p className="ui-card__description">当前版本还没有同步任务模板。</p>
           {canManage ? (
-            <button
-              type="button"
-              className="primary-button"
+            <Button
+              variant="primary"
               disabled={syncMutation.isPending || tasksQuery.data?.definitionVersion === undefined}
               onClick={() => syncMutation.mutate()}
             >
               同步任务模板
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : summary === undefined || summary.total - summary.done === 0 ? (
@@ -126,9 +143,9 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
               <div className="task-row-main">
                 <div>
                   <strong>{task.title}</strong>
-                  <span className="state-copy">{task.sourceCapability} · {task.sourceKey}</span>
+                  <span className="ui-card__description">{task.sourceCapability} · {task.sourceKey}</span>
                 </div>
-                <span className={`status-badge status-${task.status}`}>{taskStatusLabel(task.status)}</span>
+                <Badge tone={TASK_STATUS_TONES[task.status]}>{taskStatusLabel(task.status)}</Badge>
               </div>
               <dl className="task-facts">
                 <div><dt>负责人</dt><dd>{task.assigneeActorId ?? "未分配"}</dd></div>
@@ -138,11 +155,11 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
               </dl>
               {canManage ? (
                 <div className="task-actions">
-                  {task.status === "pending" ? <button type="button" className="secondary-button" disabled={mutation.isPending} onClick={() => mutation.mutate({ task, action: "start" })}>{actionLabel("start")}</button> : null}
-                  {task.status === "in_progress" || task.status === "pending" ? <button type="button" className="secondary-button" disabled={mutation.isPending || reason.trim() === ""} onClick={() => mutation.mutate({ task, action: "block" })}>{actionLabel("block")}</button> : null}
-                  {task.status === "in_progress" ? <button type="button" className="primary-button" disabled={mutation.isPending || reason.trim() === ""} onClick={() => mutation.mutate({ task, action: "complete" })}>{actionLabel("complete")}</button> : null}
-                  {task.status === "blocked" || task.status === "done" ? <button type="button" className="secondary-button" disabled={mutation.isPending || reason.trim() === ""} onClick={() => mutation.mutate({ task, action: "reopen" })}>{actionLabel("reopen")}</button> : null}
-                  <button type="button" className="secondary-button" disabled={mutation.isPending} onClick={() => mutation.mutate({ task, action: "assign" })}>{actionLabel("assign")}</button>
+                  {task.status === "pending" ? <Button variant="secondary" size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate({ task, action: "start" })}>{actionLabel("start")}</Button> : null}
+                  {task.status === "in_progress" || task.status === "pending" ? <Button variant="secondary" size="sm" disabled={mutation.isPending || reason.trim() === ""} onClick={() => mutation.mutate({ task, action: "block" })}>{actionLabel("block")}</Button> : null}
+                  {task.status === "in_progress" ? <Button variant="primary" size="sm" disabled={mutation.isPending || reason.trim() === ""} onClick={() => mutation.mutate({ task, action: "complete" })}>{actionLabel("complete")}</Button> : null}
+                  {task.status === "blocked" || task.status === "done" ? <Button variant="secondary" size="sm" disabled={mutation.isPending || reason.trim() === ""} onClick={() => mutation.mutate({ task, action: "reopen" })}>{actionLabel("reopen")}</Button> : null}
+                  <Button variant="secondary" size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate({ task, action: "assign" })}>{actionLabel("assign")}</Button>
                 </div>
               ) : null}
             </li>
@@ -151,13 +168,13 @@ export function TasksCard({ activityId, canManage }: { readonly activityId: stri
       )}
       {canManage ? (
         <div className="task-command-fields">
-          <label>负责人<input value={assignee} onChange={(event) => setAssignee(event.target.value)} placeholder="actor id（可留空取消分配）" /></label>
-          <label>截止时间<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></label>
-          <label>操作说明<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="阻塞、完成或重新打开时必填" /></label>
+          <Input label="负责人" value={assignee} onChange={(event) => setAssignee(event.target.value)} placeholder="actor id（可留空取消分配）" />
+          <Input label="截止时间" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+          <Input label="操作说明" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="阻塞、完成或重新打开时必填" />
         </div>
       ) : null}
-      {mutation.error === null || mutation.error === undefined ? null : <p className="form-error" role="alert">{humanError(mutation.error)}</p>}
-      {syncMutation.error === null || syncMutation.error === undefined ? null : <p className="form-error" role="alert">{humanError(syncMutation.error)}</p>}
-    </section>
+      {mutation.error === null || mutation.error === undefined ? null : <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p>}
+      {syncMutation.error === null || syncMutation.error === undefined ? null : <p className="ui-field__error" role="alert">{humanError(syncMutation.error)}</p>}
+    </Card>
   );
 }
