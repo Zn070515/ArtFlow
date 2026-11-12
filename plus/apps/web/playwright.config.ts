@@ -46,6 +46,10 @@ export default defineConfig({
         ARTFLOW_PLUS_DATABASE_URL: databaseUrl,
         ARTFLOW_PLUS_DB_SCHEMA: "artflow_e2e",
         ARTFLOW_PLUS_INLINE_RELAY: "1",
+        // The suite logs in as the same organizer from 127.0.0.1; the default
+        // per-IP budget would rate-limit the last specs in a fast local run.
+        ARTFLOW_PLUS_AUTH_PUBLIC_LIMIT: "200",
+        ARTFLOW_PLUS_AUTH_USER_LIMIT: "200",
         PORT: String(apiPort),
         HOST: "127.0.0.1",
       },
