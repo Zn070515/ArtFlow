@@ -785,4 +785,20 @@
     min-height: 40px;
     height: 40px;
   }
+
+  .console-page a.table-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+
+  .seat-list li {
+    min-height: 40px;
+  }
+
+  .seat-list a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
 }

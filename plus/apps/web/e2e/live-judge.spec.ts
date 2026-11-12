@@ -67,7 +67,7 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
     await expect(round.getByRole("heading", { name: /round-1 · locked/ })).toBeVisible();
 
     await round.getByRole("button", { name: "生成排名" }).click();
-    await expect(round.getByText(/RANKING · READY/)).toBeVisible();
+    await expect(round.getByRole("table", { name: /当前排名（revision \d+）/ })).toBeVisible();
     await expect(round.getByRole("cell", { name: "273.00", exact: true })).toBeVisible();
 
     await staff.getByRole("button", { name: "关闭会话" }).click();
