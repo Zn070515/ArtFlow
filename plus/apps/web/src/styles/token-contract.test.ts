@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -111,5 +111,16 @@ describe("migrated surface", () => {
     expect(css).toContain(".ui-table thead");
     expect(css).toContain("content: attr(data-label)");
     expect(css).toContain("display: block");
+  });
+});
+
+describe("token references", () => {
+  it("does not reference undefined custom properties", async () => {
+    const files = (await readdir(stylesDirectory)).filter((file) => file.endsWith(".css"));
+    const css = (await Promise.all(files.map((file) => readFile(join(stylesDirectory, file), "utf8")))).join("\n");
+    const defined = new Set([...css.matchAll(/--([a-z0-9-]+)\s*:/gi)].map((match) => match[1] ?? ""));
+    const references = [...css.matchAll(/var\(--([a-z0-9-]+)/gi)].map((match) => match[1] ?? "");
+    const missing = [...new Set(references.filter((name) => !defined.has(name)))];
+    expect(missing, "undefined CSS custom properties").toEqual([]);
   });
 });
