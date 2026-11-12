@@ -2,9 +2,9 @@ import { errorResponse } from "@artflow-plus/contracts";
 import { getRoundByKey, type Database } from "@artflow-plus/db";
 import { defaultCapabilityRegistry, DomainError, hasPermission, requirePermission, REVIEW_AWARDS_PACK, SINGER_COMPETITION_PACK, STAGE_SHOW_PACK, SYSTEM_ACTOR, VOTE_POLL_PACK } from "@artflow-plus/domain";
 import type { ActivityPack, ActorContext, CapabilityRegistry } from "@artflow-plus/domain";
-import { defaultRuntimeDeps, resolveActorFromBearer, csrfTokenFor, resolveLocalSession, ACTIVITY_ANALYTICS_READ_PERMISSIONS } from "@artflow-plus/runtime";
+import { defaultRuntimeDeps, resolveActorFromBearer, csrfTokenFor, resolveLocalSession, ACTIVITY_ANALYTICS_READ_PERMISSIONS, createDocumentExporterFromEnv } from "@artflow-plus/runtime";
 import { MemoryRateLimiter } from "@artflow-plus/runtime";
-import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
+import type { DocumentExporter, RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
 import swagger from "@fastify/swagger";
 import { timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
@@ -39,6 +39,8 @@ export interface AppOptions {
   readonly enableRuntimeFacts?: boolean;
   /** Gateway/app limiter seam; public capability entry fails closed if it errors. */
   readonly rateLimiter?: RateLimiter;
+  /** Outbound DOCX/XLSX renderer; `null` disables the binary formats. */
+  readonly documentExporter?: DocumentExporter | null;
   /** Explicit trusted proxy addresses/CIDRs; empty by default. */
   readonly trustProxy?: FastifyServerOptions["trustProxy"];
 }
@@ -166,6 +168,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   ARCHIVE_INTEGRITY_FAILED: 409,
   ARCHIVE_NOT_FOUND: 404,
   RATE_LIMITED: 429,
+  EXPORT_UNAVAILABLE: 503,
 };
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
@@ -192,6 +195,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   ];
   const baseDeps = options.deps ?? defaultRuntimeDeps();
   const rateLimiter = selectRateLimiter(options);
+  const documentExporter =
+    options.documentExporter !== undefined
+      ? options.documentExporter
+      : createDocumentExporterFromEnv();
   const deps =
     options.actor === undefined ? baseDeps : { ...baseDeps, actor: options.actor };
 
@@ -423,7 +430,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   const routeContext: ApiContext = {
-    app, db, deps, baseDeps, registry, packs, rateLimiter, isProduction,
+    app, db, deps, baseDeps, registry, packs, rateLimiter, documentExporter, isProduction,
     sessionSecret, enableRuntimeFacts: options.enableRuntimeFacts === true,
     setSessionCookies, clearSessionCookies, publicActor, requestSession,
     requestActor, requestDeps, requireStudio, requireOperationsReader,

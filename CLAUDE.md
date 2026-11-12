@@ -26,6 +26,8 @@ The API migrates on start. Browser E2E uses the `artflow_e2e` schema with `worke
 
 Python is used only for structural gates: `uv sync --locked --extra dev`, `uv run pytest tests/gates -q`, `uv run python tests/golden/validate_fixtures.py`, and `pwsh -NoProfile -File scripts/check_docs.ps1`.
 
+.NET 9 is used only by the renderer-only document export sidecar under `plus/services/document-export/`; verify it with `dotnet restore --locked-mode` and `dotnet test` on that solution. It never receives database credentials.
+
 ## Runtime operations
 
 Plus runs through `deploy/compose.production.yml` with the `plus` profile. Three images (`artflow-plus-api`, `artflow-plus-worker`, `artflow-plus-web`) are built from the same `v*` tag and must be pinned by `@sha256:...` digest in `.env.production`.
@@ -38,6 +40,7 @@ Plus runs through `deploy/compose.production.yml` with the `plus` profile. Three
 - Preserve the single write path: receipt, audit, fact, and outbox in one transaction.
 - Keep releases immutable and partition facts, events, and projections by mode.
 - Route internal files through the controlled material/archive APIs; never expose private media directly.
+- The document export sidecar is renderer-only: authorized rows go in, OOXML bytes come out. Never give it database credentials, a public port, file storage, or caller-supplied templates/paths.
 - **HTTP routes live in `plus/apps/api/src/routes/<surface>.ts`.** Each module exports `registerXRoutes(ctx: ApiContext)`; `app.ts` is composition only (construction, hooks, CSRF, error mapping, realtime server). Never register a route directly in `app.ts`; `tests/gates/test_plus_route_modules.py` rejects it, unreferenced modules, duplicate method+URL pairs, and a module growing past 900 lines.
 - **The schema has one source.** Migrations define it; `db/schema.snapshot.json` is generated from a migrated database; `db/src/types.ts` is generated from the snapshot. Any migration, column, or nullability change must regenerate both (`schema:snapshot`, `schema:types`) and pass `pnpm -C plus run schema:check` against PostgreSQL. The gate compares the snapshot with migrations and the types with the snapshot; editing a generated file by hand is a CI failure. `ColumnType<unknown, …>` is treated as nullability-indeterminate.
 - **Worker changes must preserve drained shutdown and bounded retry.** Keep the ready file for the compose healthcheck, the dead-letter queue, and the `startRelayLoop` drain; run `pnpm -C plus --filter @artflow-plus/worker test`.

@@ -57,6 +57,21 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   The contract suite includes the fast-check lifecycle model and the data-driven
   journey specs under `plus/tools/contracts/journeys/`.
 
+- **Document export sidecar** (optional, DOCX/XLSX only): `.NET 9` renders the
+  four controlled exports from authorized JSON rows. It has no database
+  credentials and no public port.
+
+  ```powershell
+  dotnet restore plus/services/document-export/ArtFlow.DocumentExport.sln --locked-mode
+  dotnet test plus/services/document-export/ArtFlow.DocumentExport.sln
+  $env:ARTFLOW_PLUS_EXPORT_TOKEN = "local-export-token"
+  dotnet run --project plus/services/document-export/src/ArtFlow.DocumentExport
+  ```
+
+  Point the API at it with `ARTFLOW_PLUS_EXPORT_SERVICE_URL` and the same
+  `ARTFLOW_PLUS_EXPORT_TOKEN`. Without both, CSV keeps working and DOCX/XLSX
+  return `503 EXPORT_UNAVAILABLE`.
+
 - **Run locally**: `pnpm --filter @artflow-plus/api start` (migrates on start,
   default `127.0.0.1:3000`) and `pnpm --filter @artflow-plus/web dev` (Vite proxies
   `/api`). Set `ARTFLOW_PLUS_INLINE_RELAY=1` to run the outbox relay inside the API
@@ -86,7 +101,8 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   Nginx/Caddy transport ceiling is 128 MiB; released material policies remain the
   domain authority below that ceiling.
 - **Deployment**: `deploy/compose.production.yml` runs `plus-db`, `plus-api`,
-  `plus-worker`, `plus-web`, and Caddy against the three digest-pinned Plus images.
+  `plus-worker`, `plus-web`, `plus-export`, and Caddy. The four Plus images are
+  digest-pinned; `plus-export` is internal-only with a read-only root filesystem.
   Copy `.env.production.example` and replace every placeholder. Backups and restores
   follow [`docs/artflow-plus/backup-restore.md`](artflow-plus/backup-restore.md).
 

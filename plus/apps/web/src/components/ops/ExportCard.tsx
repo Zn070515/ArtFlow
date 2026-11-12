@@ -1,3 +1,9 @@
+const FORMATS = [
+  { format: "csv", label: "CSV" },
+  { format: "docx", label: "Word" },
+  { format: "xlsx", label: "Excel" },
+] as const;
+
 export function ExportCard({
   activityId,
   permissions,
@@ -31,17 +37,22 @@ export function ExportCard({
     <section className="ops-card" data-testid="ops-export-card">
       <p className="eyebrow">EXPORT · 导出</p>
       <h2 className="console-card-title">受控导出</h2>
-      <p className="state-copy">CSV 导出会写审计；空数据也会生成表头。</p>
+      <p className="state-copy">导出会写审计；空数据也会生成表头。</p>
       <ul className="seat-list">
         {links.map((link) => (
           <li key={link.kind}>
-            <a
-              className="table-link"
-              href={`/api/activities/${encodeURIComponent(activityId)}/exports/${link.kind}`}
-              download
-            >
-              {link.label}
-            </a>
+            <span className="table-link">{link.label}</span>
+            {FORMATS.map(({ format, label }) => (
+              <a
+                key={format}
+                className="table-link"
+                data-testid={`export-${link.kind}-${format}`}
+                href={`/api/activities/${encodeURIComponent(activityId)}/exports/${link.kind}?format=${format}`}
+                download
+              >
+                {label}
+              </a>
+            ))}
           </li>
         ))}
       </ul>

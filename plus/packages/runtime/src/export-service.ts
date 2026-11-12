@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Database, StoredRegistration } from "@artflow-plus/db";
 import {
+  getActivity,
   insertAudit,
   listCurrentScoreFacts,
   listMaterials,
@@ -18,6 +19,21 @@ import type { Kysely } from "kysely";
 import { runtimeActor, type RuntimeDeps } from "./deps.js";
 
 export type ExportKind = "registrations" | "materials" | "scores" | "votes";
+export type ExportFormat = "csv" | "docx" | "xlsx";
+export type ExportCell = string | number | boolean;
+
+/**
+ * One authorized, renderer-agnostic export. CSV, DOCX, and XLSX all consume the
+ * same table so a format can never quietly change the rows an operator sees.
+ */
+export interface ExportTable {
+  readonly activityId: string;
+  readonly kind: ExportKind;
+  readonly title: string;
+  readonly filenameStem: string;
+  readonly headers: readonly string[];
+  readonly rows: readonly (readonly ExportCell[])[];
+}
 
 export interface ExportResult {
   readonly filename: string;
@@ -33,11 +49,12 @@ function answerText(registration: StoredRegistration, keys: readonly string[]): 
 }
 
 function cell(value: unknown): string {
-  return `"${String(value ?? "").split('"').join('""')}"`;
-}
-
-function row(values: readonly unknown[]): string {
-  return values.map(cell).join(",");
+  const text = String(value ?? "");
+  // Spreadsheet applications evaluate a leading =, +, -, @, tab, or carriage
+  // return even inside quotes. A leading apostrophe keeps operator-supplied
+  // text as text; DOCX/XLSX already use explicit text cells.
+  const guarded = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${guarded.split('"').join('""')}"`;
 }
 
 async function requireExportPermission(
@@ -53,14 +70,14 @@ async function requireExportPermission(
   if (!allowed) throw new DomainError("FORBIDDEN", `The actor cannot export ${kind}.`);
 }
 
-async function registrationRows(
+async function registrationTable(
   db: Kysely<Database>,
   activityId: string,
-): Promise<string[]> {
+): Promise<{ headers: readonly string[]; rows: readonly (readonly ExportCell[])[] }> {
   const registrations = await listRegistrations(db, activityId);
-  return [
-    row(["participantId", "name", "studentId", "song", "status", "revision", "reviewNote"]),
-    ...registrations.map((registration) => row([
+  return {
+    headers: ["participantId", "name", "studentId", "song", "status", "revision", "reviewNote"],
+    rows: registrations.map((registration) => [
       registration.participantId,
       answerText(registration, ["name", "displayName"]),
       answerText(registration, ["student_id", "studentId"]),
@@ -68,20 +85,20 @@ async function registrationRows(
       registration.status,
       registration.revision,
       registration.reviewNote ?? "",
-    ])),
-  ];
+    ]),
+  };
 }
 
-async function materialRows(
+async function materialTable(
   db: Kysely<Database>,
   activityId: string,
-): Promise<string[]> {
+): Promise<{ headers: readonly string[]; rows: readonly (readonly ExportCell[])[] }> {
   const registrations = await listRegistrations(db, activityId);
-  const lines = [row(["participantId", "questionKey", "originalName", "contentType", "byteLength", "status", "contentReady"])];
+  const rows: ExportCell[][] = [];
   for (const registration of registrations) {
     const materials = await listMaterials(db, registration.id);
     for (const material of materials) {
-      lines.push(row([
+      rows.push([
         registration.participantId,
         material.questionKey,
         material.originalName,
@@ -89,25 +106,36 @@ async function materialRows(
         material.byteLength,
         material.status,
         material.contentReady === true,
-      ]));
+      ]);
     }
   }
-  return lines;
+  return {
+    headers: [
+      "participantId",
+      "questionKey",
+      "originalName",
+      "contentType",
+      "byteLength",
+      "status",
+      "contentReady",
+    ],
+    rows,
+  };
 }
 
-async function scoreRows(
+async function scoreTable(
   db: Kysely<Database>,
   activityId: string,
-): Promise<string[]> {
+): Promise<{ headers: readonly string[]; rows: readonly (readonly ExportCell[])[] }> {
   const modes: readonly ExecutionMode[] = ["test", "rehearsal", "formal"];
   const rounds = await listRoundsForActivity(db, activityId);
   const roundById = new Map(rounds.map((round) => [round.id, round]));
-  const lines = [row(["mode", "roundKey", "performanceId", "contestantId", "judgeId", "total", "source"])];
+  const rows: ExportCell[][] = [];
   for (const mode of modes) {
     for (const round of rounds) {
       const facts = await listCurrentScoreFacts(db, round.id, mode);
       for (const fact of facts) {
-        lines.push(row([
+        rows.push([
           mode,
           roundById.get(fact.roundId)?.roundKey ?? fact.roundId,
           fact.performanceId,
@@ -115,63 +143,104 @@ async function scoreRows(
           fact.judgeId,
           fact.total,
           fact.source,
-        ]));
+        ]);
       }
     }
   }
-  return lines;
+  return {
+    headers: ["mode", "roundKey", "performanceId", "contestantId", "judgeId", "total", "source"],
+    rows,
+  };
 }
 
-async function voteRows(
+async function voteTable(
   db: Kysely<Database>,
   activityId: string,
-): Promise<string[]> {
+): Promise<{ headers: readonly string[]; rows: readonly (readonly ExportCell[])[] }> {
   const sessions = await listVoteSessionsForActivity(db, activityId);
-  const lines = [row(["sessionId", "status", "optionId", "candidateId", "count", "totalBallots"])];
+  const rows: ExportCell[][] = [];
   for (const session of sessions) {
     const [options, tally] = await Promise.all([
       listVoteOptions(db, session.id),
       readValidVoteTally(db, session.id),
     ]);
     for (const option of options) {
-      lines.push(row([
+      rows.push([
         session.id,
         session.status,
         option.id,
         option.candidateId,
         tally.countsByOption[option.id] ?? 0,
         tally.totalBallots,
-      ]));
+      ]);
     }
   }
-  return lines;
+  return {
+    headers: ["sessionId", "status", "optionId", "candidateId", "count", "totalBallots"],
+    rows,
+  };
 }
 
-/** Controlled operator export; every export writes an audit entry. */
+/** Reads the authorized table without writing an audit entry yet. */
+export async function exportActivityTable(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  input: { readonly activityId: string; readonly kind: ExportKind },
+): Promise<ExportTable> {
+  await requireExportPermission(runtimeActor(deps), input.kind);
+  const activity = await getActivity(db, input.activityId);
+  if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+  const table =
+    input.kind === "registrations" ? await registrationTable(db, input.activityId)
+      : input.kind === "materials" ? await materialTable(db, input.activityId)
+        : input.kind === "scores" ? await scoreTable(db, input.activityId)
+          : await voteTable(db, input.activityId);
+  return {
+    activityId: input.activityId,
+    kind: input.kind,
+    title: activity.title,
+    filenameStem: `activity-${input.activityId}-${input.kind}`,
+    headers: table.headers,
+    rows: table.rows,
+  };
+}
+
+/** Every successful export writes exactly one audit entry. */
+export async function recordExportAudit(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  table: ExportTable,
+  format: ExportFormat,
+): Promise<void> {
+  const actor = runtimeActor(deps);
+  await db.transaction().execute(async (trx) => {
+    await insertAudit(trx, {
+      commandId: `export-${randomUUID()}`,
+      activityId: table.activityId,
+      capability: "export",
+      commandType: `export.${table.kind}`,
+      actor,
+      detail: { kind: table.kind, format, rows: table.rows.length },
+    });
+  });
+}
+
+export function serializeCsv(table: ExportTable): string {
+  const lines = [
+    table.headers.map(cell).join(","),
+    ...table.rows.map((row) => row.map(cell).join(",")),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+/** CSV keeps its original one-call contract (table, audit, and text). */
 export async function exportActivityCsv(
   db: Kysely<Database>,
   deps: RuntimeDeps,
   input: { readonly activityId: string; readonly kind: ExportKind },
 ): Promise<ExportResult> {
-  const actor = runtimeActor(deps);
-  await requireExportPermission(actor, input.kind);
-  const lines =
-    input.kind === "registrations" ? await registrationRows(db, input.activityId)
-      : input.kind === "materials" ? await materialRows(db, input.activityId)
-        : input.kind === "scores" ? await scoreRows(db, input.activityId)
-          : await voteRows(db, input.activityId);
-  await db.transaction().execute(async (trx) => {
-    await insertAudit(trx, {
-      commandId: `export-${randomUUID()}`,
-      activityId: input.activityId,
-      capability: "export",
-      commandType: `export.${input.kind}`,
-      actor,
-      detail: { kind: input.kind, rows: Math.max(0, lines.length - 1) },
-    });
-  });
-  return {
-    filename: `activity-${input.activityId}-${input.kind}.csv`,
-    csv: `${lines.join("\n")}\n`,
-  };
+  const table = await exportActivityTable(db, deps, input);
+  const csv = serializeCsv(table);
+  await recordExportAudit(db, deps, table, "csv");
+  return { filename: `${table.filenameStem}.csv`, csv };
 }

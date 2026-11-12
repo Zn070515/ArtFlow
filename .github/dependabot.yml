@@ -19,3 +19,13 @@ updates:
     directory: "/deploy/plus"
     schedule:
       interval: weekly
+
+  - package-ecosystem: nuget
+    directory: "/plus/services/document-export"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: "/plus/services/document-export"
+    schedule:
+      interval: weekly
