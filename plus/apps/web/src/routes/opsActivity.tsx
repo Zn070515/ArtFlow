@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 
 import { fetchActivityAnalytics } from "../api/analytics.js";
+import { fetchExportFormats } from "../api/exports.js";
 import { fetchOpsActivities, fetchOpsRegistrations, fetchOpsRoster } from "../api/ops.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
@@ -52,6 +53,12 @@ function OpsActivityContent() {
   const analytics = useQuery({
     queryKey: ["ops-analytics", activityId],
     queryFn: () => fetchActivityAnalytics(activityId),
+    enabled: allowed,
+    retry: false,
+  });
+  const exportFormats = useQuery({
+    queryKey: ["export-formats"],
+    queryFn: fetchExportFormats,
     enabled: allowed,
     retry: false,
   });
@@ -144,7 +151,11 @@ function OpsActivityContent() {
             canManage={can(session?.actor.permissions, "tasks.manage")}
           />
         ) : null}
-        <ExportCard activityId={activityId} permissions={session?.actor.permissions ?? []} />
+        <ExportCard
+          activityId={activityId}
+          permissions={session?.actor.permissions ?? []}
+          documentFormats={exportFormats.data ?? ["csv"]}
+        />
         {activity?.enabledCapabilities.includes("attendance") ? (
           <AttendanceCard
             key={activityId}
