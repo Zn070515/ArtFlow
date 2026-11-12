@@ -1,6 +1,6 @@
 # ArtFlow-Plus 设计 Token 与响应式基础设计
 
-状态：Phase 1 已实现（2026-11-12）；后续页面迁移见实施计划。
+状态：Console 已完成并默认 `paper`（2026-11-12）；Portal / Vote / Join 迁移见后续计划。
 
 相关：[前端视觉方向](../frontend-design-direction.md)、
 [主办方工作台设计](2026-11-12-organizer-workspace-experience-design.md)。
