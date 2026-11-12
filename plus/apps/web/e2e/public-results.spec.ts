@@ -15,6 +15,17 @@ test("anonymous visitor opens the official results", async ({ page }) => {
   await expect(page.locator("body")).not.toContainText("fingerprint-not-public");
 });
 
+test("public landing and results fit a 390px viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("赛果");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+
+  await page.goto("/results/E2E-DEMO");
+  await expect(page.getByRole("heading", { name: "2026 院十佳 · 正式赛果" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+});
+
 test("unknown public code shows the not-found state", async ({ page }) => {
   await page.goto("/results/NOT-FOUND");
   await expect(page.getByText("没有找到这场活动的结果")).toBeVisible();

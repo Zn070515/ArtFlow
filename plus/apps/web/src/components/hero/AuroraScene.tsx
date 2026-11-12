@@ -1,6 +1,7 @@
-import { Component, lazy, Suspense, type ReactNode } from "react";
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 
 const LazyAuroraCanvas = lazy(() => import("./AuroraCanvas.js"));
+const NARROW_QUERY = "(max-width: 767px)";
 
 function StaticBackdrop() {
   return <div className="static-backdrop" data-testid="static-backdrop" aria-hidden="true" />;
@@ -19,7 +20,19 @@ class SceneBoundary extends Component<{ readonly children: ReactNode }, { readon
 }
 
 export function AuroraScene({ reducedMotion }: { readonly reducedMotion: boolean }) {
-  if (reducedMotion) return <StaticBackdrop />;
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(NARROW_QUERY).matches,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia(NARROW_QUERY);
+    const update = (): void => setNarrow(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  if (reducedMotion || narrow) return <StaticBackdrop />;
   return (
     <div className="aurora" aria-hidden="true">
       <SceneBoundary>

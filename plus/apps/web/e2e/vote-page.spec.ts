@@ -24,10 +24,11 @@ test("a voter opens the shared link, votes, and sees the already-voted state", a
   const sessions = await page.request.get("/api/activities/act_e2e_vote_page/voting/sessions");
   const session = (await sessions.json()).sessions[0] as { id: string };
 
-  const voterContext = await browser.newContext();
+  const voterContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const voter = await voterContext.newPage();
   await voter.goto(`/vote/${session.id}`);
   await expect(voter.getByRole("heading", { name: "E2E 投票页" })).toBeVisible();
+  expect(await voter.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
   await voter.getByRole("radio", { name: "alice" }).check();
   await voter.getByRole("button", { name: "投票" }).click();
   await expect(voter.getByText("投票成功，谢谢参与。")).toBeVisible();
@@ -71,9 +72,10 @@ test("a ticket holder redeems a ticket and votes through the public page", async
   const issuedBody = await issued.json() as { credential?: string };
   if (issuedBody.credential === undefined) throw new Error("The E2E ticket credential was not returned.");
 
-  const voterContext = await browser.newContext();
+  const voterContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const voter = await voterContext.newPage();
   await voter.goto("/vote/" + encodeURIComponent(session.id) + "#ticket=" + encodeURIComponent(issuedBody.credential));
+  expect(await voter.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
   await expect(voter.getByRole("heading", { name: "E2E 票据投票页" })).toBeVisible();
   await expect(voter.getByRole("radio", { name: "alice" })).toBeVisible();
   expect(voter.url()).not.toContain("ticket=");

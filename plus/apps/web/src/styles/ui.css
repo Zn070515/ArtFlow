@@ -154,6 +154,10 @@
   @media (max-width: 1023px) { .tokens-page__themes { grid-template-columns: 1fr; } }
 
   @media (max-width: 767px) {
+    .ui-button--sm { height: 40px; min-height: 40px; }
+    .ui-input,
+    .ui-select,
+    .ui-textarea { min-height: 44px; }
     .ui-toolbar { align-items: stretch; }
     .ui-toolbar .ui-field { flex: 1 1 100%; min-width: 0; }
     .ui-table-wrap { overflow: visible; border: 0; background: transparent; }
