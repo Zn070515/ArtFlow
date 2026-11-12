@@ -13,6 +13,12 @@ import {
   type LiveRound,
   type LiveState,
 } from "../../api/live.js";
+import { Badge } from "../ui/Badge.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Input } from "../ui/Input.js";
+import { Select } from "../ui/Select.js";
+import { Table } from "../ui/Table.js";
 import { liveDisplayRanks } from "./ranking.js";
 
 interface JudgeDraft {
@@ -137,53 +143,48 @@ export function LiveRoundPanel({
     : liveDisplayRanks(live.ranking.rows, live.ranking.tieGroups);
 
   return (
-    <section className="ops-card live-round-card" data-testid={`live-round-${config.key}`}>
-      <p className="eyebrow">ROUND · {config.key}</p>
-      <h2 className="console-card-title">
+    <Card className="live-round-card" data-testid={`live-round-${config.key}`}>
+      <h2 className="ui-card__title">
         {config.key} · {round?.state ?? "未准备"}
       </h2>
-      <p className="state-copy">
+      <p className="ui-card__description">
         评委 {config.judgeCount} 人 · 最少 {config.minimumJudges} 人 · {config.scoringMethod} · 晋级{" "}
         {config.advanceCount}
         {round === null ? "" : ` · revision ${round.revision}`}
       </p>
 
       {round === null ? (
-        <button className="primary-button" type="button" disabled={busy} onClick={() => void prepare()}>
+        <Button variant="primary" disabled={busy} onClick={() => void prepare()}>
           准备回合
-        </button>
+        </Button>
       ) : null}
 
       {round !== null && live.panel === null ? (
         <div className="panel-form">
-          <p className="state-copy">评委组（judgeId / seatKey）</p>
+          <p className="ui-card__description">评委组（judgeId / seatKey）</p>
           {judges.map((judge, index) => (
             <div className="judge-row" key={index}>
-              <label className="field">
-                <span>评委 {index + 1} 标识</span>
-                <input
-                  value={judge.judgeId}
-                  onChange={(event) => updateJudge(index, { judgeId: event.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span>评委 {index + 1} 座位键</span>
-                <input
-                  value={judge.seatKey}
-                  onChange={(event) => updateJudge(index, { seatKey: event.target.value })}
-                />
-              </label>
+              <Input
+                label={`评委 ${index + 1} 标识`}
+                value={judge.judgeId}
+                onChange={(event) => updateJudge(index, { judgeId: event.target.value })}
+              />
+              <Input
+                label={`评委 ${index + 1} 座位键`}
+                value={judge.seatKey}
+                onChange={(event) => updateJudge(index, { seatKey: event.target.value })}
+              />
             </div>
           ))}
-          <button className="primary-button" type="button" disabled={busy} onClick={() => void activate()}>
+          <Button variant="primary" disabled={busy} onClick={() => void activate()}>
             激活评委组
-          </button>
+          </Button>
         </div>
       ) : null}
 
       {live.panel === null ? null : (
         <div className="panel-summary">
-          <p className="state-copy">
+          <p className="ui-card__description">
             评委组 {live.panel.id.slice(0, 12)} · expected {live.panel.expectedJudges} · context v
             {live.panel.contextVersion}
           </p>
@@ -193,9 +194,9 @@ export function LiveRoundPanel({
                 <span>
                   {seat.seatKey || "—"} · {seat.judgeId}
                 </span>
-                <span className={`status-badge status-${seat.state === "assigned" ? "approved" : "draft"}`}>
+                <Badge tone={seat.state === "assigned" ? "success" : "neutral"}>
                   {seat.state}
-                </span>
+                </Badge>
               </li>
             ))}
           </ul>
@@ -204,129 +205,115 @@ export function LiveRoundPanel({
 
       {round !== null && live.panel !== null && round.state === "scoring" ? (
         <div className="performance-form">
-          <label className="field">
-            <span>开表演选手</span>
-            <select value={contestantId} onChange={(event) => setContestantId(event.target.value)}>
-              {state.participantIds.map((participantId) => (
-                <option key={participantId} value={participantId}>
-                  {state.participantNames[participantId] ?? participantId}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="primary-button"
-            type="button"
+          <Select
+            label="开表演选手"
+            value={contestantId}
+            onChange={(event) => setContestantId(event.target.value)}
+          >
+            {state.participantIds.map((participantId) => (
+              <option key={participantId} value={participantId}>
+                {state.participantNames[participantId] ?? participantId}
+              </option>
+            ))}
+          </Select>
+          <Button
+            variant="primary"
             disabled={busy || contestantId === "" || openPerformanceRow !== undefined}
             onClick={() => void open()}
           >
             开表演
-          </button>
+          </Button>
         </div>
       ) : null}
 
       {live.performances.length === 0 ? null : (
-        <div className="console-table-wrap">
-          <table className="data-table">
-            <caption>表演与评分进度</caption>
-            <thead>
-              <tr>
-                <th scope="col">序号</th>
-                <th scope="col">选手</th>
-                <th scope="col">状态</th>
-                <th scope="col">评分进度</th>
-                <th scope="col">操作</th>
+        <Table caption="表演与评分进度">
+          <thead>
+            <tr>
+              <th scope="col">序号</th>
+              <th scope="col">选手</th>
+              <th scope="col">状态</th>
+              <th scope="col">评分进度</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {live.performances.map((performance) => (
+              <tr key={performance.id}>
+                <td data-label="序号">{performance.sequence}</td>
+                <td data-label="选手">{performance.contestantId}</td>
+                <td data-label="状态">{performance.state}</td>
+                <td data-label="评分进度" data-testid={`score-count-${performance.contestantId}`}>
+                  {performance.scoreCount}/{performance.expectedJudges}
+                </td>
+                <td data-label="操作">
+                  {performance.state === "open" ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => void lockOne(performance.id)}
+                    >
+                      锁表演
+                    </Button>
+                  ) : (
+                    "—"
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {live.performances.map((performance) => (
-                <tr key={performance.id}>
-                  <td>{performance.sequence}</td>
-                  <td>{performance.contestantId}</td>
-                  <td>{performance.state}</td>
-                  <td data-testid={`score-count-${performance.contestantId}`}>
-                    {performance.scoreCount}/{performance.expectedJudges}
-                  </td>
-                  <td>
-                    {performance.state === "open" ? (
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void lockOne(performance.id)}
-                      >
-                        锁表演
-                      </button>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </Table>
       )}
 
       {round !== null ? (
         <div className="session-controls live-round-actions">
-          <button
-            className="secondary-button"
-            type="button"
+          <Button
+            variant="secondary"
             disabled={busy || round.state !== "scoring" || !allLocked}
             onClick={() => void lockCurrentRound()}
           >
             锁轮
-          </button>
-          <button
-            className="primary-button"
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
             disabled={busy || live.performances.length === 0 || openPerformanceRow !== undefined}
             onClick={() => void resolve()}
           >
             生成排名
-          </button>
+          </Button>
           {sessionMode === "formal" && round.state === "locked" ? (
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={busy}
-              onClick={() => void reopenForCorrection()}
-            >
+            <Button variant="secondary" disabled={busy} onClick={() => void reopenForCorrection()}>
               打开评分更正窗口
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}
 
       {live.ranking === null ? null : (
         <div className="ranking-block">
-          <p className="eyebrow">RANKING · {live.ranking.status === "hold" ? "HOLD" : "READY"}</p>
-          <div className="console-table-wrap">
-            <table className="data-table">
-              <caption>当前排名（revision {live.ranking.revision}）</caption>
-              <thead>
-                <tr>
-                  <th scope="col">名次</th>
-                  <th scope="col">选手</th>
-                  <th scope="col">总分</th>
-                  <th scope="col">评委数</th>
+          <Table caption={`当前排名（revision ${live.ranking.revision}）`}>
+            <thead>
+              <tr>
+                <th scope="col">名次</th>
+                <th scope="col">选手</th>
+                <th scope="col">总分</th>
+                <th scope="col">评委数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {live.ranking.rows.map((row, index) => (
+                <tr key={row.contestantId}>
+                  <td data-label="名次">{displayRanks[index] ?? index + 1}</td>
+                  <td data-label="选手">{row.contestantId}</td>
+                  <td data-label="总分">{row.total}</td>
+                  <td data-label="评委数">{row.judgeCount}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {live.ranking.rows.map((row, index) => (
-                  <tr key={row.contestantId}>
-                    <td>{displayRanks[index] ?? index + 1}</td>
-                    <td>{row.contestantId}</td>
-                    <td>{row.total}</td>
-                    <td>{row.judgeCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </Table>
           {live.ranking.tieGroups.length === 0 ? null : (
-            <p className="form-error" role="alert">
+            <p className="ui-field__error" role="alert">
               存在同分：{live.ranking.tieGroups.map((group) => group.contestants.join(" / ")).join("；")}
             </p>
           )}
@@ -335,17 +322,17 @@ export function LiveRoundPanel({
 
       {round !== null && (sessionMode === "test" || sessionMode === "rehearsal") ? (
         <div className="session-controls">
-          <button className="danger-button" type="button" disabled={busy} onClick={() => void reset()}>
+          <Button variant="danger" disabled={busy} onClick={() => void reset()}>
             重置排练
-          </button>
+          </Button>
         </div>
       ) : null}
 
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {error}
         </p>
       )}
-    </section>
+    </Card>
   );
 }

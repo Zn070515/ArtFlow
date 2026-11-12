@@ -51,9 +51,9 @@ describe("LivePage", () => {
   it("uses the compact Console heading and scrollable table wrapper", () => {
     render(<LivePage />);
 
-    expect(screen.getByRole("heading", { name: "活动" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "活动" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "活动" })).not.toHaveClass("results-title");
-    expect(document.querySelector(".console-table-wrap")).not.toBeNull();
+    expect(document.querySelector(".ui-table-wrap")).not.toBeNull();
   });
 
   it("filters live activities by search", () => {

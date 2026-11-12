@@ -97,7 +97,7 @@ describe("LiveRoundPanel", () => {
     render(<LiveRoundPanel state={state} live={live} sessionMode="formal" onChanged={vi.fn()} />);
 
     expect(document.querySelector(".live-round-actions")).not.toBeNull();
-    expect(document.querySelectorAll(".console-table-wrap")).toHaveLength(2);
+    expect(document.querySelectorAll(".ui-table-wrap")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "锁轮" })).toBeVisible();
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
   });

@@ -1,10 +1,15 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
-export function Card({ children, className }: {
+export interface CardProps extends HTMLAttributes<HTMLElement> {
   readonly children: ReactNode;
-  readonly className?: string;
-}) {
-  return <section className={["ui-card", className].filter(Boolean).join(" ")}>{children}</section>;
+}
+
+export function Card({ children, className, ...rest }: CardProps) {
+  return (
+    <section className={["ui-card", className].filter(Boolean).join(" ")} {...rest}>
+      {children}
+    </section>
+  );
 }
 
 export function CardHeader({ title, description, actions }: {
