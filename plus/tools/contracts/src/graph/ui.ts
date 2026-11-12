@@ -126,9 +126,38 @@ export function extractWebCalls(files: readonly SourceFile[]): WebCall[] {
 }
 
 /**
+ * Routes exercised by the HTTP-level journey runner are a product consumer too:
+ * a data-driven journey is the substitute for a browser path when no Web caller
+ * exists yet. The runner calls `app.inject({ method, url })` with a template URL.
+ */
+export function extractJourneyCalls(files: readonly SourceFile[]): WebCall[] {
+  const calls: WebCall[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (!/^apps\/api\/test\/.*journey.*\.ts$/.test(file.path)) continue;
+    const lineMap = new LineMap(file.text);
+    const pattern = /app\.inject\s*\(\s*\{[\s\S]{0,400}?method:\s*["'](GET|POST|PUT|PATCH|DELETE)["'][\s\S]{0,400}?url:\s*(`[^`]+`|"[^"]+"|'[^']+')/g;
+    for (const match of file.text.matchAll(pattern)) {
+      const method = match[1];
+      const raw = match[2];
+      if (method === undefined || raw === undefined || match.index === undefined) continue;
+      const rawPath = pathPattern(raw);
+      if (rawPath === null || !rawPath.startsWith("/api/")) continue;
+      const path = normalizePath(rawPath);
+      const line = lineMap.line(match.index);
+      const key = `${file.path}|${method}|${path}|${line}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      calls.push({ file: file.path, method, path, line });
+    }
+  }
+  return calls;
+}
+
+/**
  * Mutation routes with no Web caller. This is deliberately a report, not a CI
- * failure: some routes are API-only or are consumed by a future surface. It
- * makes "API exists but no product path calls it" visible.
+ * failure: some routes are API-only, journey-driven, or consumed by a future
+ * surface. It makes "API exists but no product path calls it" visible.
  */
 export function findUnreferencedMutationRoutes(
   graph: ConsumerGraph,

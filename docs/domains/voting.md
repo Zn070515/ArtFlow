@@ -49,8 +49,10 @@ open session（候选名单 + 规则）
 
 ## 事件
 
-`VoteSessionOpened`、`BallotSubmitted`、`VoteSessionClosed`、
-`VoteScoresComputed`、`LiveStateUpdated`（投影事件）。
+`VoteSessionOpened`、`BallotSubmitted`、`VoteSessionClosed`。
+
+Plus runtime 在关闭 session 时内联计算票数；`VoteScoresComputed` 与
+`LiveStateUpdated` 没有 producer，已从 capability manifest 移除，不得再作为契约事件引用。
 
 ## v1 参考
 

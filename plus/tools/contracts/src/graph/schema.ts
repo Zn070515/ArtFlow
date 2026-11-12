@@ -22,6 +22,7 @@ export type EdgeKind =
   | "emits"
   | "consumes"
   | "declares"
+  | "attributes"
   | "depends-on"
   | "subscribes"
   | "reads"

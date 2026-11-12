@@ -85,7 +85,7 @@ services:
   # after building/pinning ARTFLOW_PLUS_EXPORT_IMAGE; without it the API keeps
   # CSV and returns 503 for DOCX/XLSX.
   plus-export:
-    image: ${ARTFLOW_PLUS_EXPORT_IMAGE:-artflow-plus-export:local}
+    image: ${ARTFLOW_PLUS_EXPORT_IMAGE:?Set ARTFLOW_PLUS_EXPORT_IMAGE}
     profiles: ["export"]
     restart: unless-stopped
     environment:

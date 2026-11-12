@@ -10,15 +10,20 @@ const webPort = 4173;
 const apiUrl = `http://127.0.0.1:${apiPort}`;
 const webUrl = `http://127.0.0.1:${webPort}`;
 const channel = process.env.PLAYWRIGHT_CHANNEL as "msedge" | "chrome" | undefined;
+const isCi = process.env.CI === "true";
 
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   workers: 1,
-  timeout: 60_000,
-  forbidOnly: process.env.CI === "true",
-  retries: process.env.CI === "true" ? 2 : 0,
-  reporter: process.env.CI === "true" ? "github" : "list",
+  // The shared runner is slower than a local machine: a full 13-test pass has
+  // measured ~11 minutes, so a 60s/5s budget times out correct UI waits. Keep
+  // local budgets tight and give CI room; one retry stays inside the 20m job.
+  timeout: isCi ? 120_000 : 60_000,
+  forbidOnly: isCi,
+  retries: isCi ? 1 : 0,
+  reporter: isCi ? "github" : "list",
+  expect: { timeout: isCi ? 15_000 : 5_000 },
   use: {
     baseURL: webUrl,
     trace: "on-first-retry",
