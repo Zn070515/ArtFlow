@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/client.js";
 import { ensureBrowserIdentity, fetchPublicVote, redeemTicket, submitVote } from "../api/vote.js";
+import { Button } from "../components/ui/Button.js";
+import { Input } from "../components/ui/Input.js";
 
 function readTicketCredential(): string {
   if (typeof window === "undefined") return "";
@@ -129,9 +131,9 @@ export function VotePage() {
         <h1 className="display">{session?.activityTitle ?? "投票"}</h1>
       </header>
 
-      {query.isLoading ? <p className="state-copy">加载中…</p> : null}
+      {query.isLoading ? <p className="ui-state__copy">加载中…</p> : null}
       {query.error !== null ? (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {query.error instanceof ApiError && query.error.status === 404
             ? "投票链接无效或已失效。"
             : "投票信息暂时无法加载。"}
@@ -141,12 +143,12 @@ export function VotePage() {
       {session !== undefined ? (
         <section className="vote-card">
           {justVoted ? (
-            <p className="state-copy" aria-live="polite">投票成功，谢谢参与。</p>
+            <p className="ui-state__copy" aria-live="polite">投票成功，谢谢参与。</p>
           ) : session.status === "closed" ? (
-            <p className="state-copy">投票已结束。</p>
+            <p className="ui-state__copy">投票已结束。</p>
           ) : session.identityPolicy === "ticket" && !session.ticketReady ? (
             <>
-              <p className="state-copy">本场需要现场票据，请先验证票据。</p>
+              <p className="ui-state__copy">本场需要现场票据，请先验证票据。</p>
               <form
                 className="vote-credential-panel"
                 onSubmit={(event) => {
@@ -158,22 +160,23 @@ export function VotePage() {
                   redeem.mutate(credential);
                 }}
               >
-                <label>
-                  票据凭证
-                  <input
-                    aria-label="票据凭证"
-                    value={ticketCredential}
-                    onChange={(event) => setTicketCredential(event.target.value)}
-                    autoComplete="off"
-                  />
-                </label>
-                <button type="submit" className="primary-button" disabled={ticketCredential.trim() === "" || redeem.isPending}>
+                <Input
+                  label="票据凭证"
+                  value={ticketCredential}
+                  onChange={(event) => setTicketCredential(event.target.value)}
+                  autoComplete="off"
+                />
+                <Button
+                  variant="primary"
+                  type="submit"
+                  disabled={ticketCredential.trim() === "" || redeem.isPending}
+                >
                   {redeem.isPending ? "验证中…" : "验证票据"}
-                </button>
+                </Button>
               </form>
             </>
           ) : voted ? (
-            <p className="state-copy" aria-live="polite">你已经投过票了。</p>
+            <p className="ui-state__copy" aria-live="polite">你已经投过票了。</p>
           ) : (
             <div className="vote-workspace">
               <div className="vote-selection">
@@ -195,25 +198,24 @@ export function VotePage() {
               </div>
               <aside className="vote-action-panel">
                 {session.selectionType === "multi" ? (
-                  <p className="state-copy">
+                  <p className="ui-state__copy">
                     最多选择 {session.maxSelections} 个，已选 {selected.length} 个。
                   </p>
                 ) : (
-                  <p className="state-copy">选择一位候选后提交你的投票。</p>
+                  <p className="ui-state__copy">选择一位候选后提交你的投票。</p>
                 )}
-                <button
-                  type="button"
-                  className="primary-button"
+                <Button
+                  variant="primary"
                   disabled={selected.length === 0 || submit.isPending}
                   onClick={() => submit.mutate()}
                 >
                   投票
-                </button>
+                </Button>
               </aside>
             </div>
           )}
           {submit.error === null && redeem.error === null ? null : (
-            <p className="form-error" role="alert">{errorMessage(submit.error ?? redeem.error)}</p>
+            <p className="ui-field__error" role="alert">{errorMessage(submit.error ?? redeem.error)}</p>
           )}
         </section>
       ) : null}

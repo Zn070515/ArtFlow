@@ -77,7 +77,7 @@ describe("VotePage", () => {
     expect(await screen.findByRole("radio", { name: "alice" })).toBeInTheDocument();
     expect(document.querySelector(".vote-workspace")).not.toBeNull();
     expect(document.querySelector(".vote-action-panel")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "投票" })).toHaveClass("primary-button");
+    expect(screen.getByRole("button", { name: "投票" })).toHaveClass("ui-button", "ui-button--primary");
     expect(screen.getByRole("button", { name: "投票" })).not.toHaveClass("button-primary");
   });
 
