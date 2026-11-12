@@ -529,4 +529,3 @@ git commit -m "docs: record organizer workspace implementation plan"
 - Existing-test gap: current product surfaces are isolated and do not prove cross-surface navigation or account isolation.
 - Anti-bloat: one pure mapper and one thin API seam; no per-capability copies or aggregate endpoint.
 - Proof: focused mapper/component/route/style tests, Web check/build, Consumer Graph and structural gates, and PostgreSQL-backed E2E.
-

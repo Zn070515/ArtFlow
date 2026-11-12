@@ -193,4 +193,3 @@ TanStack Query key 使用活动 ID 分片；登录、登出和切换活动时清
 4. Studio/Ops/Live/公开结果仍由各自既有页面和 API 负责权威行为。
 5. 列表、详情、空态、错误态、权限态、账号切换和小屏布局有测试证据。
 6. 无新迁移、无未声明 route/event/topic consumer、无未定义 CSS class。
-
