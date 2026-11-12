@@ -101,10 +101,13 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   Nginx/Caddy transport ceiling is 128 MiB; released material policies remain the
   domain authority below that ceiling.
 - **Deployment**: `deploy/compose.production.yml` runs `plus-db`, `plus-api`,
-  `plus-worker`, `plus-web`, `plus-export`, and Caddy. The four Plus images are
-  digest-pinned; `plus-export` is internal-only with a read-only root filesystem.
-  Copy `.env.production.example` and replace every placeholder. Backups and restores
-  follow [`docs/artflow-plus/backup-restore.md`](artflow-plus/backup-restore.md).
+  `plus-worker`, `plus-web`, and Caddy. The optional `export` profile adds
+  `plus-export`, a renderer-only sidecar on the internal network with a read-only
+  root filesystem; enable it with `--profile export` and set both
+  `ARTFLOW_PLUS_EXPORT_SERVICE_URL` and `ARTFLOW_PLUS_EXPORT_TOKEN`. The four
+  Plus images are digest-pinned. Copy `.env.production.example` and replace every
+  placeholder. Backups and restores follow
+  [`docs/artflow-plus/backup-restore.md`](artflow-plus/backup-restore.md).
 
 ## Gate tooling
 

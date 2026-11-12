@@ -199,7 +199,7 @@ export const questionnaireCapability: CapabilityRegistration = deepFreeze({
     dependencies: [],
     conflicts: [],
     definitionSchemaVersion: 1,
-    commands: ["questionnaire.configure", "questionnaire.answer"],
+    commands: [],
     queries: ["questionnaire.describe"],
     events: ["QuestionnaireAnswered"],
     permissions: ["questionnaire.manage"],
