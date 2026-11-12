@@ -11,6 +11,9 @@ import {
   releasePodiumResult,
   startExecution,
 } from "../../api/voting.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Input } from "../ui/Input.js";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "操作失败，请稍后重试。";
@@ -103,17 +106,16 @@ export function ResultActions({
     recompute.error ?? confirm.error ?? release.error ?? close.error ?? archive.error ?? unarchive.error;
 
   return (
-    <section className="ops-card result-actions-card" data-testid="live-result-actions">
-      <p className="eyebrow">RESULT · 赛果</p>
-      <h2 className="console-card-title">排名与公示</h2>
-      <p className="state-copy">
+    <Card className="result-actions-card" data-testid="live-result-actions">
+      <h2 className="ui-card__title">排名与公示</h2>
+      <p className="ui-card__description">
         {formal ? "正式评分会话" : "彩排会话只能生成候选前的排名；正式赛果需要 formal 会话。"}
       </p>
       {candidate === null ? (
-        <p className="state-copy">还没有领奖候选。</p>
+        <p className="ui-card__description">还没有领奖候选。</p>
       ) : (
         <>
-          <p className="state-copy">候选 #{candidate.revision} · {candidate.status === "candidate" ? "可确认" : "暂不可确认"}</p>
+          <p className="ui-card__description">候选 #{candidate.revision} · {candidate.status === "candidate" ? "可确认" : "暂不可确认"}</p>
           <ol className="seat-list">
             {candidate.placements.map((placement) => (
               <li key={`${placement.place}-${placement.contestantId}`}>
@@ -124,47 +126,44 @@ export function ResultActions({
         </>
       )}
       <div className="task-actions">
-        <button type="button" className="secondary-button" disabled={busy || !formal || roundIds.length === 0} onClick={() => recompute.mutate()}>
+        <Button variant="secondary" disabled={busy || !formal || roundIds.length === 0} onClick={() => recompute.mutate()}>
           生成领奖候选
-        </button>
+        </Button>
         {publishingSession === undefined ? (
-          <button type="button" className="secondary-button" disabled={busy} onClick={() => startPublishing.mutate()}>
+          <Button variant="secondary" disabled={busy} onClick={() => startPublishing.mutate()}>
             启动发布会话
-          </button>
+          </Button>
         ) : (
-          <span className="state-copy">发布会话运行中</span>
+          <span className="ui-card__description">发布会话运行中</span>
         )}
-        <button type="button" className="secondary-button" disabled={busy || publishingSession === undefined || candidate?.status !== "candidate"} onClick={() => confirm.mutate()}>
+        <Button variant="secondary" disabled={busy || publishingSession === undefined || candidate?.status !== "candidate"} onClick={() => confirm.mutate()}>
           确认评委赛果
-        </button>
-        <button type="button" className="primary-button" disabled={busy || publishingSession === undefined || confirmedRevision === undefined || note.trim() === ""} onClick={() => release.mutate()}>
+        </Button>
+        <Button variant="primary" disabled={busy || publishingSession === undefined || confirmedRevision === undefined || note.trim() === ""} onClick={() => release.mutate()}>
           发布赛果
-        </button>
+        </Button>
       </div>
-      <label className="field">
-        <span>发布 / 归档说明</span>
-        <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="发布和归档都需要说明" />
-      </label>
+      <Input
+        label="发布 / 归档说明"
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder="发布和归档都需要说明"
+      />
       <div className="task-actions">
-        <button type="button" className="secondary-button" disabled={busy || state.activity.status === "archived"} onClick={() => close.mutate()}>
+        <Button variant="secondary" disabled={busy || state.activity.status === "archived"} onClick={() => close.mutate()}>
           关闭活动
-        </button>
-        <button type="button" className="secondary-button" disabled={busy || state.activity.status !== "closed" || note.trim() === ""} onClick={() => archive.mutate()}>
+        </Button>
+        <Button variant="secondary" disabled={busy || state.activity.status !== "closed" || note.trim() === ""} onClick={() => archive.mutate()}>
           归档活动
-        </button>
+        </Button>
         {state.activity.status === "archived" ? (
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={busy || note.trim() === ""}
-            onClick={() => unarchive.mutate()}
-          >
+          <Button variant="secondary" disabled={busy || note.trim() === ""} onClick={() => unarchive.mutate()}>
             取消归档
-          </button>
+          </Button>
         ) : null}
       </div>
-      {publishing.error === null || publishing.error === undefined ? null : <p className="form-error" role="alert">赛果状态暂时不可用。</p>}
-      {error === null || error === undefined ? null : <p className="form-error" role="alert">{errorText(error)}</p>}
-    </section>
+      {publishing.error === null || publishing.error === undefined ? null : <p className="ui-field__error" role="alert">赛果状态暂时不可用。</p>}
+      {error === null || error === undefined ? null : <p className="ui-field__error" role="alert">{errorText(error)}</p>}
+    </Card>
   );
 }

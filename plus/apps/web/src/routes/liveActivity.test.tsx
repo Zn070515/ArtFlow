@@ -81,7 +81,7 @@ describe("LiveActivityPage", () => {
   it("uses a Console header and separates rounds from the operational rail", () => {
     render(<LiveActivityPage />);
 
-    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
     expect(document.querySelector(".live-workspace")).not.toBeNull();
     expect(document.querySelector(".live-main-column")).not.toBeNull();

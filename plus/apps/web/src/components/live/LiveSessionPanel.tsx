@@ -10,6 +10,10 @@ import {
   type LiveSession,
   type LiveState,
 } from "../../api/live.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Input } from "../ui/Input.js";
+import { Select } from "../ui/Select.js";
 
 type Mode = LiveSession["mode"];
 
@@ -82,84 +86,85 @@ export function LiveSessionPanel({
   }
 
   return (
-    <section className="ops-card live-control-card" data-testid="live-session-panel">
-      <p className="eyebrow">SESSION · 评分会话</p>
-      <h2 className="console-card-title">judging 会话</h2>
+    <Card className="live-control-card" data-testid="live-session-panel">
+      <h2 className="ui-card__title">judging 会话</h2>
       {session === null ? (
         <div className="session-controls">
-          <label className="field">
-            <span>Mode</span>
-            <select value={mode} onChange={(event) => setMode(event.target.value as Mode)}>
-              <option value="test">test</option>
-              <option value="rehearsal">rehearsal</option>
-              <option value="formal">formal</option>
-            </select>
-          </label>
-          <button className="primary-button" type="button" disabled={busy} onClick={() => void start()}>
+          <Select
+            label="Mode"
+            className="session-control-field"
+            value={mode}
+            onChange={(event) => setMode(event.target.value as Mode)}
+          >
+            <option value="test">test</option>
+            <option value="rehearsal">rehearsal</option>
+            <option value="formal">formal</option>
+          </Select>
+          <Button variant="primary" disabled={busy} onClick={() => void start()}>
             启动评分会话
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="session-controls">
-          <p className="state-copy" data-testid="live-session-status">
+          <p className="ui-card__description" data-testid="live-session-status">
             judging · {session.mode} · {session.status}
           </p>
-          <button className="secondary-button" type="button" disabled={busy} onClick={() => void stop()}>
+          <Button variant="secondary" disabled={busy} onClick={() => void stop()}>
             关闭会话
-          </button>
+          </Button>
         </div>
       )}
       {session === null || !ticketingEnabled ? null : (
         <div className="session-controls">
-          <button
-            className="secondary-button"
-            type="button"
+          <Button
+            variant="secondary"
             disabled={busy || !seatsReady}
             onClick={() => void generateLink()}
           >
             生成评委入口链接
-          </button>
+          </Button>
           {seatsReady ? (
-            <p className="state-copy">重新生成会让之前发出的旧链接失效。</p>
+            <p className="ui-card__description">重新生成会让之前发出的旧链接失效。</p>
           ) : (
-            <p className="state-copy">
+            <p className="ui-card__description">
               先在回合里激活评委组；席位就绪前生成的链接无法被评委使用。
             </p>
           )}
-          <label className="field">
-            <span>关闭评委入口的原因</span>
-            <input
-              value={closeReason}
-              onChange={(event) => setCloseReason(event.target.value)}
-              placeholder="例如：本场评委已全部入场"
-            />
-          </label>
-          <button
-            className="secondary-button"
-            type="button"
+          <Input
+            label="关闭评委入口的原因"
+            className="session-control-field"
+            value={closeReason}
+            onChange={(event) => setCloseReason(event.target.value)}
+            placeholder="例如：本场评委已全部入场"
+          />
+          <Button
+            variant="secondary"
             disabled={busy || closeReason.trim() === ""}
             onClick={() => void closeEntry()}
           >
             关闭评委入口
-          </button>
+          </Button>
         </div>
       )}
       {entry === null ? null : (
         <div className="judge-entry">
-          <label className="field">
-            <span>评委入口链接（v{entry.version}）</span>
-            <input readOnly value={entry.url} aria-label="评委入口链接" onFocus={(event) => event.currentTarget.select()} />
-          </label>
+          <Input
+            label={`评委入口链接（v${entry.version}）`}
+            readOnly
+            value={entry.url}
+            aria-label="评委入口链接"
+            onFocus={(event) => event.currentTarget.select()}
+          />
           <a className="table-link" href={entry.url} target="_blank" rel="noreferrer">
             打开评委页
           </a>
         </div>
       )}
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {error}
         </p>
       )}
-    </section>
+    </Card>
   );
 }
