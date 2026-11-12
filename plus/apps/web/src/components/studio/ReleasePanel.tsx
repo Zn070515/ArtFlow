@@ -2,6 +2,9 @@ import { useState } from "react";
 
 import { ApiError } from "../../api/client.js";
 import { releaseStudioDefinition, type StudioState } from "../../api/studio.js";
+import { Badge } from "../ui/Badge.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
 
 export function ReleasePanel({
   state,
@@ -34,37 +37,35 @@ export function ReleasePanel({
   }
 
   return (
-    <section className="ops-card">
-      <p className="eyebrow">RELEASE · 发布</p>
-      <h2 className="console-card-title">定义发布</h2>
+    <Card>
+      <h2 className="ui-card__title">定义发布</h2>
       {state.releases.length === 0 ? (
-        <p className="state-copy">还没有发布版本。</p>
+        <p className="ui-card__description">还没有发布版本。</p>
       ) : (
         <ul className="release-list">
           {state.releases.map((release) => (
             <li key={release.version}>
               <span>v{release.version}</span>
               <span>{release.releasedAt.slice(0, 10)}</span>
-              {release.active ? <span className="active-badge">ACTIVE</span> : null}
+              {release.active ? <Badge tone="success">ACTIVE</Badge> : null}
             </li>
           ))}
         </ul>
       )}
-      <button
-        className="primary-button"
-        type="button"
+      <Button
+        variant="primary"
         disabled={!canRelease || busy}
         onClick={() => void release()}
       >
         {busy ? "正在发布…" : "发布当前编译"}
-      </button>
-      {state.activity.status === "draft" ? <p className="state-copy">先激活活动。</p> : null}
-      {state.compiled === null ? <p className="state-copy">先编译当前 draft。</p> : null}
+      </Button>
+      {state.activity.status === "draft" ? <p className="ui-card__description">先激活活动。</p> : null}
+      {state.compiled === null ? <p className="ui-card__description">先编译当前 draft。</p> : null}
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {error}
         </p>
       )}
-    </section>
+    </Card>
   );
 }
