@@ -1,3 +1,4 @@
+import type { ContractDescriptor } from "@artflow-plus/contracts";
 import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import type { ActorContext } from "@artflow-plus/domain";
 import {
@@ -17,7 +18,7 @@ import {
 import type { Kysely } from "kysely";
 
 import type { ContractClock } from "../clock.js";
-import type { CommandAdapter } from "../command.js";
+import { commandCounters, type CommandAdapter } from "../command.js";
 import type {
   LifecycleAdapter,
   LifecycleOutcome,
@@ -25,12 +26,33 @@ import type {
 } from "../lifecycle.js";
 
 export interface CompetitionContractAdapter extends LifecycleAdapter {
+  readonly descriptor: ContractDescriptor;
   readonly activityId: string;
   readonly contestantId: string;
   readonly staff: ActorContext;
   readonly outsider: ActorContext;
   readonly prepareCommand: CommandAdapter<{ readonly id: string }>;
 }
+
+export const COMPETITION_CONTRACT_DESCRIPTOR: ContractDescriptor = {
+  id: "competition",
+  version: 1,
+  kind: "lifecycle",
+  provider: "competition.round.prepare",
+  consumers: ["live console", "judge entry", "publishing candidate"],
+  preconditions: ["final roster", "running judging session", "published competition release"],
+  outputs: ["prepared round", "panel snapshot", "score facts", "ranking snapshot"],
+  invariants: [
+    "a round locks only after every performance score gate is locked",
+    "scores bind to the current panel, seat, and context version",
+    "reopening a locked round requires a reason and a formal session",
+  ],
+  errors: ["ROUND_LOCKED", "PERFORMANCE_NOT_SCORABLE", "STALE_REVISION", "FORMAL_MODE_REQUIRED"],
+  sideEffects: ["command receipt", "audit entry", "outbox event"],
+  idempotency: "the same command id and payload replays the stored body",
+  concurrency: "round revision gates every transition; duplicate score facts are rejected",
+  recovery: "a locked round reopens for correction, then locks again after recalculation",
+};
 
 const staff: ActorContext = {
   actorId: "contract-competition-staff",
@@ -218,32 +240,13 @@ export function createCompetitionContractAdapter(
       roundId = outcome.body.id;
       return outcome;
     },
-    async countReceipts(commandId) {
-      const row = await db.selectFrom("command_receipt")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async countAudits(commandId) {
-      const row = await db.selectFrom("audit_entry")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async eventCount() {
-      const row = await db.selectFrom("outbox")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("activity_id", "=", activityId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
+    ...commandCounters(db, () => activityId),
   };
 
   return {
     name: "competition",
-    provider: "competition.round.prepare",
+    provider: COMPETITION_CONTRACT_DESCRIPTOR.provider,
+    descriptor: COMPETITION_CONTRACT_DESCRIPTOR,
     revisionMode: "required",
     lifecycle: {
       states: ["prepared", "scoring", "locked"],

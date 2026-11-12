@@ -1,3 +1,4 @@
+import type { ContractDescriptor } from "@artflow-plus/contracts";
 import { PUBLISHING_COMMAND_SCOPES } from "@artflow-plus/domain";
 import type { ActorContext, ResultAward } from "@artflow-plus/domain";
 import {
@@ -15,7 +16,7 @@ import {
 import type { Kysely } from "kysely";
 
 import type { ContractClock } from "../clock.js";
-import type { CommandAdapter } from "../command.js";
+import { commandCounters, type CommandAdapter } from "../command.js";
 import type {
   LifecycleAdapter,
   LifecycleOutcome,
@@ -23,11 +24,32 @@ import type {
 } from "../lifecycle.js";
 
 export interface PublishingContractAdapter extends LifecycleAdapter {
+  readonly descriptor: ContractDescriptor;
   readonly activityId: string;
   readonly staff: ActorContext;
   readonly outsider: ActorContext;
   readonly confirmCommand: CommandAdapter<StoredStageResult>;
 }
+
+export const PUBLISHING_CONTRACT_DESCRIPTOR: ContractDescriptor = {
+  id: "publishing",
+  version: 1,
+  kind: "lifecycle",
+  provider: "publishing.stage_result.confirm",
+  consumers: ["public results", "program page", "archive package"],
+  preconditions: ["formal publishing session", "latest podium candidate", "published release"],
+  outputs: ["confirmed stage result", "active result release", "public snapshot"],
+  invariants: [
+    "a release is built from the latest confirmed candidate revision",
+    "a confirmed result cannot change without an unlock",
+    "only an active release can be revoked",
+  ],
+  errors: ["RESULT_NOT_CONFIRMED", "RESULT_ALREADY_RELEASED", "RESULT_RELEASE_NOT_ACTIVE", "STALE_RESOLUTION_INPUT"],
+  sideEffects: ["command receipt", "audit entry", "outbox event"],
+  idempotency: "the same command id and payload replays the stored body",
+  concurrency: "the publishing activity lock serializes confirm, release, revoke, and unlock",
+  recovery: "revoke the active release, then re-release the corrected candidate",
+};
 
 const staff: ActorContext = {
   actorId: "contract-publishing-staff",
@@ -175,32 +197,13 @@ export function createPublishingContractAdapter(
         note: "contract confirm",
       });
     },
-    async countReceipts(commandId) {
-      const row = await db.selectFrom("command_receipt")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async countAudits(commandId) {
-      const row = await db.selectFrom("audit_entry")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("command_id", "=", commandId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
-    async eventCount() {
-      const row = await db.selectFrom("outbox")
-        .select((expression) => expression.fn.countAll<number>().as("count"))
-        .where("activity_id", "=", activityId)
-        .executeTakeFirstOrThrow();
-      return Number(row.count);
-    },
+    ...commandCounters(db, () => activityId),
   };
 
   return {
     name: "publishing",
-    provider: "publishing.stage_result.confirm",
+    provider: PUBLISHING_CONTRACT_DESCRIPTOR.provider,
+    descriptor: PUBLISHING_CONTRACT_DESCRIPTOR,
     revisionMode: "none",
     lifecycle: {
       states: ["confirmed", "active", "revoked", "ready_to_confirm"],
