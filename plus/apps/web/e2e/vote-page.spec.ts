@@ -8,7 +8,7 @@ test("a voter opens the shared link, votes, and sees the already-voted state", a
   await page.getByLabel("用户名").fill("e2e-ops");
   await page.getByLabel("密码").fill("e2e-ops-password");
   await page.getByRole("button", { name: "登录" }).click();
-  await page.waitForURL(/\/ops$/);
+  await page.waitForURL(/\/workspace$/);
 
   await page.goto("/ops/act_e2e_vote_page");
   const sessionRows = page.locator(".voting-session-row");
@@ -46,7 +46,7 @@ test("a ticket holder redeems a ticket and votes through the public page", async
   await page.getByLabel("用户名").fill("e2e-ops");
   await page.getByLabel("密码").fill("e2e-ops-password");
   await page.getByRole("button", { name: "登录" }).click();
-  await page.waitForURL(/\/ops$/);
+  await page.waitForURL(/\/workspace$/);
 
   const activityId = "act_e2e_ticket_vote_page";
   await page.goto("/ops/" + activityId);
