@@ -18,7 +18,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "graph": "pnpm run build && node dist/graph/cli.js graph",
-    "graph:check": "pnpm run build && node dist/graph/cli.js graph --check",
+    "graph:check": "pnpm run build && node dist/graph/cli.js graph --check --strict",
     "impact": "pnpm run build && node dist/graph/cli.js impact",
     "readiness": "tsx src/harness/readiness-cli.ts",
     "audit": "tsx src/audit/cli.ts",

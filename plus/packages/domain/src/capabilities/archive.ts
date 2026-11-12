@@ -111,9 +111,8 @@ export const archiveCapability: CapabilityRegistration = deepFreeze({
     commands: [
       "archive.activity.archive",
       "archive.activity.unarchive",
-      "archive.package.read",
     ],
-    queries: ["archive.state.read"],
+    queries: ["archive.state.read", "archive.package.read"],
     events: ["ArchivePackaged", "ActivityArchived", "ActivityUnarchived"],
     permissions: ["archive.manage"],
     surfaces: ["studio", "ops"],

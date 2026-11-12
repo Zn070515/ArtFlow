@@ -19,7 +19,7 @@ import {
   stringLiteral,
 } from "./scan.js";
 import type { ImportSpec, RouteDecl, SymbolDecl } from "./scan.js";
-import { extractWebCalls, routeMatches } from "./ui.js";
+import { extractJourneyCalls, extractWebCalls, routeMatches } from "./ui.js";
 import {
   capabilityNodeId,
   commandNodeId,
@@ -323,10 +323,11 @@ function bindSymbols(state: BuilderState): void {
     }
   }
 
+  const files = new Set(state.files.keys());
   for (const context of state.files.values()) {
     for (const specifier of context.imports) {
       if (specifier.names.length === 0) continue;
-      const relative = resolveRelative(context.file.path, specifier.specifier, new Set(state.files.keys()));
+      const relative = resolveRelative(context.file.path, specifier.specifier, files);
       const packageExport = relative === null ? state.packageExports.get(specifier.specifier) : undefined;
       const strict = relative !== null || specifier.specifier.startsWith("@artflow-plus/");
       for (const imported of specifier.names) {
@@ -481,7 +482,10 @@ function addCommandCalls(state: BuilderState): void {
           kind: "capability",
           name: capability,
         });
-        addEdge(state, { from: capabilityNode.id, to: command.id, kind: "declares", file: context.file.path, line }, true);
+        // A call-site capability field attributes a provider to a capability;
+        // it is not a manifest declaration. Keeping the kinds separate stops
+        // the manifest gap check from certifying itself.
+        addEdge(state, { from: capabilityNode.id, to: command.id, kind: "attributes", file: context.file.path, line }, true);
       }
     }
   }
@@ -536,10 +540,31 @@ function addEventCalls(state: BuilderState): void {
           kind: "capability",
           name: capability,
         });
-        addEdge(state, { from: capabilityNode.id, to: event.id, kind: "declares", file: context.file.path, line }, true);
+        addEdge(state, { from: capabilityNode.id, to: event.id, kind: "attributes", file: context.file.path, line }, true);
       }
     }
   }
+}
+
+/**
+ * Manifest fields are often a named array (`commands: COMPETITION_COMMANDS`).
+ * Resolve a top-level const array in the same file so a manifest declaration is
+ * not mistaken for a missing one; a truly missing list stays empty.
+ */
+function manifestStringList(context: FileContext, raw: string | undefined): string[] {
+  const direct = stringArray(raw);
+  if (direct.length > 0 || raw === undefined) return direct;
+  const identifier = /^\s*([A-Za-z_$][\w$]*)\s*$/.exec(raw)?.[1];
+  if (identifier === undefined) return [];
+  const declaration = new RegExp(
+    `\\b(?:export\\s+)?const\\s+${escapeRegExp(identifier)}\\s*=\\s*\\[`,
+  ).exec(context.masked);
+  if (declaration === null || declaration.index === undefined) return [];
+  const open = context.masked.indexOf("[", declaration.index);
+  if (open === -1) return [];
+  const close = findMatching(context.file.text, open);
+  if (close === -1) return [];
+  return stringArray(context.file.text.slice(open, close + 1));
 }
 
 function addCapabilities(state: BuilderState): void {
@@ -570,17 +595,17 @@ function addCapabilities(state: BuilderState): void {
         file: context.file.path,
         line: context.lineMap.line(match.index),
       });
-      for (const commandType of stringArray(fields.get("commands"))) {
+      for (const commandType of manifestStringList(context, fields.get("commands"))) {
         const command = addNode(state, { id: commandNodeId(commandType), kind: "command", name: commandType });
         state.declaredCommands.add(commandType);
         addEdge(state, { from: capability.id, to: command.id, kind: "declares", file: context.file.path, line: context.lineMap.line(match.index) }, true);
       }
-      for (const eventType of stringArray(fields.get("events"))) {
+      for (const eventType of manifestStringList(context, fields.get("events"))) {
         const event = addNode(state, { id: eventNodeId(eventType), kind: "event", name: eventType });
         state.declaredEvents.add(eventType);
         addEdge(state, { from: capability.id, to: event.id, kind: "declares", file: context.file.path, line: context.lineMap.line(match.index) }, true);
       }
-      for (const dependency of stringArray(fields.get("dependencies"))) {
+      for (const dependency of manifestStringList(context, fields.get("dependencies"))) {
         const target = addNode(state, { id: capabilityNodeId(dependency), kind: "capability", name: dependency });
         addEdge(state, { from: capability.id, to: target.id, kind: "depends-on", file: context.file.path, line: context.lineMap.line(match.index) }, true);
       }
@@ -677,7 +702,9 @@ function addRoutes(state: BuilderState): void {
 
 function addWebConsumers(state: BuilderState): void {
   const routes = [...state.nodes.values()].filter((node) => node.kind === "route");
-  for (const call of extractWebCalls([...state.files.values()].map((context) => context.file))) {
+  const files = [...state.files.values()].map((context) => context.file);
+  const calls = [...extractWebCalls(files), ...extractJourneyCalls(files)];
+  for (const call of calls) {
     const matches = routes.filter((route) => {
       const [method, path] = route.name.split(" ", 2);
       return method === call.method && path !== undefined && routeMatches(path, call.path);

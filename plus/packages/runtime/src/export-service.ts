@@ -35,11 +35,6 @@ export interface ExportTable {
   readonly rows: readonly (readonly ExportCell[])[];
 }
 
-export interface ExportResult {
-  readonly filename: string;
-  readonly csv: string;
-}
-
 function answerText(registration: StoredRegistration, keys: readonly string[]): string {
   for (const key of keys) {
     const value = registration.answers[key];
@@ -48,8 +43,17 @@ function answerText(registration: StoredRegistration, keys: readonly string[]): 
   return "";
 }
 
+/**
+ * Operator text can contain newlines (review notes, free-form answers). OOXML
+ * text runs cannot carry control characters, so flatten them before any format
+ * sees the table; CSV also benefits from the same stable shape.
+ */
+function plainText(value: unknown): string {
+  return String(value ?? "").replace(/[\u0000-\u001F\u007F]/g, " ");
+}
+
 function cell(value: unknown): string {
-  const text = String(value ?? "");
+  const text = plainText(value);
   // Spreadsheet applications evaluate a leading =, +, -, @, tab, or carriage
   // return even inside quotes. A leading apostrophe keeps operator-supplied
   // text as text; DOCX/XLSX already use explicit text cells.
@@ -198,10 +202,12 @@ export async function exportActivityTable(
   return {
     activityId: input.activityId,
     kind: input.kind,
-    title: activity.title,
+    title: plainText(activity.title),
     filenameStem: `activity-${input.activityId}-${input.kind}`,
-    headers: table.headers,
-    rows: table.rows,
+    headers: table.headers.map(plainText),
+    rows: table.rows.map((row) =>
+      row.map((value) => (typeof value === "string" ? plainText(value) : value))
+    ),
   };
 }
 
@@ -225,6 +231,7 @@ export async function recordExportAudit(
   });
 }
 
+/** CSV stays a pure serializer; the route audits after the render succeeds. */
 export function serializeCsv(table: ExportTable): string {
   const lines = [
     table.headers.map(cell).join(","),
@@ -233,14 +240,3 @@ export function serializeCsv(table: ExportTable): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** CSV keeps its original one-call contract (table, audit, and text). */
-export async function exportActivityCsv(
-  db: Kysely<Database>,
-  deps: RuntimeDeps,
-  input: { readonly activityId: string; readonly kind: ExportKind },
-): Promise<ExportResult> {
-  const table = await exportActivityTable(db, deps, input);
-  const csv = serializeCsv(table);
-  await recordExportAudit(db, deps, table, "csv");
-  return { filename: `${table.filenameStem}.csv`, csv };
-}

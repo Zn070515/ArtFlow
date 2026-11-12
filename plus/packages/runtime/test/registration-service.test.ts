@@ -279,6 +279,68 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
   });
 
+  it("keeps the previous current material when replacement content fails", async () => {
+    // LIFE-10: a failed replacement must not retire the current material.
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: "start-registration-life10",
+      activityId,
+      participantId: participant.actorId,
+    });
+    const first = await uploadWithContent(participant, {
+      commandId: "upload-life10-a",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "first.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 100,
+    });
+    const replacement = await uploadMaterial(db, deps(participant), {
+      commandId: "upload-life10-b",
+      activityId,
+      registrationId: started.body.id,
+      questionKey: "audio",
+      originalName: "second.mp3",
+      contentType: "audio/mpeg",
+      byteLength: 20,
+    });
+    await expect(attachMaterialContent(db, deps(participant), {
+      commandId: "attach-life10-b",
+      activityId,
+      materialId: replacement.body.id,
+      bytes: new Uint8Array(19).fill(1),
+    })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
+
+    const rows = await db
+      .selectFrom("material")
+      .select(["id", "current", "content_ready"])
+      .where("registration_id", "=", started.body.id)
+      .where("question_key", "=", "audio")
+      .execute();
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(first.body.id)).toMatchObject({ current: true, content_ready: true });
+    expect(byId.get(replacement.body.id)).toMatchObject({
+      current: false,
+      content_ready: false,
+    });
+
+    // Simulate the corrupt shape the invariant forbids: a current row without
+    // bytes. Review must refuse it even though the row is current.
+    await db.updateTable("material").set({ current: false })
+      .where("id", "=", first.body.id).execute();
+    await db.updateTable("material").set({ current: true, content_ready: false })
+      .where("id", "=", replacement.body.id).execute();
+    await expect(reviewMaterial(db, deps(staff), {
+      commandId: "review-life10-staging",
+      activityId,
+      materialId: replacement.body.id,
+      expectedRevision: replacement.body.revision,
+      status: "approved",
+      note: "",
+    })).rejects.toMatchObject({ code: "MATERIAL_CONTENT_UNAVAILABLE" });
+  });
+
   it("runs draft, submit, staff review, and server-derived roster finalization", async () => {
     const activityId = await seedActivity();
     const started = await startRegistration(db, deps(participant), {
