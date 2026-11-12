@@ -24,6 +24,9 @@ export default defineConfig({
   retries: isCi ? 1 : 0,
   reporter: isCi ? "github" : "list",
   expect: { timeout: isCi ? 15_000 : 5_000 },
+  // Visual baselines are maintained as one platform-neutral image; the token
+  // sheet uses bundled fonts, so the layout is stable across Chromium hosts.
+  snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   use: {
     baseURL: webUrl,
     trace: "on-first-retry",
