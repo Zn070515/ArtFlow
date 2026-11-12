@@ -71,7 +71,7 @@ describe("JudgePage", () => {
   it("uses a focused Console score workspace without Portal heading styles", () => {
     render(<JudgePage />);
 
-    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
     expect(document.querySelector(".judge-workspace")).not.toBeNull();
     expect(document.querySelector(".judge-score-column")).not.toBeNull();

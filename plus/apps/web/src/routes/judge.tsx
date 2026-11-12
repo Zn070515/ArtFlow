@@ -10,6 +10,12 @@ import {
   type JudgeContext,
 } from "../api/judge.js";
 import { JUDGING_SCOPE } from "../api/live.js";
+import { Button } from "../components/ui/Button.js";
+import { Card } from "../components/ui/Card.js";
+import { EmptyState } from "../components/ui/EmptyState.js";
+import { ErrorState } from "../components/ui/ErrorState.js";
+import { Input } from "../components/ui/Input.js";
+import { Textarea } from "../components/ui/Textarea.js";
 
 type ClaimState =
   | { readonly status: "idle" }
@@ -66,34 +72,23 @@ export function JudgePage() {
   });
 
   if (claim.status === "claiming") {
-    return <p className="console-state auth-loading">正在认领评委席位…</p>;
+    return <p className="auth-loading">正在认领评委席位…</p>;
   }
   if (claim.status === "failed") {
-    return (
-      <section className="console-state">
-        <p className="eyebrow">JUDGE</p>
-        <h1 className="console-page-title">入口不可用</h1>
-        <p className="form-error" role="alert">
-          {claim.message}
-        </p>
-      </section>
-    );
+    return <EmptyState title="入口不可用" description={claim.message} />;
   }
   if (context.isPending) {
-    return <p className="console-state auth-loading">正在加载评委上下文…</p>;
+    return <p className="auth-loading">正在加载评委上下文…</p>;
   }
   if (context.error !== null) {
     const unauthenticated = context.error instanceof ApiError && context.error.status === 401;
     return (
-      <section className="console-state">
-        <p className="eyebrow">JUDGE</p>
-        <h1 className="console-page-title">{unauthenticated ? "需要评委入口链接" : "评委上下文不可用"}</h1>
-        <p className="state-copy">
-          {unauthenticated
-            ? "请使用工作人员刚生成的评委入口链接打开本页。"
-            : errorMessage(context.error, "请稍后刷新重试。")}
-        </p>
-      </section>
+      <ErrorState
+        title={unauthenticated ? "需要评委入口链接" : "评委上下文不可用"}
+        description={unauthenticated
+          ? "请使用工作人员刚生成的评委入口链接打开本页。"
+          : errorMessage(context.error, "请稍后刷新重试。")}
+      />
     );
   }
 
@@ -116,11 +111,10 @@ function JudgeContent({
 }) {
   return (
     <section className="judge-page">
-      <header className="console-page-header">
+      <header>
         <div>
-          <p className="eyebrow">JUDGE · 评委评分</p>
-          <h1 className="console-page-title">{context.activity.title}</h1>
-          <p className="state-copy">
+          <h1 className="ui-page-title">{context.activity.title}</h1>
+          <p className="ui-page-meta">
             公开码 {context.activity.publicCode} · 座位 {context.seat.seatKey}
             {context.seat.judgeId === null ? "" : ` · 评委 ${context.seat.judgeId}`}
           </p>
@@ -130,18 +124,17 @@ function JudgeContent({
         <div className="judge-score-column">
           <ScoreCard context={context} onScored={onScored} />
         </div>
-        <section className="ops-card judge-status-panel">
-          <p className="eyebrow">STATUS · 状态</p>
-          <h2 className="console-card-title">本轮</h2>
-          <p className="state-copy">
+        <Card className="judge-status-panel">
+          <h2 className="ui-card__title">本轮</h2>
+          <p className="ui-card__description">
             回合 {context.round?.roundKey ?? "—"} · 评委组 {context.panel?.id.slice(0, 12) ?? "—"}
           </p>
-          <p className="state-copy">
+          <p className="ui-card__description">
             {context.performance === null
               ? "等待下一位选手…"
               : `当前选手 ${context.performance.contestantId} · 第 ${context.performance.sequence} 位`}
           </p>
-        </section>
+        </Card>
       </div>
     </section>
   );
@@ -218,28 +211,25 @@ function ScoreCard({
 
   if (context.performance === null) {
     return (
-      <section className="ops-card judge-score-card" data-testid="judge-score-card">
-        <p className="eyebrow">SCORE · 评分</p>
-        <h2 className="console-card-title">等待选手</h2>
-        <p className="state-copy">工作人员开表演后会自动出现评分表。</p>
-      </section>
+      <Card className="judge-score-card" data-testid="judge-score-card">
+        <h2 className="ui-card__title">等待选手</h2>
+        <p className="ui-card__description">工作人员开表演后会自动出现评分表。</p>
+      </Card>
     );
   }
   if (target === null) {
     return (
-      <section className="ops-card judge-score-card" data-testid="judge-score-card">
-        <p className="eyebrow">SCORE · 评分</p>
-        <h2 className="console-card-title">席位未就绪</h2>
-        <p className="state-copy">本轮评委组尚未就绪，请等待工作人员处理。</p>
-      </section>
+      <Card className="judge-score-card" data-testid="judge-score-card">
+        <h2 className="ui-card__title">席位未就绪</h2>
+        <p className="ui-card__description">本轮评委组尚未就绪，请等待工作人员处理。</p>
+      </Card>
     );
   }
   if (context.existingScore !== null) {
     return (
-      <section className="ops-card judge-score-card" data-testid="judge-score-card">
-        <p className="eyebrow">SCORE · 评分</p>
-        <h2 className="console-card-title">已提交 · {context.existingScore.total}</h2>
-        <p className="state-copy" data-testid="judge-submitted">
+      <Card className="judge-score-card" data-testid="judge-score-card">
+        <h2 className="ui-card__title">已提交 · {context.existingScore.total}</h2>
+        <p className="ui-card__description" data-testid="judge-submitted">
           {context.performance.contestantId} 已评分，等待下一位选手。
         </p>
         <ul className="seat-list">
@@ -250,15 +240,14 @@ function ScoreCard({
             </li>
           ))}
         </ul>
-      </section>
+      </Card>
     );
   }
 
   return (
-    <section className="ops-card judge-score-card" data-testid="judge-score-card">
-      <p className="eyebrow">SCORE · 评分</p>
-      <h2 className="console-card-title">{context.performance.contestantId}</h2>
-      <p className="state-copy">第 {context.performance.sequence} 位 · 三项满分制</p>
+    <Card className="judge-score-card" data-testid="judge-score-card">
+      <h2 className="ui-card__title">{context.performance.contestantId}</h2>
+      <p className="ui-card__description">第 {context.performance.sequence} 位 · 三项满分制</p>
       <form
         className="auth-form"
         onSubmit={(event) => {
@@ -267,36 +256,35 @@ function ScoreCard({
         }}
       >
         {criteria.map((criterion) => (
-          <label className="field" key={criterion.key}>
-            <span>
-              {criterion.key}（{criterion.minimum ?? 0}–{criterion.maximum}）
-            </span>
-            <input
-              type="number"
-              inputMode="decimal"
-              min={criterion.minimum ?? 0}
-              max={criterion.maximum}
-              step="0.01"
-              value={values[criterion.key] ?? ""}
-              onChange={(event) =>
-                setValues((current) => ({ ...current, [criterion.key]: event.target.value }))
-              }
-            />
-          </label>
+          <Input
+            key={criterion.key}
+            label={`${criterion.key}（${criterion.minimum ?? 0}–${criterion.maximum}）`}
+            type="number"
+            inputMode="decimal"
+            min={criterion.minimum ?? 0}
+            max={criterion.maximum}
+            step="0.01"
+            value={values[criterion.key] ?? ""}
+            onChange={(event) =>
+              setValues((current) => ({ ...current, [criterion.key]: event.target.value }))
+            }
+          />
         ))}
-        <label className="field">
-          <span>备注</span>
-          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
-        </label>
-        <button className="primary-button" type="submit" disabled={busy}>
+        <Textarea
+          label="备注"
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          rows={3}
+        />
+        <Button variant="primary" type="submit" disabled={busy}>
           {busy ? "提交中…" : "提交评分"}
-        </button>
+        </Button>
       </form>
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {error}
         </p>
       )}
-    </section>
+    </Card>
   );
 }
