@@ -72,6 +72,7 @@
 .app-shell {
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: clip;
   background: var(--color-page);
   color: var(--color-text);

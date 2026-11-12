@@ -20,13 +20,13 @@ export function ProgramPage() {
 
   return (
     <main style={{ maxWidth: 960, margin: "0 auto", padding: 24, fontSize: hostMode ? 24 : 16 }}>
-      <header style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
+      <header style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
         <div>
           <p className="eyebrow">PROGRAM · 节目单</p>
           <h1>{program.activity.title}</h1>
           <p className="state-copy">公开码 {program.activity.publicCode}</p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={hostMode} onChange={(event) => setHostMode(event.target.checked)} />
             主持大字
