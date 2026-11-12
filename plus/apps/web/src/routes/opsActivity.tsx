@@ -108,12 +108,10 @@ function OpsActivityContent() {
           ) : registrations.error !== null ? (
             <p className="form-error" role="alert">报名列表暂时无法加载。</p>
           ) : (
-            <div className="console-table-wrap">
-              <RegistrationTable
-                activityId={activityId}
-                registrations={registrations.data ?? []}
-              />
-            </div>
+            <RegistrationTable
+              activityId={activityId}
+              registrations={registrations.data ?? []}
+            />
           )}
         </Card>
         {roster.isPending ? (

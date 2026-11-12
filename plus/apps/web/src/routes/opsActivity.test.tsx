@@ -101,7 +101,7 @@ describe("OpsActivityPage", () => {
 
     expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
-    expect(document.querySelector(".console-table-wrap")).not.toBeNull();
+    expect(screen.getByRole("table", { name: "报名列表" })).toBeInTheDocument();
   });
 
   it("mounts tasks only when the activity enables the capability", () => {
