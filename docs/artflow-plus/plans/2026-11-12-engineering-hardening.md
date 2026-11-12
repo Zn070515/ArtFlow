@@ -123,8 +123,9 @@ packages/db/src/types.ts
   - Studio「重命名活动」；
   - Live/Ops「取消归档」。
 - `gap-baseline.json` 从 **156 → 145**；`uiGaps` 从 26 → 18。
-- 验证：641 tests、check、schema:check、build:prod、结构门禁 26、Golden、
-  `audit:check`（145）、`graph:check`（0 unresolved）、`check_docs` 全绿。
+- 验证（该轮快照）：641 tests、check、schema:check、build:prod、结构门禁 26、Golden、
+  `audit:check`（145）、`graph:check`（0 unresolved）、`check_docs` 全绿。当前仓库为
+  结构门禁 27、baseline 130；本段保留为当轮记录，不随之后续变动。
 
 ## Test architecture
 

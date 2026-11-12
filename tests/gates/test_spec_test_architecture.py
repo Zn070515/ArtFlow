@@ -25,6 +25,18 @@ MIN_SECTION_CHARS = 200
 HEADING = re.compile(r"^##\s+.*test architecture.*$", re.IGNORECASE | re.MULTILINE)
 NEXT_HEADING = re.compile(r"^##\s+", re.MULTILINE)
 
+# The section must name every element the instruction files require. Both the
+# English and Chinese labels used by existing documents are accepted.
+REQUIRED_ELEMENTS = {
+    "contracts": r"contract|契约",
+    "consumers": r"consumer|消费者",
+    "lifecycle": r"lifecycle|生命周期",
+    "adapters": r"adapter|适配器",
+    "faults": r"fault|故障",
+    "anti-bloat": r"bloat|臃肿",
+    "gates": r"gate|门禁",
+}
+
 
 def section_body(text: str) -> str | None:
     heading = HEADING.search(text)
@@ -55,10 +67,20 @@ def test_new_specs_and_plans_declare_test_architecture() -> None:
             relative = path.relative_to(ROOT).as_posix()
             if body is None:
                 problems.append(f"{relative}: missing '## Test architecture' section")
-            elif len(body) < MIN_SECTION_CHARS:
+                continue
+            size = len(re.sub(r"\s", "", body))
+            if size < MIN_SECTION_CHARS:
                 problems.append(
-                    f"{relative}: the Test architecture section is {len(body)} chars; "
+                    f"{relative}: the Test architecture section has {size} non-space chars; "
                     f"at least {MIN_SECTION_CHARS} are required"
+                )
+            missing = [
+                name for name, pattern in REQUIRED_ELEMENTS.items()
+                if re.search(pattern, body, re.IGNORECASE) is None
+            ]
+            if missing:
+                problems.append(
+                    f"{relative}: Test architecture is missing {', '.join(missing)}"
                 )
     assert not problems, "\n".join(problems)
 
