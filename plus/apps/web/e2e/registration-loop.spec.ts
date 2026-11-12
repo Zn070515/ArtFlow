@@ -47,7 +47,7 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await expect(ops).toHaveURL(/\/ops$/);
     await ops.getByRole("link", { name: "2026 院十佳报名" }).click();
     await expect(ops.getByRole("table")).toBeVisible();
-    await ops.getByRole("link", { name: /^participant:/ }).first().click();
+    await ops.getByRole("table").getByRole("link").first().click();
     await expect(
       ops.getByRole("heading", { name: "2026 院十佳报名", exact: true }),
     ).toBeVisible();
