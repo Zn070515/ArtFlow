@@ -64,3 +64,44 @@ describe("closed token scale", () => {
     expect(scale).toContain("--ease-out: cubic-bezier(.2,.8,.2,1);");
   });
 });
+
+const migratedFiles = [
+  join(process.cwd(), "src", "components", "ui", "Button.tsx"),
+  join(process.cwd(), "src", "components", "ui", "Input.tsx"),
+  join(process.cwd(), "src", "components", "ui", "Textarea.tsx"),
+  join(process.cwd(), "src", "components", "ui", "Select.tsx"),
+  join(process.cwd(), "src", "components", "ui", "Badge.tsx"),
+  join(process.cwd(), "src", "components", "ui", "Card.tsx"),
+  join(process.cwd(), "src", "components", "ui", "Table.tsx"),
+  join(process.cwd(), "src", "components", "ui", "Toolbar.tsx"),
+  join(process.cwd(), "src", "components", "ui", "EmptyState.tsx"),
+  join(process.cwd(), "src", "components", "ui", "ErrorState.tsx"),
+  join(process.cwd(), "src", "routes", "ops.tsx"),
+];
+
+describe("migrated surface", () => {
+  it("has no raw hex colours in the migrated TSX", async () => {
+    for (const file of migratedFiles) {
+      const source = await readFile(file, "utf8");
+      expect(source, file).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+  });
+
+  it("uses only scale font sizes, gaps, paddings and radii in ui.css", async () => {
+    const css = await readFile(join(stylesDirectory, "ui.css"), "utf8");
+    for (const match of css.matchAll(/font-size:\s*([^;]+);/g)) {
+      expect(match[1]?.trim(), "font-size").toMatch(/^var\(--text-[1-8]\)$/);
+    }
+    for (const match of css.matchAll(/gap:\s*([^;]+);/g)) {
+      expect(match[1]?.trim(), "gap").toMatch(/^var\(--space-[1-8]\)$/);
+    }
+    for (const match of css.matchAll(/padding:\s*([^;]+);/g)) {
+      for (const part of (match[1] ?? "").trim().split(/\s+/)) {
+        expect(part, "padding").toMatch(/^(0|var\(--space-[1-8]\))$/);
+      }
+    }
+    for (const match of css.matchAll(/border-radius:\s*([^;]+);/g)) {
+      expect(match[1]?.trim(), "radius").toMatch(/^(var\(--radius-[1-5]\)|var\(--radius-pill\)|50%)$/);
+    }
+  });
+});
