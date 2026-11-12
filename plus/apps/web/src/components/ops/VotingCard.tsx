@@ -18,6 +18,11 @@ import {
 } from "../../api/voting.js";
 import type { VoteResultCandidateView } from "../../api/voting.js";
 import { useRealtimeTopic } from "../../realtime/useRealtimeTopic.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Input } from "../ui/Input.js";
+import { Select } from "../ui/Select.js";
+import { Textarea } from "../ui/Textarea.js";
 
 function humanError(error: unknown): string {
   const code = error instanceof ApiError ? error.code : "";
@@ -50,15 +55,15 @@ function VoteLink({ sessionId }: { readonly sessionId: string }) {
   return (
     <div className="vote-link">
       <a href={url} target="_blank" rel="noreferrer">{url}</a>
-      <button
-        type="button"
-        className="secondary-button"
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={() => {
           void navigator.clipboard?.writeText(url);
         }}
       >
         复制链接
-      </button>
+      </Button>
       {qr === null ? null : <img src={qr} alt="投票二维码" width={160} height={160} />}
     </div>
   );
@@ -178,15 +183,20 @@ export function VotingCard(props: {
     release.error;
 
   if (!props.canManageVotes) return null;
-  if (sessionsQuery.isLoading) return <section className="ops-card">正在读取投票…</section>;
+  if (sessionsQuery.isLoading) {
+    return (
+      <Card className="voting-card">
+        <p className="auth-loading">正在读取投票…</p>
+      </Card>
+    );
+  }
 
   const voteSession = running("voting");
   const publishingSession = running("publishing");
 
   return (
-    <section className="ops-card voting-card">
-      <p className="eyebrow">VOTING · 投票</p>
-      <h2>投票与发布</h2>
+    <Card className="voting-card">
+      <h2 className="ui-card__title">投票与发布</h2>
 
       <div className="voting-sessions">
         {(["voting", "publishing"] as const).map((scope) => {
@@ -199,6 +209,7 @@ export function VotingCard(props: {
                 session === undefined ? (
                   <>
                     <select
+                      className="ui-select"
                       aria-label="启动模式"
                       value={startMode}
                       onChange={(event) => setStartMode(event.target.value as "rehearsal" | "formal")}
@@ -206,18 +217,18 @@ export function VotingCard(props: {
                       <option value="rehearsal">彩排</option>
                       <option value="formal">正式</option>
                     </select>
-                    <button type="button" className="secondary-button" onClick={() => start.mutate(scope)}>
+                    <Button variant="secondary" size="sm" onClick={() => start.mutate(scope)}>
                       启动
-                    </button>
+                    </Button>
                   </>
                 ) : (
-                  <button
-                    type="button"
-                    className="secondary-button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => closeExecutionMutation.mutate(session)}
                   >
                     关闭会话
-                  </button>
+                  </Button>
                 )
               ) : null}
             </div>
@@ -226,24 +237,21 @@ export function VotingCard(props: {
       </div>
 
       <div className="voting-new">
-        <label>
-          候选（每行一个）
-          <textarea
-            value={candidateText}
-            onChange={(event) => setCandidateText(event.target.value)}
-            rows={4}
-          />
-        </label>
-        <button
-          type="button"
-          className="primary-button"
+        <Textarea
+          label="候选（每行一个）"
+          rows={4}
+          value={candidateText}
+          onChange={(event) => setCandidateText(event.target.value)}
+        />
+        <Button
+          variant="primary"
           disabled={voteSession === undefined || open.isPending || candidateText.trim() === ""}
           onClick={() => open.mutate()}
         >
           开启投票
-        </button>
+        </Button>
         {voteSession === undefined ? (
-          <p className="state-copy">先启动 voting 会话。</p>
+          <p className="ui-card__description">先启动 voting 会话。</p>
         ) : null}
       </div>
 
@@ -252,7 +260,7 @@ export function VotingCard(props: {
           <li key={session.id} className="voting-session">
             <div>
               <strong>{session.id}</strong>
-              <span className="state-copy">
+              <span className="ui-card__description">
                 {session.status === "open" ? "进行中" : "已关闭"} · {session.candidateCount} 个候选
                 {fallback && session.live !== null ? " · 轮询中" : ""}
               </span>
@@ -268,13 +276,13 @@ export function VotingCard(props: {
             ) : null}
             <div className="voting-actions">
               {session.status === "open" ? (
-                <button type="button" className="secondary-button" onClick={() => closeSession.mutate(session)}>
+                <Button variant="secondary" size="sm" onClick={() => closeSession.mutate(session)}>
                   关闭场次
-                </button>
+                </Button>
               ) : (
-                <button type="button" className="secondary-button" onClick={() => loadPreview.mutate(session.id)}>
+                <Button variant="secondary" size="sm" onClick={() => loadPreview.mutate(session.id)}>
                   预览结果
-                </button>
+                </Button>
               )}
             </div>
             {session.status === "open" && session.mode === "formal" ? (
@@ -286,7 +294,7 @@ export function VotingCard(props: {
 
       {preview === null ? null : (
         <div className="voting-preview">
-          <h3>结果预览</h3>
+          <h3 className="ui-card__title">结果预览</h3>
           <table>
             <thead>
               <tr><th>名次</th><th>候选</th><th>票数</th><th>占比</th></tr>
@@ -303,42 +311,42 @@ export function VotingCard(props: {
             </tbody>
           </table>
           {preview.status === "hold" ? (
-            <p className="state-copy">没有有效票，无法发布。</p>
+            <p className="ui-card__description">没有有效票，无法发布。</p>
           ) : null}
           {props.canManageResults ? (
             <div className="voting-publish">
-              <label>
-                阶段
-                <select value={effectiveStage} onChange={(event) => setStageKey(event.target.value)}>
-                  {stages.map((stage) => (
-                    <option key={stage.key} value={stage.key}>{stage.label}</option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="primary-button"
+              <Select
+                label="阶段"
+                value={effectiveStage}
+                onChange={(event) => setStageKey(event.target.value)}
+              >
+                {stages.map((stage) => (
+                  <option key={stage.key} value={stage.key}>{stage.label}</option>
+                ))}
+              </Select>
+              <Button
+                variant="primary"
                 disabled={confirm.isPending || publishingSession === undefined || preview.status === "hold"}
                 onClick={() => confirm.mutate(preview)}
               >
                 确认赛果
-              </button>
-              <label>
-                发布备注
-                <input value={note} onChange={(event) => setNote(event.target.value)} />
-              </label>
-              <button
-                type="button"
-                className="primary-button"
+              </Button>
+              <Input
+                label="发布备注"
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+              />
+              <Button
+                variant="primary"
                 disabled={release.isPending || note.trim() === "" || confirm.data === undefined}
                 onClick={() =>
                   confirm.data === undefined ? undefined : release.mutate(confirm.data.candidateRevision)
                 }
               >
                 发布结果
-              </button>
+              </Button>
               {publishingSession === undefined ? (
-                <p className="state-copy">先启动 publishing 会话。</p>
+                <p className="ui-card__description">先启动 publishing 会话。</p>
               ) : null}
             </div>
           ) : null}
@@ -346,8 +354,8 @@ export function VotingCard(props: {
       )}
 
       {error === null || error === undefined ? null : (
-        <p className="form-error" role="alert">{humanError(error)}</p>
+        <p className="ui-field__error" role="alert">{humanError(error)}</p>
       )}
-    </section>
+    </Card>
   );
 }
