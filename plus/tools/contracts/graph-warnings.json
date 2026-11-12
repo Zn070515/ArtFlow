@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "accepted": [
+    {
+      "match": "Dynamic event provider emits event types at runtime",
+      "reason": "appendRuntimeFact accepts the event type and capability as caller inputs; the dynamic seam is declared in dynamic-dependencies.json and validated at runtime."
+    }
+  ]
+}
