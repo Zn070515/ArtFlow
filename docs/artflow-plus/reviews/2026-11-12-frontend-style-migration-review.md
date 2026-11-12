@@ -31,8 +31,8 @@
 - contract-tools **105 tests** + voting contract **8 tests** 通过；
 - 文档门禁通过。
 
-## 仍需跟进
+## 后续状态（2026-11-12）
 
-- Portal 展示字族（Instrument Serif / Noto Serif SC）目前随主包加载；下一步应按路由 code-split，降低 Console 首屏字体预算。
-- 全站逐像素视觉基线尚未建立；目前有 token sheet/布局断言与 7 条 E2E。
-- `impact` job 仍为 `continue-on-error`；积累 2 周误报率后再决定是否阻塞。
+- **已解决**：Portal 展示字族改为 `PortalShell` 挂载时动态 import；Console 主包不含 Instrument Serif / Noto Serif SC，构建产物中是独立的 CSS chunk。
+- **已补**：token sheet 增加 1440/390 Playwright 像素基线（平台中立 snapshot，5% 容差）；Ops 保留 1440/1024/390 布局断言。
+- **仍待**：其他页面的逐像素基线；`impact` job 的阻塞化需要 2 周误报率数据。
