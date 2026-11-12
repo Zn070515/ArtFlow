@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "../../api/client.js";
 import { compileStudioDefinition, type StudioState } from "../../api/studio.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
 
 function defaultText(state: StudioState): string {
   return JSON.stringify(
@@ -68,11 +70,10 @@ export function DefinitionEditor({
   }
 
   return (
-    <section className="ops-card studio-editor">
-      <p className="eyebrow">DEFINITION · 定义</p>
+    <Card className="studio-editor">
       <div className="studio-card-head">
-        <h2 className="console-card-title">Definition Package</h2>
-        <span className="state-copy">
+        <h2 className="ui-card__title">Definition Package</h2>
+        <span className="ui-card__description">
           draft revision {state.draft?.revision ?? "—"}
           {state.compiled === null ? "" : ` · compiled ${state.compiled.contentHash.slice(0, 12)}…`}
         </span>
@@ -85,9 +86,8 @@ export function DefinitionEditor({
         aria-label="Definition Package JSON"
       />
       <div className="studio-toolbar">
-        <button
-          className="secondary-button"
-          type="button"
+        <Button
+          variant="secondary"
           onClick={() => {
             try {
               setText(JSON.stringify(JSON.parse(text), null, 2));
@@ -98,10 +98,10 @@ export function DefinitionEditor({
           }}
         >
           格式化
-        </button>
-        <button className="primary-button" type="button" disabled={busy} onClick={() => void compile()}>
+        </Button>
+        <Button variant="primary" disabled={busy} onClick={() => void compile()}>
           {busy ? "正在编译…" : "编译定义"}
-        </button>
+        </Button>
       </div>
       {message === null ? null : <p className="form-success">{message}</p>}
       {error === null ? null : (
@@ -110,6 +110,6 @@ export function DefinitionEditor({
           {details === null ? null : <pre>{JSON.stringify(details, null, 2)}</pre>}
         </div>
       )}
-    </section>
+    </Card>
   );
 }

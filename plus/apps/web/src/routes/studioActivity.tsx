@@ -14,6 +14,11 @@ import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { DefinitionEditor } from "../components/studio/DefinitionEditor.js";
 import { ReleasePanel } from "../components/studio/ReleasePanel.js";
 import { SessionPanel } from "../components/studio/SessionPanel.js";
+import { Button } from "../components/ui/Button.js";
+import { Card } from "../components/ui/Card.js";
+import { EmptyState } from "../components/ui/EmptyState.js";
+import { ErrorState } from "../components/ui/ErrorState.js";
+import { Input } from "../components/ui/Input.js";
 
 export function StudioActivityPage() {
   return (
@@ -28,21 +33,20 @@ function GuidedSummary({ state }: { readonly state: StudioState }) {
     | { manifest?: { key?: string; title?: string } }
     | undefined;
   return (
-    <section className="ops-card">
-      <p className="eyebrow">GUIDED · 摘要</p>
-      <h2 className="console-card-title">组合</h2>
-      <p className="state-copy">
+    <Card>
+      <h2 className="ui-card__title">组合</h2>
+      <p className="ui-card__description">
         已启用：{state.activity.enabledCapabilities.join(", ")}
       </p>
       {manifest?.manifest === undefined ? null : (
-        <p className="state-copy">
+        <p className="ui-card__description">
           Manifest：{manifest.manifest.key} · {manifest.manifest.title}
         </p>
       )}
       {state.compiled === null ? null : (
-        <p className="state-copy">已编译：{state.compiled.capabilities.join(", ")}</p>
+        <p className="ui-card__description">已编译：{state.compiled.capabilities.join(", ")}</p>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -108,37 +112,39 @@ function StudioActivityContent() {
 
   if (!allowed) {
     return (
-      <section className="console-state">
-        <p className="eyebrow">STUDIO</p>
-        <h1 className="console-page-title">没有 Studio 权限</h1>
-        <p className="state-copy">当前账号缺少 studio.manage。</p>
-      </section>
+      <EmptyState
+        title="没有 Studio 权限"
+        description="当前账号缺少 studio.manage。"
+      />
     );
   }
   if (query.isPending) return <p className="auth-loading">正在加载 Studio 状态…</p>;
   if (query.error !== null) {
-    return <p className="form-error" role="alert">Studio 状态暂时无法加载。</p>;
+    return (
+      <ErrorState
+        description="Studio 状态暂时无法加载。"
+        onRetry={() => { void query.refetch(); }}
+      />
+    );
   }
 
   const state = query.data;
   return (
     <section className="studio-page">
-      <header className="studio-header console-page-header">
+      <header className="studio-header">
         <div>
           <Link to="/studio" className="table-link">
             ← 返回活动列表
           </Link>
-          <p className="eyebrow">STUDIO · {state.activity.status}</p>
-          <h1 className="console-page-title">{state.activity.title}</h1>
-          <p className="state-copy">
+          <h1 className="ui-page-title">{state.activity.title}</h1>
+          <p className="ui-page-meta">
             公开码 {state.activity.publicCode} · revision {state.activity.revision} · active release v
             {state.activity.activeDefinitionVersion}
           </p>
         </div>
         <div className="task-actions">
-          <button
-            className="secondary-button"
-            type="button"
+          <Button
+            variant="secondary"
             disabled={state.activity.status === "archived"}
             onClick={() => {
               setTitle(state.activity.title);
@@ -146,45 +152,36 @@ function StudioActivityContent() {
             }}
           >
             重命名
-          </button>
+          </Button>
           {state.activity.status === "draft" ? (
-            <button
-              className="primary-button"
-              type="button"
-              disabled={activating}
-              onClick={() => void activate()}
-            >
+            <Button variant="primary" disabled={activating} onClick={() => void activate()}>
               {activating ? "正在激活…" : "激活活动"}
-            </button>
+            </Button>
           ) : null}
         </div>
       </header>
       {renameOpen ? (
         <div className="session-controls">
-          <label className="field">
-            <span>活动标题</span>
-            <input value={title} onChange={(event) => setTitle(event.target.value)} />
-          </label>
-          <button
-            className="primary-button"
-            type="button"
+          <Input
+            label="活动标题"
+            className="session-control-field"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+          <Button
+            variant="primary"
             disabled={renaming || title.trim() === ""}
             onClick={() => void rename()}
           >
             {renaming ? "正在保存…" : "保存标题"}
-          </button>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={renaming}
-            onClick={() => setRenameOpen(false)}
-          >
+          </Button>
+          <Button variant="secondary" disabled={renaming} onClick={() => setRenameOpen(false)}>
             取消
-          </button>
+          </Button>
         </div>
       ) : null}
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {error}
         </p>
       )}

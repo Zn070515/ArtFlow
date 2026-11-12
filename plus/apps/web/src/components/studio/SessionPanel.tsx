@@ -6,6 +6,9 @@ import {
   startStudioSession,
   type StudioState,
 } from "../../api/studio.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Select } from "../ui/Select.js";
 
 type Mode = "test" | "rehearsal" | "formal";
 
@@ -59,46 +62,43 @@ export function SessionPanel({
   }
 
   return (
-    <section className="ops-card">
-      <p className="eyebrow">SESSIONS · 执行</p>
-      <h2 className="console-card-title">执行会话</h2>
+    <Card>
+      <h2 className="ui-card__title">执行会话</h2>
       {active === undefined ? (
-        <p className="state-copy">先发布一个定义，才能启动会话。</p>
+        <p className="ui-card__description">先发布一个定义，才能启动会话。</p>
       ) : (
         <div className="session-controls">
-          <label className="field">
-            <span>Scope</span>
-            <select
-              value={scope}
-              onChange={(event) => {
-                setScope(event.target.value);
-                setConfirming(false);
-              }}
-            >
-              {active.declaredScopes.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Mode</span>
-            <select
-              value={mode}
-              onChange={(event) => {
-                setMode(event.target.value as Mode);
-                setConfirming(false);
-              }}
-            >
-              <option value="test">test</option>
-              <option value="rehearsal">rehearsal</option>
-              <option value="formal">formal</option>
-            </select>
-          </label>
+          <Select
+            label="Scope"
+            className="session-control-field"
+            value={scope}
+            onChange={(event) => {
+              setScope(event.target.value);
+              setConfirming(false);
+            }}
+          >
+            {active.declaredScopes.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </Select>
+          <Select
+            label="Mode"
+            className="session-control-field"
+            value={mode}
+            onChange={(event) => {
+              setMode(event.target.value as Mode);
+              setConfirming(false);
+            }}
+          >
+            <option value="test">test</option>
+            <option value="rehearsal">rehearsal</option>
+            <option value="formal">formal</option>
+          </Select>
           {confirming ? (
             <div className="session-confirm" role="group" aria-label="确认启动会话">
-              <p className="state-copy">
+              <p className="ui-card__description">
                 将启动 {scope} · {mode} 会话。
                 {mode === "formal"
                   ? " formal 会话会写入正式事实，不能当作彩排重复运行。"
@@ -106,32 +106,21 @@ export function SessionPanel({
                     ? " 彩排事实与正式事实分开保存。"
                     : " test 只用于试跑，建议先确认流程。"}
               </p>
-              <button
-                className="primary-button"
-                type="button"
-                disabled={busy}
-                onClick={() => void start()}
-              >
+              <Button variant="primary" disabled={busy} onClick={() => void start()}>
                 {busy ? "正在启动…" : `确认启动 ${mode} 会话`}
-              </button>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={busy}
-                onClick={() => setConfirming(false)}
-              >
+              </Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setConfirming(false)}>
                 取消
-              </button>
+              </Button>
             </div>
           ) : (
-            <button
-              className="primary-button"
-              type="button"
+            <Button
+              variant="primary"
               disabled={busy || scope === ""}
               onClick={() => setConfirming(true)}
             >
               启动会话
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -143,24 +132,24 @@ export function SessionPanel({
                 {session.scope} · {session.mode} · {session.status}
               </span>
               {session.status === "running" ? (
-                <button
-                  className="secondary-button"
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={busy}
                   onClick={() => void close(session.id, session.revision)}
                 >
                   关闭
-                </button>
+                </Button>
               ) : null}
             </li>
           ))}
         </ul>
       )}
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {error}
         </p>
       )}
-    </section>
+    </Card>
   );
 }

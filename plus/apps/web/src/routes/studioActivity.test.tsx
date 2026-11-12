@@ -71,7 +71,7 @@ describe("StudioActivityPage", () => {
   it("uses a Console title and separates editor from the operational rail", () => {
     render(<StudioActivityPage />);
 
-    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
     expect(document.querySelector(".studio-workspace")).not.toBeNull();
     expect(document.querySelector(".studio-main-column")).not.toBeNull();
