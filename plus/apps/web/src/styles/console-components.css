@@ -4,39 +4,41 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 24px;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
 }
 
 .console-page-title {
   margin: 0;
   color: var(--color-text);
-  font-size: clamp(1.5rem, 2vw, 1.75rem);
-  font-weight: 650;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
+  font-size: var(--text-6);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+  line-height: var(--leading-tight);
 }
 
 .console-card-title {
-  margin: 0.2rem 0 1rem;
+  margin: var(--space-1) 0 var(--space-3);
   color: var(--color-text);
-  font-family: var(--font-console);
-  font-size: 1.15rem;
-  font-weight: 650;
-  letter-spacing: -0.015em;
-  line-height: 1.3;
+  font-family: var(--font-ui-display);
+  font-size: var(--text-4);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
 }
 
 .console-page-header .eyebrow,
 .console-page .eyebrow {
-  margin-bottom: 8px;
-  color: var(--color-accent);
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
+  margin-bottom: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-1);
+  letter-spacing: 0.08em;
 }
 
 .console-page .state-copy {
   color: var(--color-text-muted);
+  font-size: var(--text-2);
+  line-height: var(--leading-body);
 }
 
 .console-page .table-link {
@@ -669,4 +671,106 @@
   .console-page .studio-editor .editor-textarea {
     min-height: 420px;
   }
+}
+
+/* Temporary Console bridge for pages that still use the pre-primitive classes.
+ * Remove each rule when the corresponding page moves to components/ui. */
+[data-shell="console"] .primary-button,
+[data-shell="console"] .secondary-button,
+[data-shell="console"] .danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-ui);
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+[data-shell="console"] .primary-button {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+[data-shell="console"] .secondary-button {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-line);
+}
+
+[data-shell="console"] .danger-button {
+  background: var(--color-surface);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+[data-shell="console"] .primary-button:hover:not(:disabled),
+[data-shell="console"] .secondary-button:hover:not(:disabled),
+[data-shell="console"] .danger-button:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  filter: none;
+  transform: none;
+}
+
+[data-shell="console"] .primary-button:active:not(:disabled),
+[data-shell="console"] .secondary-button:active:not(:disabled),
+[data-shell="console"] .danger-button:active:not(:disabled) {
+  transform: scale(.97);
+}
+
+[data-shell="console"] .primary-button:disabled,
+[data-shell="console"] .secondary-button:disabled,
+[data-shell="console"] .danger-button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+[data-shell="console"] .form-error {
+  color: var(--color-danger);
+  font-size: var(--text-2);
+  line-height: var(--leading-ui);
+}
+
+[data-shell="console"] .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+[data-shell="console"] .field span {
+  color: var(--color-text-muted);
+  font-size: var(--text-1);
+  font-weight: var(--weight-medium);
+}
+
+[data-shell="console"] .field input,
+[data-shell="console"] .field select,
+[data-shell="console"] .field textarea {
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+  line-height: var(--leading-ui);
+}
+
+[data-shell="console"] .field input:focus,
+[data-shell="console"] .field select:focus,
+[data-shell="console"] .field textarea:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+  border-color: var(--color-focus);
+  box-shadow: none;
 }

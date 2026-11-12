@@ -14,6 +14,7 @@ import { VotingCard } from "../components/ops/VotingCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
 import { ExportCard } from "../components/ops/ExportCard.js";
+import { Card } from "../components/ui/Card.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
   if (permissions === undefined) return false;
@@ -83,27 +84,25 @@ function OpsActivityContent() {
 
   return (
     <section className="ops-page">
-      <header className="ops-header console-page-header">
+      <header className="ops-header">
         <div>
           <Link to="/ops" className="table-link">
             ← 返回活动列表
           </Link>
-          <p className="eyebrow">OPS · {activity?.status ?? "ACTIVITY"}</p>
-          <h1 className="console-page-title">{activity?.title ?? activityId}</h1>
-          {activity === undefined ? null : <p className="state-copy">公开码 {activity.publicCode}</p>}
+          <h1 className="ui-page-title">{activity?.title ?? activityId}</h1>
+          {activity === undefined ? null : <p className="ui-page-meta">公开码 {activity.publicCode}</p>}
         </div>
       </header>
       <div className="ops-grid">
         {analytics.isPending ? (
-          <section className="ops-card"><p className="auth-loading">正在加载运营分析…</p></section>
+          <Card><p className="auth-loading">正在加载运营分析…</p></Card>
         ) : analytics.error !== null ? (
-          <section className="ops-card"><p className="form-error" role="alert">运营分析暂时无法加载。</p></section>
+          <Card><p className="form-error" role="alert">运营分析暂时无法加载。</p></Card>
         ) : analytics.data === undefined ? null : (
           <ActivityAnalyticsCard analytics={analytics.data} />
         )}
-        <section className="ops-card">
-          <p className="eyebrow">REGISTRATIONS · 报名</p>
-          <h2 className="console-card-title">报名</h2>
+        <Card>
+          <h2 className="ui-card__title">报名</h2>
           {registrations.isPending ? (
             <p className="auth-loading">正在加载报名…</p>
           ) : registrations.error !== null ? (
@@ -116,15 +115,15 @@ function OpsActivityContent() {
               />
             </div>
           )}
-        </section>
+        </Card>
         {roster.isPending ? (
-          <section className="ops-card">
+          <Card>
             <p className="auth-loading">正在加载名单…</p>
-          </section>
+          </Card>
         ) : roster.error !== null ? (
-          <section className="ops-card">
+          <Card>
             <p className="form-error" role="alert">名单状态暂时无法加载。</p>
-          </section>
+          </Card>
         ) : (
           <RosterCard activityId={activityId} roster={roster.data!} summary={rosterSummary} />
         )}

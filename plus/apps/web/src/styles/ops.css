@@ -30,26 +30,24 @@
 .ops-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
-  gap: 18px;
+  gap: var(--space-4);
   align-items: start;
 }
 
 .ops-card {
-  padding: clamp(20px, 2.5vw, 30px);
-  border: 1px solid var(--line);
-  border-radius: calc(var(--radius) + 6px);
-  background: linear-gradient(180deg, rgba(12, 12, 18, 0.92), rgba(7, 7, 10, 0.9));
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(26px);
-  animation: rise 750ms cubic-bezier(0.19, 0.7, 0.22, 1) both;
+  padding: var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-4);
+  background: var(--color-surface);
 }
 
 .ops-card h2 {
-  margin: 0.2rem 0 1rem;
-  font-family: var(--display);
-  font-size: 1.5rem;
-  font-weight: 560;
-  letter-spacing: -0.02em;
+  margin: var(--space-1) 0 var(--space-4);
+  font-family: var(--font-ui-display);
+  font-size: var(--text-5);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.01em;
 }
 
 .activity-analytics-card {
@@ -60,47 +58,46 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .analytics-readonly {
-  padding: 6px 10px;
-  border: 1px solid rgba(232, 180, 90, 0.3);
-  border-radius: 999px;
-  color: var(--gold);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  font-size: var(--text-1);
+  letter-spacing: 0.04em;
 }
 
 .analytics-stat-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 1.2rem;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 
 .analytics-stat {
   min-width: 0;
-  padding: 14px;
-  border: 1px solid rgba(245, 239, 230, 0.08);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.025);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-3);
+  background: var(--color-surface-raised);
 }
 
 .analytics-stat span,
 .analytics-stat small {
   display: block;
-  color: var(--bone-dim);
-  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-size: var(--text-1);
 }
 
 .analytics-stat strong {
   display: block;
-  margin: 8px 0 4px;
-  color: var(--bone);
-  font-size: 1.55rem;
-  font-weight: 600;
+  margin: var(--space-2) 0 var(--space-1);
+  color: var(--color-text);
+  font-size: var(--text-5);
+  font-weight: var(--weight-semibold);
 }
 
 .analytics-stat small {
@@ -110,14 +107,14 @@
 }
 
 .analytics-attention {
-  margin-top: 1.4rem;
+  margin-top: var(--space-4);
 }
 
 .analytics-attention h3 {
-  margin: 0 0 8px;
-  color: var(--bone);
-  font-size: 0.86rem;
-  font-weight: 600;
+  margin: 0 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--text-3);
+  font-weight: var(--weight-semibold);
 }
 
 .tasks-card {

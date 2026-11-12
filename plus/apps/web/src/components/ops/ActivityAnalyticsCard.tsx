@@ -1,4 +1,5 @@
 import type { ActivityAnalyticsResponse } from "../../api/analytics.js";
+import { Card } from "../ui/Card.js";
 
 const ATTENTION_LABELS: Readonly<Record<string, string>> = {
   REGISTRATION_REVIEW_PENDING: "报名仍有待审核项",
@@ -26,11 +27,10 @@ export function ActivityAnalyticsCard({
   readonly analytics: ActivityAnalyticsResponse;
 }) {
   return (
-    <section className="ops-card activity-analytics-card">
+    <Card className="activity-analytics-card">
       <div className="activity-analytics-header">
         <div>
-          <p className="eyebrow">ANALYTICS · 运营分析</p>
-          <h2>准备度与活动统计</h2>
+          <h2 className="ui-card__title">准备度与活动统计</h2>
         </div>
         <span className="analytics-readonly">只读投影</span>
       </div>
@@ -57,6 +57,6 @@ export function ActivityAnalyticsCard({
           </ul>
         )}
       </div>
-    </section>
+    </Card>
   );
 }
