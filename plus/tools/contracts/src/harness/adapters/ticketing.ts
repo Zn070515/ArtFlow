@@ -177,6 +177,17 @@ export function createTicketingContractAdapter(
         { command: "redeem", from: "issued", to: "redeemed", revisionDelta: 0 },
       ],
     },
+    variants: [
+      {
+        name: "revoke",
+        transitions: [
+          { command: "issue", from: "none", to: "issued", revisionDelta: 0 },
+          { command: "rotate", from: "issued", to: "issued", revisionDelta: 1 },
+          { command: "revoke", from: "issued", to: "revoked", revisionDelta: 0 },
+        ],
+        terminal: ["revoked"],
+      },
+    ],
     illegal: [
       { command: "rotate", expectedRevision: 0, code: "INVALID_TRANSITION" },
       { command: "redeem", expectedRevision: 0, code: "TICKET_REPLAYED" },

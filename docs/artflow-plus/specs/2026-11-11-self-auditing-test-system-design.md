@@ -243,9 +243,12 @@ journey，要么显式声明 `notInJourney`。
 - L1/L2：Consumer Graph（1,891 nodes / 3,243 edges / 0 unresolved）、未引用
   mutation route 报告、Pack readiness、`audit:check` baseline 棘轮（145 条：
   manifest 68、invariant-coverage 59、ui-route 18），已接入 CI；
-- L3：registration/ticketing/competition 三个契约 Adapter；fast-check lifecycle
-  model、随机命令序列、确定性并发、read-model differential；共享故障模板
-  （多点回滚、同 commandId 并发单赢家、重复 relay 投影幂等）；
+- L3：registration/ticketing/competition/publishing 四个契约 Adapter；lifecycle
+  harness 支持分支 variant（ticket revoke、publishing revoke/re-release/unlock）；
+  适配器覆盖门禁要求每个带 command 的能力要么有 Adapter，要么有具体豁免理由；
+  fast-check lifecycle model、随机命令序列、确定性并发、read-model
+  differential；共享故障模板（多点回滚、同 commandId 并发单赢家、重复 relay
+  投影幂等）；
 - L4：数据驱动 Journey runner，已覆盖报名名单与评委入口到评分两条 spec；
 - L5：`mutation:audit` 15 个关键变异，当前 **15/15 caught**；nightly 以
   `--strict` 运行，stale anchor 也失败；
@@ -256,7 +259,7 @@ journey，要么显式声明 `notInJourney`。
 
 下一步：
 
-1. 补 publishing Adapter（confirm → release → revoke → re-release）；
+1. 用 variant 机制补 voting/grouping 的会话生命周期；
 2. 扩展故障矩阵：outbox 消费者崩溃/重放、依赖超时、stale read；
 3. 继续收敛 graph warnings（34）与 baseline（145），先清 Manifest 声明缺口；
 4. 变更影响报告目前是 `continue-on-error`，评估改成阻塞前先证明误报率；
