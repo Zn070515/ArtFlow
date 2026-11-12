@@ -97,7 +97,9 @@ function WorkspaceActivityContent() {
   };
   const progress = buildWorkspaceProgress(facts);
   const action = pickWorkspaceNextAction(facts);
-  const hasResults = activity.status !== "draft" || (analytics.data?.publishing.resultReleases.byStatus.active ?? 0) > 0;
+  const hasResults =
+    activity.enabledCapabilities.includes("publishing") &&
+    (analytics.data?.publishing.resultReleases.byStatus.active ?? 0) > 0;
 
   return (
     <section className="workspace-page workspace-detail-page">

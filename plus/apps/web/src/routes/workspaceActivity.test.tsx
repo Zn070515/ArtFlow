@@ -119,6 +119,12 @@ describe("WorkspaceActivityPage", () => {
     expect(screen.getByText("该活动已启用 Live，但当前账号没有现场权限。")).toBeInTheDocument();
   });
 
+  it("only exposes public results after an active release exists", () => {
+    render(<WorkspaceActivityPage />);
+
+    expect(screen.queryByRole("link", { name: "查看公开赛果" })).not.toBeInTheDocument();
+  });
+
   it("shows an unavailable state for an unknown activity", () => {
     useQueryMock.mockImplementation(({ queryKey }: { readonly queryKey: readonly unknown[] }) => {
       if (queryKey.join(":") === "workspace-activities") return queryState({ data: [] });
