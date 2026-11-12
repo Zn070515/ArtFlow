@@ -103,6 +103,28 @@ jobs:
       - name: Lint the gate code
         run: uv run ruff check tests/gates tests/golden
 
+  document-export:
+    name: Document export service
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore locked packages
+        run: dotnet restore plus/services/document-export/ArtFlow.DocumentExport.sln --locked-mode
+
+      - name: Test the renderer
+        run: dotnet test plus/services/document-export/ArtFlow.DocumentExport.sln --no-restore -c Release
+
+      - name: Build the sidecar image
+        run: docker build -t artflow-plus-export:ci plus/services/document-export
+
   web-e2e:
     name: Web public journey
     runs-on: ubuntu-latest

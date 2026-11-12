@@ -38,6 +38,8 @@ services:
       ARTFLOW_PLUS_INLINE_RELAY: "0"
       ARTFLOW_PLUS_ARCHIVE_DIR: /app/var/archives
       ARTFLOW_PLUS_MEDIA_DIR: /app/var/media
+      ARTFLOW_PLUS_EXPORT_SERVICE_URL: ${ARTFLOW_PLUS_EXPORT_SERVICE_URL:-}
+      ARTFLOW_PLUS_EXPORT_TOKEN: ${ARTFLOW_PLUS_EXPORT_TOKEN:-}
     volumes:
       - plus_archive_data:/app/var/archives
       - plus_media_data:/app/var/media
@@ -76,6 +78,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - artflow_internal
+
+  # Optional renderer-only sidecar. Enable with `docker compose --profile export up`
+  # after building/pinning ARTFLOW_PLUS_EXPORT_IMAGE; without it the API keeps
+  # CSV and returns 503 for DOCX/XLSX.
+  plus-export:
+    image: ${ARTFLOW_PLUS_EXPORT_IMAGE:-artflow-plus-export:local}
+    profiles: ["export"]
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ARTFLOW_PLUS_EXPORT_TOKEN: ${ARTFLOW_PLUS_EXPORT_TOKEN:-}
+      DOTNET_EnableDiagnostics: "0"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - artflow_internal
 

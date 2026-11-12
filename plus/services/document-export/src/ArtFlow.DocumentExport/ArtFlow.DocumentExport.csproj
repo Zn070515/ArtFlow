@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <AssemblyName>ArtFlow.DocumentExport</AssemblyName>
+    <RootNamespace>ArtFlow.DocumentExport</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ArtFlow.DocumentExport.Tests" />
+  </ItemGroup>
+</Project>
