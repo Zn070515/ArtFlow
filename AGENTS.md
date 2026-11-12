@@ -116,9 +116,35 @@ Every logical change is a small, independently verifiable commit. Separate test 
 
 PRs should summarize behavior changes, list migrations, note verification, and include screenshots for UI changes.
 
+### Requesting a review on GitHub
+
+Reviews attach to pull requests, so a branch merged directly into `main` cannot be reviewed after the fact. Parallel work must use this path and wait for green CI; a single scoped change may skip it when no review is needed. For a branch that still needs review:
+
+```bash
+git push -u origin <branch>
+gh pr create --draft --base main --head <branch> --title "<type>: <summary>" --body "<verification>"
+gh pr edit <number> --add-reviewer "@copilot"
+```
+
+`gh` 2.102+ maps `@copilot` to the Copilot reviewer bot. On older versions use the REST form:
+
+```bash
+gh api --method POST repos/{owner}/{repo}/pulls/<number>/requested_reviewers \
+  -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+```
+
+Verify the review actually ran and matches the head commit:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/<number>/reviews --jq '.[] | [.user.login, .commit_id]'
+gh api repos/{owner}/{repo}/pulls/<number> --jq '.head.sha'
+```
+
+Human reviewers use `--add-reviewer <login>`. Repository Settings → Rules can request Copilot code review automatically for new pushes or draft PRs, which avoids a per-PR API call.
+
 ## Agent Execution & Git Network Rules
 
-- Execute repository work inline in the current conversation. Do not spawn subagents or delegate inspection, editing, testing, verification, cleanup, commits, or merges; the primary agent must perform and report those actions directly.
+- Parallel work may use subagents or delegated workstreams. The primary agent remains responsible for the final integration, verification, commit, merge, and report.
 - If `git push` times out, retry through the local VPN proxy at `127.0.0.1:12334`:
 
 ```bash
@@ -138,20 +164,46 @@ git switch -c feat/<short-name>
 
 Use `feat/`, `fix/`, `docs/`, `test/`, or `build/` prefixes. Do not start work with uncommitted changes; preserve existing user changes and ask before proceeding.
 
-After verification:
+After verification, commit on the branch:
 
 ```bash
 git status --short
 git diff --check
 git add <scoped-files>
 git commit -m "<type>: <short description>"
+```
+
+**Single scoped change** (one workstream) — direct integration is allowed:
+
+```bash
 git switch main
 git pull --ff-only origin main
 git merge --no-ff <branch-name>
 git push origin main
 ```
 
-Keep the branch until the merge and push are confirmed.
+Opening a PR is optional here; use one when you want a GitHub review.
+
+**Parallel development** (multiple independent workstreams, delegated agents, or a change that needs external review) — the PR path is mandatory:
+
+```bash
+git push -u origin <branch-name>
+gh pr create --base main --head <branch-name> \
+  --title "<type>: <short description>" \
+  --body "<behavior change, verification, migrations, risk>"
+gh pr edit <number> --add-reviewer "@copilot"   # or a human login
+
+# Wait until every required check is green; this exits non-zero on failure.
+gh pr checks <number> --watch --fail-fast
+gh pr view <number> --json reviewDecision,mergeStateStatus
+
+git switch main
+git pull --ff-only origin main
+git merge --no-ff <branch-name>
+git push origin main
+```
+
+Required checks are Gates (including the document-export and Web E2E jobs), Security, and Workflow lint. Never merge with a red or pending check; address review findings and re-request review after pushing new commits. Keep the branch until the merge and push are confirmed.
 
 Before merging, run:
 
