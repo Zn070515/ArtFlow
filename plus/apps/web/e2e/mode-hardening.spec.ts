@@ -28,7 +28,7 @@ test("rehearses, resets, then runs the same round formally", async ({ browser })
     await staff.getByLabel("用户名").fill("e2e-ops");
     await staff.getByLabel("密码").fill("e2e-ops-password");
     await staff.getByRole("button", { name: "登录" }).click();
-    await expect(staff).toHaveURL(/\/ops$/);
+    await expect(staff).toHaveURL(/\/workspace$/);
 
     await staff.goto(`/live/${seed.modeActivityId}`);
     await expect(staff.getByRole("heading", { name: seed.modeTitle, exact: true })).toBeVisible();

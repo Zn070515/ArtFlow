@@ -5,7 +5,7 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
   await page.getByLabel("用户名").fill("e2e-ops");
   await page.getByLabel("密码").fill("e2e-ops-password");
   await page.getByRole("button", { name: "登录" }).click();
-  await page.waitForURL(/\/ops$/);
+  await page.waitForURL(/\/workspace$/);
 
   await page.goto("/ops/act_e2e_voting");
   await expect(page.getByRole("heading", { name: "投票与发布" })).toBeVisible();

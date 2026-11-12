@@ -18,7 +18,7 @@ test("ops opens check-in, checks in a participant, staff member, and ticket", as
   await page.getByLabel("用户名").fill("e2e-ops");
   await page.getByLabel("密码").fill("e2e-ops-password");
   await page.getByRole("button", { name: "登录" }).click();
-  await page.waitForURL(/\/ops$/);
+  await page.waitForURL(/\/workspace$/);
 
   await page.goto(`/ops/${fixture.activityId}`);
   const card = page.getByTestId("attendance-card");

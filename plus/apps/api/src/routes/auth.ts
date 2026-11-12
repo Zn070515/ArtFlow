@@ -1,4 +1,9 @@
 import type { ApiContext } from "../http/context.js";
+
+function positiveLimit(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
 import { RegisterParticipantBodySchema } from "@artflow-plus/contracts";
 import { revokeLocalSession } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
@@ -21,8 +26,9 @@ export function registerAuthRoutes(ctx: ApiContext): void {
     { schema: { body: LoginBody } },
     async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       const body = request.body as { username: string; password: string };
-      await requirePublicRateLimit(request, "auth-login", 10);
-      await requireRateLimit(`auth-login-user:${body.username.trim().toLowerCase()}`, 20);
+      // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the per-IP budget.
+      await requirePublicRateLimit(request, "auth-login", positiveLimit("ARTFLOW_PLUS_AUTH_PUBLIC_LIMIT", 10));
+      await requireRateLimit(`auth-login-user:${body.username.trim().toLowerCase()}`, positiveLimit("ARTFLOW_PLUS_AUTH_USER_LIMIT", 20));
       const result = await authenticateLocalAccount(db, body);
       const csrf = csrfTokenFor(result.token, sessionSecret);
       setSessionCookies(reply, result.token, csrf);
@@ -41,8 +47,9 @@ export function registerAuthRoutes(ctx: ApiContext): void {
     { schema: { body: LoginBody } },
     async (request) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       const body = request.body as { username: string; password: string };
-      await requirePublicRateLimit(request, "auth-token", 10);
-      await requireRateLimit(`auth-token-user:${body.username.trim().toLowerCase()}`, 20);
+      // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the per-IP budget.
+      await requirePublicRateLimit(request, "auth-token", positiveLimit("ARTFLOW_PLUS_AUTH_PUBLIC_LIMIT", 10));
+      await requireRateLimit(`auth-token-user:${body.username.trim().toLowerCase()}`, positiveLimit("ARTFLOW_PLUS_AUTH_USER_LIMIT", 20));
       const result = await authenticateLocalAccount(db, body);
       // Programmatic clients (tests, CLI) authenticate with a bearer token; the
       // browser login above does not expose one.

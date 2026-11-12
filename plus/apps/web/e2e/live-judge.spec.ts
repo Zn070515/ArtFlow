@@ -26,7 +26,7 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
     await staff.getByLabel("用户名").fill("e2e-ops");
     await staff.getByLabel("密码").fill("e2e-ops-password");
     await staff.getByRole("button", { name: "登录" }).click();
-    await expect(staff).toHaveURL(/\/ops$/);
+    await expect(staff).toHaveURL(/\/workspace$/);
 
     await staff.goto(`/live/${seed.activityId}`);
     await expect(staff.getByRole("heading", { name: seed.title, exact: true })).toBeVisible();

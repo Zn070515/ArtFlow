@@ -7,7 +7,7 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   await page.getByLabel("用户名").fill("e2e-ops");
   await page.getByLabel("密码").fill("e2e-ops-password");
   await page.getByRole("button", { name: "登录" }).click();
-  await expect(page).toHaveURL(/\/ops$/);
+  await expect(page).toHaveURL(/\/workspace$/);
 
   await page.goto("/studio");
   await page.getByRole("link", { name: "新建活动" }).click();

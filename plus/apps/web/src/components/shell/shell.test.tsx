@@ -19,6 +19,7 @@ vi.mock("../../auth/SessionProvider.js", () => ({
   hasLiveAccess: () => true,
   hasOpsAccess: () => true,
   hasStudioAccess: () => true,
+  hasWorkspaceAccess: () => true,
   useSession: useSessionMock,
 }));
 
@@ -56,6 +57,7 @@ describe("PortalShell and ConsoleShell", () => {
     expect(document.querySelector('[data-shell="console"][data-theme="signal"]')).not.toBeNull();
     expect(screen.getByRole("navigation", { name: "Console 主导航" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ops" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Workspace" })).toBeInTheDocument();
     expect(screen.getByText("page")).toBeInTheDocument();
   });
 
@@ -93,6 +95,7 @@ describe("PortalShell and ConsoleShell", () => {
     ["/judge/public-code", "Judge · 评分"],
     ["/join", "报名 · 参与者"],
     ["/login", "登录"],
+    ["/workspace/activity-1", "工作台 · 活动"],
   ])("labels %s as %s", (pathname, label) => {
     locationMock.mockReturnValue({ pathname });
 

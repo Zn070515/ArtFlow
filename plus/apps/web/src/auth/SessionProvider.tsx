@@ -88,35 +88,35 @@ export function useSession(): SessionContextValue {
 
 export function hasOpsAccess(session: SessionResponse | null): boolean {
   if (session === null) return false;
-  const { permissions, roles } = session.actor;
+  const { permissions } = session.actor;
   return (
     permissions.includes("*") ||
     permissions.includes("registration.review") ||
-    permissions.includes("registration.manage") ||
-    roles.includes("staff") ||
-    roles.includes("admin")
+    permissions.includes("registration.manage")
   );
 }
 
 export function hasStudioAccess(session: SessionResponse | null): boolean {
   if (session === null) return false;
-  const { permissions, roles } = session.actor;
-  return permissions.includes("*") || permissions.includes("studio.manage") || roles.includes("admin");
+  const { permissions } = session.actor;
+  return permissions.includes("*") || permissions.includes("studio.manage");
 }
 
 export function hasLiveAccess(session: SessionResponse | null): boolean {
   if (session === null) return false;
-  const { permissions, roles } = session.actor;
+  const { permissions } = session.actor;
   return (
     permissions.includes("*") ||
     permissions.includes("competition.manage") ||
-    permissions.includes("judge.manage") ||
-    roles.includes("admin")
+    permissions.includes("judge.manage")
   );
 }
 
+export function hasWorkspaceAccess(session: SessionResponse | null): boolean {
+  return hasOpsAccess(session) || hasStudioAccess(session) || hasLiveAccess(session);
+}
+
 export function defaultLanding(session: SessionResponse): string {
-  if (hasOpsAccess(session)) return "/ops";
-  if (hasStudioAccess(session)) return "/studio";
+  if (hasWorkspaceAccess(session)) return "/workspace";
   return "/join";
 }

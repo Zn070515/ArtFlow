@@ -44,8 +44,12 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await ops.getByLabel("用户名").fill("e2e-ops");
     await ops.getByLabel("密码").fill("e2e-ops-password");
     await ops.getByRole("button", { name: "登录" }).click();
-    await expect(ops).toHaveURL(/\/ops$/);
-    await ops.getByRole("link", { name: "2026 院十佳报名" }).click();
+    await expect(ops).toHaveURL(/\/workspace$/);
+    const activityCard = ops.locator(".workspace-activity-card").filter({ hasText: "2026 院十佳报名" });
+    await activityCard.getByRole("link", { name: "打开活动工作台" }).click();
+    await expect(ops).toHaveURL(/\/workspace\/[^/]+$/);
+    await ops.getByRole("link", { name: "处理报名审核" }).click();
+    await expect(ops).toHaveURL(/\/ops\/[^/]+$/);
     await expect(ops.getByRole("table")).toBeVisible();
     await ops.getByRole("table").getByRole("link").first().click();
     await expect(
@@ -59,7 +63,7 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await ops.getByRole("button", { name: "确认定稿 1 人" }).click();
     await expect(ops.getByText(/已定稿 · 1 人/)).toBeVisible();
   } finally {
-    await participantContext.close();
-    await opsContext.close();
+    await participantContext.close().catch(() => undefined);
+    await opsContext.close().catch(() => undefined);
   }
 });
