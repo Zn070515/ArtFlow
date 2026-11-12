@@ -88,6 +88,12 @@ export function createHttpDocumentExporter(
       } catch {
         throw unavailable("The renderer did not answer.");
       }
+      if (response.status === 413) {
+        throw new DomainError("EXPORT_TOO_LARGE", "The export is too large for the renderer.");
+      }
+      if (response.status === 400) {
+        throw new DomainError("EXPORT_INVALID", "The renderer rejected the export payload.");
+      }
       if (!response.ok) {
         throw unavailable(`The renderer returned ${response.status}.`);
       }
@@ -95,7 +101,15 @@ export function createHttpDocumentExporter(
       if (contentType !== DOCUMENT_CONTENT_TYPES[input.format]) {
         throw unavailable("The renderer returned an unexpected content type.");
       }
-      const bytes = await readCapped(response, maxBytes);
+      let bytes: Buffer;
+      try {
+        bytes = await readCapped(response, maxBytes);
+      } catch (error) {
+        // A timeout or reset after the headers rejects mid-stream; it must
+        // still fail closed as an unavailable renderer, not an internal error.
+        if (error instanceof DomainError) throw error;
+        throw unavailable("The renderer response could not be read.");
+      }
       if (bytes.length === 0) throw unavailable("The renderer returned an empty document.");
       return { bytes, contentType, extension: input.format };
     },
@@ -108,7 +122,12 @@ export function createDocumentExporterFromEnv(
 ): DocumentExporter | null {
   const baseUrl = env.ARTFLOW_PLUS_EXPORT_SERVICE_URL?.trim() ?? "";
   const token = env.ARTFLOW_PLUS_EXPORT_TOKEN?.trim() ?? "";
-  if (baseUrl === "" || token === "") return null;
+  if ((baseUrl === "") !== (token === "")) {
+    throw new Error(
+      "ARTFLOW_PLUS_EXPORT_SERVICE_URL and ARTFLOW_PLUS_EXPORT_TOKEN must be set together.",
+    );
+  }
+  if (baseUrl === "") return null;
   return createHttpDocumentExporter({
     baseUrl,
     token,

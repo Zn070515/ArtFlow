@@ -18,8 +18,10 @@ export function fetchAttendance(
     if (value !== undefined && value !== "") params.set(key, value);
   }
   const suffix = params.toString();
+  // One template keeps the consumer graph's path parser happy; an empty query
+  // string is valid and normalizes to the same route.
   return apiFetch<AttendanceListResponse>(
-    `/api/activities/${encodeURIComponent(activityId)}/attendance${suffix ? `?${suffix}` : ""}`,
+    `/api/activities/${encodeURIComponent(activityId)}/attendance?${suffix}`,
   );
 }
 

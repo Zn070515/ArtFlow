@@ -285,6 +285,7 @@ export const publishingCapability: CapabilityRegistration = deepFreeze({
     events: [
       "StageResultConfirmed",
       "StageResultUnlocked",
+      "StageResultMarkedStale",
       "ResultReleased",
       "ResultReleaseRevoked",
       "ResultReleaseSuperseded",

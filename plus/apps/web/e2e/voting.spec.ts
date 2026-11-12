@@ -12,10 +12,14 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
 
   // Start the two execution sessions the card needs.
   const sessionRows = page.locator(".voting-session-row");
-  await sessionRows.filter({ hasText: "voting 会话" }).getByRole("button", { name: "启动" }).click();
-  await expect(sessionRows.filter({ hasText: "voting 会话" }).getByText("运行中")).toBeVisible();
-  await sessionRows.filter({ hasText: "publishing 会话" }).getByRole("button", { name: "启动" }).click();
-  await expect(sessionRows.filter({ hasText: "publishing 会话" }).getByText("运行中")).toBeVisible();
+  const votingRow = sessionRows.filter({ hasText: "voting 会话" });
+  await votingRow.getByLabel("启动模式").selectOption("formal");
+  await votingRow.getByRole("button", { name: "启动" }).click();
+  await expect(votingRow.getByText("运行中")).toBeVisible();
+  const publishingRow = sessionRows.filter({ hasText: "publishing 会话" });
+  await publishingRow.getByLabel("启动模式").selectOption("formal");
+  await publishingRow.getByRole("button", { name: "启动" }).click();
+  await expect(publishingRow.getByText("运行中")).toBeVisible();
 
   // Open a vote with two candidates.
   await page.getByLabel("候选（每行一个）").fill("alice\nbob");

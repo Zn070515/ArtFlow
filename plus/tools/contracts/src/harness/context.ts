@@ -35,20 +35,38 @@ export async function createContractContext(): Promise<ContractContext> {
   const schema = `artflow_contract_${Date.now()}_${process.pid}_${randomUUID().slice(0, 8)}`;
   const admin = new Client({ connectionString });
   await admin.connect();
-  await admin.query(`CREATE SCHEMA "${schema}"`);
-  const db = createDb({ connectionString, schema });
-  const dbB = createDb({ connectionString, schema });
-  await migrate(db);
+  let db: Kysely<Database> | undefined;
+  let dbB: Kysely<Database> | undefined;
+  try {
+    await admin.query(`CREATE SCHEMA "${schema}"`);
+    db = createDb({ connectionString, schema });
+    dbB = createDb({ connectionString, schema });
+    await migrate(db);
+  } catch (error) {
+    // A failed migration must not leak the admin client or the schema;
+    // otherwise vitest hangs on the open handle and the schema accumulates.
+    if (db !== undefined) await closeDb(db).catch(() => undefined);
+    if (dbB !== undefined) await closeDb(dbB).catch(() => undefined);
+    await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
+    await admin.end().catch(() => undefined);
+    throw error;
+  }
+  if (db === undefined || dbB === undefined) {
+    throw new Error("The contract schema was created without a database handle.");
+  }
   return {
     db,
     dbB,
     admin,
     schema,
     async dispose(): Promise<void> {
-      await closeDb(db);
-      await closeDb(dbB);
-      await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
-      await admin.end();
+      try {
+        await closeDb(db);
+        await closeDb(dbB);
+      } finally {
+        await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        await admin.end();
+      }
     },
   };
 }

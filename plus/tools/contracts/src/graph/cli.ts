@@ -10,6 +10,7 @@ import { plusRelative } from "./paths.js";
 import { summarizeGraph } from "./schema.js";
 import type { NodeKind } from "./schema.js";
 import { findUnreferencedMutationRoutes, formatUiGaps } from "./ui.js";
+import { checkWarningAllowlist, readWarningAllowlist } from "./warnings.js";
 
 interface Arguments {
   readonly command: string;
@@ -40,6 +41,10 @@ function defaultRoot(): string {
 
 function dynamicPath(): string {
   return path.resolve(import.meta.dirname, "../../dynamic-dependencies.json");
+}
+
+function warningsPath(): string {
+  return path.resolve(import.meta.dirname, "../../graph-warnings.json");
 }
 
 function artifactPath(root: string, name: string): string {
@@ -113,7 +118,24 @@ function main(): void {
         process.stderr.write(`- [${item.kind}] ${item.value}${item.file === undefined ? "" : ` (${item.file}:${item.line ?? 0})`}: ${item.reason}\n`);
       }
     }
-    if (args.flags.get("check") === true && graph.unresolved.length > 0) {
+    const check = args.flags.get("check") === true;
+    if (check && args.flags.get("strict") === true) {
+      const allowlist = readWarningAllowlist(warningsPath());
+      const warningsCheck = checkWarningAllowlist(graph.warnings, allowlist);
+      for (const warning of warningsCheck.unaccepted) {
+        process.stderr.write(`Unaccepted graph warning: ${warning}\n`);
+      }
+      for (const stale of warningsCheck.stale) {
+        process.stderr.write(`Stale graph-warning allowlist entry: ${stale}\n`);
+      }
+      if (warningsCheck.unaccepted.length > 0 || warningsCheck.stale.length > 0) {
+        process.exitCode = 1;
+      }
+    }
+    if (check && graph.unresolved.length > 0) {
+      process.exitCode = 1;
+    }
+    if (check && apiOnlyProblems.length > 0) {
       process.exitCode = 1;
     }
     return;

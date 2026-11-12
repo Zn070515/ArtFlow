@@ -54,7 +54,7 @@ describe.skipIf(!connectionString)("export table", () => {
     await db.insertInto("activity").values({
       id: activityId,
       public_code: "TABLE001",
-      title: "Table Export",
+      title: "Table\tExport",
       status: "active",
       revision: 1,
       enabled_capabilities: JSON.stringify(["registration"]),
@@ -67,7 +67,7 @@ describe.skipIf(!connectionString)("export table", () => {
       questionnaire_version: "v1",
       questionnaire_hash: "table-hash",
       status: "approved",
-      answers: JSON.stringify({ name: "Alice", student_id: "20260001", song: "Song" }),
+      answers: JSON.stringify({ name: "Alice", student_id: "20260001", song: "Song\nTitle" }),
       revision: 1,
       review_note: "",
       reviewed_by: "export-table-staff",
@@ -93,7 +93,7 @@ describe.skipIf(!connectionString)("export table", () => {
       title: "Table Export",
       filenameStem: `activity-${activityId}-registrations`,
       headers: ["participantId", "name", "studentId", "song", "status", "revision", "reviewNote"],
-      rows: [["p-1", "Alice", "20260001", "Song", "approved", 1, ""]],
+      rows: [["p-1", "Alice", "20260001", "Song Title", "approved", 1, ""]],
     });
 
     const materials = await exportActivityTable(db, deps, { activityId, kind: "materials" });
