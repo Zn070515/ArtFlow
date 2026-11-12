@@ -15,6 +15,13 @@ export const JOURNEY_ACTIONS = [
   "submit-registration",
   "review-registration",
   "finalize-roster",
+  "start-judging-session",
+  "prepare-round",
+  "activate-panel",
+  "open-performance",
+  "reissue-judge-entry",
+  "claim-judge-seat",
+  "submit-judge-score",
 ] as const;
 
 export type JourneyAction = (typeof JOURNEY_ACTIONS)[number];
