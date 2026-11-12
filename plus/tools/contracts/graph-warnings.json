@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "accepted": [
+    {
+      "match": "Dynamic event provider emits event types at runtime and cannot be listed statically: symbol:packages/runtime/src/execution-service.ts#appendRuntimeFact (Generic engine fact seam: the event type and capability are caller inputs validated at runtime.).",
+      "reason": "appendRuntimeFact accepts the event type and capability as caller inputs; the dynamic seam is declared in dynamic-dependencies.json and validated at runtime. Any additional dynamic provider produces a different warning and fails the ratchet."
+    }
+  ]
+}

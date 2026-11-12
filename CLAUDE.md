@@ -30,7 +30,7 @@ Python is used only for structural gates: `uv sync --locked --extra dev`, `uv ru
 
 ## Runtime operations
 
-Plus runs through `deploy/compose.production.yml` with the `plus` profile. Three images (`artflow-plus-api`, `artflow-plus-worker`, `artflow-plus-web`) are built from the same `v*` tag and must be pinned by `@sha256:...` digest in `.env.production`.
+Plus runs through `deploy/compose.production.yml` with the `plus` profile. Four images (`artflow-plus-api`, `artflow-plus-worker`, `artflow-plus-web`, `artflow-plus-export`) are built from the same `v*` tag and must be pinned by `@sha256:...` digest in `.env.production`. The export sidecar is behind the optional `export` compose profile.
 
 `GET /healthz/` is anonymous and intentionally returns only a generic status. Backups and restores follow [backup-restore](docs/artflow-plus/backup-restore.md).
 
@@ -101,6 +101,17 @@ The test system is part of the architecture, not a follow-on. The design record 
 
 ## Git workflow
 
-Work on a short-lived feature branch from the clean, updated `main`. Verify the scoped change before committing. Merge the verified branch back into `main` with a non-fast-forward merge and push it; do not rewrite or force-push shared history.
+Work on a short-lived feature branch from the clean, updated `main`. Verify the scoped change before committing. Do not rewrite or force-push shared history.
 
-Pushing is automatic and does not need to be requested each time: once a scoped change has passed its focused gate, commit it on the short-lived branch, merge it into `main` with `--no-ff`, and push. Never push a change that has not passed its focused gate, and never force-push or rewrite shared history.
+**Single scoped change** (one workstream): once the focused gate is green, commit on the branch, merge into `main` with `--no-ff`, and push. Pushing is automatic and does not need to be requested each time. Opening a PR is optional here; use one when you want a GitHub review.
+
+**Parallel development** (multiple independent workstreams, delegated agents, or a change that needs external review): the PR path is mandatory.
+
+1. Push the short-lived branch.
+2. Open a PR against `main`: `gh pr create --base main --head <branch> --title "<type>: <summary>" --body "<behavior, verification, risk>"`.
+3. Request a GitHub review: `gh pr edit <number> --add-reviewer "@copilot"` (or a human login).
+4. Address review findings and push; re-request review when the head commit changes.
+5. Merge only after **every required CI check is green** — Gates (including the document-export and Web E2E jobs), Security, and Workflow lint. A red or pending check blocks the merge.
+6. Merge with `--no-ff` and push `main`.
+
+Never merge a PR with failing or pending CI, and never push a change that has not passed its focused gate.

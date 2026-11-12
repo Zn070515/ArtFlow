@@ -238,24 +238,32 @@ journey，要么显式声明 `notInJourney`。
 
 ## 9. 已实现与下一步
 
-已实现：
+已实现（2026-11-12）：
 
-- Consumer Graph + `consumes-route`；
-- `findUnreferencedMutationRoutes`；
-- `checkPackReadiness`；
-- 本地缺口报告（本轮改为 baseline 棘轮）；
-- 契约 harness（P2）；
-- 六个已知缺陷的回归测试（P3）；
-- `audit:check` 已接入 CI（L1/L2）；
-- 变异审计 `mutation:audit`（L5）：8 个关键变异，首次跑出 2 个测试缺口，
-  补测后 8/8 caught。
+- L1/L2：Consumer Graph（1,891 nodes / 3,243 edges / 0 unresolved）、未引用
+  mutation route 报告、Pack readiness、`audit:check` baseline 棘轮（145 条：
+  manifest 68、invariant-coverage 59、ui-route 18），已接入 CI；
+- L3：registration/ticketing/competition/publishing 四个契约 Adapter；lifecycle
+  harness 支持分支 variant（ticket revoke、publishing revoke/re-release/unlock）；
+  适配器覆盖门禁要求每个带 command 的能力要么有 Adapter，要么有具体豁免理由；
+  fast-check lifecycle model、随机命令序列、确定性并发、read-model
+  differential；共享故障模板（多点回滚、同 commandId 并发单赢家、重复 relay
+  投影幂等）；
+- L4：数据驱动 Journey runner，已覆盖报名名单与评委入口到评分两条 spec；
+- L5：`mutation:audit` 15 个关键变异，当前 **15/15 caught**；nightly 以
+  `--strict` 运行，stale anchor 也失败；
+- 导出 read path 纳入同一体系：API 契约测试、sidecar 客户端故障测试、
+  7 个导出 mutation，全量测试 684；
+- 规范侧：`CLAUDE.md` / `AGENTS.md` 要求每个 spec 与 plan 在实施前写
+  Test architecture 段。
 
 下一步：
 
-1. fast-check lifecycle model、随机命令序列、确定性并发（L3）；
-2. Journey spec runner（L4）；
-3. 把变异审计接入夜间任务，扩展 publishing/outbox/material/mode 变异（L5）；
-4. 逐步清理 baseline：先修 P0 产品缺口，再收紧对应类别的 `--strict`。
+1. 用 variant 机制补 voting/grouping 的会话生命周期；
+2. 扩展故障矩阵：outbox 消费者崩溃/重放、依赖超时、stale read；
+3. 继续收敛 graph warnings（34）与 baseline（145），先清 Manifest 声明缺口；
+4. 变更影响报告目前是 `continue-on-error`，评估改成阻塞前先证明误报率；
+5. 把 `dotnet test` 与文档门禁纳入 PR 必过检查（已进 Gates，PR 跑通后确认）。
 
 ## 10. 验收标准
 
