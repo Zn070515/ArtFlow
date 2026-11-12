@@ -16,6 +16,7 @@ import { RootLayout } from "./routes/__root.js";
 import { StudioPage } from "./routes/studio.js";
 import { StudioActivityPage } from "./routes/studioActivity.js";
 import { StudioNewPage } from "./routes/studioNew.js";
+import { TokensPage } from "./routes/tokens.js";
 import { VotePage } from "./routes/vote.js";
 import { WorkspaceActivityPage } from "./routes/workspaceActivity.js";
 import { WorkspacePage } from "./routes/workspace.js";
@@ -136,6 +137,12 @@ const workspaceActivityRoute = createRoute({
   component: WorkspaceActivityPage,
 });
 
+const tokensRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/_tokens",
+  component: TokensPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   resultsRoute,
@@ -155,6 +162,7 @@ const routeTree = rootRoute.addChildren([
   judgeRoute,
   workspaceRoute,
   workspaceActivityRoute,
+  tokensRoute,
 ]);
 
 export const router = createRouter({
