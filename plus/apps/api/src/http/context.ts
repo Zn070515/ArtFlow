@@ -4,7 +4,7 @@ import type {
   ActorContext,
   CapabilityRegistry,
 } from "@artflow-plus/domain";
-import type { RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
+import type { DocumentExporter, RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely } from "kysely";
 
@@ -32,6 +32,7 @@ export interface ApiContext {
   readonly registry: CapabilityRegistry;
   readonly packs: readonly ActivityPack[];
   readonly rateLimiter: RateLimiter;
+  readonly documentExporter: DocumentExporter | null;
   readonly isProduction: boolean;
   readonly sessionSecret: string;
   readonly enableRuntimeFacts: boolean;
