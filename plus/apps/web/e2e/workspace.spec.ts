@@ -21,3 +21,25 @@ test("organizer enters the workspace and continues an activity", async ({ page }
   await page.getByRole("link", { name: "返回活动工作台" }).click();
   await expect(page).toHaveURL(/\/workspace$/);
 });
+
+test("keeps activity identity visible while analytics recovers", async ({ page }) => {
+  const analyticsPath = "**/api/activities/*/operations/analytics";
+  await page.route(analyticsPath, (route) => route.abort());
+
+  await page.goto("/login");
+  await page.getByLabel("用户名").fill("e2e-ops");
+  await page.getByLabel("密码").fill("e2e-ops-password");
+  await page.getByRole("button", { name: "登录" }).click();
+  await expect(page).toHaveURL(/\/workspace$/);
+
+  const card = page.locator(".workspace-activity-card").first();
+  await card.getByRole("link", { name: "打开活动工作台" }).click();
+  await expect(page.getByRole("heading", { name: "活动进度" })).toBeVisible();
+  await expect(page.getByText("运营摘要暂不可用")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "活动快捷操作" })).toBeVisible();
+
+  await page.unroute(analyticsPath);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "活动进度" })).toBeVisible();
+  await expect(page.getByText("运营摘要暂不可用")).not.toBeVisible();
+});
