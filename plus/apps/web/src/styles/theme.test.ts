@@ -7,14 +7,16 @@ import { readAllStyles } from "./read-styles.js";
 const stylesDirectory = join(process.cwd(), "src", "styles");
 
 describe("ArtFlow visual theme styles", () => {
-  it("declares the Portal and Console theme presets with layout roles", async () => {
+  it("declares the paper, graphite and afterglow themes", async () => {
     const tokens = await readFile(`${stylesDirectory}/tokens.css`, "utf8");
+    const themes = await readFile(`${stylesDirectory}/themes.css`, "utf8");
     const global = await readAllStyles(stylesDirectory);
 
-    expect(tokens).toContain('[data-theme="violet"]');
-    expect(tokens).toContain('[data-theme="signal"]');
-    expect(tokens).toContain('[data-theme="afterglow"]');
-    expect(tokens).toContain("--color-surface-raised");
+    expect(tokens).toContain('"./themes.css"');
+    expect(themes).toContain('[data-theme="paper"]');
+    expect(themes).toContain('[data-theme="graphite"]');
+    expect(themes).toContain('[data-theme="afterglow"]');
+    expect(themes).toContain("--color-surface-raised");
     expect(global).toContain(".console-shell");
     expect(global).toContain(".console-table-wrap");
   });
@@ -29,7 +31,7 @@ describe("ArtFlow visual theme styles", () => {
     expect(consoleCss).toContain("min-height: 100vh");
   });
 
-  it("keeps Console styling on semantic Signal tokens", async () => {
+  it("keeps Console styling on semantic tokens", async () => {
     const global = await readAllStyles(stylesDirectory);
 
     expect(global).not.toContain("var(--muted, #666)");

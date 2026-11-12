@@ -1,5 +1,8 @@
 import "@fontsource-variable/fraunces";
 import "@fontsource-variable/space-grotesk";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/noto-sans-sc";
+import "@fontsource-variable/jetbrains-mono";
 import "./styles/tokens.css";
 import "./styles/global.css";
 
@@ -10,6 +13,7 @@ import { createRoot } from "react-dom/client";
 
 import { SessionProvider } from "./auth/SessionProvider.js";
 import { router } from "./router.js";
+import { ThemeProvider } from "./theme/ThemeProvider.js";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,9 +30,11 @@ if (root === null) throw new Error("Missing #root element.");
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <SessionProvider>
-        <RouterProvider router={router} />
-      </SessionProvider>
+      <ThemeProvider defaultTheme="graphite">
+        <SessionProvider>
+          <RouterProvider router={router} />
+        </SessionProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

@@ -1,0 +1,38 @@
+/*
+ * Deprecated: only for pages not yet migrated to semantic tokens.
+ * Remove each alias when its last consumer is migrated.
+ */
+@layer tokens {
+  :root {
+    --ink: var(--color-page);
+    --ink-soft: var(--color-surface);
+    --bone: var(--color-text);
+    --bone-dim: var(--color-text-muted);
+    --bone-subtle: var(--color-text-subtle);
+    --gold: var(--color-accent);
+    --gold-bright: var(--color-accent);
+    --gold-deep: var(--color-accent);
+    --gold-soft: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    --accent-ink: var(--color-accent-contrast);
+    --ember: var(--color-danger);
+    --ember-soft: color-mix(in srgb, var(--color-danger) 24%, transparent);
+    --cool: var(--color-info);
+    --line: var(--color-line);
+    --glass: var(--color-surface);
+    --glass-strong: var(--color-surface-raised);
+    --display: var(--font-display);
+    --sans: var(--font-body);
+    --radius: var(--radius-4);
+    --shadow: var(--shadow-float);
+  }
+
+  [data-shell="console"] {
+    --display: var(--font-ui-display);
+    --sans: var(--font-body);
+  }
+
+  [data-shell="portal"] {
+    --display: "Fraunces Variable", "Noto Serif SC", "Songti SC", "SimSun", serif;
+    --sans: "Space Grotesk Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  }
+}

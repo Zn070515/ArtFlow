@@ -59,12 +59,16 @@ describe("OpsPage", () => {
     });
   });
 
-  it("uses the compact Console page header and table overflow contract", () => {
+  it("uses the Console header, toolbar and data table primitives", () => {
     render(<OpsPage />);
 
-    expect(screen.getByRole("heading", { name: "活动" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "活动" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "活动" })).not.toHaveClass("results-title");
-    expect(document.querySelector(".console-table-wrap")).not.toBeNull();
+    expect(screen.getByRole("search", { name: "活动筛选" })).toHaveClass("ui-toolbar");
+    expect(screen.getByRole("searchbox", { name: "搜索活动" })).toHaveClass("ui-input");
+    expect(screen.getByRole("combobox", { name: "按状态筛选" })).toHaveClass("ui-select");
+    expect(screen.getByRole("table", { name: "活动列表" })).toHaveClass("ui-table");
+    expect(document.querySelector('td[data-label="公开码"]')).not.toBeNull();
   });
 
   it("filters the activity table from its stable toolbar", () => {
