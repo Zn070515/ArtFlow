@@ -35,11 +35,6 @@ export interface ExportTable {
   readonly rows: readonly (readonly ExportCell[])[];
 }
 
-export interface ExportResult {
-  readonly filename: string;
-  readonly csv: string;
-}
-
 function answerText(registration: StoredRegistration, keys: readonly string[]): string {
   for (const key of keys) {
     const value = registration.answers[key];
@@ -225,6 +220,7 @@ export async function recordExportAudit(
   });
 }
 
+/** CSV stays a pure serializer; the route audits after the render succeeds. */
 export function serializeCsv(table: ExportTable): string {
   const lines = [
     table.headers.map(cell).join(","),
@@ -233,14 +229,3 @@ export function serializeCsv(table: ExportTable): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** CSV keeps its original one-call contract (table, audit, and text). */
-export async function exportActivityCsv(
-  db: Kysely<Database>,
-  deps: RuntimeDeps,
-  input: { readonly activityId: string; readonly kind: ExportKind },
-): Promise<ExportResult> {
-  const table = await exportActivityTable(db, deps, input);
-  const csv = serializeCsv(table);
-  await recordExportAudit(db, deps, table, "csv");
-  return { filename: `${table.filenameStem}.csv`, csv };
-}

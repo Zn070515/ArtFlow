@@ -60,7 +60,10 @@ describe("HTTP document exporter", () => {
 
   it("fails closed on a non-2xx answer", async () => {
     const baseUrl = await serve((_request, response) => {
-      response.writeHead(500).end();
+      // A 500 that still looks like a document must not slip through the
+      // content-type check; the status check has to reject it first.
+      response.writeHead(500, { "content-type": DOCUMENT_CONTENT_TYPES.docx });
+      response.end(Buffer.from("error-page"));
     });
     const exporter = createHttpDocumentExporter({ baseUrl, token: "shared-secret" });
     await expect(exporter.render(input)).rejects.toMatchObject({ code: "EXPORT_UNAVAILABLE" });
