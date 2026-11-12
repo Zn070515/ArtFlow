@@ -105,6 +105,36 @@ export function createVotingContractAdapter(
       .execute();
   }
 
+  async function insertVotingRelease(
+    version: number,
+    contentHash: string,
+    sourceDraftRevision: number,
+  ): Promise<void> {
+    await insertRelease(db, {
+      activityId,
+      version,
+      contentHash,
+      capabilities: {
+        voting: {
+          ok: true,
+          capabilityKey: "voting",
+          contentHash: "voting",
+          artifact: votingArtifact,
+        },
+      },
+      executionPolicy: {
+        declaredScopes: ["voting"],
+        conflicts: {},
+        runtimeContractVersion: 2,
+        commandScopes: VOTING_COMMAND_SCOPES,
+      },
+      capabilityVersions: { voting: "1" },
+      bindings: [],
+      releasedAt: version === 1 ? "2026-11-11T12:00:00Z" : "2026-11-11T12:01:00Z",
+      sourceDraftRevision,
+    });
+  }
+
   async function open(
     commandId: string,
     actor: ActorContext,
@@ -214,29 +244,7 @@ export function createVotingContractAdapter(
         enabled_capabilities: JSON.stringify(["voting"]),
         active_definition_version: 1,
       }).execute();
-      await insertRelease(db, {
-        activityId,
-        version: 1,
-        contentHash: "contract-voting-release",
-        capabilities: {
-          voting: {
-            ok: true,
-            capabilityKey: "voting",
-            contentHash: "voting",
-            artifact: votingArtifact,
-          },
-        },
-        executionPolicy: {
-          declaredScopes: ["voting"],
-          conflicts: {},
-          runtimeContractVersion: 2,
-          commandScopes: VOTING_COMMAND_SCOPES,
-        },
-        capabilityVersions: { voting: "1" },
-        bindings: [],
-        releasedAt: "2026-11-11T12:00:00Z",
-        sourceDraftRevision: 1,
-      });
+      await insertVotingRelease(1, "contract-voting-release", 1);
       await insertRunningSession("formal");
     },
     execute: executeLifecycle,
@@ -261,29 +269,7 @@ export function createVotingContractAdapter(
     },
     async staleRelease() {
       await closeRunningSession();
-      await insertRelease(db, {
-        activityId,
-        version: 2,
-        contentHash: "contract-voting-release-v2",
-        capabilities: {
-          voting: {
-            ok: true,
-            capabilityKey: "voting",
-            contentHash: "voting",
-            artifact: votingArtifact,
-          },
-        },
-        executionPolicy: {
-          declaredScopes: ["voting"],
-          conflicts: {},
-          runtimeContractVersion: 2,
-          commandScopes: VOTING_COMMAND_SCOPES,
-        },
-        capabilityVersions: { voting: "1" },
-        bindings: [],
-        releasedAt: "2026-11-11T12:01:00Z",
-        sourceDraftRevision: 2,
-      });
+      await insertVotingRelease(2, "contract-voting-release-v2", 2);
       await db.updateTable("activity")
         .set({ active_definition_version: 2, revision: 2 })
         .where("id", "=", activityId)
