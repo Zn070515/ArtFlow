@@ -1,9 +1,28 @@
-export type { ActivityAnalyticsResponse } from "./analytics.js";
-export type { LiveState } from "./live.js";
-export type { OpsActivitySummary as WorkspaceActivity } from "./ops.js";
-export type { StudioState } from "./studio.js";
+import { fetchActivityAnalytics } from "./analytics.js";
+import type { ActivityAnalyticsResponse } from "./analytics.js";
+import { fetchLiveState } from "./live.js";
+import type { LiveState } from "./live.js";
+import { fetchOpsActivities } from "./ops.js";
+import type { OpsActivitySummary } from "./ops.js";
+import { fetchStudioState } from "./studio.js";
+import type { StudioState } from "./studio.js";
 
-export { fetchActivityAnalytics as fetchWorkspaceAnalytics } from "./analytics.js";
-export { fetchLiveState as fetchWorkspaceLiveState } from "./live.js";
-export { fetchOpsActivities as fetchWorkspaceActivities } from "./ops.js";
-export { fetchStudioState as fetchWorkspaceStudioState } from "./studio.js";
+export type { ActivityAnalyticsResponse, LiveState };
+export type WorkspaceActivity = OpsActivitySummary;
+export type { StudioState };
+
+export function fetchWorkspaceActivities(): Promise<readonly WorkspaceActivity[]> {
+  return fetchOpsActivities();
+}
+
+export function fetchWorkspaceAnalytics(activityId: string): Promise<ActivityAnalyticsResponse> {
+  return fetchActivityAnalytics(activityId);
+}
+
+export function fetchWorkspaceLiveState(activityId: string): Promise<LiveState> {
+  return fetchLiveState(activityId);
+}
+
+export function fetchWorkspaceStudioState(activityId: string): Promise<StudioState> {
+  return fetchStudioState(activityId);
+}
