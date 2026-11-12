@@ -30,7 +30,7 @@ if (root === null) throw new Error("Missing #root element.");
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="graphite">
+      <ThemeProvider defaultTheme="paper">
         <SessionProvider>
           <RouterProvider router={router} />
         </SessionProvider>
