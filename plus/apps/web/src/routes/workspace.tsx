@@ -8,7 +8,13 @@ import {
   type WorkspaceActivity,
 } from "../api/workspace.js";
 import { RequireSession } from "../auth/RequireSession.js";
-import { hasStudioAccess, hasWorkspaceAccess, useSession } from "../auth/SessionProvider.js";
+import {
+  hasLiveAccess,
+  hasOpsAccess,
+  hasStudioAccess,
+  hasWorkspaceAccess,
+  useSession,
+} from "../auth/SessionProvider.js";
 import { ConsolePagination } from "../components/console/ConsolePagination.js";
 import { WorkspaceActivityCard } from "../components/workspace/WorkspaceActivityCard.js";
 import { buildWorkspaceProgress, pickWorkspaceNextAction } from "../components/workspace/workspaceState.js";
@@ -45,6 +51,31 @@ function WorkspaceContent() {
 
   useEffect(() => setPage(1), [searchTerm, statusFilter]);
 
+  const activities = query.data ?? [];
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
+  const statuses = [...new Set(activities.map((activity) => activity.status))].sort();
+  const filteredActivities = activities.filter((activity) => {
+    const matchesSearch = normalizedSearch.length === 0 ||
+      `${activity.title} ${activity.publicCode}`.toLocaleLowerCase().includes(normalizedSearch);
+    return matchesSearch && (statusFilter.length === 0 || activity.status === statusFilter);
+  });
+  const totalPages = Math.max(1, Math.ceil(filteredActivities.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedActivities = filteredActivities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const analyticsQueries = useQueries({
+    queries: paginatedActivities.map((activity) => ({
+      queryKey: ["workspace-analytics", activity.id],
+      queryFn: () => fetchWorkspaceAnalytics(activity.id),
+      enabled: allowed,
+      retry: false,
+    })),
+  });
+  const access = {
+    studio: hasStudioAccess(session),
+    ops: hasOpsAccess(session),
+    live: hasLiveAccess(session),
+  };
+
   if (!allowed) {
     return (
       <section className="console-state">
@@ -70,31 +101,6 @@ function WorkspaceContent() {
       </section>
     );
   }
-
-  const activities = query.data ?? [];
-  const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
-  const statuses = [...new Set(activities.map((activity) => activity.status))].sort();
-  const filteredActivities = activities.filter((activity) => {
-    const matchesSearch = normalizedSearch.length === 0 ||
-      `${activity.title} ${activity.publicCode}`.toLocaleLowerCase().includes(normalizedSearch);
-    return matchesSearch && (statusFilter.length === 0 || activity.status === statusFilter);
-  });
-  const totalPages = Math.max(1, Math.ceil(filteredActivities.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const paginatedActivities = filteredActivities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const analyticsQueries = useQueries({
-    queries: paginatedActivities.map((activity) => ({
-      queryKey: ["workspace-analytics", activity.id],
-      queryFn: () => fetchWorkspaceAnalytics(activity.id),
-      enabled: allowed,
-      retry: false,
-    })),
-  });
-  const access = {
-    studio: hasStudioAccess(session),
-    ops: true,
-    live: true,
-  };
 
   return (
     <section className="workspace-page">

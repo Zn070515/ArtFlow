@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const useQueryMock = vi.hoisted(() => vi.fn());
 const useSessionMock = vi.hoisted(() => vi.fn());
 const hasWorkspaceAccessMock = vi.hoisted(() => vi.fn());
+const hasOpsAccessMock = vi.hoisted(() => vi.fn());
 const hasStudioAccessMock = vi.hoisted(() => vi.fn());
 const hasLiveAccessMock = vi.hoisted(() => vi.fn());
 
@@ -31,6 +32,7 @@ vi.mock("../auth/RequireSession.js", () => ({
 }));
 vi.mock("../auth/SessionProvider.js", () => ({
   hasLiveAccess: hasLiveAccessMock,
+  hasOpsAccess: hasOpsAccessMock,
   hasStudioAccess: hasStudioAccessMock,
   hasWorkspaceAccess: hasWorkspaceAccessMock,
   useSession: useSessionMock,
@@ -67,6 +69,7 @@ describe("WorkspaceActivityPage", () => {
   beforeEach(() => {
     useSessionMock.mockReturnValue({ session: { actor: { permissions: ["*"], roles: ["staff"] } } });
     hasWorkspaceAccessMock.mockReturnValue(true);
+    hasOpsAccessMock.mockReturnValue(true);
     hasStudioAccessMock.mockReturnValue(true);
     hasLiveAccessMock.mockReturnValue(true);
     useQueryMock.mockImplementation(({ queryKey }: { readonly queryKey: readonly unknown[] }) => {
@@ -102,6 +105,18 @@ describe("WorkspaceActivityPage", () => {
     expect(screen.getByRole("heading", { name: "春季现场" })).toBeInTheDocument();
     expect(screen.getByText("运营摘要暂不可用")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "进入 Ops" })).toHaveAttribute("href", "/ops/activity-1");
+  });
+
+  it("does not expose organizer links that the actor cannot access", () => {
+    hasOpsAccessMock.mockReturnValue(false);
+    hasLiveAccessMock.mockReturnValue(false);
+
+    render(<WorkspaceActivityPage />);
+
+    expect(screen.getByRole("link", { name: "进入 Studio" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "进入 Ops" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "进入 Live" })).not.toBeInTheDocument();
+    expect(screen.getByText("该活动已启用 Live，但当前账号没有现场权限。")).toBeInTheDocument();
   });
 
   it("shows an unavailable state for an unknown activity", () => {

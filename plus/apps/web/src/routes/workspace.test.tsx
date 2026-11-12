@@ -7,7 +7,9 @@ const useQueriesMock = vi.hoisted(() => vi.fn());
 const useSessionMock = vi.hoisted(() => vi.fn());
 const fetchWorkspaceActivitiesMock = vi.hoisted(() => vi.fn());
 const hasWorkspaceAccessMock = vi.hoisted(() => vi.fn());
+const hasOpsAccessMock = vi.hoisted(() => vi.fn());
 const hasStudioAccessMock = vi.hoisted(() => vi.fn());
+const hasLiveAccessMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({ useQueries: useQueriesMock, useQuery: useQueryMock }));
 vi.mock("@tanstack/react-router", () => ({
@@ -26,6 +28,8 @@ vi.mock("../auth/RequireSession.js", () => ({
 }));
 vi.mock("../auth/SessionProvider.js", () => ({
   hasStudioAccess: hasStudioAccessMock,
+  hasOpsAccess: hasOpsAccessMock,
+  hasLiveAccess: hasLiveAccessMock,
   hasWorkspaceAccess: hasWorkspaceAccessMock,
   useSession: useSessionMock,
 }));
@@ -58,7 +62,9 @@ describe("WorkspacePage", () => {
   beforeEach(() => {
     useSessionMock.mockReturnValue({ session: { actor: { permissions: ["*"], roles: ["staff"] } } });
     hasWorkspaceAccessMock.mockReturnValue(true);
+    hasOpsAccessMock.mockReturnValue(true);
     hasStudioAccessMock.mockReturnValue(true);
+    hasLiveAccessMock.mockReturnValue(true);
     fetchWorkspaceActivitiesMock.mockResolvedValue(activities);
     useQueryMock.mockReturnValue({ data: activities, error: null, isPending: false, refetch: vi.fn() });
     useQueriesMock.mockReturnValue(activities.map(() => ({ data: null, error: null, isPending: false })));
@@ -98,6 +104,15 @@ describe("WorkspacePage", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("活动列表暂时无法加载");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("mounts analytics queries while the activity list is pending", () => {
+    useQueryMock.mockReturnValue({ data: undefined, error: null, isPending: true, refetch: vi.fn() });
+    useQueriesMock.mockReturnValue([]);
+
+    render(<WorkspacePage />);
+
+    expect(useQueriesMock).toHaveBeenCalledWith({ queries: [] });
   });
 
   it("explains that a participant-only account should use the join flow", () => {

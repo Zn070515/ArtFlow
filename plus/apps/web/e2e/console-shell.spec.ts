@@ -6,7 +6,7 @@ test("mobile Console navigation is hidden when closed and restores focus on Esca
   await page.getByLabel("用户名").fill("e2e-ops");
   await page.getByLabel("密码").fill("e2e-ops-password");
   await page.getByRole("button", { name: "登录" }).click();
-  await expect(page).toHaveURL(/\/ops$/);
+  await expect(page).toHaveURL(/\/workspace$/);
 
   const sidebar = page.locator("#console-sidebar");
   const menuToggle = page.getByRole("button", { name: "打开 Console 导航" });

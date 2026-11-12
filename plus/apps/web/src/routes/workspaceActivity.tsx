@@ -10,6 +10,7 @@ import {
 import { RequireSession } from "../auth/RequireSession.js";
 import {
   hasLiveAccess,
+  hasOpsAccess,
   hasStudioAccess,
   hasWorkspaceAccess,
   useSession,
@@ -84,7 +85,7 @@ function WorkspaceActivityContent() {
 
   const access = {
     studio: hasStudioAccess(session),
-    ops: true,
+    ops: hasOpsAccess(session),
     live: hasLiveAccess(session),
   };
   const facts = {

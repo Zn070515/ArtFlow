@@ -44,7 +44,7 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await ops.getByLabel("用户名").fill("e2e-ops");
     await ops.getByLabel("密码").fill("e2e-ops-password");
     await ops.getByRole("button", { name: "登录" }).click();
-    await expect(ops).toHaveURL(/\/ops$/);
+    await expect(ops).toHaveURL(/\/workspace$/);
     await ops.getByRole("link", { name: "2026 院十佳报名" }).click();
     await expect(ops.getByRole("table")).toBeVisible();
     await ops.getByRole("link", { name: /^participant:/ }).first().click();
