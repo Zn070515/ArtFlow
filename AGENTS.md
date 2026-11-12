@@ -116,6 +116,32 @@ Every logical change is a small, independently verifiable commit. Separate test 
 
 PRs should summarize behavior changes, list migrations, note verification, and include screenshots for UI changes.
 
+### Requesting a review on GitHub
+
+Reviews attach to pull requests, so a branch merged directly into `main` cannot be reviewed after the fact. For a branch that still needs review:
+
+```bash
+git push -u origin <branch>
+gh pr create --draft --base main --head <branch> --title "<type>: <summary>" --body "<verification>"
+gh pr edit <number> --add-reviewer "@copilot"
+```
+
+`gh` 2.102+ maps `@copilot` to the Copilot reviewer bot. On older versions use the REST form:
+
+```bash
+gh api --method POST repos/{owner}/{repo}/pulls/<number>/requested_reviewers \
+  -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+```
+
+Verify the review actually ran and matches the head commit:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/<number>/reviews --jq '.[] | [.user.login, .commit_id]'
+gh api repos/{owner}/{repo}/pulls/<number> --jq '.head.sha'
+```
+
+Human reviewers use `--add-reviewer <login>`. Repository Settings → Rules can request Copilot code review automatically for new pushes or draft PRs, which avoids a per-PR API call.
+
 ## Agent Execution & Git Network Rules
 
 - Execute repository work inline in the current conversation. Do not spawn subagents or delegate inspection, editing, testing, verification, cleanup, commits, or merges; the primary agent must perform and report those actions directly.
