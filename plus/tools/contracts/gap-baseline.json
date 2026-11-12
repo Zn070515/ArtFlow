@@ -254,22 +254,6 @@
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "manifest:command-undeclared:competition.score.direct_judge",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:command-undeclared:competition.score.paper_dr",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:command-undeclared:competition.score.staff_proxy",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "manifest:command-undeclared:competition.score.staff_rapid",
-      "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "manifest:event-no-consumer:AdvancementFinalized",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
