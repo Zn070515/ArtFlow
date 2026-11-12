@@ -53,12 +53,14 @@ describe("graph regressions", () => {
   });
 
   it("does not let a longer invariant id cover a prefix id", () => {
+    // Synthetic ids only: a real id in this fixture would itself count as a
+    // test reference in the production audit.
     const root = tempRoot();
-    write(root, "docs/invariants/life.md", "- LIFE-1 initial\n- LIFE-10 terminal\n");
-    write(root, "plus/tools/contracts/test/sample.test.ts", "// LIFE-10 only\n");
+    write(root, "docs/invariants/synthetic.md", "- AUTH-999 initial\n- AUTH-9990 terminal\n");
+    write(root, "plus/tools/contracts/test/sample.test.ts", "// AUTH-9990 only\n");
     const gaps = invariantCoverageGaps(root);
     expect(gaps).toEqual([
-      expect.objectContaining({ id: "invariant-coverage:LIFE-1" }),
+      expect.objectContaining({ id: "invariant-coverage:AUTH-999" }),
     ]);
   });
 
@@ -67,9 +69,13 @@ describe("graph regressions", () => {
       version: 1 as const,
       accepted: [{ match: "known dynamic seam", reason: "declared dynamic dependency" }],
     };
-    expect(checkWarningAllowlist(["known dynamic seam detail"], allowlist)).toEqual({
+    expect(checkWarningAllowlist(["known dynamic seam"], allowlist)).toEqual({
       unaccepted: [],
       stale: [],
+    });
+    expect(checkWarningAllowlist(["known dynamic seam: extra provider"], allowlist)).toEqual({
+      unaccepted: ["known dynamic seam: extra provider"],
+      stale: ["known dynamic seam"],
     });
     expect(checkWarningAllowlist(["brand new warning"], allowlist)).toEqual({
       unaccepted: ["brand new warning"],

@@ -15,20 +15,26 @@ export function emptyWarningAllowlist(): WarningAllowlist {
 }
 
 export function readWarningAllowlist(pathname: string): WarningAllowlist {
+  // A missing or malformed allowlist must fail loudly: swallowing it would
+  // disable the strict ratchet exactly when the graph emits no warnings.
+  let raw: Partial<WarningAllowlist>;
   try {
-    const raw = JSON.parse(readFileSync(pathname, "utf8")) as Partial<WarningAllowlist>;
-    if (raw.version !== 1 || !Array.isArray(raw.accepted)) return emptyWarningAllowlist();
-    return {
-      version: 1,
-      accepted: raw.accepted.filter((entry): entry is WarningAllowlistEntry =>
-        typeof entry === "object" && entry !== null &&
-        typeof entry.match === "string" && entry.match.length > 0 &&
-        typeof entry.reason === "string" && entry.reason.length > 0,
-      ),
-    };
-  } catch {
-    return emptyWarningAllowlist();
+    raw = JSON.parse(readFileSync(pathname, "utf8")) as Partial<WarningAllowlist>;
+  } catch (error) {
+    throw new Error(`Cannot read the graph warning allowlist at ${pathname}: ${String(error)}`);
   }
+  if (raw.version !== 1 || !Array.isArray(raw.accepted)) {
+    throw new Error(`The graph warning allowlist at ${pathname} has an unsupported shape.`);
+  }
+  const accepted = raw.accepted.filter((entry): entry is WarningAllowlistEntry =>
+    typeof entry === "object" && entry !== null &&
+    typeof entry.match === "string" && entry.match.length > 0 &&
+    typeof entry.reason === "string" && entry.reason.length > 0,
+  );
+  if (accepted.length !== raw.accepted.length) {
+    throw new Error(`The graph warning allowlist at ${pathname} has an invalid entry.`);
+  }
+  return { version: 1, accepted };
 }
 
 export interface WarningCheck {
@@ -48,7 +54,8 @@ export function checkWarningAllowlist(
   const used = new Set<number>();
   const unaccepted: string[] = [];
   for (const warning of warnings) {
-    const index = allowlist.accepted.findIndex((entry) => warning.includes(entry.match));
+    // Exact match: a prefix would accept every new warning of the same class.
+    const index = allowlist.accepted.findIndex((entry) => warning === entry.match);
     if (index === -1) {
       unaccepted.push(warning);
     } else {
