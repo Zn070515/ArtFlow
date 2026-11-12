@@ -1,0 +1,64 @@
+@layer tokens {
+  [data-theme="paper"] {
+    color-scheme: light;
+    --color-page: var(--p-neutral-100);
+    --color-surface: var(--p-neutral-0);
+    --color-surface-raised: var(--p-neutral-50);
+    --color-surface-hover: var(--p-neutral-200);
+    --color-line: var(--p-neutral-250);
+    --color-line-strong: var(--p-neutral-300);
+    --color-text: var(--p-neutral-700);
+    --color-text-muted: var(--p-neutral-500);
+    --color-text-subtle: var(--p-neutral-500);
+    --color-accent: var(--p-blue-500);
+    --color-accent-contrast: var(--p-neutral-0);
+    --color-focus: var(--p-blue-500);
+    --color-success: var(--p-green-600);
+    --color-warning: var(--p-amber-600);
+    --color-danger: var(--p-red-600);
+    --color-info: var(--p-blue-500);
+    --color-neutral: var(--p-neutral-500);
+  }
+
+  [data-theme="graphite"] {
+    color-scheme: dark;
+    --color-page: var(--p-neutral-900);
+    --color-surface: var(--p-graphite-800);
+    --color-surface-raised: var(--p-graphite-700);
+    --color-surface-hover: var(--p-graphite-600);
+    --color-line: var(--p-graphite-500);
+    --color-line-strong: var(--p-graphite-400);
+    --color-text: var(--p-graphite-50);
+    --color-text-muted: var(--p-graphite-200);
+    --color-text-subtle: var(--p-graphite-300);
+    --color-accent: var(--p-blue-400);
+    --color-accent-contrast: var(--p-neutral-900);
+    --color-focus: var(--p-blue-400);
+    --color-success: var(--p-green-400);
+    --color-warning: var(--p-amber-400);
+    --color-danger: var(--p-red-400);
+    --color-info: var(--p-cyan-400);
+    --color-neutral: var(--p-graphite-200);
+  }
+
+  [data-theme="afterglow"] {
+    color-scheme: dark;
+    --color-page: var(--p-neutral-900);
+    --color-surface: var(--p-ink-soft);
+    --color-surface-raised: var(--p-ink-raised);
+    --color-surface-hover: var(--p-ink-hover);
+    --color-line: var(--p-graphite-500);
+    --color-line-strong: var(--p-graphite-400);
+    --color-text: var(--p-bone);
+    --color-text-muted: var(--p-bone-muted);
+    --color-text-subtle: var(--p-bone-subtle);
+    --color-accent: var(--p-warm-500);
+    --color-accent-contrast: var(--p-warm-contrast);
+    --color-focus: var(--p-warm-500);
+    --color-success: var(--p-green-400);
+    --color-warning: #ffb37a;
+    --color-danger: #ff9a76;
+    --color-info: var(--p-cyan-400);
+    --color-neutral: var(--p-bone-muted);
+  }
+}

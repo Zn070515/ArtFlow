@@ -1,3 +1,6 @@
 @layer tokens, base, components, utilities;
 
 @import "./scale.css";
+@import "./palette.css";
+@import "./themes.css";
+@import "./legacy-aliases.css";
