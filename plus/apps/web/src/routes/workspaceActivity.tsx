@@ -15,6 +15,9 @@ import {
   hasWorkspaceAccess,
   useSession,
 } from "../auth/SessionProvider.js";
+import { Card } from "../components/ui/Card.js";
+import { EmptyState } from "../components/ui/EmptyState.js";
+import { ErrorState } from "../components/ui/ErrorState.js";
 import { ActivitySwitcher } from "../components/workspace/ActivitySwitcher.js";
 import { WorkspaceNextAction } from "../components/workspace/WorkspaceNextAction.js";
 import { WorkspaceProgress } from "../components/workspace/WorkspaceProgress.js";
@@ -60,26 +63,29 @@ function WorkspaceActivityContent() {
 
   if (!allowed) {
     return (
-      <section className="console-state">
-        <p className="eyebrow">WORKSPACE · 主办方</p>
-        <h1 className="console-page-title">没有主办方工作台权限</h1>
-        <p className="state-copy">当前账号没有主办方工作台权限。</p>
-        <Link className="secondary-button" to="/join">进入报名</Link>
-      </section>
+      <EmptyState
+        title="没有主办方工作台权限"
+        description="当前账号没有主办方工作台权限。"
+        action={<Link className="ui-button ui-button--secondary ui-button--md" to="/join">进入报名</Link>}
+      />
     );
   }
-  if (activities.isPending) return <p className="console-state auth-loading">正在加载活动工作台…</p>;
+  if (activities.isPending) return <p className="auth-loading">正在加载活动工作台…</p>;
   if (activities.error !== null) {
-    return <p className="console-state form-error" role="alert">活动工作台暂时无法加载。</p>;
+    return (
+      <ErrorState
+        description="活动工作台暂时无法加载。"
+        onRetry={() => { void activities.refetch(); }}
+      />
+    );
   }
   if (activity === undefined) {
     return (
-      <section className="console-state">
-        <p className="eyebrow">WORKSPACE · 主办方</p>
-        <h1 className="console-page-title">活动不可用</h1>
-        <p className="state-copy">这个活动不存在、已被移除，或当前账号无法访问。</p>
-        <Link className="secondary-button" to="/workspace">返回活动工作台</Link>
-      </section>
+      <EmptyState
+        title="活动不可用"
+        description="这个活动不存在、已被移除，或当前账号无法访问。"
+        action={<Link className="ui-button ui-button--secondary ui-button--md" to="/workspace">返回活动工作台</Link>}
+      />
     );
   }
 
@@ -103,12 +109,11 @@ function WorkspaceActivityContent() {
 
   return (
     <section className="workspace-page workspace-detail-page">
-      <header className="console-page-header workspace-detail-header">
+      <header className="workspace-detail-header">
         <div>
           <Link className="table-link" to="/workspace">← 返回活动工作台</Link>
-          <p className="eyebrow">ACTIVITY · {activity.status}</p>
-          <h1 className="console-page-title">{activity.title}</h1>
-          <p className="state-copy">公开码 {activity.publicCode} · revision {activity.revision}</p>
+          <h1 className="ui-page-title">{activity.title}</h1>
+          <p className="ui-page-meta">公开码 {activity.publicCode} · revision {activity.revision}</p>
         </div>
         <ActivitySwitcher activities={activities.data ?? []} activeActivityId={activity.id} />
       </header>
@@ -119,18 +124,17 @@ function WorkspaceActivityContent() {
         </div>
         <aside className="workspace-detail-rail" aria-label="活动快捷操作">
           <WorkspaceNextAction action={action} activity={activity} pending={analytics.isPending} />
-          <section className="ops-card workspace-quick-links">
-            <p className="eyebrow">SHORTCUTS · 快捷入口</p>
-            <h2 className="console-card-title">进入工作区</h2>
+          <Card className="workspace-quick-links">
+            <h2 className="ui-card__title">进入工作区</h2>
             <div className="workspace-link-list">
-              {access.studio ? <Link className="secondary-button" to="/studio/$activityId" params={{ activityId: activity.id }}>进入 Studio</Link> : null}
-              {access.ops ? <Link className="secondary-button" to="/ops/$activityId" params={{ activityId: activity.id }}>进入 Ops</Link> : null}
-              {access.live && activity.enabledCapabilities.includes("competition") ? <Link className="secondary-button" to="/live/$activityId" params={{ activityId: activity.id }}>进入 Live</Link> : null}
-              {hasResults ? <Link className="secondary-button" to="/results/$publicCode" params={{ publicCode: activity.publicCode }}>查看公开赛果</Link> : null}
+              {access.studio ? <Link className="ui-button ui-button--secondary ui-button--md" to="/studio/$activityId" params={{ activityId: activity.id }}>进入 Studio</Link> : null}
+              {access.ops ? <Link className="ui-button ui-button--secondary ui-button--md" to="/ops/$activityId" params={{ activityId: activity.id }}>进入 Ops</Link> : null}
+              {access.live && activity.enabledCapabilities.includes("competition") ? <Link className="ui-button ui-button--secondary ui-button--md" to="/live/$activityId" params={{ activityId: activity.id }}>进入 Live</Link> : null}
+              {hasResults ? <Link className="ui-button ui-button--secondary ui-button--md" to="/results/$publicCode" params={{ publicCode: activity.publicCode }}>查看公开赛果</Link> : null}
             </div>
-            {activity.enabledCapabilities.includes("competition") && !access.live ? <p className="state-copy">该活动已启用 Live，但当前账号没有现场权限。</p> : null}
-            {!activity.enabledCapabilities.includes("competition") ? <p className="state-copy">该活动未启用 Live。</p> : null}
-          </section>
+            {activity.enabledCapabilities.includes("competition") && !access.live ? <p className="ui-card__description">该活动已启用 Live，但当前账号没有现场权限。</p> : null}
+            {!activity.enabledCapabilities.includes("competition") ? <p className="ui-card__description">该活动未启用 Live。</p> : null}
+          </Card>
         </aside>
       </div>
     </section>

@@ -26,7 +26,7 @@ describe("Organizer workspace style contracts", () => {
   it("keeps workspace styles on Console tokens and includes responsive layout rules", async () => {
     const workspace = await readFile(join(stylesDirectory, "workspace.css"), "utf8");
 
-    expect(workspace).toContain("var(--color-surface)");
+    expect(workspace).toContain("var(--color-text)");
     expect(workspace).toContain("var(--color-line)");
     expect(workspace).toContain("@media (max-width: 1023px)");
     expect(workspace).toContain("@media (max-width: 767px)");

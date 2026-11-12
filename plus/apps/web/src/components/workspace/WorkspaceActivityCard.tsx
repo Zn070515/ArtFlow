@@ -1,6 +1,9 @@
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { Badge, type BadgeTone } from "../ui/Badge.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
 import type { WorkspaceActivity, WorkspaceNextAction as NextAction } from "./workspaceState.js";
 
 const capabilityLabels: Readonly<Record<string, string>> = {
@@ -13,6 +16,20 @@ const capabilityLabels: Readonly<Record<string, string>> = {
   attendance: "签到",
   tasks: "任务",
   archive: "归档",
+};
+
+const statusLabels: Readonly<Record<string, string>> = {
+  draft: "草稿",
+  active: "进行中",
+  closed: "已结束",
+  archived: "已归档",
+};
+
+const statusTones: Readonly<Record<string, BadgeTone>> = {
+  draft: "neutral",
+  active: "success",
+  closed: "warning",
+  archived: "neutral",
 };
 
 function actionTarget(action: NextAction, activity: WorkspaceActivity) {
@@ -50,32 +67,35 @@ export function WorkspaceActivityCard({
   }
 
   return (
-    <article className="ops-card workspace-activity-card">
-      <div className="workspace-card-header">
-        <div>
-          <p className="eyebrow">ACTIVITY · 活动</p>
-          <h2 className="console-card-title">{activity.title}</h2>
-        </div>
-        <span className={`status-badge status-${activity.status}`}>{activity.status}</span>
-      </div>
+    <Card className="workspace-activity-card">
+      <header className="workspace-card-header">
+        <h2 className="ui-card__title">{activity.title}</h2>
+        <Badge tone={statusTones[activity.status] ?? "neutral"}>
+          {statusLabels[activity.status] ?? activity.status}
+        </Badge>
+      </header>
       <div className="workspace-public-code">
         <span>公开码</span>
         <code>{activity.publicCode}</code>
-        <button className="secondary-button" type="button" onClick={() => void copyPublicCode()}>
+        <Button variant="secondary" size="sm" onClick={() => void copyPublicCode()}>
           复制公开码
-        </button>
+        </Button>
         <span className="sr-only" role="status" aria-live="polite">
           {copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : ""}
         </span>
       </div>
       <ul className="workspace-capabilities" aria-label="已启用能力">
-        {activity.enabledCapabilities.length === 0 ? <li>尚未配置能力</li> : null}
+        {activity.enabledCapabilities.length === 0 ? (
+          <li><Badge tone="neutral">尚未配置能力</Badge></li>
+        ) : null}
         {activity.enabledCapabilities.map((capability) => (
-          <li key={capability}>{capabilityLabels[capability] ?? capability}</li>
+          <li key={capability}>
+            <Badge tone="neutral">{capabilityLabels[capability] ?? capability}</Badge>
+          </li>
         ))}
       </ul>
-      <div className="workspace-card-footer">
-        <span className={attentionCount !== undefined && attentionCount > 0 ? "workspace-attention-count" : "state-copy"}>
+      <footer className="workspace-card-footer">
+        <span className={attentionCount !== undefined && attentionCount > 0 ? "workspace-attention-count" : "ui-card__description"}>
           {attentionCount === undefined
             ? "打开工作台查看状态"
             : attentionCount > 0
@@ -84,19 +104,19 @@ export function WorkspaceActivityCard({
         </span>
         <div className="workspace-card-actions">
           {primaryAction === null ? null : (
-            <Link className="primary-button" {...actionTarget(primaryAction, activity)}>
+            <Link className="ui-button ui-button--primary ui-button--md" {...actionTarget(primaryAction, activity)}>
               {primaryAction.label}
             </Link>
           )}
           <Link
-            className="secondary-button"
+            className="ui-button ui-button--secondary ui-button--md"
             to="/workspace/$activityId"
             params={{ activityId: activity.id }}
           >
             打开活动工作台
           </Link>
         </div>
-      </div>
-    </article>
+      </footer>
+    </Card>
   );
 }
