@@ -5,8 +5,9 @@ using ArtFlow.DocumentExport;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options =>
 {
-    // A 50,000-row export stays well below this; anything larger is rejected
-    // before the JSON parser allocates the whole body.
+    // Hard transport ceiling. Row and header limits are validated after
+    // parsing; a body that hits this limit gets 413, which the API reports as
+    // EXPORT_TOO_LARGE instead of pretending the renderer is down.
     options.Limits.MaxRequestBodySize = 8 * 1024 * 1024;
 });
 
