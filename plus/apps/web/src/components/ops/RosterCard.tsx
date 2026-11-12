@@ -3,6 +3,9 @@ import { useState } from "react";
 
 import { ApiError } from "../../api/client.js";
 import { finalizeRoster, reopenRoster, type OpsRoster } from "../../api/ops.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+import { Textarea } from "../ui/Textarea.js";
 
 export interface RosterRegistrationSummary {
   readonly approved: number;
@@ -81,38 +84,33 @@ export function RosterCard({
   const error = finalize.error ?? reopen.error;
 
   return (
-    <section className="ops-card">
-      <p className="eyebrow">ROSTER · 名单</p>
-      <h2>名单状态</h2>
+    <Card>
+      <h2 className="ui-card__title">名单状态</h2>
       {roster.status === "final" ? (
         <>
-          <p className="state-copy">
+          <p className="ui-card__description">
             已定稿 · {roster.approvedCount} 人 ·{" "}
             {new Date(roster.finalizedAt).toLocaleString("zh-CN")}
           </p>
-          <p className="state-copy">定稿后审核已冻结；确需修改时先重新打开名单。</p>
+          <p className="ui-card__description">定稿后审核已冻结；确需修改时先重新打开名单。</p>
           {reopening ? (
             <div className="session-controls">
-              <label className="field">
-                <span>重新打开的原因</span>
-                <textarea
-                  rows={2}
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  placeholder="例如：误把名单定稿成 0 人，需要重新审核报名"
-                />
-              </label>
-              <button
-                className="primary-button"
-                type="button"
+              <Textarea
+                label="重新打开的原因"
+                rows={2}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="例如：误把名单定稿成 0 人，需要重新审核报名"
+              />
+              <Button
+                variant="primary"
                 disabled={reopen.isPending || reason.trim().length === 0}
                 onClick={() => reopen.mutate()}
               >
                 {reopen.isPending ? "正在重新打开…" : "确认重新打开"}
-              </button>
-              <button
-                className="secondary-button"
-                type="button"
+              </Button>
+              <Button
+                variant="secondary"
                 disabled={reopen.isPending}
                 onClick={() => {
                   setReopening(false);
@@ -120,64 +118,49 @@ export function RosterCard({
                 }}
               >
                 取消
-              </button>
+              </Button>
             </div>
           ) : (
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => setReopening(true)}
-            >
+            <Button variant="secondary" onClick={() => setReopening(true)}>
               重新打开名单
-            </button>
+            </Button>
           )}
         </>
       ) : confirming ? (
         <div className="session-controls">
-          <p className="state-copy">
+          <p className="ui-card__description">
             将定稿 {approved} 名已通过者。定稿后审核会被冻结，未审核的报名必须先处理。
           </p>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={finalize.isPending}
-            onClick={() => finalize.mutate()}
-          >
+          <Button variant="primary" disabled={finalize.isPending} onClick={() => finalize.mutate()}>
             {finalize.isPending ? "正在定稿…" : `确认定稿 ${approved} 人`}
-          </button>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={finalize.isPending}
-            onClick={() => setConfirming(false)}
-          >
+          </Button>
+          <Button variant="secondary" disabled={finalize.isPending} onClick={() => setConfirming(false)}>
             取消
-          </button>
+          </Button>
         </div>
       ) : (
         <>
-          <p className="state-copy">
+          <p className="ui-card__description">
             {summary === null
               ? "正在读取最新报名…"
               : `尚未定稿。已通过 ${approved} 人，待审核 ${pending} 人。`}
           </p>
-          <button
-            className="primary-button"
-            type="button"
+          <Button
+            variant="primary"
             disabled={blockedReason !== null}
             title={blockedReason ?? undefined}
             onClick={() => setConfirming(true)}
           >
             定稿名单
-          </button>
-          {blockedReason === null ? null : <p className="state-copy">{blockedReason}</p>}
+          </Button>
+          {blockedReason === null ? null : <p className="ui-card__description">{blockedReason}</p>}
         </>
       )}
       {error === null ? null : (
-        <p className="form-error" role="alert">
+        <p className="ui-field__error" role="alert">
           {rosterErrorMessage(error)}
         </p>
       )}
-    </section>
+    </Card>
   );
 }
