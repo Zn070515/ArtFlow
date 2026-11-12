@@ -1,5 +1,8 @@
 import "@fontsource-variable/fraunces";
 import "@fontsource-variable/space-grotesk";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/noto-sans-sc";
+import "@fontsource-variable/jetbrains-mono";
 import "./styles/tokens.css";
 import "./styles/global.css";
 
