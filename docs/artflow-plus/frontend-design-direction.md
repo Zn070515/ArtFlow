@@ -1,6 +1,10 @@
 # ArtFlow-Plus 前端视觉方向：Portal / Console 双壳
 
 状态：**Proposed**（2026-10-27）——方向已固定，前端实现与页面迁移留到下一轮。
+
+> Token、primitive 与响应式的实施规格见
+> [`2026-11-12-design-token-system-design.md`](specs/2026-11-12-design-token-system-design.md)。
+> 本文件保留页面类型、双壳方向与视觉原则；当两份文档冲突时，以 token 规格为准。
 范围：`plus/apps/web` 的视觉语言、桌面布局、组件契约与验收方式。
 相关：[ADR-0016](../architecture/adr/0016-web-shell-and-public-portal.md)（Afterglow 公开门户）、
 [ADR-0034](../architecture/adr/0034-portal-console-shell-split.md)、
