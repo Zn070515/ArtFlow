@@ -26,6 +26,7 @@ export function FileMetadataField({
         {question.required ? <em className="required-mark"> *</em> : null}
       </span>
       <input
+        className="ui-input"
         id={`question-${question.key}`}
         name={question.key}
         type="file"

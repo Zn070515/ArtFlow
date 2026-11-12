@@ -1,4 +1,5 @@
 import type { RegistrationQuestion } from "../../api/registrations.js";
+import { Textarea } from "../ui/Textarea.js";
 
 export function QuestionField({
   question,
@@ -19,19 +20,15 @@ export function QuestionField({
     );
   }
   return (
-    <label className="field question-field">
-      <span>
-        {question.label}
-        {question.required ? <em className="required-mark"> *</em> : null}
-      </span>
-      <textarea
-        id={`question-${question.key}`}
-        name={question.key}
-        rows={2}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
+    <Textarea
+      className="question-field question-full-row"
+      label={<>{question.label}{question.required ? <em className="required-mark"> *</em> : null}</>}
+      id={`question-${question.key}`}
+      name={question.key}
+      rows={2}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+    />
   );
 }
