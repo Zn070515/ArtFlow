@@ -12,6 +12,12 @@ import {
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { summarizeDefinition } from "../components/studio/definitionSummary.js";
+import { Button } from "../components/ui/Button.js";
+import { Card } from "../components/ui/Card.js";
+import { EmptyState } from "../components/ui/EmptyState.js";
+import { ErrorState } from "../components/ui/ErrorState.js";
+import { Input } from "../components/ui/Input.js";
+import { Select } from "../components/ui/Select.js";
 
 function SummarySection({
   title,
@@ -105,45 +111,48 @@ function StudioNewContent() {
 
   if (!allowed) {
     return (
-      <section className="console-state">
-        <p className="eyebrow">STUDIO</p>
-        <h1 className="console-page-title">没有 Studio 权限</h1>
-        <p className="state-copy">当前账号缺少 studio.manage。</p>
-      </section>
+      <EmptyState
+        title="没有 Studio 权限"
+        description="当前账号缺少 studio.manage。"
+      />
     );
   }
   if (packsQuery.isPending) return <p className="auth-loading">正在加载 Pack…</p>;
   if (packsQuery.error !== null) {
-    return <p className="form-error" role="alert">Pack 列表暂时无法加载。</p>;
+    return (
+      <ErrorState
+        description="Pack 列表暂时无法加载。"
+        onRetry={() => { void packsQuery.refetch(); }}
+      />
+    );
   }
 
   const summary = summarizeDefinition(preview?.definition, preview?.enabledCapabilities ?? []);
 
   return (
     <section className="studio-page">
-      <header className="studio-header console-page-header">
-        <div>
-          <p className="eyebrow">STUDIO · 新建</p>
-          <h1 className="console-page-title">新建活动</h1>
-        </div>
+      <header className="studio-header">
+        <h1 className="ui-page-title">新建活动</h1>
       </header>
       <div className="studio-grid">
-        <section className="ops-card studio-main-column">
-          <h2 className="console-card-title">Guided Mode</h2>
-          <label className="field">
-            <span>活动标题</span>
-            <input value={title} onChange={(event) => setTitle(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>Activity Pack</span>
-            <select value={pack?.identity ?? ""} onChange={(event) => setPackId(event.target.value)}>
-              {packs.map((candidate) => (
-                <option key={candidate.identity} value={candidate.identity}>
-                  {candidate.title}
-                </option>
-              ))}
-            </select>
-          </label>
+        <Card className="studio-main-column">
+          <h2 className="ui-card__title">Guided Mode</h2>
+          <Input
+            label="活动标题"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+          <Select
+            label="Activity Pack"
+            value={pack?.identity ?? ""}
+            onChange={(event) => setPackId(event.target.value)}
+          >
+            {packs.map((candidate) => (
+              <option key={candidate.identity} value={candidate.identity}>
+                {candidate.title}
+              </option>
+            ))}
+          </Select>
           {pack === undefined ? null : (
             <div className="pack-questions">
               {pack.questions.map((question) => (
@@ -162,27 +171,26 @@ function StudioNewContent() {
             </div>
           )}
           {error === null ? null : (
-            <p className="form-error" role="alert">
+            <p className="ui-field__error" role="alert">
               {error}
             </p>
           )}
           <div className="studio-toolbar">
-            <button className="secondary-button" type="button" onClick={() => void doPreview()}>
+            <Button variant="secondary" onClick={() => void doPreview()}>
               预览定义
-            </button>
-            <button className="primary-button" type="button" disabled={busy} onClick={() => void create()}>
+            </Button>
+            <Button variant="primary" disabled={busy} onClick={() => void create()}>
               {busy ? "正在创建…" : "创建活动"}
-            </button>
+            </Button>
           </div>
-        </section>
-        <section className="ops-card studio-rail">
-          <p className="eyebrow">PREVIEW</p>
-          <h2 className="console-card-title">生成的组合</h2>
+        </Card>
+        <Card className="studio-rail">
+          <h2 className="ui-card__title">生成的组合</h2>
           {preview === null ? (
-            <p className="state-copy">点击“预览定义”查看启用的能力与规则摘要。</p>
+            <p className="ui-card__description">点击“预览定义”查看启用的能力与规则摘要。</p>
           ) : (
             <>
-              <p className="state-copy">
+              <p className="ui-card__description">
                 已启用：{preview.enabledCapabilities.join("、")}
               </p>
               <div className="definition-summary">
@@ -199,7 +207,7 @@ function StudioNewContent() {
               </details>
             </>
           )}
-        </section>
+        </Card>
       </div>
     </section>
   );
