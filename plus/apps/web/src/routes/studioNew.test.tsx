@@ -44,9 +44,9 @@ describe("StudioNewPage", () => {
   it("uses the compact Console heading", () => {
     render(<StudioNewPage />);
 
-    expect(screen.getByRole("heading", { name: "新建活动" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "新建活动" })).toHaveClass("ui-page-title");
     expect(screen.getByRole("heading", { name: "新建活动" })).not.toHaveClass("results-title");
-    expect(screen.getByRole("heading", { name: "Guided Mode" })).toHaveClass("console-card-title");
-    expect(screen.getByRole("heading", { name: "生成的组合" })).toHaveClass("console-card-title");
+    expect(screen.getByRole("heading", { name: "Guided Mode" })).toHaveClass("ui-card__title");
+    expect(screen.getByRole("heading", { name: "生成的组合" })).toHaveClass("ui-card__title");
   });
 });
