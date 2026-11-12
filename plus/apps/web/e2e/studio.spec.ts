@@ -26,7 +26,9 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   await page.getByRole("button", { name: "发布当前编译" }).click();
   await expect(page.locator(".active-badge").first()).toBeVisible();
 
+  await page.getByLabel("Mode").selectOption("rehearsal");
   await page.getByRole("button", { name: "启动会话" }).click();
+  await page.getByRole("button", { name: "确认启动 rehearsal 会话" }).click();
   await expect(page.getByText(/rehearsal · running/)).toBeVisible();
   await page.getByRole("button", { name: "关闭" }).first().click();
   await expect(page.getByText(/rehearsal · closed/)).toBeVisible();

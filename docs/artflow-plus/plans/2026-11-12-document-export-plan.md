@@ -112,6 +112,8 @@ before the renderer, so the renderer cannot quietly redefine the data.
 - **Anti-bloat:** one table builder, one serializer, one HTTP client, one render
   endpoint, two renderers, one xUnit project, one Node contract test file. No
   per-kind formats, no template assets, no binary fixtures.
+- **Gates:** `dotnet test`, the focused export tests, the full Plus suite,
+  `audit:check`, `graph:check`, and `check_docs` before merge.
 - **Proof before scale:** the failure boundary tests run before the .NET
   renderer is wired into compose, and the full suite must stay green at every
   commit.
