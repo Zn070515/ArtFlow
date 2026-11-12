@@ -8,6 +8,9 @@ test("mobile Console navigation is hidden when closed and restores focus on Esca
   await page.getByRole("button", { name: "登录" }).click();
   await expect(page).toHaveURL(/\/workspace$/);
 
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(overflow).toBe(false);
+
   const sidebar = page.locator("#console-sidebar");
   const menuToggle = page.getByRole("button", { name: "打开 Console 导航" });
   await expect(sidebar).toBeHidden();
