@@ -40,6 +40,15 @@ describe("ArtFlow visual theme styles", () => {
     expect(global).toContain("var(--color-focus)");
   });
 
+  it("defines the default Portal theme at the root and scopes legacy aliases to themes", async () => {
+    const themes = await readFile(`${stylesDirectory}/themes.css`, "utf8");
+    const aliases = await readFile(`${stylesDirectory}/legacy-aliases.css`, "utf8");
+
+    expect(themes).toMatch(/:root,\s*\[data-theme="afterglow"\]/);
+    expect(aliases).not.toContain(":root {");
+    expect(aliases).toContain(':is([data-theme="paper"], [data-theme="graphite"], [data-theme="afterglow"])');
+  });
+
   it("removes keyboard reachability from a closed mobile sidebar", async () => {
     const global = await readAllStyles(stylesDirectory);
 

@@ -12,7 +12,6 @@ import {
 import { JUDGING_SCOPE } from "../api/live.js";
 import { Button } from "../components/ui/Button.js";
 import { Card } from "../components/ui/Card.js";
-import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
 import { Input } from "../components/ui/Input.js";
 import { Textarea } from "../components/ui/Textarea.js";
@@ -75,7 +74,7 @@ export function JudgePage() {
     return <p className="auth-loading">正在认领评委席位…</p>;
   }
   if (claim.status === "failed") {
-    return <EmptyState title="入口不可用" description={claim.message} />;
+    return <ErrorState title="入口不可用" description={claim.message} />;
   }
   if (context.isPending) {
     return <p className="auth-loading">正在加载评委上下文…</p>;

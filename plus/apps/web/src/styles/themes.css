@@ -41,6 +41,7 @@
     --color-neutral: var(--p-graphite-200);
   }
 
+  :root,
   [data-theme="afterglow"] {
     color-scheme: dark;
     --color-page: var(--p-neutral-900);
@@ -56,8 +57,8 @@
     --color-accent-contrast: var(--p-warm-contrast);
     --color-focus: var(--p-warm-500);
     --color-success: var(--p-green-400);
-    --color-warning: #ffb37a;
-    --color-danger: #ff9a76;
+    --color-warning: var(--p-amber-300);
+    --color-danger: var(--p-red-300);
     --color-info: var(--p-cyan-400);
     --color-neutral: var(--p-bone-muted);
   }

@@ -251,6 +251,11 @@
   min-height: 40px;
 }
 
+.console-page .ui-button--sm {
+  min-height: 32px;
+  height: 32px;
+}
+
 @media (max-width: 1199px) and (min-width: 1024px) {
   .console-layout {
     grid-template-columns: 220px minmax(0, 1fr);

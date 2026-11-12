@@ -18,7 +18,7 @@ const stateTone: Readonly<Record<WorkspaceProgressItem["state"], BadgeTone>> = {
 
 export function WorkspaceProgress({ items }: { readonly items: readonly WorkspaceProgressItem[] }) {
   return (
-    <Card className="workspace-progress">
+    <Card className="workspace-progress" aria-labelledby="workspace-progress-title">
       <h2 className="ui-card__title" id="workspace-progress-title">
         活动进度
       </h2>

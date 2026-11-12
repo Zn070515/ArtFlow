@@ -3,7 +3,7 @@
  * Remove each alias when its last consumer is migrated.
  */
 @layer tokens {
-  :root {
+  :is([data-theme="paper"], [data-theme="graphite"], [data-theme="afterglow"]) {
     --ink: var(--color-page);
     --ink-soft: var(--color-surface);
     --bone: var(--color-text);
