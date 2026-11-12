@@ -233,7 +233,7 @@ export const registrationCapability: CapabilityRegistration = deepFreeze({
       "registration.supplement.submit",
     ],
     queries: ["registration.read", "registration.roster"],
-    events: ["RegistrationStarted", "RegistrationSubmitted", "RegistrationReviewed", "RosterFinalized", "RosterReopened"],
+    events: ["RegistrationStarted", "RegistrationSubmitted", "RegistrationReviewed", "RegistrationSupplementIssued", "RegistrationSupplementSubmitted", "RosterFinalized", "RosterReopened"],
     permissions: ["registration.manage", "registration.review", "registration.roster.finalize"],
     surfaces: ["studio", "ops", "portal", "live"],
     scopes: ["registration", "checkin"],

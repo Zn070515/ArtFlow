@@ -106,7 +106,6 @@ async function seedLiveActivity(id: string, code: string, label: string): Promis
         runtimeContractVersion: 2,
         commandScopes: Object.fromEntries(
           [
-            "competition.configure",
             "competition.round.prepare",
             "competition.panel.activate",
             "competition.performance.open",

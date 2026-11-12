@@ -147,12 +147,16 @@ export function deployManifestGaps(root: string): TestGap[] {
     ));
   }
   const k8s = read(root, "deploy/k8s/base/db.yaml");
-  if (k8s !== null && !k8s.includes("mountPath: /var/lib/postgresql")) {
-    gaps.push(gap(
-      "deploy-manifest",
-      "k8s.plus-db.mount-path",
-      "The k8s database manifest does not use /var/lib/postgresql.",
-    ));
+  if (k8s !== null) {
+    const correct = /mountPath:\s*["']?\/var\/lib\/postgresql["']?\s*$/m.test(k8s);
+    const wrong = /mountPath:\s*["']?\/var\/lib\/postgresql\/data["']?\s*$/m.test(k8s);
+    if (!correct || wrong) {
+      gaps.push(gap(
+        "deploy-manifest",
+        "k8s.plus-db.mount-path",
+        "The k8s database manifest must mount /var/lib/postgresql, not /var/lib/postgresql/data.",
+      ));
+    }
   }
   return gaps;
 }
@@ -200,9 +204,12 @@ export function invariantCoverageGaps(root: string): TestGap[] {
     .filter((file) => /(?:test|spec|gate|golden)/i.test(file))
     .map((file) => read(root, file) ?? "")
     .join("\n");
+  // Match whole ids, not substrings: LIFE-10 must not cover LIFE-1.
+  const referenced = new Set<string>();
+  for (const match of testText.matchAll(INVARIANT_PATTERN)) referenced.add(match[0]);
 
   return [...ids].sort().flatMap((id) =>
-    testText.includes(id)
+    referenced.has(id)
       ? []
       : [gap("invariant-coverage", id, "No test file references this invariant id.")],
   );
