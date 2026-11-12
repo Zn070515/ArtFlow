@@ -1,11 +1,11 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { hasLiveAccess, hasOpsAccess, hasStudioAccess, useSession } from "../../auth/SessionProvider.js";
+import { hasLiveAccess, hasOpsAccess, hasStudioAccess, hasWorkspaceAccess, useSession } from "../../auth/SessionProvider.js";
 
 interface ConsoleNavItem {
   readonly label: string;
-  readonly to: "/ops" | "/studio" | "/live" | "/join";
+  readonly to: "/ops" | "/studio" | "/live" | "/join" | "/workspace";
   readonly prefix: string;
   readonly visible: boolean;
 }
@@ -16,6 +16,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const items: readonly ConsoleNavItem[] = [
+    { label: "Workspace", to: "/workspace", prefix: "/workspace", visible: hasWorkspaceAccess(session) },
     { label: "Ops", to: "/ops", prefix: "/ops", visible: hasOpsAccess(session) },
     { label: "Studio", to: "/studio", prefix: "/studio", visible: hasStudioAccess(session) },
     { label: "Live", to: "/live", prefix: "/live", visible: hasLiveAccess(session) },
@@ -43,7 +44,9 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileOpen]);
 
-  const contextLabel = pathname.startsWith("/ops")
+  const contextLabel = pathname.startsWith("/workspace")
+    ? "工作台 · 活动"
+    : pathname.startsWith("/ops")
     ? "Ops · 运营"
     : pathname.startsWith("/studio")
       ? "Studio · 规则"
