@@ -1,14 +1,19 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { hasLiveAccess, hasOpsAccess, hasStudioAccess, useSession } from "../../auth/SessionProvider.js";
 import { AuroraScene } from "../hero/AuroraScene.js";
 import { useReducedMotion } from "../../hooks/useReducedMotion.js";
+import { loadPortalFonts } from "../../styles/portalFonts.js";
 
 export function PortalShell({ children }: { readonly children: ReactNode }) {
   const reducedMotion = useReducedMotion();
   const { pathname } = useLocation();
   const { session, logout } = useSession();
+
+  useEffect(() => {
+    void loadPortalFonts();
+  }, []);
   const showAurora = pathname === "/" || pathname === "/results" || pathname.startsWith("/results/");
   const showStaticBackdrop = pathname.startsWith("/vote/");
 
