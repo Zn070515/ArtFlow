@@ -1,0 +1,25 @@
+{
+  "id": "singer-judge-score",
+  "description": "Organizer prepares and activates a panel, issues an entry link, and a judge claims a seat and submits a score.",
+  "actor": "organizer",
+  "steps": [
+    { "action": "create-activity", "title": "Journey Judge Contest" },
+    { "action": "activate-activity" },
+    { "action": "compile-definition" },
+    { "action": "release-definition" },
+    { "action": "start-registration" },
+    { "action": "answer-question", "key": "name", "value": "Judge Journey Singer" },
+    { "action": "answer-question", "key": "student_id", "value": "20260002" },
+    { "action": "answer-question", "key": "song", "value": "Judge Journey Song" },
+    { "action": "submit-registration" },
+    { "action": "review-registration", "status": "approved" },
+    { "action": "finalize-roster" },
+    { "action": "start-judging-session" },
+    { "action": "prepare-round" },
+    { "action": "activate-panel" },
+    { "action": "open-performance" },
+    { "action": "reissue-judge-entry" },
+    { "action": "claim-judge-seat" },
+    { "action": "submit-judge-score" }
+  ]
+}
