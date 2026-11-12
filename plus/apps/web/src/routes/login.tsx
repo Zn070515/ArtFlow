@@ -3,6 +3,8 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { ApiError } from "../api/client.js";
 import { defaultLanding, useSession } from "../auth/SessionProvider.js";
+import { Button } from "../components/ui/Button.js";
+import { Input } from "../components/ui/Input.js";
 
 type Mode = "login" | "register";
 
@@ -67,51 +69,45 @@ export function LoginPage() {
         </p>
         <p className="auth-copy">工作人员账号不在这里注册，由部署人员用 create-account 预先创建。</p>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
-          <label className="field">
-            <span>用户名</span>
-            <input
-              autoComplete="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              minLength={3}
-              maxLength={64}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>密码</span>
-            <input
+          <Input
+            label="用户名"
+            autoComplete="username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            minLength={3}
+            maxLength={64}
+            required
+          />
+          <Input
+            label="密码"
+            type="password"
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            minLength={8}
+            maxLength={128}
+            required
+          />
+          {mode === "register" ? (
+            <Input
+              label="确认密码"
               type="password"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(event) => setConfirm(event.target.value)}
               minLength={8}
               maxLength={128}
               required
             />
-          </label>
-          {mode === "register" ? (
-            <label className="field">
-              <span>确认密码</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={confirm}
-                onChange={(event) => setConfirm(event.target.value)}
-                minLength={8}
-                maxLength={128}
-                required
-              />
-            </label>
           ) : null}
           {error === null ? null : (
-            <p className="form-error" role="alert">
+            <p className="ui-field__error" role="alert">
               {error}
             </p>
           )}
-          <button className="primary-button" type="submit" disabled={busy}>
+          <Button variant="primary" type="submit" disabled={busy}>
             {busy ? "请稍候…" : mode === "login" ? "登录" : "创建账号"}
-          </button>
+          </Button>
         </form>
         <button
           className="auth-switch"

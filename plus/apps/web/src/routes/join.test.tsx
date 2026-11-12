@@ -16,7 +16,7 @@ describe("JoinPage", () => {
     render(<JoinPage />);
 
     expect(document.querySelector(".console-page-header")).not.toBeNull();
-    expect(screen.getByRole("heading", { name: "输入活动公开码" })).toHaveClass("console-page-title");
+    expect(screen.getByRole("heading", { name: "输入活动公开码" })).toHaveClass("ui-page-title");
     expect(document.querySelector(".join-code-card")).not.toBeNull();
     expect(screen.getByLabelText("活动公开码")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "继续" })).toBeInTheDocument();
