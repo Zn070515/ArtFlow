@@ -51,7 +51,7 @@
   评分 scope），其他值返回 400。
 - 只返回 `current = true` 的评分事实；每个事实附带最近一条修正
   （`open`/`revised`/`closed`/`recalculated`/`cancelled`），没有则为 `null`。
-  `recalculated`/`cancelled` 只用于展示终态，不再提供动作。最近一条按
+  `recalculated`/`cancelled` 是该条修正的终态；同一评分事实可以再开一条新修正，面板提供「再次修正」。最近一条按
   `created_at desc, revision desc` 选取——`revision` 是单条修正自己的版本号，
   新修正会重置为 0，不能跨修正比较。
 - 响应：
@@ -200,7 +200,7 @@ interface RoundScoresResponse {
      `保存修正` 调 `editScoreFact`（带 `correctionId`、`expectedVersion`、完整 criteria 与 reason）。
      一条修正只允许一次编辑；保存后状态为 `revised`，不再显示表单。
    - `关闭修正`（仅 `revised`）→ `closeScoreCorrection`；`重算`（仅 `closed`）→
-     `recalculateAfterCorrection`；`recalculated` 为终态，不再提供动作。
+     `recalculateAfterCorrection`；`recalculated`/`cancelled` 为该条修正的终态，但可再开一条新修正（「再次修正」）。
    - 每次命令成功后重新拉取 scores、publishing state 与 live state；**重算后必须由
      panel 提示先“锁轮”再“生成排名”**——`resolveRound` 只接受 locked 轮次，否则
      排名不会变化。
