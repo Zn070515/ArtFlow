@@ -405,20 +405,19 @@
   animation-delay: 60ms;
 }
 
-.rank-row:nth-child(2) {
-  animation-delay: 90ms;
+.rank-row {
+  --sibling-index: 1;
+  --stagger-step: 60ms;
+  --stagger-offset: -30ms;
+  /* Older browsers use the custom property set by ResultsView when
+     sibling-index() is unsupported; modern browsers parse the second
+     declaration and ignore the first. */
+  animation-delay: calc(var(--sibling-index, 1) * var(--stagger-step) + var(--stagger-offset));
+  animation-delay: calc(sibling-index() * var(--stagger-step) + var(--stagger-offset));
 }
 
-.rank-row:nth-child(3) {
-  animation-delay: 150ms;
-}
-
-.rank-row:nth-child(4) {
-  animation-delay: 210ms;
-}
-
-.rank-row:nth-child(5) {
-  animation-delay: 270ms;
+.rank-row:first-child {
+  animation-delay: 0ms;
 }
 
 @media (max-width: 767px) {

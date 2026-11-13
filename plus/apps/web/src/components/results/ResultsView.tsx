@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import type { PublicAward, PublicDecision, PublicResults } from "../../api/public-results.js";
 
 export function formatReleasedAt(value: string): string {
@@ -13,10 +15,25 @@ function scoreText(decision: PublicDecision): string {
   return decision.unit === "percent" ? `${decision.score}%` : decision.score;
 }
 
-function RankRow({ decision }: { readonly decision: PublicDecision }) {
+function supportsSiblingIndex(): boolean {
+  return typeof CSS !== "undefined" && CSS.supports("animation-delay: calc(sibling-index() * 0.1s)");
+}
+
+function RankRow({
+  decision,
+  index,
+  fallbackSiblingIndex,
+}: {
+  readonly decision: PublicDecision;
+  readonly index: number;
+  readonly fallbackSiblingIndex: boolean;
+}) {
   const champion = decision.rank === 1;
+  const style = fallbackSiblingIndex
+    ? ({ "--sibling-index": index + 1 } as CSSProperties)
+    : undefined;
   return (
-    <li className={champion ? "rank-row is-champion" : "rank-row"}>
+    <li className={champion ? "rank-row is-champion" : "rank-row"} style={style}>
       <span className="rank-number" aria-hidden="true">
         {String(decision.rank).padStart(2, "0")}
       </span>
@@ -45,6 +62,7 @@ function AwardChips({ awards }: { readonly awards: readonly PublicAward[] }) {
 }
 
 export function ResultsView({ data }: { readonly data: PublicResults }) {
+  const fallbackSiblingIndex = !supportsSiblingIndex();
   return (
     <article className="results">
       <header className="results-hero">
@@ -58,8 +76,13 @@ export function ResultsView({ data }: { readonly data: PublicResults }) {
             <time dateTime={result.releasedAt}>{formatReleasedAt(result.releasedAt)}</time>
           </div>
           <ol className="rank-list">
-            {result.decisions.map((decision) => (
-              <RankRow decision={decision} key={`${decision.rank}-${decision.contestantId}`} />
+            {result.decisions.map((decision, index) => (
+              <RankRow
+                decision={decision}
+                index={index}
+                fallbackSiblingIndex={fallbackSiblingIndex}
+                key={`${decision.rank}-${decision.contestantId}`}
+              />
             ))}
           </ol>
           <AwardChips awards={result.awards} />

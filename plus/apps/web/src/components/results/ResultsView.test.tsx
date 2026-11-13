@@ -1,8 +1,13 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { PublicResults } from "../../api/public-results.js";
 import { formatReleasedAt, ResultsView } from "./ResultsView.js";
+
+const originalCss = globalThis.CSS;
+afterEach(() => {
+  Object.defineProperty(globalThis, "CSS", { configurable: true, value: originalCss });
+});
 
 const data: PublicResults = {
   activity: { publicCode: "ABC123" },
@@ -35,6 +40,21 @@ describe("ResultsView", () => {
 
   it("formats the release timestamp", () => {
     expect(formatReleasedAt("2026-10-20T18:00:00.000Z")).toContain("2026");
+  });
+
+  it("falls back to --sibling-index when sibling-index() is unsupported", () => {
+    Object.defineProperty(globalThis, "CSS", { configurable: true, value: { supports: () => false } });
+    const { container } = render(<ResultsView data={data} />);
+    const rows = container.querySelectorAll<HTMLElement>(".rank-row");
+    expect(rows[0]?.style.getPropertyValue("--sibling-index")).toBe("1");
+    expect(rows[1]?.style.getPropertyValue("--sibling-index")).toBe("2");
+  });
+
+  it("does not write the fallback when sibling-index() is supported", () => {
+    Object.defineProperty(globalThis, "CSS", { configurable: true, value: { supports: () => true } });
+    const { container } = render(<ResultsView data={data} />);
+    const rows = container.querySelectorAll<HTMLElement>(".rank-row");
+    expect(rows[0]?.style.getPropertyValue("--sibling-index")).toBe("");
   });
 });
 
