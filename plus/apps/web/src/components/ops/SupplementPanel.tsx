@@ -1,19 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { ApiError } from "../../api/client.js";
 import type { IssuedSupplementView } from "../../api/ops.js";
 import { issueSupplement } from "../../api/ops.js";
 import type { RegistrationDetail } from "../../api/registrations.js";
+import { apiErrorText } from "../ui/apiError.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
-
-function humanError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) {
-    return "报名已被更新，请刷新后重试。";
-  }
-  return error instanceof Error ? error.message : "补交授权失败，请稍后重试。";
-}
 
 export function SupplementPanel({
   detail,
@@ -86,7 +79,7 @@ export function SupplementPanel({
         </p>
       )}
       {mutation.error === null || mutation.error === undefined ? null : (
-        <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p>
+        <p className="ui-field__error" role="alert">{apiErrorText(mutation.error, "补交授权失败，请稍后重试。", "报名已被更新，请刷新后重试。")}</p>
       )}
     </Card>
   );

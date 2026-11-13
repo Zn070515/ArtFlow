@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ExecutionStateView } from "../../api/diagnostics.js";
-import { fetchEvents, fetchExecutionState, fetchOutboxHealth } from "../../api/diagnostics.js";
+import { fetchExecutionState, fetchOutboxHealth, fetchRecentEvents } from "../../api/diagnostics.js";
 import { Badge, type BadgeTone } from "../ui/Badge.js";
 import { Card } from "../ui/Card.js";
 
@@ -23,7 +23,7 @@ export function DiagnosticsCard({
 }) {
   const events = useQuery({
     queryKey: ["ops-events", activityId],
-    queryFn: () => fetchEvents(activityId, { limit: 20 }),
+    queryFn: () => fetchRecentEvents(activityId, 20),
     enabled: canManage,
     retry: false,
   });

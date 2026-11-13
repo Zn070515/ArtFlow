@@ -121,6 +121,34 @@ export function extractWebCalls(files: readonly SourceFile[]): WebCall[] {
       seen.add(key);
       calls.push({ file: file.path, method, path, line });
     }
+    // Downloads and jumps use `<a href="/api/...">` rather than apiFetch.
+    for (const match of file.text.matchAll(/\bhref\s*=\s*/g)) {
+      if (match.index === undefined || masked[match.index] === " ") continue;
+      let cursor = match.index + match[0].length;
+      while (/\s/.test(file.text[cursor] ?? "")) cursor += 1;
+      let raw: string | undefined;
+      const opener = file.text[cursor];
+      if (opener === "\"" || opener === "'") {
+        const end = file.text.indexOf(opener, cursor + 1);
+        if (end !== -1) raw = file.text.slice(cursor, end + 1);
+      } else if (opener === "{") {
+        cursor += 1;
+        while (/\s/.test(file.text[cursor] ?? "")) cursor += 1;
+        if (file.text[cursor] === "`") {
+          const end = file.text.indexOf("`", cursor + 1);
+          if (end !== -1) raw = file.text.slice(cursor, end + 1);
+        }
+      }
+      if (raw === undefined) continue;
+      const rawPath = pathPattern(raw);
+      if (rawPath === null || !rawPath.startsWith("/api/")) continue;
+      const path = normalizePath(rawPath);
+      const line = lineMap.line(match.index);
+      const key = `${file.path}|GET|${path}|${line}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      calls.push({ file: file.path, method: "GET", path, line });
+    }
   }
   return calls;
 }

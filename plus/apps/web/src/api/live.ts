@@ -229,6 +229,53 @@ export function lockPerformance(
   );
 }
 
+export function advancePerformance(
+  activityId: string,
+  roundKey: string,
+  performanceId: string,
+  input: { readonly nextContestantId: string; readonly nextSequence: number },
+): Promise<LivePerformance> {
+  return apiFetch<LivePerformance>(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/performances/${performanceId}/advance`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({ scope: JUDGING_SCOPE, ...input }),
+    },
+  );
+}
+
+export function submitStaffScore(input: {
+  readonly activityId: string;
+  readonly roundKey: string;
+  readonly performanceId: string;
+  readonly panelSnapshotId: string;
+  readonly seatId: string;
+  readonly contextVersion: number;
+  readonly criteria: Readonly<Record<string, number>>;
+  readonly notes: string;
+  readonly source: "staff_rapid" | "staff_proxy" | "paper_dr";
+  readonly sourceReference?: string;
+  readonly reason?: string;
+}): Promise<unknown> {
+  return apiFetch(`/api/activities/${input.activityId}/competition/rounds/${input.roundKey}/scores`, {
+    method: "POST",
+    headers: commandHeaders(crypto.randomUUID()),
+    body: JSON.stringify({
+      scope: JUDGING_SCOPE,
+      source: input.source,
+      performanceId: input.performanceId,
+      panelSnapshotId: input.panelSnapshotId,
+      seatId: input.seatId,
+      contextVersion: input.contextVersion,
+      criteria: input.criteria,
+      notes: input.notes,
+      ...(input.sourceReference === undefined ? {} : { sourceReference: input.sourceReference }),
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }),
+  });
+}
+
 export function lockRound(
   activityId: string,
   roundKey: string,

@@ -92,7 +92,19 @@ export function hasOpsAccess(session: SessionResponse | null): boolean {
   return (
     permissions.includes("*") ||
     permissions.includes("registration.review") ||
-    permissions.includes("registration.manage")
+    permissions.includes("registration.manage") ||
+    permissions.includes("studio.manage") ||
+    permissions.includes("competition.manage") ||
+    permissions.includes("judge.manage") ||
+    permissions.includes("competition.score.write") ||
+    permissions.includes("ticket.manage") ||
+    permissions.includes("archive.manage") ||
+    permissions.includes("attendance.manage") ||
+    permissions.includes("tasks.manage") ||
+    permissions.includes("materials.review") ||
+    permissions.includes("voting.manage") ||
+    permissions.includes("result.manage") ||
+    permissions.includes("grouping.manage")
   );
 }
 

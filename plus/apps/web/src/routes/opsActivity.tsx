@@ -36,6 +36,14 @@ function OpsActivityContent() {
   const { activityId } = useParams({ from: "/ops/$activityId" });
   const { session } = useSession();
   const allowed = hasOpsAccess(session);
+  const permissions = session?.actor.permissions ?? [];
+  // The Ops page is shared by ticketing/archive/live staff, but the
+  // registration list stays behind the registration read permissions.
+  const canSeeRegistrations =
+    can(permissions, "registration.review") ||
+    can(permissions, "registration.manage") ||
+    can(permissions, "studio.manage") ||
+    can(permissions, "competition.manage");
   const activities = useQuery({
     queryKey: ["ops-activities"],
     queryFn: fetchOpsActivities,
@@ -45,13 +53,13 @@ function OpsActivityContent() {
   const registrations = useQuery({
     queryKey: ["ops-registrations", activityId],
     queryFn: () => fetchOpsRegistrations(activityId),
-    enabled: allowed,
+    enabled: allowed && canSeeRegistrations,
     retry: false,
   });
   const roster = useQuery({
     queryKey: ["ops-roster", activityId],
     queryFn: () => fetchOpsRoster(activityId),
-    enabled: allowed,
+    enabled: allowed && canSeeRegistrations,
     retry: false,
   });
   const analytics = useQuery({
@@ -104,30 +112,34 @@ function OpsActivityContent() {
         ) : analytics.data === undefined ? null : (
           <ActivityAnalyticsCard analytics={analytics.data} />
         )}
-        <Card>
-          <h2 className="ui-card__title">报名</h2>
-          {registrations.isPending ? (
-            <p className="auth-loading">正在加载报名…</p>
-          ) : registrations.error !== null ? (
-            <p className="form-error" role="alert">报名列表暂时无法加载。</p>
-          ) : (
-            <RegistrationTable
-              activityId={activityId}
-              registrations={registrations.data ?? []}
-            />
-          )}
-        </Card>
-        {roster.isPending ? (
-          <Card>
-            <p className="auth-loading">正在加载名单…</p>
-          </Card>
-        ) : roster.error !== null ? (
-          <Card>
-            <p className="form-error" role="alert">名单状态暂时无法加载。</p>
-          </Card>
-        ) : (
-          <RosterCard activityId={activityId} roster={roster.data!} summary={rosterSummary} />
-        )}
+        {canSeeRegistrations ? (
+          <>
+            <Card>
+              <h2 className="ui-card__title">报名</h2>
+              {registrations.isPending ? (
+                <p className="auth-loading">正在加载报名…</p>
+              ) : registrations.error !== null ? (
+                <p className="form-error" role="alert">报名列表暂时无法加载。</p>
+              ) : (
+                <RegistrationTable
+                  activityId={activityId}
+                  registrations={registrations.data ?? []}
+                />
+              )}
+            </Card>
+            {roster.isPending ? (
+              <Card>
+                <p className="auth-loading">正在加载名单…</p>
+              </Card>
+            ) : roster.error !== null ? (
+              <Card>
+                <p className="form-error" role="alert">名单状态暂时无法加载。</p>
+              </Card>
+            ) : (
+              <RosterCard activityId={activityId} roster={roster.data!} summary={rosterSummary} />
+            )}
+          </>
+        ) : null}
         {activity?.enabledCapabilities.includes("grouping") &&
         (session?.actor.permissions.includes("grouping.manage") ?? false) ? (
           <GroupingCard key={activityId} activityId={activityId} />

@@ -13,6 +13,7 @@ import {
   setGroupingWindow,
 } from "../../api/grouping.js";
 import type { GroupingStage, GroupingWindow } from "../../api/grouping.js";
+import { fetchLiveState } from "../../api/live.js";
 import { fetchOpsRegistrations } from "../../api/ops.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
@@ -66,6 +67,14 @@ export function GroupingCard(props: { readonly activityId: string }) {
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState("");
   const [windowState, setWindowState] = useState<GroupingWindow>("closed");
+  const [rosterSource, setRosterSource] = useState<"all_approved" | "round_advanced">("all_approved");
+  const [sourceRoundId, setSourceRoundId] = useState("");
+  const live = useQuery({
+    queryKey: ["live-state", props.activityId],
+    queryFn: () => fetchLiveState(props.activityId),
+    enabled: rosterSource === "round_advanced",
+    retry: false,
+  });
 
   const stage: GroupingStage | undefined = latest ?? state.data?.stages[0];
 
@@ -93,16 +102,19 @@ export function GroupingCard(props: { readonly activityId: string }) {
     void queryClient.invalidateQueries({ queryKey: ["grouping", props.activityId] });
   };
 
-  // round_advanced grouping needs a source-participant read; deferred.
   const create = useMutation({
     mutationFn: () =>
       createGroupingStage(props.activityId, commandId("group-create"), {
         stageKey: STAGE_KEY,
         name: STAGE_NAME,
-        rosterSource: "all_approved",
+        rosterSource,
+        ...(rosterSource === "round_advanced" ? { sourceRoundId } : {}),
       }),
     onSuccess: accept,
   });
+  const roundOptions = (live.data?.rounds ?? [])
+    .map((item) => item.round)
+    .filter((item): item is NonNullable<typeof item> => item !== null);
 
   const record = useMutation({
     mutationFn: (groups: readonly { name: string; participantIds: readonly string[] }[]) => {
@@ -226,9 +238,44 @@ export function GroupingCard(props: { readonly activityId: string }) {
       <h2 className="ui-card__title">第一轮分组</h2>
 
       {stage === undefined ? (
-        <Button variant="primary" onClick={() => create.mutate()}>
-          创建分组赛段
-        </Button>
+        <div className="grouping-create">
+          <Select
+            label="名单来源"
+            value={rosterSource}
+            onChange={(event) => {
+              const next = event.target.value as "all_approved" | "round_advanced";
+              setRosterSource(next);
+              if (next === "all_approved") setSourceRoundId("");
+            }}
+          >
+            <option value="all_approved">全部通过报名</option>
+            <option value="round_advanced">上一轮晋级名单</option>
+          </Select>
+          {rosterSource === "round_advanced" ? (
+            <Select
+              label="来源回合"
+              value={sourceRoundId}
+              onChange={(event) => setSourceRoundId(event.target.value)}
+            >
+              <option value="">选择已定稿回合</option>
+              {roundOptions.map((round) => (
+                <option key={round.id} value={round.id}>
+                  {round.roundKey}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          <Button
+            variant="primary"
+            disabled={create.isPending || (rosterSource === "round_advanced" && sourceRoundId === "")}
+            onClick={() => create.mutate()}
+          >
+            创建分组赛段
+          </Button>
+          {create.error === null || create.error === undefined ? null : (
+            <p className="ui-field__error" role="alert">{errorMessage(create.error)}</p>
+          )}
+        </div>
       ) : (
         <>
           <p className="ui-card__description">

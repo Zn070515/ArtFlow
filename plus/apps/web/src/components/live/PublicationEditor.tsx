@@ -1,20 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { ApiError } from "../../api/client.js";
 import type { PublicationView } from "../../api/voting.js";
 import { editPublication } from "../../api/voting.js";
+import { apiErrorText } from "../ui/apiError.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
 import { Input } from "../ui/Input.js";
 import { Textarea } from "../ui/Textarea.js";
-
-function humanError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) {
-    return "公示内容已被更新，请刷新后重试。";
-  }
-  return error instanceof Error ? error.message : "公示编辑失败，请稍后重试。";
-}
 
 export function PublicationEditor({
   activityId,
@@ -76,7 +69,7 @@ export function PublicationEditor({
         </>
       ) : null}
       {mutation.error === null || mutation.error === undefined ? null : (
-        <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p>
+        <p className="ui-field__error" role="alert">{apiErrorText(mutation.error, "公示编辑失败，请稍后重试。", "公示内容已被更新，请刷新后重试。")}</p>
       )}
     </Card>
   );
