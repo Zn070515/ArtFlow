@@ -113,6 +113,186 @@ describe.skipIf(!connectionString)("grouping advancement source guard", () => {
     })).rejects.toMatchObject({ code: "GROUPING_SOURCE_UNKNOWN" });
   });
 
+  it("rejects resolution and grouping when a correction outran the ranking", async () => {
+    const fixture = await seedLockedRound(db);
+    const ranking = await resolveRound(db, recoveryDeps(recoveryStaff), {
+      commandId: `resolve-before-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      scope: "judging",
+    });
+    const tie = (ranking.body.tieGroups as { id: string; contestants: string[] }[])[0]!;
+    const decided = await recordTieDecision(db, recoveryDeps(recoveryStaff), {
+      commandId: `tie-before-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      rankingSnapshotId: ranking.body.id,
+      tieId: tie.id,
+      inputFingerprint: ranking.body.inputFingerprint,
+      contestants: tie.contestants,
+      order: [...tie.contestants].reverse(),
+      reason: "现场裁决",
+      scope: "judging",
+    });
+    const finalized = await finalizeAdvancement(db, recoveryDeps(recoveryStaff), {
+      commandId: `advance-before-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      expectedRankingRevision: decided.body.revision,
+      scope: "judging",
+    });
+    expect(finalized.body.status).toBe("auto");
+
+    // Correct singer-c so the singer-a/singer-b tie survives for the
+    // post-relock path, but do not re-resolve: the ranking is now stale.
+    const before = await getRoundScores(db, {
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      scope: "judging",
+    });
+    const fact = before.facts.find((item) => item.contestantId === "singer-c")!;
+    const roundRow = await db.selectFrom("competition_round").selectAll()
+      .where("id", "=", fixture.roundId).executeTakeFirstOrThrow();
+    await reopenRoundForCorrection(db, recoveryDeps(recoveryStaff), {
+      commandId: `reopen-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      expectedRevision: roundRow.revision,
+      reason: "改分",
+      scope: "judging",
+    });
+    const opened = await openScoreCorrection(db, recoveryDeps(recoveryStaff), {
+      commandId: `open-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      performanceId: fact.performanceId,
+      scoreFactId: fact.id,
+      panelSnapshotId: fact.panelSnapshotId,
+      reason: "看错分",
+      scope: "judging",
+    });
+    await editScoreFact(db, recoveryDeps(recoveryStaff), {
+      commandId: `edit-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      performanceId: fact.performanceId,
+      scoreFactId: fact.id,
+      panelSnapshotId: fact.panelSnapshotId,
+      seatId: fact.seatId,
+      contextVersion: fact.contextVersion,
+      expectedVersion: fact.version,
+      criteria: { total: 70 },
+      reason: "看错分",
+      correctionId: opened.body.id,
+      scope: "judging",
+    });
+    await closeScoreCorrection(db, recoveryDeps(recoveryStaff), {
+      commandId: `close-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      performanceId: fact.performanceId,
+      scoreFactId: fact.id,
+      correctionId: opened.body.id,
+      panelSnapshotId: fact.panelSnapshotId,
+      scope: "judging",
+    });
+    await recalculateAfterCorrection(db, recoveryDeps(recoveryStaff), {
+      commandId: `recalc-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      performanceId: fact.performanceId,
+      scoreFactId: fact.id,
+      correctionId: opened.body.id,
+      panelSnapshotId: fact.panelSnapshotId,
+      scope: "judging",
+    });
+
+    // Resolution commands require a locked round, but the ranking still names
+    // the pre-correction score version because it has not been re-resolved.
+    const correctedRound = await db.selectFrom("competition_round").selectAll()
+      .where("id", "=", fixture.roundId).executeTakeFirstOrThrow();
+    await lockRound(db, recoveryDeps(recoveryStaff), {
+      commandId: `relock-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      expectedRevision: correctedRound.revision,
+      scope: "judging",
+    });
+
+    const staleTie = {
+      commandId: `tie-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      rankingSnapshotId: decided.body.id,
+      tieId: tie.id,
+      inputFingerprint: decided.body.inputFingerprint,
+      contestants: tie.contestants,
+      order: [...tie.contestants].reverse(),
+      reason: "现场裁决",
+      scope: "judging",
+    };
+    await expect(recordTieDecision(db, recoveryDeps(recoveryStaff), staleTie))
+      .rejects.toMatchObject({ code: "STALE_RESOLUTION_INPUT" });
+    await expect(finalizeAdvancement(db, recoveryDeps(recoveryStaff), {
+      commandId: `advance-stale-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      expectedRankingRevision: decided.body.revision,
+      scope: "judging",
+    })).rejects.toMatchObject({ code: "STALE_RESOLUTION_INPUT" });
+    await expect(createGroupingStage(db, recoveryDeps(recoveryStaff), {
+      commandId: `grouping-stale-scores-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      stageKey: "stale-next",
+      name: "下一阶段",
+      rosterSource: "round_advanced",
+      sourceRoundId: fixture.roundId,
+    })).rejects.toMatchObject({ code: "STALE_ADVANCEMENT" });
+
+    // Re-resolve: the same commands now see a fresh ranking.
+    const reranked = await resolveRound(db, recoveryDeps(recoveryStaff), {
+      commandId: `resolve-after-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      scope: "judging",
+    });
+    const rerankedTie = (reranked.body.tieGroups as { id: string; contestants: string[] }[])[0]!;
+    const decidedAgain = await recordTieDecision(db, recoveryDeps(recoveryStaff), {
+      commandId: `tie-after-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      rankingSnapshotId: reranked.body.id,
+      tieId: rerankedTie.id,
+      inputFingerprint: reranked.body.inputFingerprint,
+      contestants: rerankedTie.contestants,
+      order: [...rerankedTie.contestants].reverse(),
+      reason: "现场裁决",
+      scope: "judging",
+    });
+    expect(decidedAgain.body.status).toBe("ready");
+    const finalizedAgain = await finalizeAdvancement(db, recoveryDeps(recoveryStaff), {
+      commandId: `advance-after-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      expectedRankingRevision: decidedAgain.body.revision,
+      scope: "judging",
+    });
+    expect(finalizedAgain.body.status).toBe("auto");
+    const stage = await createGroupingStage(db, recoveryDeps(recoveryStaff), {
+      commandId: `grouping-after-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      stageKey: "fresh-next",
+      name: "下一阶段",
+      rosterSource: "round_advanced",
+      sourceRoundId: fixture.roundId,
+    });
+    expect(stage.body).toMatchObject({
+      rosterSource: "round_advanced",
+      sourceRoundId: fixture.roundId,
+      status: "draft",
+    });
+  });
+
   it("rejects a stale advancement decision", async () => {
     const fixture = await seedLockedRound(db);
     const ranking = await resolveRound(db, recoveryDeps(recoveryStaff), {

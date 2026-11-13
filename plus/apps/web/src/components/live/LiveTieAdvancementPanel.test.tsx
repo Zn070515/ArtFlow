@@ -86,6 +86,7 @@ const tieRanking = {
   id: "ranking-1",
   revision: 1,
   status: "hold" as const,
+  sourceScoreVersion: 3,
   inputFingerprint: "fp-1",
   rows: [
     { contestantId: "singer-a", total: "90.00", judgeCount: 1 },

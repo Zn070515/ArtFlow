@@ -292,6 +292,7 @@ it("validates the round scores read contract", () => {
       id: "ranking-1",
       revision: 1,
       status: "hold",
+      sourceScoreVersion: 3,
       inputFingerprint: "fingerprint",
       rows: [{ contestantId: "singer-a", total: "90.00", judgeCount: 1 }],
       tieGroups: [{ id: "tie-1", total: "90.00", contestants: ["singer-a", "singer-b"] }],
@@ -330,7 +331,7 @@ it("validates nullable and finalized round score response variants", () => {
     ...base,
     session: { id: "session-1", mode: "rehearsal", scope: "stage" },
     ranking: {
-      id: "ranking-1", revision: 1, status: "ready", inputFingerprint: "fp",
+      id: "ranking-1", revision: 1, status: "ready", sourceScoreVersion: 0, inputFingerprint: "fp",
       rows: [{ contestantId: "singer-a", total: "90.00", judgeCount: 1 }],
       tieGroups: [],
     },

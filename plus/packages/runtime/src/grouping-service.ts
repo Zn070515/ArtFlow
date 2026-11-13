@@ -148,6 +148,9 @@ async function resolveGroupingSource(
   if (currentRanking === null || currentRanking.inputFingerprint !== decision.inputFingerprint) {
     throw new DomainError("STALE_ADVANCEMENT", "The advancement decision no longer matches the current ranking.");
   }
+  if (currentRanking.sourceScoreVersion !== round.scoreVersion) {
+    throw new DomainError("STALE_ADVANCEMENT", "The advancement ranking is stale; re-resolve ranking before grouping.");
+  }
   const participantIds = advancementParticipantIds(decision.decisions);
   return {
     participantIds,

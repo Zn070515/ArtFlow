@@ -184,6 +184,7 @@ export const CompetitionRoundScoresResponseSchema = Type.Object({
       id: Type.String({ minLength: 1 }),
       revision: Type.Integer({ minimum: 0 }),
       status: Type.Union([Type.Literal("ready"), Type.Literal("hold")]),
+      sourceScoreVersion: Type.Integer({ minimum: 0 }),
       inputFingerprint: Type.String({ minLength: 1, maxLength: 64 }),
       rows: Type.Array(Type.Object({
         contestantId: Type.String({ minLength: 1 }),

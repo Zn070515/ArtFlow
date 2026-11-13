@@ -56,6 +56,7 @@ export async function getRoundScores(
       id: ranking.id,
       revision: ranking.revision,
       status: ranking.status,
+      sourceScoreVersion: ranking.sourceScoreVersion,
       inputFingerprint: ranking.inputFingerprint,
       rows: (ranking.rows as { contestantId: string; total: string; judgeCount: number }[]),
       tieGroups: (ranking.tieGroups as { id: string; total: string; contestants: string[] }[]),

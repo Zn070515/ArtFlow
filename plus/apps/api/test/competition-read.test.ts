@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { closeDb, createDb, insertLocalAccount, migrate } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
-import { hashPassword } from "@artflow-plus/runtime";
+import { hashPassword, resolveRound } from "@artflow-plus/runtime";
 import type { RuntimeDeps } from "@artflow-plus/runtime";
 import type { FastifyInstance } from "fastify";
 import { Client } from "pg";
@@ -84,6 +84,20 @@ function scoresUrl(): string {
 }
 
 dbIt("returns the round score projection to competition readers", async () => {
+  await resolveRound(db, {
+    ...deps,
+    actor: {
+      actorId: "competition-read-staff",
+      actorType: "user",
+      roles: ["staff"],
+      permissions: ["competition.manage"],
+    },
+  }, {
+    commandId: `resolve-${randomUUID()}`,
+    activityId: fixture.activityId,
+    roundId: fixture.roundId,
+    scope: "judging",
+  });
   const token = await bearer("competition-reader", "reader-password");
   const response = await app.inject({
     method: "GET",
@@ -95,6 +109,7 @@ dbIt("returns the round score projection to competition readers", async () => {
   expect(body.facts).toHaveLength(3);
   expect(body.session).toMatchObject({ mode: "formal", scope: "judging" });
   expect(body.round).toMatchObject({ key: "final", state: "locked", advanceCount: 1 });
+  expect(body.ranking).toMatchObject({ status: "hold", sourceScoreVersion: body.round.scoreVersion });
 });
 
 dbIt("allows a score writer to read the projection", async () => {
