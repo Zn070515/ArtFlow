@@ -159,9 +159,21 @@ pnpm -C plus --filter @artflow-plus/contract-tools run readiness
 - **重复路由**：`POST .../competition/rounds` 已声明为 API-only；Web 改用
   `POST .../competition/rounds/:roundKey/prepare`。
 
-仍然开放（未在本轮处理）：
+2026-11-14 第二轮闭环：
 
-- `competition.performance.advance` 仍无 HTTP route / UI；
-- `/scores` 只允许 `direct_judge`，纸面、代录、快速评分三种 source 仍不可达；
-- grouping 的 `rosterSource: "round_advanced"` 仍不可选；
-- 图扫描对 `<a href>` 下载与动态 route 模板的盲区未修。
+- **`competition.performance.advance`**：新增受认证的
+  `POST .../performances/:performanceId/advance`，Live 面板可选下一位选手并
+  「锁定当前并切到下一位」。
+- **评分来源**：Live 新增「现场评分补录」，可选快速评分、工作人员代录、纸面录入；
+  代录/纸面强制填写来源凭证与说明。
+- **grouping**：创建赛段时可选「全部通过报名」或「上一轮晋级名单」，并从实时
+  回合列表选择来源回合。
+- **图扫描**：`extractWebCalls` 现在识别 `<a href="/api/...">` 与模板字面量下载，
+  新增 `web-calls.test.ts` 覆盖。
+- **测试并行 flake**：根 `test` 脚本改为 `pnpm -r --workspace-concurrency=1`，
+  避免多个包同时对同一数据库执行 migrate / DROP SCHEMA；连续两次全量通过。
+
+仍然开放：
+
+- 动态 route 模板（如 `/tasks/:taskId/${action}`）的静态展开；当前靠
+  `api-only.json` 与人工复核兜底。
