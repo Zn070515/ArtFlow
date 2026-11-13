@@ -14,7 +14,12 @@ vi.mock("../api/auth.js", () => ({
   registerParticipant: vi.fn(),
 }));
 
-import { defaultLanding, hasWorkspaceAccess } from "./SessionProvider.js";
+import {
+  canManageCompetition,
+  defaultLanding,
+  hasLiveAccess,
+  hasWorkspaceAccess,
+} from "./SessionProvider.js";
 
 function session(permissions: readonly string[], roles: readonly string[] = []): SessionResponse {
   return {
@@ -50,5 +55,32 @@ describe("organizer workspace access", () => {
 
   it("does not treat an anonymous session as an organizer", () => {
     expect(hasWorkspaceAccess(null)).toBe(false);
+  });
+});
+
+describe("canManageCompetition", () => {
+  it("accepts competition manage, score write, and wildcard permissions", () => {
+    expect(canManageCompetition(session(["competition.manage"]))).toBe(true);
+    expect(canManageCompetition(session(["competition.score.write"]))).toBe(true);
+    expect(canManageCompetition(session(["*"]))).toBe(true);
+  });
+
+  it("rejects judge-only and null sessions", () => {
+    expect(canManageCompetition(session(["judge.manage"]))).toBe(false);
+    expect(canManageCompetition(null)).toBe(false);
+  });
+});
+
+describe("hasLiveAccess", () => {
+  it("allows every Live operator, including score writers", () => {
+    expect(hasLiveAccess(session(["competition.manage"]))).toBe(true);
+    expect(hasLiveAccess(session(["competition.score.write"]))).toBe(true);
+    expect(hasLiveAccess(session(["judge.manage"]))).toBe(true);
+    expect(hasLiveAccess(session(["*"]))).toBe(true);
+  });
+
+  it("rejects unrelated and null sessions", () => {
+    expect(hasLiveAccess(session(["registration.manage"]))).toBe(false);
+    expect(hasLiveAccess(null)).toBe(false);
   });
 });

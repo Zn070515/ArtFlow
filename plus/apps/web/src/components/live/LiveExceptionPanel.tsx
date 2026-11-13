@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type JSX, type ReactNode } from "react";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
 
+import { ApiError } from "../../api/client.js";
 import {
   closeScoreCorrection,
   describeLiveError,
@@ -27,8 +28,38 @@ const CORRECTION_STATUS: Record<ScoreCorrection["state"], string> = {
   cancelled: "已取消",
 };
 
+const CORRECTION_ERROR_MESSAGES: Record<string, string> = {
+  RESULT_CONSUMED: "该赛段结果已确认，请先解锁赛果。",
+  SESSION_NOT_RUNNING: "请先启动评分会话。",
+  STALE_REVISION: "数据已变化，请刷新后重试。",
+  STALE_CONTEXT: "数据已变化，请刷新后重试。",
+  CORRECTION_REQUIRED: "修正状态已变化，请刷新后重试。",
+  CORRECTION_ALREADY_OPEN: "修正状态已变化，请刷新后重试。",
+};
+
 function correctionStatusLabel(correction: ScoreFact["correction"]): string {
   return correction === null ? "未修正" : CORRECTION_STATUS[correction.state];
+}
+
+function describeCorrectionError(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const mapped = CORRECTION_ERROR_MESSAGES[error.code];
+    if (mapped !== undefined) return mapped;
+  }
+  return describeLiveError(error, fallback);
+}
+
+function keepOnly<T>(current: Record<string, T>, ids: ReadonlySet<string>): Record<string, T> {
+  let changed = false;
+  const next: Record<string, T> = {};
+  for (const [key, value] of Object.entries(current)) {
+    if (ids.has(key)) {
+      next[key] = value;
+    } else {
+      changed = true;
+    }
+  }
+  return changed ? next : current;
 }
 
 export function LiveExceptionPanel({
@@ -45,7 +76,8 @@ export function LiveExceptionPanel({
   const queryClient = useQueryClient();
   const [openFactId, setOpenFactId] = useState<string | null>(null);
   const [openReason, setOpenReason] = useState("");
-  const [criteriaDrafts, setCriteriaDrafts] = useState<Record<string, Record<string, number>>>({});
+  const [criteriaDrafts, setCriteriaDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [criteriaErrors, setCriteriaErrors] = useState<Record<string, string>>({});
   const [editReasons, setEditReasons] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +88,21 @@ export function LiveExceptionPanel({
     enabled: live.round !== null,
     retry: false,
   });
+
+  const activeCorrectionKey = (query.data?.facts ?? [])
+    .map((fact) => fact.correction?.id ?? "")
+    .filter((id) => id !== "")
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    const ids = new Set<string>(
+      activeCorrectionKey === "" ? [] : activeCorrectionKey.split("|"),
+    );
+    setCriteriaDrafts((current) => keepOnly(current, ids));
+    setCriteriaErrors((current) => keepOnly(current, ids));
+    setEditReasons((current) => keepOnly(current, ids));
+  }, [activeCorrectionKey]);
 
   function finish(message: string): void {
     void queryClient.invalidateQueries({
@@ -68,7 +115,28 @@ export function LiveExceptionPanel({
 
   function fail(caught: unknown): void {
     setStatus(null);
-    setError(describeLiveError(caught, "操作失败，请稍后重试。"));
+    setError(describeCorrectionError(caught, "操作失败，请稍后重试。"));
+  }
+
+  function clearCorrectionDraft(correctionId: string): void {
+    setCriteriaDrafts((current) => {
+      if (!(correctionId in current)) return current;
+      const next = { ...current };
+      delete next[correctionId];
+      return next;
+    });
+    setCriteriaErrors((current) => {
+      if (!(correctionId in current)) return current;
+      const next = { ...current };
+      delete next[correctionId];
+      return next;
+    });
+    setEditReasons((current) => {
+      if (!(correctionId in current)) return current;
+      const next = { ...current };
+      delete next[correctionId];
+      return next;
+    });
   }
 
   const openCorrection = useMutation({
@@ -98,7 +166,10 @@ export function LiveExceptionPanel({
       readonly reason: string;
       readonly correctionId: string;
     }) => editScoreFact(activityId, live.config.key, input),
-    onSuccess: () => finish("修正已保存，请关闭修正窗口。"),
+    onSuccess: (_result, input) => {
+      clearCorrectionDraft(input.correctionId);
+      finish("修正已保存，请关闭修正窗口。");
+    },
     onError: fail,
   });
 
@@ -109,7 +180,10 @@ export function LiveExceptionPanel({
       readonly panelSnapshotId: string;
       readonly performanceId: string;
     }) => closeScoreCorrection(activityId, live.config.key, input),
-    onSuccess: () => finish("修正已关闭，请重算。"),
+    onSuccess: (_result, input) => {
+      clearCorrectionDraft(input.correctionId);
+      finish("修正已关闭，请重算。");
+    },
     onError: fail,
   });
 
@@ -120,45 +194,99 @@ export function LiveExceptionPanel({
       readonly panelSnapshotId: string;
       readonly performanceId: string;
     }) => recalculateAfterCorrection(activityId, live.config.key, input),
-    onSuccess: () => finish("重算完成，请点击「生成排名」更新排名。"),
+    onSuccess: (_result, input) => {
+      clearCorrectionDraft(input.correctionId);
+      finish("重算完成，请点击「生成排名」更新排名。");
+    },
     onError: fail,
   });
 
-  function initialCriteria(fact: ScoreFact): Record<string, number> {
-    const next: Record<string, number> = {};
+  function initialCriteriaDraft(fact: ScoreFact): Record<string, string> {
+    const next: Record<string, string> = {};
     for (const criterion of state.config.rubric.criteria) {
-      next[criterion.key] = fact.criteria[criterion.key] ?? 0;
+      next[criterion.key] = String(fact.criteria[criterion.key] ?? 0);
     }
     return next;
   }
 
-  function draftFor(fact: ScoreFact): Record<string, number> {
-    return criteriaDrafts[fact.id] ?? initialCriteria(fact);
+  function draftFor(fact: ScoreFact, correction: ScoreCorrection): Record<string, string> {
+    return criteriaDrafts[correction.id] ?? initialCriteriaDraft(fact);
   }
 
-  function changeCriterion(fact: ScoreFact, key: string, value: string): void {
+  function editReasonFor(correction: ScoreCorrection): string {
+    return editReasons[correction.id] ?? correction.reason;
+  }
+
+  function changeCriterion(
+    fact: ScoreFact,
+    correction: ScoreCorrection,
+    key: string,
+    value: string,
+  ): void {
     setCriteriaDrafts((current) => {
-      const base = current[fact.id] ?? initialCriteria(fact);
-      const parsed = value === "" ? 0 : Number(value);
+      const base = current[correction.id] ?? initialCriteriaDraft(fact);
       return {
         ...current,
-        [fact.id]: { ...base, [key]: Number.isNaN(parsed) ? 0 : parsed },
+        [correction.id]: { ...base, [key]: value },
       };
+    });
+    setCriteriaErrors((current) => {
+      if (!(correction.id in current)) return current;
+      const next = { ...current };
+      delete next[correction.id];
+      return next;
     });
   }
 
-  function editReasonFor(fact: ScoreFact, correction: ScoreCorrection): string {
-    return editReasons[fact.id] ?? correction.reason;
+  function validateCriteria(
+    fact: ScoreFact,
+    correction: ScoreCorrection,
+  ): Record<string, number> | null {
+    const draft = draftFor(fact, correction);
+    const criteria: Record<string, number> = {};
+    for (const criterion of state.config.rubric.criteria) {
+      const raw = (draft[criterion.key] ?? "").trim();
+      const parsed = Number(raw);
+      if (raw === "" || !Number.isFinite(parsed)) {
+        setCriteriaErrors((current) => ({
+          ...current,
+          [correction.id]: `请输入有效的「${criterion.key}」分数。`,
+        }));
+        return null;
+      }
+      if (criterion.minimum !== undefined && parsed < criterion.minimum) {
+        setCriteriaErrors((current) => ({
+          ...current,
+          [correction.id]: `「${criterion.key}」必须在 ${criterion.minimum} 到 ${criterion.maximum} 之间。`,
+        }));
+        return null;
+      }
+      if (parsed > criterion.maximum) {
+        setCriteriaErrors((current) => ({
+          ...current,
+          [correction.id]:
+            criterion.minimum === undefined
+              ? `「${criterion.key}」不能大于 ${criterion.maximum}。`
+              : `「${criterion.key}」必须在 ${criterion.minimum} 到 ${criterion.maximum} 之间。`,
+        }));
+        return null;
+      }
+      criteria[criterion.key] = parsed;
+    }
+    return criteria;
   }
 
   function saveCorrection(fact: ScoreFact, correction: ScoreCorrection): void {
-    const draft = draftFor(fact);
-    const criteria: Record<string, number> = {};
-    for (const criterion of state.config.rubric.criteria) {
-      criteria[criterion.key] = draft[criterion.key] ?? 0;
-    }
-    const reason = editReasonFor(fact, correction).trim();
+    const reason = editReasonFor(correction).trim();
     if (reason === "") return;
+    const criteria = validateCriteria(fact, correction);
+    if (criteria === null) return;
+    setCriteriaErrors((current) => {
+      if (!(correction.id in current)) return current;
+      const next = { ...current };
+      delete next[correction.id];
+      return next;
+    });
     editCorrection.mutate({
       scoreFactId: fact.id,
       performanceId: fact.performanceId,
@@ -228,8 +356,9 @@ export function LiveExceptionPanel({
     }
 
     if (correction.state === "open") {
-      const draft = draftFor(fact);
-      const reason = editReasonFor(fact, correction);
+      const draft = draftFor(fact, correction);
+      const reason = editReasonFor(correction);
+      const validationError = criteriaErrors[correction.id];
       return (
         <>
           <div className="live-exception-criteria">
@@ -238,8 +367,14 @@ export function LiveExceptionPanel({
                 key={criterion.key}
                 label={criterion.key}
                 type="number"
-                value={draft[criterion.key] ?? 0}
-                onChange={(event) => changeCriterion(fact, criterion.key, event.target.value)}
+                step="0.01"
+                inputMode="decimal"
+                min={criterion.minimum}
+                max={criterion.maximum}
+                value={draft[criterion.key] ?? ""}
+                onChange={(event) =>
+                  changeCriterion(fact, correction, criterion.key, event.target.value)
+                }
               />
             ))}
           </div>
@@ -248,9 +383,14 @@ export function LiveExceptionPanel({
             value={reason}
             onChange={(event) => {
               const value = event.target.value;
-              setEditReasons((current) => ({ ...current, [fact.id]: value }));
+              setEditReasons((current) => ({ ...current, [correction.id]: value }));
             }}
           />
+          {validationError === undefined ? null : (
+            <p className="ui-field__error" role="alert">
+              {validationError}
+            </p>
+          )}
           <Button
             variant="primary"
             size="sm"
@@ -306,83 +446,93 @@ export function LiveExceptionPanel({
     return null;
   }
 
-  function blockingCard(message: string): JSX.Element {
-    return (
-      <Card className="live-exception-panel">
-        <h2 className="ui-card__title">异常处理 · 评分修正</h2>
-        <p className="ui-card__description">{message}</p>
-      </Card>
-    );
-  }
+  function renderFacts(data: RoundScoresResponse): ReactNode {
+    const performanceIds: string[] = [];
+    for (const performance of data.performances) {
+      performanceIds.push(performance.id);
+    }
+    for (const fact of data.facts) {
+      if (!performanceIds.includes(fact.performanceId)) {
+        performanceIds.push(fact.performanceId);
+      }
+    }
+    const groups = performanceIds
+      .map((performanceId) => ({
+        performanceId,
+        performance: data.performances.find((item) => item.id === performanceId) ?? null,
+        facts: data.facts.filter((fact) => fact.performanceId === performanceId),
+      }))
+      .filter((group) => group.facts.length > 0);
 
-  if (live.round === null) {
-    return blockingCard("该轮次尚未准备。");
-  }
-  if (live.round.state === "locked") {
-    return blockingCard(
-      "轮次已锁定。请先在轮次操作区点「打开评分更正窗口」，再回到这里修正。",
-    );
+    if (groups.length === 0) {
+      return <p className="ui-card__description">当前轮次还没有评分事实。</p>;
+    }
+
+    return groups.map((group) => (
+      <div className="live-exception-group" key={group.performanceId}>
+        {group.facts.map((fact) => {
+          const contestantId = group.performance?.contestantId ?? fact.contestantId;
+          return (
+            <div
+              className="live-exception-fact"
+              data-testid={`score-fact-${fact.id}`}
+              key={fact.id}
+            >
+              <div className="live-exception-meta">
+                <strong>{state.participantNames[contestantId] ?? contestantId}</strong>
+                <span>
+                  {fact.seatId} · {fact.source}
+                </span>
+                <span>总分 {fact.total}</span>
+                <span>{correctionStatusLabel(fact.correction)}</span>
+              </div>
+              <div className="live-exception-actions">{renderFactActions(fact)}</div>
+            </div>
+          );
+        })}
+      </div>
+    ));
   }
 
   const data = query.data;
-  if (data === undefined || data.session === null) {
-    return blockingCard("当前没有运行中的评分会话。");
+  let body: ReactNode;
+  if (live.round === null) {
+    body = <p className="ui-card__description">该轮次尚未准备。</p>;
+  } else if (live.round.state === "locked") {
+    body = (
+      <p className="ui-card__description">
+        {state.session?.mode === "formal"
+          ? "轮次已锁定。请先在轮次操作区点「打开评分更正窗口」，再回到这里修正。"
+          : "轮次已锁定。"}
+      </p>
+    );
+  } else if (query.isPending) {
+    body = <p className="ui-card__description">正在加载评分事实…</p>;
+  } else if (query.isError) {
+    body = (
+      <div className="live-exception-error" role="alert">
+        <p className="ui-field__error">
+          {describeCorrectionError(query.error, "评分事实加载失败，请稍后重试。")}
+        </p>
+        <Button variant="secondary" size="sm" onClick={() => void query.refetch()}>
+          重试
+        </Button>
+      </div>
+    );
+  } else if (data === undefined) {
+    body = <p className="ui-card__description">正在加载评分事实…</p>;
+  } else if (data.session === null) {
+    body = <p className="ui-card__description">当前没有运行中的评分会话。</p>;
+  } else if (state.activity.status !== "active") {
+    body = <p className="ui-card__description">活动不在进行中，不能修正评分。</p>;
+  } else {
+    body = renderFacts(data);
   }
-  if (state.activity.status !== "active") {
-    return blockingCard("活动不在进行中，不能修正评分。");
-  }
-
-  const performanceIds: string[] = [];
-  for (const performance of data.performances) {
-    performanceIds.push(performance.id);
-  }
-  for (const fact of data.facts) {
-    if (!performanceIds.includes(fact.performanceId)) {
-      performanceIds.push(fact.performanceId);
-    }
-  }
-  const groups = performanceIds
-    .map((performanceId) => ({
-      performanceId,
-      performance: data.performances.find((item) => item.id === performanceId) ?? null,
-      facts: data.facts.filter((fact) => fact.performanceId === performanceId),
-    }))
-    .filter((group) => group.facts.length > 0);
 
   return (
     <Card className="live-exception-panel" data-testid={`live-exceptions-${live.config.key}`}>
-      <h2 className="ui-card__title">异常处理 · 评分修正</h2>
-      <p className="ui-card__description">
-        按表演列出评分事实；改分后请重算，再重新生成排名与锁轮。
-      </p>
-      {groups.length === 0 ? (
-        <p className="ui-card__description">当前轮次还没有评分事实。</p>
-      ) : (
-        groups.map((group) => (
-          <div className="live-exception-group" key={group.performanceId}>
-            {group.facts.map((fact) => {
-              const contestantId = group.performance?.contestantId ?? fact.contestantId;
-              return (
-                <div
-                  className="live-exception-fact"
-                  data-testid={`score-fact-${fact.contestantId}`}
-                  key={fact.id}
-                >
-                  <div className="live-exception-meta">
-                    <strong>{state.participantNames[contestantId] ?? contestantId}</strong>
-                    <span>
-                      {fact.seatId} · {fact.source}
-                    </span>
-                    <span>总分 {fact.total}</span>
-                    <span>{correctionStatusLabel(fact.correction)}</span>
-                  </div>
-                  <div className="live-exception-actions">{renderFactActions(fact)}</div>
-                </div>
-              );
-            })}
-          </div>
-        ))
-      )}
+      <h2 className="ui-card__title">异常处理 · 评分修正 · {live.config.key}</h2>
+      {body}
       {status === null ? null : (
         <p className="ui-card__description" role="status">
           {status}

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../api/client.js";
 import type { LiveRound, LiveState, RoundScoresResponse } from "../../api/live.js";
 
 const fetchRoundScoresMock = vi.hoisted(() => vi.fn());
@@ -57,6 +58,19 @@ const state: LiveState = {
   rounds: [],
   participantIds: ["singer-a"],
   participantNames: { "singer-a": "林晓雨" },
+};
+
+const twoCriterionState: LiveState = {
+  ...state,
+  config: {
+    ...state.config,
+    rubric: {
+      criteria: [
+        { key: "total", weight: 1, maximum: 100 },
+        { key: "artistry", weight: 1, maximum: 10 },
+      ],
+    },
+  },
 };
 
 const live: LiveRound = {
@@ -157,16 +171,23 @@ function renderPanel(options: {
       mutations: { retry: false },
     },
   });
-  return render(
+  const element = (liveValue: LiveRound) => (
     <QueryClientProvider client={queryClient}>
       <LiveExceptionPanel
         activityId="act-1"
-        live={options.live ?? live}
+        live={liveValue}
         state={options.state ?? state}
         onChanged={vi.fn()}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(element(options.live ?? live));
+  return {
+    ...view,
+    rerenderWithLive(nextLive: LiveRound): void {
+      view.rerender(element(nextLive));
+    },
+  };
 }
 
 describe("LiveExceptionPanel", () => {
@@ -182,6 +203,40 @@ describe("LiveExceptionPanel", () => {
 
     expect(await screen.findByText(/打开评分更正窗口/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "开修正" })).toBeNull();
+  });
+
+  it("uses the short locked message outside formal mode", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores());
+    renderPanel({
+      live: { ...live, round: { ...live.round!, state: "locked" } },
+      state: {
+        ...state,
+        session: {
+          id: "session-1",
+          activityId: "activity-1",
+          definitionVersion: 1,
+          contentHash: "hash",
+          scope: "judging",
+          mode: "rehearsal",
+          status: "running",
+          revision: 0,
+          openedAt: "2026-11-13T10:00:00.000Z",
+        },
+      },
+    });
+
+    expect(await screen.findByText("轮次已锁定。")).toBeVisible();
+    expect(screen.queryByText(/打开评分更正窗口/)).toBeNull();
+  });
+
+  it("shows a retry block when the scores fail to load", async () => {
+    fetchRoundScoresMock.mockRejectedValueOnce(new Error("boom"));
+    renderPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "评分事实加载失败，请稍后重试。",
+    );
+    expect(screen.getByRole("button", { name: "重试" })).toBeVisible();
   });
 
   it("blocks correction when no judging session is running", async () => {
@@ -230,11 +285,128 @@ describe("LiveExceptionPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存修正" }));
 
     await waitFor(() => {
-      expect(editScoreFactMock).toHaveBeenCalledWith("act-1", "round-1", expect.objectContaining({
-        criteria: { total: 95 },
-        correctionId: "correction-1",
+      expect(editScoreFactMock).toHaveBeenCalledWith("act-1", "round-1", {
+        scoreFactId: "fact-1",
+        performanceId: "performance-1",
+        panelSnapshotId: "panel-1",
+        seatId: "seat-1",
+        contextVersion: 1,
         expectedVersion: 3,
-      }));
+        criteria: { total: 95 },
+        reason: "看错分",
+        correctionId: "correction-1",
+      });
+    });
+  });
+
+  it("sends every rubric key and keeps the untouched criterion", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      facts: [{
+        ...baseFact,
+        criteria: { total: 90, artistry: 8 },
+        correction: {
+          id: "correction-1",
+          state: "open",
+          baseVersion: 1,
+          reason: "看错分",
+          revision: 0,
+        },
+      }],
+    }));
+    renderPanel({ state: twoCriterionState });
+
+    fireEvent.change(await screen.findByLabelText("total"), { target: { value: "95" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修正" }));
+
+    await waitFor(() => {
+      expect(editScoreFactMock).toHaveBeenCalledWith("act-1", "round-1", {
+        scoreFactId: "fact-1",
+        performanceId: "performance-1",
+        panelSnapshotId: "panel-1",
+        seatId: "seat-1",
+        contextVersion: 1,
+        expectedVersion: 3,
+        criteria: { total: 95, artistry: 8 },
+        reason: "看错分",
+        correctionId: "correction-1",
+      });
+    });
+  });
+
+  it("rejects out-of-range criteria before submitting", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      facts: [{
+        ...baseFact,
+        correction: {
+          id: "correction-1",
+          state: "open",
+          baseVersion: 1,
+          reason: "看错分",
+          revision: 0,
+        },
+      }],
+    }));
+    renderPanel();
+
+    fireEvent.change(await screen.findByLabelText("total"), { target: { value: "101" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修正" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("不能大于");
+    expect(editScoreFactMock).not.toHaveBeenCalled();
+  });
+
+  it("maps a correction command error to a Chinese alert", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores());
+    openScoreCorrectionMock.mockRejectedValueOnce(
+      new ApiError(409, "RESULT_CONSUMED", "result consumed"),
+    );
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "开修正" }));
+    fireEvent.change(screen.getByLabelText("修正原因"), { target: { value: "看错分" } });
+    fireEvent.click(screen.getByRole("button", { name: "确认开修正" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "该赛段结果已确认，请先解锁赛果。",
+    );
+  });
+
+  it("resets criteria drafts when the correction changes", async () => {
+    fetchRoundScoresMock.mockResolvedValueOnce(scores({
+      facts: [{
+        ...baseFact,
+        criteria: { total: 90 },
+        correction: {
+          id: "correction-1",
+          state: "open",
+          baseVersion: 1,
+          reason: "看错分",
+          revision: 0,
+        },
+      }],
+    }));
+    const view = renderPanel();
+
+    fireEvent.change(await screen.findByLabelText("total"), { target: { value: "80" } });
+    expect((screen.getByLabelText("total") as HTMLInputElement).value).toBe("80");
+
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      facts: [{
+        ...baseFact,
+        criteria: { total: 70 },
+        correction: {
+          id: "correction-2",
+          state: "open",
+          baseVersion: 2,
+          reason: "重新修正",
+          revision: 0,
+        },
+      }],
+    }));
+    view.rerenderWithLive({ ...live, round: { ...live.round!, revision: 2 } });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText("total") as HTMLInputElement).value).toBe("70");
     });
   });
 

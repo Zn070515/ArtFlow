@@ -33,6 +33,7 @@ function LiveActivityContent() {
     allowed ? `activity:${activityId}` : null,
     () => {
       void queryClient.invalidateQueries({ queryKey: ["live-state", activityId] });
+      void queryClient.invalidateQueries({ queryKey: ["round-scores", activityId] });
     },
   );
   const query = useQuery({

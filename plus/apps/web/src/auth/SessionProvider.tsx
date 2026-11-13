@@ -108,6 +108,7 @@ export function hasLiveAccess(session: SessionResponse | null): boolean {
   return (
     permissions.includes("*") ||
     permissions.includes("competition.manage") ||
+    permissions.includes("competition.score.write") ||
     permissions.includes("judge.manage")
   );
 }
