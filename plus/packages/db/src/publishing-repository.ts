@@ -22,6 +22,16 @@ function json(value: unknown): unknown {
   return typeof value === "string" ? (JSON.parse(value) as unknown) : value;
 }
 
+function participantName(answers: unknown, fallback: string): string {
+  const parsed = json(answers);
+  if (parsed === null || typeof parsed !== "object") return fallback;
+  for (const key of ["name", "displayName", "title"]) {
+    const value = (parsed as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return fallback;
+}
+
 export interface StoredResultSource {
   readonly kind: "podium_candidate" | "vote_session";
   readonly aggregateId: string;
@@ -385,13 +395,22 @@ export async function updateResultReleaseStatus(
   }).where("id", "=", value.id).where("activity_id", "=", value.activityId).execute();
 }
 
+export interface PublicResultDecision extends ResultDecision {
+  /** Display name from the registration answers; falls back to contestantId. */
+  readonly contestantName: string;
+}
+
+export interface PublicResultAward extends ResultAward {
+  readonly contestantName: string;
+}
+
 export interface PublicResult {
   readonly releaseId: string;
   readonly stageKey: string;
   readonly publicTitle: string;
   readonly releasedAt: string;
-  readonly decisions: readonly ResultDecision[];
-  readonly awards: readonly ResultAward[];
+  readonly decisions: readonly PublicResultDecision[];
+  readonly awards: readonly PublicResultAward[];
 }
 
 export interface PublicResults {
@@ -443,6 +462,16 @@ export async function selectPublicResults(
   const activityTitle = newest === undefined
     ? ""
     : (json(newest.snapshot) as ResultSnapshot).activityTitle;
+  // The release snapshot freezes contestant ids. Names are presentation data
+  // resolved from the activity's registrations at read time.
+  const registrations = await db.selectFrom("registration")
+    .select(["participant_id", "answers"])
+    .where("activity_id", "=", activity.id)
+    .execute();
+  const names = new Map<string, string>();
+  for (const registration of registrations) {
+    names.set(registration.participant_id, participantName(registration.answers, registration.participant_id));
+  }
   const results = visible.map((row) => {
     const snapshot = json(row.snapshot) as ResultSnapshot;
     return {
@@ -450,8 +479,14 @@ export async function selectPublicResults(
       stageKey: row.stage_key,
       publicTitle: snapshot.publicTitle,
       releasedAt: iso(row.released_at) ?? "",
-      decisions: snapshot.decisions,
-      awards: snapshot.awards,
+      decisions: snapshot.decisions.map((decision) => ({
+        ...decision,
+        contestantName: names.get(decision.contestantId) ?? decision.contestantId,
+      })),
+      awards: snapshot.awards.map((award) => ({
+        ...award,
+        contestantName: names.get(award.contestantId) ?? award.contestantId,
+      })),
     };
   });
   return { activity: { publicCode: activity.public_code }, activityTitle, results };
