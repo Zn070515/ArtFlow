@@ -1,4 +1,5 @@
 import {
+  findRunningSessionByScope,
   getActivity,
   getCurrentRankingSnapshot,
   getLatestAdvancementDecision,
@@ -6,7 +7,6 @@ import {
   listCurrentScoreFacts,
   listLatestCorrectionsForScoreFacts,
   listRoundPerformances,
-  listSessionRecords,
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import type { CompetitionRoundScoresResponse } from "@artflow-plus/contracts";
@@ -19,6 +19,7 @@ export interface RoundScoresInput {
   readonly scope: string;
 }
 
+/** Permission checks belong to the route/topic caller; this reads the projection. */
 export async function getRoundScores(
   db: Kysely<Database>,
   input: RoundScoresInput,
@@ -32,8 +33,7 @@ export async function getRoundScores(
   if (round === null || round.activityId !== activity.id) {
     throw new DomainError("NOT_FOUND", "The competition round was not found.");
   }
-  const session = (await listSessionRecords(db, activity.id))
-    .find((item) => item.status === "running" && item.scope === input.scope) ?? null;
+  const session = await findRunningSessionByScope(db, activity.id, input.scope);
   const mode = session?.mode ?? null;
   const facts = mode === null ? [] : await listCurrentScoreFacts(db, round.id, mode);
   const corrections = await listLatestCorrectionsForScoreFacts(db, facts.map((fact) => fact.id));
@@ -50,6 +50,8 @@ export async function getRoundScores(
       advanceCount: round.advanceCount,
     },
     session: session === null ? null : { id: session.id, mode: session.mode, scope: session.scope },
+    // rows/tieGroups are engine-written: decorateTieGroups adds tie ids and the
+    // response contract validates the shape.
     ranking: ranking === null ? null : {
       id: ranking.id,
       revision: ranking.revision,
@@ -58,6 +60,8 @@ export async function getRoundScores(
       rows: (ranking.rows as { contestantId: string; total: string; judgeCount: number }[]),
       tieGroups: (ranking.tieGroups as { id: string; total: string; contestants: string[] }[]),
     },
+    // finalizeAdvancement writes contestantId/advanced; the response contract
+    // validates the shape.
     advancement: advancement === null ? null : {
       id: advancement.id,
       revision: advancement.revision,

@@ -29,7 +29,7 @@ export const recoveryStaff: ActorContext = {
   actorId: "resolution-staff",
   actorType: "user",
   roles: ["staff"],
-  permissions: ["competition.manage", "competition.round.prepare", "grouping.manage"],
+  permissions: ["competition.manage", "competition.round.prepare"],
 };
 export const recoveryJudge: ActorContext = {
   actorId: "judge-1",

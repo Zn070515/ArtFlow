@@ -18,6 +18,9 @@ import {
 } from "./helpers/recovery-fixture.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
+if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
+  throw new Error("REQUIRE_DB=1 but ARTFLOW_PLUS_DATABASE_URL is unset.");
+}
 const schema = `artflow_round_scores_${Date.now()}_${process.pid}`;
 let db: Kysely<Database>;
 let admin: Client;
@@ -30,6 +33,7 @@ describe.skipIf(!connectionString)("round scores read service", () => {
     db = createDb({ connectionString, schema }); await migrate(db);
   });
   afterAll(async () => {
+    if (!connectionString) return;
     await closeDb(db); await admin.query(`DROP SCHEMA "${schema}" CASCADE`); await admin.end();
   });
 
@@ -57,6 +61,30 @@ describe.skipIf(!connectionString)("round scores read service", () => {
     expect(result.performances).toHaveLength(3);
   });
 
+  it("returns a session-only projection when no ranking exists yet", async () => {
+    const fixture = await seedLockedRound(db);
+    const result = await getRoundScores(db, {
+      activityId: fixture.activityId, roundId: fixture.roundId, scope: "judging",
+    });
+    expect(result.session).not.toBeNull();
+    expect(result.ranking).toBeNull();
+    expect(result.advancement).toBeNull();
+  });
+
+  it("projects the rehearsal session mode", async () => {
+    const fixture = await seedLockedRound(db, "rehearsal");
+    await resolveRound(db, recoveryDeps(recoveryStaff), {
+      commandId: `resolve-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      scope: "judging",
+    });
+    const result = await getRoundScores(db, {
+      activityId: fixture.activityId, roundId: fixture.roundId, scope: "judging",
+    });
+    expect(result.session?.mode).toBe("rehearsal");
+  });
+
   it("returns an empty projection when no session is running", async () => {
     const fixture = await seedLockedRound(db);
     await resolveRound(db, recoveryDeps(recoveryStaff), {
@@ -82,6 +110,20 @@ describe.skipIf(!connectionString)("round scores read service", () => {
     })).rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
 
+  it("rejects an unknown activity", async () => {
+    await expect(getRoundScores(db, {
+      activityId: "activity-missing", roundId: "round-missing", scope: "judging",
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("rejects a round belonging to another activity", async () => {
+    const first = await seedLockedRound(db);
+    const second = await seedLockedRound(db);
+    await expect(getRoundScores(db, {
+      activityId: first.activityId, roundId: second.roundId, scope: "judging",
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("projects a finalized advancement decision", async () => {
     const fixture = await seedLockedRound(db);
     const ranking = await resolveRound(db, recoveryDeps(recoveryStaff), {
@@ -103,6 +145,8 @@ describe.skipIf(!connectionString)("round scores read service", () => {
     });
     expect(result.advancement).toMatchObject({ status: "needs_review" });
     expect(result.advancement?.decisions).toHaveLength(3);
+    expect(result.ranking?.inputFingerprint).toMatch(/^.+$/);
+    expect(result.advancement?.inputFingerprint).toMatch(/^.+$/);
   });
 
   it("projects an open score correction", async () => {
