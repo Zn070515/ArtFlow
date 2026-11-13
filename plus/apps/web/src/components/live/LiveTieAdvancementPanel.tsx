@@ -171,7 +171,7 @@ export function LiveTieAdvancementPanel({
       );
     }
     if (finalized) {
-      return <p className="ui-card__description">已定稿（revision {advancement.revision}）</p>;
+      return <p className="ui-card__description" data-testid="advancement-status">已定稿（revision {advancement.revision}）</p>;
     }
     if (advancement.status === "needs_review") {
       return (

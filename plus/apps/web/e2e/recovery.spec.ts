@@ -68,7 +68,7 @@ test("recovers a live result through revoke, correction, tie, and re-publish", a
   await expect(tiePanel.getByText("已记录裁决")).toBeVisible();
   await expect(tiePanel.getByRole("button", { name: "晋级定稿" })).toBeEnabled();
   await tiePanel.getByRole("button", { name: "晋级定稿" }).click();
-  await expect(tiePanel.getByText(/已定稿/)).toBeVisible();
+  await expect(tiePanel.getByTestId("advancement-status")).toContainText("已定稿");
 
   // The seed's preset candidate is revision 3 with singer-c at 80.00; the
   // recomputed candidate must advance the revision and carry the corrected total.
