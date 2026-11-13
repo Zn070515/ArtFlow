@@ -448,46 +448,6 @@
     {
       "id": "manifest:event-no-consumer:tasks.changed",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:PATCH /api/activities/:id/publishing/publications/:stageKey",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/attendance/points/:pointKey",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/attendance/staff/:staffId",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/prepare",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/registrations/:registrationId/materials/:materialId/review",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/registrations/:registrationId/supplement",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/ticket-sessions/:sessionId/revoke",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/tickets",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/tickets/:ticketId/revoke",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/tickets/:ticketId/rotate",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     }
   ]
 }

@@ -42,6 +42,46 @@ export function createAttendancePoint(
   });
 }
 
+export function updateAttendancePoint(
+  activityId: string,
+  pointKey: string,
+  body: {
+    readonly expectedRevision: number;
+    readonly name: string;
+    readonly subjectTypes: readonly string[];
+    readonly active: boolean;
+  },
+): Promise<AttendancePoint> {
+  return apiFetch<AttendancePoint>(
+    `/api/activities/${encodeURIComponent(activityId)}/attendance/points/${encodeURIComponent(pointKey)}`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function updateAttendanceStaff(
+  activityId: string,
+  staffId: string,
+  body: {
+    readonly expectedRevision: number;
+    readonly displayName: string;
+    readonly actorId: string | null;
+    readonly active: boolean;
+  },
+): Promise<AttendanceStaff> {
+  return apiFetch<AttendanceStaff>(
+    `/api/activities/${encodeURIComponent(activityId)}/attendance/staff/${encodeURIComponent(staffId)}`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 export function addAttendanceStaff(
   activityId: string,
   body: { displayName: string; actorId?: string | null },

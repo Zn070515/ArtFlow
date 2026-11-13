@@ -4,7 +4,9 @@ import { Link, useParams } from "@tanstack/react-router";
 import { fetchRegistrationDetail, type RegistrationDetail } from "../api/registrations.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
+import { MaterialsReviewPanel } from "../components/ops/MaterialsReviewPanel.js";
 import { ReviewPanel } from "../components/ops/ReviewPanel.js";
+import { SupplementPanel } from "../components/ops/SupplementPanel.js";
 
 export function OpsRegistrationPage() {
   return (
@@ -81,6 +83,16 @@ function OpsRegistrationContent() {
   const { session } = useSession();
   const queryClient = useQueryClient();
   const allowed = hasOpsAccess(session);
+  const permissions = session?.actor.permissions ?? [];
+  const can = (permission: string): boolean =>
+    permissions.includes("*") || permissions.includes(permission);
+  const refresh = (): void => {
+    void queryClient.invalidateQueries({
+      queryKey: ["registration-detail", activityId, registrationId],
+    });
+    void queryClient.invalidateQueries({ queryKey: ["ops-registrations", activityId] });
+    void queryClient.invalidateQueries({ queryKey: ["ops-roster", activityId] });
+  };
   const query = useQuery({
     queryKey: ["registration-detail", activityId, registrationId],
     queryFn: () => fetchRegistrationDetail(activityId, registrationId),
@@ -112,15 +124,16 @@ function OpsRegistrationContent() {
       </header>
       <div className="ops-grid">
         <DetailView detail={query.data} />
-        <ReviewPanel
+        <ReviewPanel detail={query.data} onReviewed={refresh} />
+        <MaterialsReviewPanel
           detail={query.data}
-          onReviewed={() => {
-            void queryClient.invalidateQueries({
-              queryKey: ["registration-detail", activityId, registrationId],
-            });
-            void queryClient.invalidateQueries({ queryKey: ["ops-registrations", activityId] });
-            void queryClient.invalidateQueries({ queryKey: ["ops-roster", activityId] });
-          }}
+          canManage={can("materials.review")}
+          onReviewed={refresh}
+        />
+        <SupplementPanel
+          detail={query.data}
+          canManage={can("registration.review")}
+          onIssued={refresh}
         />
       </div>
     </section>

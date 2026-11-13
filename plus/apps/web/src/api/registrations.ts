@@ -161,3 +161,26 @@ export function uploadMaterialContent(
     },
   );
 }
+
+export type MaterialReviewStatus = "approved" | "needs_supplement";
+
+export function reviewMaterial(
+  activityId: string,
+  registrationId: string,
+  materialId: string,
+  commandId: string,
+  input: {
+    readonly expectedRevision: number;
+    readonly status: MaterialReviewStatus;
+    readonly note: string;
+  },
+): Promise<RegistrationMaterial> {
+  return apiFetch<RegistrationMaterial>(
+    `/api/activities/${encodeURIComponent(activityId)}/registrations/${encodeURIComponent(registrationId)}/materials/${encodeURIComponent(materialId)}/review`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": commandId },
+      body: JSON.stringify(input),
+    },
+  );
+}

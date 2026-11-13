@@ -14,6 +14,7 @@ import { VotingCard } from "../components/ops/VotingCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
 import { ExportCard } from "../components/ops/ExportCard.js";
+import { TicketsCard } from "../components/ops/TicketsCard.js";
 import { Card } from "../components/ui/Card.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
@@ -153,6 +154,13 @@ function OpsActivityContent() {
           permissions={session?.actor.permissions ?? []}
           documentFormats={exportFormats.data ?? ["csv"]}
         />
+        {activity?.enabledCapabilities.includes("ticketing") ? (
+          <TicketsCard
+            key={activityId}
+            activityId={activityId}
+            canManage={can(session?.actor.permissions, "ticket.manage")}
+          />
+        ) : null}
         {activity?.enabledCapabilities.includes("attendance") ? (
           <AttendanceCard
             key={activityId}

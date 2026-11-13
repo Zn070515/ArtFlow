@@ -117,6 +117,22 @@ export function finalizeRoster(
   });
 }
 
+export function issueSupplement(
+  activityId: string,
+  registrationId: string,
+  allowedKeys: readonly string[],
+  commandId: string,
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${encodeURIComponent(activityId)}/registrations/${encodeURIComponent(registrationId)}/supplement`,
+    {
+      method: "POST",
+      headers: { "idempotency-key": commandId },
+      body: JSON.stringify({ allowedKeys }),
+    },
+  );
+}
+
 export function reopenRoster(
   activityId: string,
   commandId: string,

@@ -12,6 +12,11 @@
       "reason": "Legacy compatibility alias for /competition/rounds/:roundKey/prepare; the Web uses the scoped route."
     },
     {
+      "method": "POST",
+      "path": "/api/activities/:id/competition/rounds",
+      "reason": "Collection form of the same prepare command, kept for external clients; the Web uses /competition/rounds/:roundKey/prepare."
+    },
+    {
       "method": "PATCH",
       "path": "/api/activities/:id/registrations/:registrationId",
       "reason": "Legacy compatibility alias for /registrations/:registrationId/answers; the Web uses the explicit answers route."
