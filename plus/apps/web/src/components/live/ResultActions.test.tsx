@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LiveState } from "../../api/live.js";
 
+const fetchPublishingState = vi.hoisted(() => vi.fn());
+const fetchExecutions = vi.hoisted(() => vi.fn());
 const revokeResultRelease = vi.hoisted(() => vi.fn(async () => ({})));
 const unlockStageResult = vi.hoisted(() => vi.fn(async () => ({})));
 
@@ -11,36 +13,8 @@ vi.mock("../../api/voting.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api/voting.js")>();
   return {
     ...actual,
-    fetchPublishingState: vi.fn(async () => ({
-      stages: [{ key: "final", label: "决赛" }],
-      podiumCandidate: null,
-      stageResults: [
-        { stageKey: "final", status: "confirmed", candidateRevision: 3, inputFingerprint: "fp" },
-      ],
-      releases: [
-        {
-          id: "release-1",
-          stageKey: "final",
-          status: "active",
-          note: "初始发布",
-          releasedAt: "2026-11-13T10:00:00Z",
-        },
-      ],
-      publications: [],
-    })),
-    fetchExecutions: vi.fn(async () => [
-      {
-        id: "publishing-session-1",
-        activityId: "act-1",
-        definitionVersion: 1,
-        contentHash: "hash",
-        scope: "publishing",
-        mode: "formal",
-        status: "running",
-        revision: 0,
-        openedAt: "2026-11-13T10:00:00Z",
-      },
-    ]),
+    fetchPublishingState,
+    fetchExecutions,
     revokeResultRelease,
     unlockStageResult,
   };
@@ -79,34 +53,88 @@ const state: LiveState = {
   participantNames: {},
 };
 
+const publishingSession = {
+  id: "publishing-session-1",
+  activityId: "act-1",
+  definitionVersion: 1,
+  contentHash: "hash",
+  scope: "publishing",
+  mode: "formal",
+  status: "running",
+  revision: 0,
+  openedAt: "2026-11-13T10:00:00Z",
+};
+
+function publishingState(releases: readonly Record<string, unknown>[]) {
+  return {
+    stages: [{ key: "final", label: "决赛" }],
+    podiumCandidate: null,
+    stageResults: [
+      { stageKey: "final", status: "confirmed", candidateRevision: 3, inputFingerprint: "fp" },
+    ],
+    releases,
+    publications: [],
+  };
+}
+
+const activeRelease = {
+  id: "release-1",
+  stageKey: "final",
+  status: "active",
+  note: "初始发布",
+  releasedAt: "2026-11-13T10:00:00Z",
+};
+
+function renderResultActions(): void {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ResultActions activityId="act-1" state={state} onChanged={vi.fn()} />
+    </QueryClientProvider>,
+  );
+}
+
+function typeNote(value: string): void {
+  fireEvent.change(screen.getByLabelText("发布 / 归档说明"), { target: { value } });
+}
+
 describe("ResultActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchExecutions.mockResolvedValue([publishingSession]);
   });
 
   it("revokes an active release and unlocks a confirmed stage", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ResultActions activityId="act-1" state={state} onChanged={vi.fn()} />
-      </QueryClientProvider>,
-    );
+    fetchPublishingState.mockResolvedValue(publishingState([activeRelease]));
+    renderResultActions();
 
-    expect(await screen.findByTestId("release-status")).toHaveTextContent("active");
+    const status = await screen.findByTestId("release-status");
+    expect(status).toHaveAttribute("data-release-status", "active");
+    expect(status).toHaveTextContent("决赛 · 生效 · 2026-11-13T10:00:00Z");
 
-    fireEvent.change(screen.getByLabelText("发布 / 归档说明"), {
-      target: { value: "现场撤回" },
-    });
+    typeNote("现场撤回");
+    expect(screen.getByRole("button", { name: "发布赛果" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "撤销发布" }));
 
     await waitFor(() => {
+      expect(revokeResultRelease).toHaveBeenCalledWith("act-1", "release-1", "现场撤回");
       expect(screen.getByRole("button", { name: "解锁赛果" })).toBeEnabled();
     });
     fireEvent.click(screen.getByRole("button", { name: "解锁赛果" }));
 
     await waitFor(() => {
-      expect(revokeResultRelease).toHaveBeenCalledWith("act-1", "release-1", "现场撤回");
       expect(unlockStageResult).toHaveBeenCalledWith("act-1", "final", 3, "现场撤回");
     });
+  });
+
+  it("keeps release enabled on a fresh page with a confirmed stage result", async () => {
+    fetchPublishingState.mockResolvedValue(publishingState([]));
+    renderResultActions();
+
+    await screen.findByRole("button", { name: "解锁赛果" });
+    expect(screen.queryByTestId("release-status")).toBeNull();
+
+    typeNote("重新发布");
+    expect(screen.getByRole("button", { name: "发布赛果" })).toBeEnabled();
   });
 });
