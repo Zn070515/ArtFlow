@@ -158,7 +158,7 @@ export function registerVotingRoutes(ctx: ApiContext): void {
 
   app.get(
     "/api/activities/:id/ticketing/state",
-    { schema: { params: ActivityParams }, config: { access: "voting" } },
+    { schema: { params: ActivityParams }, config: { access: "session" } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const context = await requestDeps(request);
