@@ -249,12 +249,12 @@
   font-size: 0.86rem;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .form-actions {
     flex-direction: column;
   }
 
   .auth-switch {
-    min-height: 40px;
+    min-height: 44px;
   }
 }
