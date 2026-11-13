@@ -75,18 +75,19 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: filter 160ms ease, transform 160ms ease;
+  transition: filter 160ms ease, translate 160ms ease;
+  translate: 0;
 }
 
 .primary-button:hover {
   filter: brightness(1.08);
-  transform: translateY(-1px);
+  translate: 0 -1px;
 }
 
 .primary-button:disabled {
   opacity: 0.6;
   cursor: wait;
-  transform: none;
+  translate: 0;
 }
 
 .auth-switch {

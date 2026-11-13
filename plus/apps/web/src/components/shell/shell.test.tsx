@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -108,7 +108,7 @@ describe("PortalShell and ConsoleShell", () => {
     expect(screen.getByLabelText("当前工作区")).toHaveTextContent(label);
   });
 
-  it("closes the mobile navigation with Escape and restores trigger focus", () => {
+  it("closes the mobile navigation with Escape and restores trigger focus", async () => {
     render(
       <ConsoleShell>
         <p>page</p>
@@ -120,6 +120,35 @@ describe("PortalShell and ConsoleShell", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(document.activeElement).toBe(toggle);
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+
+  it("marks the mobile drawer as a dialog and inerts the page", () => {
+    const original = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn((query: string) => ({
+        matches: query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    try {
+      render(
+        <ConsoleShell>
+          <p>page</p>
+        </ConsoleShell>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "打开 Console 导航" }));
+      expect(screen.getByRole("dialog", { name: "Console 侧栏" })).toBeInTheDocument();
+      expect(document.querySelector(".console-main")?.hasAttribute("inert")).toBe(true);
+    } finally {
+      Object.defineProperty(window, "matchMedia", { configurable: true, value: original });
+    }
   });
 });

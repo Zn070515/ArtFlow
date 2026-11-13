@@ -78,7 +78,7 @@
 
 .console-page .primary-button:hover {
   filter: brightness(1.08);
-  transform: none;
+  scale: 1;
 }
 
 .console-page .secondary-button {
@@ -697,7 +697,8 @@
   line-height: var(--leading-ui);
   letter-spacing: 0;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), scale var(--duration-fast) var(--ease-out);
+  scale: 1;
 }
 
 [data-shell="console"] .primary-button {
@@ -722,13 +723,13 @@
 [data-shell="console"] .danger-button:hover:not(:disabled) {
   border-color: var(--color-line-strong);
   filter: none;
-  transform: none;
+  scale: 1;
 }
 
 [data-shell="console"] .primary-button:active:not(:disabled),
 [data-shell="console"] .secondary-button:active:not(:disabled),
 [data-shell="console"] .danger-button:active:not(:disabled) {
-  transform: scale(.97);
+  scale: .97;
 }
 
 [data-shell="console"] .primary-button:disabled,
@@ -736,7 +737,7 @@
 [data-shell="console"] .danger-button:disabled {
   opacity: .55;
   cursor: not-allowed;
-  transform: none;
+  scale: 1;
 }
 
 [data-shell="console"] .form-error {

@@ -14,6 +14,9 @@ interface ConsoleNavItem {
 
 export function ConsoleShell({ children }: { readonly children: ReactNode }) {
   const { pathname } = useLocation();
+  const [isDrawer, setIsDrawer] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches,
+  );
   const { session, logout } = useSession();
   const { theme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -30,6 +33,24 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
     setMobileOpen(false);
   }
 
+  function focusToggle(): void {
+    // The topbar is inert while the drawer is open; wait for React to clear it.
+    requestAnimationFrame(() => menuButtonRef.current?.focus());
+  }
+
+  function closeDrawer(): void {
+    setMobileOpen(false);
+    focusToggle();
+  }
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = (): void => setIsDrawer(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
@@ -40,7 +61,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       setMobileOpen(false);
-      menuButtonRef.current?.focus();
+      focusToggle();
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -65,7 +86,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
 
   return (
     <div className="console-shell" data-shell="console" data-theme={theme}>
-      <header className="console-topbar">
+      <header className="console-topbar" inert={isDrawer && mobileOpen}>
         <Link to="/" className="console-brand" aria-label="ArtFlow Portal 首页">
           <span className="console-brand-mark" aria-hidden="true">
             AF
@@ -113,7 +134,19 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
           id="console-sidebar"
           className={`console-sidebar${mobileOpen ? " is-open" : ""}`}
           aria-label="Console 侧栏"
+          {...(isDrawer ? { role: "dialog", "aria-modal": true } : {})}
         >
+          {isDrawer && mobileOpen ? (
+            <button
+              type="button"
+              className="console-drawer-close"
+              aria-label="关闭 Console 导航"
+              onClick={closeDrawer}
+              autoFocus
+            >
+              ×
+            </button>
+          ) : null}
           <div className="console-sidebar-label">工作区</div>
           <nav className="console-nav" aria-label="Console 主导航">
             {items
@@ -138,7 +171,10 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
             ← 返回公开门户
           </Link>
         </aside>
-        <main className="console-main">
+        {isDrawer && mobileOpen ? (
+          <div className="console-drawer-backdrop" aria-hidden="true" onClick={closeDrawer} />
+        ) : null}
+        <main className="console-main" inert={isDrawer && mobileOpen}>
           <div className="console-page">{children}</div>
         </main>
       </div>

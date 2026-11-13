@@ -115,16 +115,17 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: transform 160ms ease, filter 160ms ease;
+  transition: translate 160ms ease, filter 160ms ease;
+  translate: 0;
 }
 
 .code-field button:hover {
   filter: brightness(1.08);
-  transform: translateY(-1px);
+  translate: 0 -1px;
 }
 
 .code-field button:active {
-  transform: translateY(0);
+  translate: 0;
 }
 
 .code-error {

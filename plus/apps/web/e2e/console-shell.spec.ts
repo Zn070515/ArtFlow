@@ -20,9 +20,18 @@ test("mobile Console navigation is hidden when closed and restores focus on Esca
   })).toBe("hidden/none");
 
   await menuToggle.click();
-  await expect(page.getByRole("button", { name: "关闭 Console 导航" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Console 侧栏" })).toBeVisible();
   await expect(sidebar).toBeVisible();
+  await expect(page.locator(".console-drawer-close")).toBeFocused();
+  expect(await page.locator(".console-main").evaluate((element) => (element as HTMLElement).inert)).toBe(true);
 
+  await page.locator(".console-drawer-backdrop").click({ position: { x: 370, y: 400 } });
+  await expect(sidebar).toBeHidden();
+  await expect(menuToggle).toBeFocused();
+  expect(await page.locator(".console-main").evaluate((element) => (element as HTMLElement).inert)).toBe(false);
+
+  await menuToggle.click();
+  await expect(page.getByRole("dialog", { name: "Console 侧栏" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(sidebar).toBeHidden();
   await expect(menuToggle).toBeFocused();
