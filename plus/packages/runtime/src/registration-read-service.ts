@@ -114,6 +114,8 @@ export async function listActivitiesForReview(
   db: Kysely<Database>,
   deps: RuntimeDeps,
 ): Promise<readonly StoredActivitySummary[]> {
+  // The Ops surface is wider than registration review: ticketing, archive,
+  // attendance, tasks and the live surfaces all enter through the same list.
   requireAny(runtimeActor(deps), [
     "registration.review",
     "registration.manage",
@@ -121,6 +123,14 @@ export async function listActivitiesForReview(
     "competition.manage",
     "judge.manage",
     "competition.score.write",
+    "ticket.manage",
+    "archive.manage",
+    "attendance.manage",
+    "tasks.manage",
+    "materials.review",
+    "voting.manage",
+    "result.manage",
+    "grouping.manage",
   ]);
   return listActivities(db);
 }
