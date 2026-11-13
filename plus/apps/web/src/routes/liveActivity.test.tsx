@@ -24,6 +24,9 @@ vi.mock("../auth/RequireSession.js", () => ({
 vi.mock("../auth/SessionProvider.js", () => ({
   canManageCompetition: () => true,
   canManageCompetitionSetup: () => true,
+  canManageLiveSession: () => true,
+  canPrepareCompetitionRound: () => true,
+  canResolveCompetition: () => true,
   hasLiveAccess: () => true,
   useSession: useSessionMock,
 }));

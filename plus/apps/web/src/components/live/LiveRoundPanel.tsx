@@ -32,14 +32,20 @@ export function LiveRoundPanel({
   live,
   sessionMode,
   onChanged,
+  canPrepare = true,
   canManageSetup = true,
+  canResolve = true,
 }: {
   readonly state: LiveState;
   readonly live: LiveRound;
   readonly sessionMode?: "test" | "rehearsal" | "formal";
   readonly onChanged: () => void;
-  /** Round setup/lock/session controls need competition.manage or round.prepare. */
+  /** Preparing a round also accepts competition.round.prepare. */
+  readonly canPrepare?: boolean;
+  /** Panel, performance, lock, reopen and reset commands require competition.manage. */
   readonly canManageSetup?: boolean;
+  /** Ranking resolution also accepts competition.score.write. */
+  readonly canResolve?: boolean;
 }) {
   const config = live.config;
   const round = live.round;
@@ -156,7 +162,7 @@ export function LiveRoundPanel({
         {round === null ? "" : ` · revision ${round.revision}`}
       </p>
 
-      {round === null && canManageSetup ? (
+      {round === null && canPrepare ? (
         <Button variant="primary" disabled={busy} onClick={() => void prepare()}>
           准备回合
         </Button>
@@ -269,23 +275,27 @@ export function LiveRoundPanel({
         </Table>
       )}
 
-      {round !== null && canManageSetup ? (
+      {round !== null && (canManageSetup || canResolve) ? (
         <div className="session-controls live-round-actions">
-          <Button
-            variant="secondary"
-            disabled={busy || round.state !== "scoring" || !allLocked}
-            onClick={() => void lockCurrentRound()}
-          >
-            锁轮
-          </Button>
-          <Button
-            variant="primary"
-            disabled={busy || live.performances.length === 0 || openPerformanceRow !== undefined}
-            onClick={() => void resolve()}
-          >
-            生成排名
-          </Button>
-          {sessionMode === "formal" && round.state === "locked" ? (
+          {canManageSetup ? (
+            <Button
+              variant="secondary"
+              disabled={busy || round.state !== "scoring" || !allLocked}
+              onClick={() => void lockCurrentRound()}
+            >
+              锁轮
+            </Button>
+          ) : null}
+          {canResolve ? (
+            <Button
+              variant="primary"
+              disabled={busy || live.performances.length === 0 || openPerformanceRow !== undefined}
+              onClick={() => void resolve()}
+            >
+              生成排名
+            </Button>
+          ) : null}
+          {canManageSetup && sessionMode === "formal" && round.state === "locked" ? (
             <Button variant="secondary" disabled={busy} onClick={() => setReopenOpen(true)}>
               打开评分更正窗口
             </Button>

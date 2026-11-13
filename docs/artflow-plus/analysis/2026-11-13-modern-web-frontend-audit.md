@@ -134,3 +134,37 @@
   但会与标签重复播报，二者不可兼得。
 - **测试夹具重复**：API 与 runtime 各有一份竞赛种子；仓库没有共享 test-support
   包，两份文件用互相指向的注释记录了同步义务。
+
+## P3 已交付
+
+- **独立 transform 属性**：按钮的 hover/active 从 `transform: translateY/scale`
+  改为 `translate`/`scale`，并在基础态设置 identity，避免只有状态变化时创建
+  新的 stacking context。
+- **容器查询试点**：`.workspace-activity-card` 设为 `container-type: inline-size`，
+  卡片自身宽度 <420px 时头部/底部改为纵向排列；这是按组件阈值决定，不再用
+  视口断点推断卡片宽度。
+- **移动端 Console 抽屉**：移动断点下抽屉是 `role="dialog"` + `aria-modal`，
+  打开时 topbar/main `inert`、有可点击 backdrop 与显式关闭按钮，关闭后焦点回到
+  菜单按钮；桌面断点仍是普通侧栏，不暴露 dialog 角色。
+- **暂缓**：指南的 scroll-snap 滑动手势需要把侧栏重构成横向 scroller；本轮先补
+  模态语义、焦点与关闭路径，滑动作为后续独立改造。
+
+## 第二轮高强度审查后的修正
+
+- **权限拆分**：`canManageCompetitionSetup` 只认 `competition.manage`；新增
+  `canPrepareCompetitionRound`（含 `competition.round.prepare`）、
+  `canResolveCompetition`（含 `competition.score.write`）、
+  `canManageLiveSession`（`studio.manage`/`competition.manage`），与后端
+  `requireSetupPermission` / `requireResolutionPermission` / `requireSessionManager`
+  逐一对齐。评分员能看到「生成排名」，但看不到锁轮/重开/重置。
+- **晋级 mode 判定可测**：抽出 `advancementMatchesMode` 纯函数并直接测试
+  “rehearsal ranking + formal decision” 的拒绝路径，不再依赖一个恰好 `ranking=null`
+  的集成场景。
+- **Attendance 过滤刷新**：`isFetching` 时始终显示“正在加载…”，并禁用行内
+  签到/撤销，避免旧行在新搜索/签到点/模式加载期间仍可点击。
+- **锁定提示分支**：评分员看到的是“请联系具备 competition.manage 权限的人员
+  重开本轮”，而不是一个对他们隐藏的按钮。
+- **Console hover**：补 `translate: 0`，与 `scale: 1` 一起取消主按钮的 1px 上浮。
+- **模态滚动**：保留指南的 `dialog:modal`/`::backdrop` `overscroll-behavior`
+  方案，不采用 `body { overflow: hidden }`——指南明确禁止修改根滚动容器，
+  会移除滚动条、造成布局位移并破坏 sticky。该行为按渐进增强处理。

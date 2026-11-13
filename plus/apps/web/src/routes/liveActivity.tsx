@@ -4,7 +4,15 @@ import { Fragment } from "react";
 
 import { fetchLiveState } from "../api/live.js";
 import { RequireSession } from "../auth/RequireSession.js";
-import { canManageCompetition, canManageCompetitionSetup, hasLiveAccess, useSession } from "../auth/SessionProvider.js";
+import {
+  canManageCompetition,
+  canManageCompetitionSetup,
+  canManageLiveSession,
+  canPrepareCompetitionRound,
+  canResolveCompetition,
+  hasLiveAccess,
+  useSession,
+} from "../auth/SessionProvider.js";
 import { LiveExceptionPanel } from "../components/live/LiveExceptionPanel.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveTieAdvancementPanel } from "../components/live/LiveTieAdvancementPanel.js";
@@ -72,7 +80,10 @@ function LiveActivityContent() {
   }
 
   const state = query.data;
+  const canPrepare = canPrepareCompetitionRound(session);
   const canManageSetup = canManageCompetitionSetup(session);
+  const canResolve = canResolveCompetition(session);
+  const canManageSession = canManageLiveSession(session);
   const hasTicketing = state.activity.enabledCapabilities.includes("ticketing");
 
   return (
@@ -87,7 +98,7 @@ function LiveActivityContent() {
             公开码 {state.activity.publicCode} · release v{state.activity.activeDefinitionVersion} ·
             {fallback ? " 5s 轮询" : " 实时推送"}
           </p>
-          {hasTicketing || !canManageSetup ? null : (
+          {hasTicketing || !canManageSession ? null : (
             <p className="ui-field__error" role="alert">
               该活动未启用 ticketing，无法生成评委入口链接。
             </p>
@@ -103,7 +114,9 @@ function LiveActivityContent() {
                 live={live}
                 sessionMode={state.session?.mode}
                 onChanged={refresh}
+                canPrepare={canPrepare}
                 canManageSetup={canManageSetup}
+                canResolve={canResolve}
               />
               {canManageCompetition(session) ? (
                 <>
@@ -111,6 +124,7 @@ function LiveActivityContent() {
                     activityId={activityId}
                     live={live}
                     state={state}
+                    canManageSetup={canManageSetup}
                     onChanged={refresh}
                   />
                   <LiveTieAdvancementPanel
@@ -125,7 +139,7 @@ function LiveActivityContent() {
           ))}
         </div>
         <aside className="live-control-rail">
-          {canManageSetup ? <LiveSessionPanel state={state} onChanged={refresh} /> : null}
+          {canManageSession ? <LiveSessionPanel state={state} onChanged={refresh} /> : null}
           {state.activity.enabledCapabilities.includes("attendance") ? (
             <AttendanceSummary
               activityId={activityId}

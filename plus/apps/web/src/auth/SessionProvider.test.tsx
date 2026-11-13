@@ -17,6 +17,9 @@ vi.mock("../api/auth.js", () => ({
 import {
   canManageCompetition,
   canManageCompetitionSetup,
+  canManageLiveSession,
+  canPrepareCompetitionRound,
+  canResolveCompetition,
   defaultLanding,
   hasLiveAccess,
   hasWorkspaceAccess,
@@ -73,13 +76,24 @@ describe("canManageCompetition", () => {
 });
 
 describe("canManageCompetitionSetup", () => {
-  it("accepts setup managers and rejects score writers", () => {
+  it("accepts only setup managers", () => {
     expect(canManageCompetitionSetup(session(["competition.manage"]))).toBe(true);
-    expect(canManageCompetitionSetup(session(["competition.round.prepare"]))).toBe(true);
     expect(canManageCompetitionSetup(session(["*"]))).toBe(true);
+    expect(canManageCompetitionSetup(session(["competition.round.prepare"]))).toBe(false);
     expect(canManageCompetitionSetup(session(["competition.score.write"]))).toBe(false);
     expect(canManageCompetitionSetup(session(["judge.manage"]))).toBe(false);
     expect(canManageCompetitionSetup(null)).toBe(false);
+  });
+});
+
+describe("competition capability helpers", () => {
+  it("separates prepare, resolve and session permissions", () => {
+    expect(canPrepareCompetitionRound(session(["competition.round.prepare"]))).toBe(true);
+    expect(canPrepareCompetitionRound(session(["competition.score.write"]))).toBe(false);
+    expect(canResolveCompetition(session(["competition.score.write"]))).toBe(true);
+    expect(canResolveCompetition(session(["competition.round.prepare"]))).toBe(false);
+    expect(canManageLiveSession(session(["studio.manage"]))).toBe(true);
+    expect(canManageLiveSession(session(["competition.score.write"]))).toBe(false);
   });
 });
 

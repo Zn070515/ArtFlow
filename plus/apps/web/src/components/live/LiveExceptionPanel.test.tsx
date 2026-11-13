@@ -172,6 +172,7 @@ function deferred<T>() {
 function renderPanel(options: {
   readonly live?: LiveRound;
   readonly state?: LiveState;
+  readonly canManageSetup?: boolean;
 } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -185,6 +186,7 @@ function renderPanel(options: {
         activityId="act-1"
         live={liveValue}
         state={options.state ?? state}
+        canManageSetup={options.canManageSetup ?? true}
         onChanged={vi.fn()}
       />
     </QueryClientProvider>
@@ -601,6 +603,14 @@ describe("LiveExceptionPanel", () => {
     expect(
       await screen.findByText("重算完成，请先「锁轮」再点「生成排名」。"),
     ).toBeVisible();
+  });
+
+  it("tells score writers to ask a manager when the round is locked", () => {
+    const lockedLive: LiveRound = live.round === null
+      ? live
+      : { ...live, round: { ...live.round, state: "locked" } };
+    renderPanel({ live: lockedLive, canManageSetup: false });
+    expect(screen.getByText(/请联系具备 competition\.manage/)).toBeInTheDocument();
   });
 
   it("opens a new correction after the previous one was recalculated", async () => {

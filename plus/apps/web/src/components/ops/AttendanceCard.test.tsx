@@ -145,6 +145,20 @@ describe("AttendanceCard", () => {
     await waitFor(() => expect(screen.getByText("当前筛选下没有主体。")).toBeInTheDocument());
   });
 
+  it("disables stale row actions while a new filter loads", async () => {
+    let resolveSecond: ((value: AttendanceListResponse) => void) | undefined;
+    fetchAttendanceMock.mockResolvedValueOnce(list);
+    fetchAttendanceMock.mockImplementationOnce(
+      () => new Promise<AttendanceListResponse>((resolve) => { resolveSecond = resolve; }),
+    );
+    renderCard();
+    await screen.findByText("选手甲");
+    fireEvent.change(screen.getByLabelText("搜索"), { target: { value: "nobody" } });
+    expect(await screen.findByText("正在加载…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "签到" })).toBeDisabled();
+    resolveSecond?.({ ...list, rows: [] });
+  });
+
   it("moves the selected tab with arrow keys", async () => {
     renderCard();
     const participant = await screen.findByRole("tab", { name: "参赛者" });
