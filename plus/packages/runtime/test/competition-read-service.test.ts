@@ -83,6 +83,8 @@ describe.skipIf(!connectionString)("round scores read service", () => {
       activityId: fixture.activityId, roundId: fixture.roundId, scope: "judging",
     });
     expect(result.session?.mode).toBe("rehearsal");
+    expect(result.facts).toHaveLength(3);
+    expect(result.ranking).not.toBeNull();
   });
 
   it("returns an empty projection when no session is running", async () => {
@@ -145,7 +147,7 @@ describe.skipIf(!connectionString)("round scores read service", () => {
     });
     expect(result.advancement).toMatchObject({ status: "needs_review" });
     expect(result.advancement?.decisions).toHaveLength(3);
-    expect(result.ranking?.inputFingerprint).toMatch(/^.+$/);
+    expect(result.advancement?.inputFingerprint).toBe(result.ranking?.inputFingerprint);
     expect(result.advancement?.inputFingerprint).toMatch(/^.+$/);
   });
 
