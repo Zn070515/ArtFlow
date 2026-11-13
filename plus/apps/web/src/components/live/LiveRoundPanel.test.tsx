@@ -1,8 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
+const advancePerformanceMock = vi.hoisted(() => vi.fn());
+
 vi.mock("../../api/live.js", () => ({
   activatePanel: vi.fn(),
+  advancePerformance: advancePerformanceMock,
   describeLiveError: vi.fn(),
   lockPerformance: vi.fn(),
   lockRound: vi.fn(),
@@ -123,6 +126,31 @@ describe("LiveRoundPanel", () => {
     expect(document.querySelectorAll(".ui-table-wrap")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "锁轮" })).toBeVisible();
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
+  });
+
+  it("advances from the open performance to the next contestant", async () => {
+    advancePerformanceMock.mockResolvedValue(live.performances[1]);
+    const twoParticipants = {
+      ...state,
+      participantIds: ["singer-a", "singer-b"],
+      participantNames: { "singer-a": "林晓雨", "singer-b": "周远" },
+    };
+    render(
+      <LiveRoundPanel
+        state={twoParticipants}
+        live={live}
+        sessionMode="formal"
+        onChanged={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("下一位选手"), { target: { value: "singer-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "锁定当前并切到下一位" }));
+    await waitFor(() => expect(advancePerformanceMock).toHaveBeenCalledWith(
+      "activity-1",
+      "round-1",
+      "performance-1",
+      { nextContestantId: "singer-b", nextSequence: 2 },
+    ));
   });
 
   it("shows participant names instead of raw contestant ids", () => {

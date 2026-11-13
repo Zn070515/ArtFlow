@@ -87,6 +87,52 @@ dbIt("requires bearer authentication and idempotency for M5 writes", async () =>
   expect(missingIdempotency.statusCode).toBe(400);
 });
 
+dbIt("wires the performance advance route with auth, idempotency and a closed body", async () => {
+  const url = "/api/activities/missing/competition/rounds/final/performances/performance-1/advance";
+  const unauthenticated = await app.inject({
+    method: "POST",
+    url,
+    headers: { "idempotency-key": "advance-unauthenticated", "content-type": "application/json" },
+    payload: { scope: "judging", nextContestantId: "contestant-2", nextSequence: 2 },
+  });
+  expect(unauthenticated.statusCode).toBe(401);
+
+  const token = await bearer();
+  const missingIdempotency = await app.inject({
+    method: "POST",
+    url,
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    payload: { scope: "judging", nextContestantId: "contestant-2", nextSequence: 2 },
+  });
+  expect(missingIdempotency.statusCode).toBe(400);
+
+  const forgedField = await app.inject({
+    method: "POST",
+    url,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "idempotency-key": "advance-forged",
+      "content-type": "application/json",
+    },
+    payload: { scope: "judging", nextContestantId: "contestant-2", nextSequence: 2, actorId: "forged" },
+  });
+  // Unknown fields are ignored by the route schema; the forged actor never
+  // reaches the command, so the missing activity still wins with NOT_FOUND.
+  expect(forgedField.statusCode).toBe(404);
+
+  const missingActivity = await app.inject({
+    method: "POST",
+    url,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "idempotency-key": "advance-missing",
+      "content-type": "application/json",
+    },
+    payload: { scope: "judging", nextContestantId: "contestant-2", nextSequence: 2 },
+  });
+  expect(missingActivity.statusCode).toBe(404);
+});
+
 dbIt("does not accept actor or permission claims from an M5 request body", async () => {
   const token = await bearer();
   const response = await app.inject({

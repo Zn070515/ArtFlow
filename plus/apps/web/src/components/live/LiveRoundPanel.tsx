@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import {
   activatePanel,
+  advancePerformance,
   describeLiveError,
   lockPerformance,
   lockRound,
@@ -56,6 +57,7 @@ export function LiveRoundPanel({
     })),
   );
   const [contestantId, setContestantId] = useState(state.participantIds[0] ?? "");
+  const [nextContestantId, setNextContestantId] = useState("");
   const [busy, setBusy] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
@@ -104,6 +106,20 @@ export function LiveRoundPanel({
           sequence,
         }).then(() => undefined),
       "开表演失败。",
+    );
+  }
+
+  function advance(): Promise<void> {
+    const current = live.performances.find((performance) => performance.state === "open");
+    if (current === undefined || nextContestantId === "") return Promise.resolve();
+    const nextSequence = live.performances.reduce((highest, item) => Math.max(highest, item.sequence), 0) + 1;
+    return run(
+      () =>
+        advancePerformance(state.activity.id, config.key, current.id, {
+          nextContestantId,
+          nextSequence,
+        }).then(() => undefined),
+      "切换下一位失败。",
     );
   }
 
@@ -231,6 +247,32 @@ export function LiveRoundPanel({
             onClick={() => void open()}
           >
             开表演
+          </Button>
+        </div>
+      ) : null}
+
+      {openPerformanceRow !== undefined && canManageSetup ? (
+        <div className="performance-form">
+          <Select
+            label="下一位选手"
+            value={nextContestantId}
+            onChange={(event) => setNextContestantId(event.target.value)}
+          >
+            <option value="">选择下一位</option>
+            {state.participantIds
+              .filter((participantId) => live.performances.every((item) => item.contestantId !== participantId))
+              .map((participantId) => (
+                <option key={participantId} value={participantId}>
+                  {state.participantNames[participantId] ?? participantId}
+                </option>
+              ))}
+          </Select>
+          <Button
+            variant="secondary"
+            disabled={busy || nextContestantId === ""}
+            onClick={() => void advance()}
+          >
+            锁定当前并切到下一位
           </Button>
         </div>
       ) : null}

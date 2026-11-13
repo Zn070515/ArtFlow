@@ -1,8 +1,8 @@
 import type { ApiContext } from "../http/context.js";
-import { ActivateCompetitionPanelBodySchema, CompetitionRankingQuerySchema, CompetitionRoundParamsSchema, CompetitionRoundScoresQuerySchema, CompetitionRoundScoresResponseSchema, CompetitionScopeBodySchema, CompetitionScoreBodySchema, EditCompetitionScoreBodySchema, FinalizeAdvancementBodySchema, LockCompetitionRoundBodySchema, OpenCompetitionPerformanceBodySchema, OpenScoreCorrectionBodySchema, PrepareCompetitionRoundBodySchema, ReasonBodySchema, RecomputePodiumBodySchema, ReopenCompetitionRoundBodySchema, ResetRehearsalBodySchema, ResolveCompetitionBodySchema, ScoreCorrectionLifecycleBodySchema, TieDecisionBodySchema } from "@artflow-plus/contracts";
+import { ActivateCompetitionPanelBodySchema, AdvanceCompetitionPerformanceBodySchema, CompetitionRankingQuerySchema, CompetitionRoundParamsSchema, CompetitionRoundScoresQuerySchema, CompetitionRoundScoresResponseSchema, CompetitionScopeBodySchema, CompetitionScoreBodySchema, EditCompetitionScoreBodySchema, FinalizeAdvancementBodySchema, LockCompetitionRoundBodySchema, OpenCompetitionPerformanceBodySchema, OpenScoreCorrectionBodySchema, PrepareCompetitionRoundBodySchema, ReasonBodySchema, RecomputePodiumBodySchema, ReopenCompetitionRoundBodySchema, ResetRehearsalBodySchema, ResolveCompetitionBodySchema, ScoreCorrectionLifecycleBodySchema, TieDecisionBodySchema } from "@artflow-plus/contracts";
 import { getCurrentRankingSnapshot } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
-import { activateCompetitionPanel, closeJudgeEntry, closeScoreCorrection, editScoreFact, finalizeAdvancement, getRoundScores, lockPerformance, lockRound, openPerformance, openScoreCorrection, prepareCompetitionRound, recalculateAfterCorrection, recomputePodiumCandidate, recordTieDecision, reissueJudgeCapability, reopenRoundForCorrection, resetRehearsalRound, resolveRound, submitJudgeScore, submitPaperScore, submitProxyScore, submitRapidScore } from "@artflow-plus/runtime";
+import { activateCompetitionPanel, advancePerformance, closeJudgeEntry, closeScoreCorrection, editScoreFact, finalizeAdvancement, getRoundScores, lockPerformance, lockRound, openPerformance, openScoreCorrection, prepareCompetitionRound, recalculateAfterCorrection, recomputePodiumCandidate, recordTieDecision, reissueJudgeCapability, reopenRoundForCorrection, resetRehearsalRound, resolveRound, submitJudgeScore, submitPaperScore, submitProxyScore, submitRapidScore } from "@artflow-plus/runtime";
 import { Type } from "@sinclair/typebox";
 import { ActivityParams, PrepareRoundBody, RoundParams } from "../http/schemas.js";
 import { cookieValue, requireIdempotency } from "../http/helpers.js";
@@ -127,6 +127,30 @@ export function registerCompetitionRoutes(ctx: ApiContext): void {
         activityId: id,
         roundId: round.id,
         performanceId,
+        scope: body.scope,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/competition/rounds/:roundKey/performances/:performanceId/advance",
+    { schema: { params: CompetitionPerformanceParams, body: AdvanceCompetitionPerformanceBodySchema } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id, roundKey, performanceId } = request.params as { id: string; roundKey: string; performanceId: string };
+      const body = request.body as { scope: string; nextContestantId: string; nextSequence: number };
+      // Authenticate before resolving the round so an anonymous caller cannot
+      // distinguish a missing activity from a forbidden one.
+      const context = await requestDeps(request);
+      const round = await routeRound(id, roundKey);
+      const outcome = await advancePerformance(db, context, {
+        commandId,
+        activityId: id,
+        roundId: round.id,
+        currentPerformanceId: performanceId,
+        nextContestantId: body.nextContestantId,
+        nextSequence: body.nextSequence,
         scope: body.scope,
       });
       return reply.status(outcome.status).send(outcome.body);

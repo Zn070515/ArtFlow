@@ -222,4 +222,10 @@ export const CompetitionRoundScoresResponseSchema = Type.Object({
   facts: Type.Array(RoundScoreFactSchema),
 }, { additionalProperties: false });
 
+export const AdvanceCompetitionPerformanceBodySchema = Type.Object({
+  scope: ScopeSchema,
+  nextContestantId: Type.String({ minLength: 1, maxLength: 100 }),
+  nextSequence: Type.Integer({ minimum: 1 }),
+}, { additionalProperties: false });
+
 export type CompetitionRoundScoresResponse = Static<typeof CompetitionRoundScoresResponseSchema>;

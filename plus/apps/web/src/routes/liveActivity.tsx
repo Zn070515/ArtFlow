@@ -18,6 +18,7 @@ import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveTieAdvancementPanel } from "../components/live/LiveTieAdvancementPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
+import { LiveStaffScorePanel } from "../components/live/LiveStaffScorePanel.js";
 import { ResultActions } from "../components/live/ResultActions.js";
 import { Card } from "../components/ui/Card.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
@@ -133,6 +134,7 @@ function LiveActivityContent() {
                     state={state}
                     onChanged={refresh}
                   />
+                  <LiveStaffScorePanel state={state} live={live} onChanged={refresh} />
                 </>
               ) : null}
             </Fragment>
