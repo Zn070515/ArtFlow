@@ -4,7 +4,7 @@ import { Fragment } from "react";
 
 import { fetchLiveState } from "../api/live.js";
 import { RequireSession } from "../auth/RequireSession.js";
-import { canManageCompetition, hasLiveAccess, useSession } from "../auth/SessionProvider.js";
+import { canManageCompetition, canManageCompetitionSetup, hasLiveAccess, useSession } from "../auth/SessionProvider.js";
 import { LiveExceptionPanel } from "../components/live/LiveExceptionPanel.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveTieAdvancementPanel } from "../components/live/LiveTieAdvancementPanel.js";
@@ -72,6 +72,7 @@ function LiveActivityContent() {
   }
 
   const state = query.data;
+  const canManageSetup = canManageCompetitionSetup(session);
   const hasTicketing = state.activity.enabledCapabilities.includes("ticketing");
 
   return (
@@ -86,7 +87,7 @@ function LiveActivityContent() {
             公开码 {state.activity.publicCode} · release v{state.activity.activeDefinitionVersion} ·
             {fallback ? " 5s 轮询" : " 实时推送"}
           </p>
-          {hasTicketing ? null : (
+          {hasTicketing || !canManageSetup ? null : (
             <p className="ui-field__error" role="alert">
               该活动未启用 ticketing，无法生成评委入口链接。
             </p>
@@ -102,6 +103,7 @@ function LiveActivityContent() {
                 live={live}
                 sessionMode={state.session?.mode}
                 onChanged={refresh}
+                canManageSetup={canManageSetup}
               />
               {canManageCompetition(session) ? (
                 <>
@@ -123,7 +125,7 @@ function LiveActivityContent() {
           ))}
         </div>
         <aside className="live-control-rail">
-          <LiveSessionPanel state={state} onChanged={refresh} />
+          {canManageSetup ? <LiveSessionPanel state={state} onChanged={refresh} /> : null}
           {state.activity.enabledCapabilities.includes("attendance") ? (
             <AttendanceSummary
               activityId={activityId}

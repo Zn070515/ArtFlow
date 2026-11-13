@@ -32,11 +32,14 @@ export function LiveRoundPanel({
   live,
   sessionMode,
   onChanged,
+  canManageSetup = true,
 }: {
   readonly state: LiveState;
   readonly live: LiveRound;
   readonly sessionMode?: "test" | "rehearsal" | "formal";
   readonly onChanged: () => void;
+  /** Round setup/lock/session controls need competition.manage or round.prepare. */
+  readonly canManageSetup?: boolean;
 }) {
   const config = live.config;
   const round = live.round;
@@ -153,13 +156,13 @@ export function LiveRoundPanel({
         {round === null ? "" : ` · revision ${round.revision}`}
       </p>
 
-      {round === null ? (
+      {round === null && canManageSetup ? (
         <Button variant="primary" disabled={busy} onClick={() => void prepare()}>
           准备回合
         </Button>
       ) : null}
 
-      {round !== null && live.panel === null ? (
+      {round !== null && live.panel === null && canManageSetup ? (
         <div className="panel-form">
           <p className="ui-card__description">评委组（judgeId / seatKey）</p>
           {judges.map((judge, index) => (
@@ -203,7 +206,7 @@ export function LiveRoundPanel({
         </div>
       )}
 
-      {round !== null && live.panel !== null && round.state === "scoring" ? (
+      {round !== null && live.panel !== null && round.state === "scoring" && canManageSetup ? (
         <div className="performance-form">
           <Select
             label="开表演选手"
@@ -247,7 +250,7 @@ export function LiveRoundPanel({
                   {performance.scoreCount}/{performance.expectedJudges}
                 </td>
                 <td data-label="操作">
-                  {performance.state === "open" ? (
+                  {performance.state === "open" && canManageSetup ? (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -266,7 +269,7 @@ export function LiveRoundPanel({
         </Table>
       )}
 
-      {round !== null ? (
+      {round !== null && canManageSetup ? (
         <div className="session-controls live-round-actions">
           <Button
             variant="secondary"
@@ -320,7 +323,7 @@ export function LiveRoundPanel({
         </div>
       )}
 
-      {round !== null && (sessionMode === "test" || sessionMode === "rehearsal") ? (
+      {round !== null && canManageSetup && (sessionMode === "test" || sessionMode === "rehearsal") ? (
         <div className="session-controls">
           <Button variant="danger" disabled={busy} onClick={() => setResetOpen(true)}>
             重置排练

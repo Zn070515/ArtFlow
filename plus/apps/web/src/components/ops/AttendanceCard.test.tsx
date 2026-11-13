@@ -126,6 +126,25 @@ describe("AttendanceCard", () => {
     }));
   });
 
+  it("shows a loading state instead of an empty state while switching tabs", async () => {
+    let resolveSecond: ((value: AttendanceListResponse) => void) | undefined;
+    fetchAttendanceMock.mockResolvedValueOnce(list);
+    fetchAttendanceMock.mockImplementationOnce(
+      () => new Promise<AttendanceListResponse>((resolve) => { resolveSecond = resolve; }),
+    );
+    renderCard();
+    await screen.findByTestId("attendance-card");
+    fireEvent.click(screen.getByRole("tab", { name: "票据" }));
+    expect(await screen.findByText("正在加载…")).toBeInTheDocument();
+    expect(screen.queryByText("当前筛选下没有主体。")).toBeNull();
+    resolveSecond?.({
+      ...list,
+      rows: [],
+      summary: [{ subjectType: "ticket", expected: 0, present: 0, undone: 0 }],
+    });
+    await waitFor(() => expect(screen.getByText("当前筛选下没有主体。")).toBeInTheDocument());
+  });
+
   it("moves the selected tab with arrow keys", async () => {
     renderCard();
     const participant = await screen.findByRole("tab", { name: "参赛者" });

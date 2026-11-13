@@ -447,7 +447,9 @@ export async function listLatestCorrectionsForScoreFacts(
 ): Promise<ReadonlyMap<string, StoredScoreCorrection>> {
   if (scoreFactIds.length === 0) return new Map();
   const rows = await db.selectFrom("score_correction").selectAll()
+    .distinctOn("score_fact_id")
     .where("score_fact_id", "in", [...scoreFactIds])
+    .orderBy("score_fact_id")
     .orderBy("created_at", "desc")
     .orderBy("revision", "desc")
     .execute();

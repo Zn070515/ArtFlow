@@ -313,21 +313,21 @@ export async function createGroupingStage(
       if (input.sourceRoundId === undefined) {
         throw new DomainError("INVALID_INPUT", "A round-sourced stage must name its round.");
       }
-      const round = await getRound(trx, input.sourceRoundId);
-      if (round === null || round.activityId !== activity.id) {
-        throw new DomainError("NOT_FOUND", "The source round was not found in this activity.");
-      }
+    } else if (input.sourceRoundId !== undefined) {
+      throw new DomainError("INVALID_INPUT", "An all-approved stage cannot name a source round.");
+    }
+    // A retried create with a new command id must report the existing stage,
+    // not a stale-advancement error from the source-resolution work.
+    if ((await getGroupingStageByKey(trx, activity.id, stageKey)) !== null) {
+      throw new DomainError("GROUPING_STAGE_EXISTS", `Stage ${stageKey} already exists.`);
+    }
+    if (input.rosterSource === "round_advanced") {
       // Fail the draft at creation when its named advancement is stale; the
       // same check runs on record/confirm/freeze.
       await resolveGroupingSource(trx, activity.id, {
         rosterSource: input.rosterSource,
         sourceRoundId: input.sourceRoundId,
       });
-    } else if (input.sourceRoundId !== undefined) {
-      throw new DomainError("INVALID_INPUT", "An all-approved stage cannot name a source round.");
-    }
-    if ((await getGroupingStageByKey(trx, activity.id, stageKey)) !== null) {
-      throw new DomainError("GROUPING_STAGE_EXISTS", `Stage ${stageKey} already exists.`);
     }
     const stage: StoredGroupingStage = {
       id: idFromCommand("grouping_stage", input.commandId),

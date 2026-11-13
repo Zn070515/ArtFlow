@@ -192,6 +192,7 @@ export function AttendanceCard({
 
   const data = attendance.data;
   const rows = data.rows.filter((row) => row.subjectType === tab);
+  const loadingNextTab = attendance.isFetching && rows.length === 0;
   const summary = data.summary.find((item) => item.subjectType === tab);
 
   return (
@@ -324,7 +325,11 @@ export function AttendanceCard({
           </li>
         ))}
       </ul>
-      {rows.length === 0 ? <p className="auth-loading">当前筛选下没有主体。</p> : null}
+      {loadingNextTab ? (
+        <p className="auth-loading">正在加载…</p>
+      ) : rows.length === 0 ? (
+        <p className="auth-loading">当前筛选下没有主体。</p>
+      ) : null}
       {mutation.error !== null && mutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p> : null}
       {sessionMutation.error !== null && sessionMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(sessionMutation.error)}</p> : null}
       </div>

@@ -16,9 +16,9 @@ interface DialogShellProps {
   readonly validate?: () => string | null;
 }
 
-const lightDismissFallback = "closedBy" in HTMLDialogElement.prototype
-  ? false
-  : true;
+const hasDialogElement = typeof HTMLDialogElement !== "undefined";
+const lightDismissFallback =
+  hasDialogElement && !("closedBy" in HTMLDialogElement.prototype);
 
 function outside(dialog: HTMLDialogElement, event: PointerEvent): boolean {
   const rect = dialog.getBoundingClientRect();
@@ -50,6 +50,7 @@ function DialogShell({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog === null) return;
+    if (typeof dialog.showModal !== "function") return;
     if (open && !dialog.open) dialog.showModal();
     if (!open && dialog.open) dialog.close();
   }, [open]);

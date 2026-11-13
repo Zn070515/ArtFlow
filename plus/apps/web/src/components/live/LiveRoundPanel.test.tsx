@@ -125,6 +125,21 @@ describe("LiveRoundPanel", () => {
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
   });
 
+  it("hides setup controls from score writers", () => {
+    render(
+      <LiveRoundPanel
+        state={state}
+        live={lockedLive}
+        sessionMode="formal"
+        onChanged={vi.fn()}
+        canManageSetup={false}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "锁轮" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "生成排名" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开评分更正窗口" })).toBeNull();
+  });
+
   it("collects the reopen reason in a dialog", async () => {
     render(<LiveRoundPanel state={state} live={lockedLive} sessionMode="formal" onChanged={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "打开评分更正窗口" }));
