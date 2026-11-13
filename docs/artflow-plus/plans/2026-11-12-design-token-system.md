@@ -2468,6 +2468,42 @@ git commit -m "docs(web): mark the token foundation phase as implemented"
 
 ---
 
+## Test architecture
+
+- **Contracts and capabilities touched**: this plan changes only the web style layer and
+  `components/ui` primitives. It adds no API route, database migration, domain event, or
+  realtime topic, and it registers no new capability. The contracts it must keep are the token
+  scale in `tokens.css`, the className contract of every primitive, and the three theme
+  palettes; `token-contract.test.ts`, `theme-contrast.test.ts`, and `base.test.ts` assert them.
+- **Consumers and read models**: the consumers are the Portal and Console shells, the Ops list
+  and detail pages used as the migration pilot, and the dev-only token sheet. They all read the
+  same semantic tokens; switching a theme or a viewport tier must not create a second read
+  model or a second source of truth.
+- **Lifecycle, terminal guards, and mode isolation**: there is no persisted lifecycle and no
+  `test`/`rehearsal`/`formal` partition in this plan. The only authority boundary is the token
+  sheet visual baseline: a deliberate visual change must regenerate the baseline in the same
+  change, so a stale baseline cannot silently pass as the terminal state.
+- **Adapters**: no contract adapter is added. The integration seam is the real page rendered in
+  Playwright: tests drive the actual router, shell, and CSS, and never mock computed styles.
+- **Fault and recovery cases**: static styling has no runtime fault-injection point. The
+  reproducible failures worth covering are an undefined token, an undefined className, a theme
+  that fails contrast, and a 390/768/1024 layout that scrolls horizontally or shrinks a touch
+  target. `token-contract.test.ts`, `theme-contrast.test.ts`, the 1440/1024/390 visual
+  baselines, and `ops-responsive.spec.ts` cover those; each failure prints the offending
+  selector, token, or viewport so it can be reproduced.
+- **Why existing tests are insufficient**: the current surface tests only assert that a few
+  classes exist. They do not prove that sizes, gaps, and radii come from one scale, that every
+  className is defined, that all three themes pass contrast, or that mobile layouts replace
+  tables with complete card rows. A per-page snapshot can stay green while the scale keeps
+  growing, so this plan adds the closed-scale and visual gates instead of more page copies.
+- **Anti-bloat decision**: extend the existing `token-contract`, `theme-contrast`, and Playwright
+  visual suites rather than adding a second styling test framework. Primitives are demonstrated
+  once in the token sheet, and page tests assert behavior, not a duplicated visual matrix.
+- **Focused gates**: `pnpm -C plus --filter @artflow-plus/web run test`,
+  `pnpm -C plus --filter @artflow-plus/web run check`,
+  `pnpm -C plus --filter @artflow-plus/web exec playwright test e2e/tokens.spec.ts e2e/ops-responsive.spec.ts`,
+  `pnpm -C plus run graph:check`, and `uv run pytest tests/gates -q`.
+
 ## Self-review checklist
 
 - Spec coverage: closed scale (Task 1), themes (Task 2), typography/reduced motion (Task 3), theme switching (Task 4), primitives (Tasks 5–9), token sheet (Task 10), Ops proof (Task 11), mobile (Task 12), gates/docs (Task 13).
