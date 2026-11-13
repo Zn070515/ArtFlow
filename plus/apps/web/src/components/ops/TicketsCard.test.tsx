@@ -80,11 +80,9 @@ describe("TicketsCard", () => {
     ));
   });
 
-  it("hides write controls without ticket.manage", async () => {
+  it("renders nothing and fetches nothing without ticket.manage", () => {
     renderCard(false);
-    await screen.findByTestId("tickets-card");
-    expect(screen.queryByRole("button", { name: "签发新票据" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "撤销票据" })).toBeNull();
-    expect(screen.queryByLabelText("撤销说明")).toBeNull();
+    expect(screen.queryByTestId("tickets-card")).toBeNull();
+    expect(fetchTicketingStateMock).not.toHaveBeenCalled();
   });
 });

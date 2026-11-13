@@ -41,8 +41,10 @@ export function SupplementPage() {
   const submit = useMutation({
     mutationFn: submitSupplement,
     onSuccess: () => {
+      // Submitting revokes the single-use grant. Refetching the claim here
+      // would turn the confirmation into an "invalid link" error, so the
+      // success state stays local.
       setSubmitted(true);
-      void queryClient.invalidateQueries({ queryKey: ["public-supplement"] });
     },
   });
 

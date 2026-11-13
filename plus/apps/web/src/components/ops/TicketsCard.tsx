@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { ApiError } from "../../api/client.js";
 import type { IssuedTicket, TicketView } from "../../api/tickets.js";
 import {
   fetchTicketingState,
@@ -11,6 +10,7 @@ import {
   rotateTicket,
 } from "../../api/tickets.js";
 import { Badge, type BadgeTone } from "../ui/Badge.js";
+import { apiErrorText } from "../ui/apiError.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
 import { Input } from "../ui/Input.js";
@@ -29,13 +29,6 @@ const TICKET_LABELS: Readonly<Record<TicketView["state"], string>> = {
   expired: "已过期",
 };
 
-function humanError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) {
-    return "票据已被更新，请刷新后重试。";
-  }
-  return error instanceof Error ? error.message : "票据操作失败，请稍后重试。";
-}
-
 function shortId(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 8)}…`;
 }
@@ -53,6 +46,9 @@ export function TicketsCard({
   const state = useQuery({
     queryKey: ["ops-ticketing", activityId],
     queryFn: () => fetchTicketingState(activityId),
+    // The state endpoint is ticket.manage-only; a read-only Ops viewer must
+    // not mount a request that the API will reject.
+    enabled: canManage,
     retry: false,
   });
   const refresh = (): void => {
@@ -90,6 +86,7 @@ export function TicketsCard({
   });
 
   const error = issue.error ?? rotate.error ?? revoke.error ?? revokeSession.error;
+  if (!canManage) return null;
   if (state.isPending) {
     return (
       <Card className="tickets-card">
@@ -100,7 +97,7 @@ export function TicketsCard({
   if (state.error !== null && state.error !== undefined) {
     return (
       <Card className="tickets-card">
-        <p className="ui-field__error" role="alert">{humanError(state.error)}</p>
+        <p className="ui-field__error" role="alert">{apiErrorText(state.error, "票据操作失败，请稍后重试。", "票据已被更新，请刷新后重试。")}</p>
       </Card>
     );
   }
@@ -202,7 +199,7 @@ export function TicketsCard({
         />
       ) : null}
       {error === null || error === undefined ? null : (
-        <p className="ui-field__error" role="alert">{humanError(error)}</p>
+        <p className="ui-field__error" role="alert">{apiErrorText(error, "票据操作失败，请稍后重试。", "票据已被更新，请刷新后重试。")}</p>
       )}
     </Card>
   );

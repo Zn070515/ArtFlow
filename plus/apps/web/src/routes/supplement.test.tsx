@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const claimSupplementMock = vi.hoisted(() => vi.fn());
@@ -66,6 +66,14 @@ describe("SupplementPage", () => {
     expect(screen.getByText(/旧.mp3|old\.mp3/)).toBeInTheDocument();
     expect(screen.getByText(/请重新上传/)).toBeInTheDocument();
     expect(screen.getByLabelText("上传 伴奏")).toBeInTheDocument();
+  });
+
+  it("keeps the confirmation after submitting the single-use grant", async () => {
+    renderPage();
+    await screen.findByTestId("supplement-page");
+    fireEvent.click(screen.getByRole("button", { name: "提交补交" }));
+    expect(await screen.findByText("补交已提交，等待工作人员审核。")).toBeInTheDocument();
+    expect(screen.queryByText("无法打开补交")).toBeNull();
   });
 
   it("falls back to the supplement cookie when no token is present", async () => {
