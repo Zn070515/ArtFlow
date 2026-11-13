@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useState, type JSX, type ReactNode } from "react";
 
+import { ApiError } from "../../api/client.js";
 import {
   decideTie,
   describeLiveError,
@@ -68,6 +69,14 @@ export function LiveTieAdvancementPanel({
   function fail(caught: unknown): void {
     setStatus(null);
     setError(describeLiveError(caught, "操作失败，请稍后重试。"));
+    // Polling mode may have missed a ranking revision or tie decision. Refresh
+    // the projection so the operator acts on the current snapshot.
+    if (
+      caught instanceof ApiError &&
+      (caught.code === "STALE_REVISION" || caught.code === "STALE_RESOLUTION_INPUT")
+    ) {
+      void query.refetch();
+    }
   }
 
   function orderFor(group: TieGroup): readonly string[] {
@@ -102,7 +111,7 @@ export function LiveTieAdvancementPanel({
     },
     onSuccess: () => {
       setReason("");
-      complete("已记录平局裁决，请重新生成排名后定稿晋级。");
+      complete("已记录裁决，请定稿晋级。");
     },
     onError: fail,
   });
@@ -155,7 +164,13 @@ export function LiveTieAdvancementPanel({
       return <p className="ui-card__description">已定稿（revision {advancement.revision}）</p>;
     }
     if (advancement.status === "needs_review") {
-      return <p className="ui-card__description">上次定稿未完成，请先裁决平局。</p>;
+      return (
+        <p className="ui-card__description">
+          {crossing.length === 0
+            ? "上次定稿未完成；现在可以重新定稿。"
+            : "上次定稿未完成，请先裁决平局。"}
+        </p>
+      );
     }
     return null;
   }

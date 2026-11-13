@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LiveRound, LiveState, RoundScoresResponse } from "../../api/live.js";
@@ -167,6 +167,24 @@ describe("LiveTieAdvancementPanel", () => {
       });
     });
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("submits the locally reordered tie contestants", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores());
+    renderPanel();
+
+    const group = await screen.findByTestId("tie-group-tie-1");
+    fireEvent.change(screen.getByLabelText("裁决原因"), {
+      target: { value: "现场裁决" },
+    });
+    fireEvent.click(within(group).getAllByRole("button", { name: "下移" })[0]!);
+    fireEvent.click(within(group).getByRole("button", { name: "记录裁决" }));
+
+    await waitFor(() => {
+      expect(decideTieMock).toHaveBeenCalledWith("act-1", "final", expect.objectContaining({
+        order: ["singer-b", "singer-a"],
+      }));
+    });
   });
 
   it("finalizes advancement with the current ranking revision", async () => {

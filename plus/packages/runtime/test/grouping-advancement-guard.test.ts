@@ -13,6 +13,7 @@ import {
   lockRound,
   openScoreCorrection,
   recalculateAfterCorrection,
+  recordGroupingGroups,
   recordTieDecision,
   reopenRoundForCorrection,
   resolveRound,
@@ -47,6 +48,69 @@ describe.skipIf(!connectionString)("grouping advancement source guard", () => {
     await closeDb(db);
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
     await admin.end();
+  });
+
+  it("accepts a fresh advancement decision and resolves the advanced subset", async () => {
+    const fixture = await seedLockedRound(db);
+    const ranking = await resolveRound(db, recoveryDeps(recoveryStaff), {
+      commandId: `resolve-fresh-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      scope: "judging",
+    });
+    const tie = (ranking.body.tieGroups as { id: string; contestants: string[] }[])[0]!;
+    const decided = await recordTieDecision(db, recoveryDeps(recoveryStaff), {
+      commandId: `tie-fresh-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      rankingSnapshotId: ranking.body.id,
+      tieId: tie.id,
+      inputFingerprint: ranking.body.inputFingerprint,
+      contestants: tie.contestants,
+      order: [...tie.contestants].reverse(),
+      reason: "现场裁决",
+      scope: "judging",
+    });
+    const finalized = await finalizeAdvancement(db, recoveryDeps(recoveryStaff), {
+      commandId: `advance-fresh-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      expectedRankingRevision: decided.body.revision,
+      scope: "judging",
+    });
+    expect(finalized.body.status).toBe("auto");
+
+    const stage = await createGroupingStage(db, recoveryDeps(recoveryStaff), {
+      commandId: `grouping-fresh-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      stageKey: "next",
+      name: "下一阶段",
+      rosterSource: "round_advanced",
+      sourceRoundId: fixture.roundId,
+    });
+    expect(stage.body).toMatchObject({
+      rosterSource: "round_advanced",
+      sourceRoundId: fixture.roundId,
+      status: "draft",
+    });
+
+    const recorded = await recordGroupingGroups(db, recoveryDeps(recoveryStaff), {
+      commandId: `record-fresh-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      stageId: stage.body.id,
+      expectedRevision: stage.body.revision,
+      groups: [{ name: "A", participantIds: ["singer-b"] }],
+    });
+    expect(recorded.body.revision).toBe(stage.body.revision + 1);
+
+    // singer-a lost the tie decision and is not in the resolved source set.
+    await expect(recordGroupingGroups(db, recoveryDeps(recoveryStaff), {
+      commandId: `record-loser-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      stageId: stage.body.id,
+      expectedRevision: recorded.body.revision,
+      groups: [{ name: "A", participantIds: ["singer-a"] }],
+    })).rejects.toMatchObject({ code: "GROUPING_SOURCE_UNKNOWN" });
   });
 
   it("rejects a stale advancement decision", async () => {

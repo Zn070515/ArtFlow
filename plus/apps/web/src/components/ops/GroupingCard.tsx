@@ -13,7 +13,6 @@ import {
   setGroupingWindow,
 } from "../../api/grouping.js";
 import type { GroupingStage, GroupingWindow } from "../../api/grouping.js";
-import { fetchLiveState } from "../../api/live.js";
 import { fetchOpsRegistrations } from "../../api/ops.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
@@ -57,15 +56,6 @@ export function GroupingCard(props: { readonly activityId: string }) {
     queryFn: () => fetchOpsRegistrations(props.activityId),
     retry: false,
   });
-  const live = useQuery({
-    queryKey: ["live-state", props.activityId],
-    queryFn: () => fetchLiveState(props.activityId),
-    retry: false,
-  });
-  const [rosterSource, setRosterSource] = useState<"all_approved" | "round_advanced">(
-    "all_approved",
-  );
-  const [sourceRoundId, setSourceRoundId] = useState("");
   const [groupCount, setGroupCount] = useState(5);
   const [draft, setDraft] = useState<
     readonly { name: string; participantIds: readonly string[] }[] | null
@@ -87,14 +77,6 @@ export function GroupingCard(props: { readonly activityId: string }) {
     if (stage !== undefined && stage.groupCount !== null) setGroupCount(stage.groupCount);
   }, [stage?.id, stage?.groupCount]);
 
-  // The advancement source names a prepared round's database id; the live
-  // projection carries the release key, so pair the two before offering it.
-  const sourceRounds = (live.data?.config.rounds ?? []).flatMap((config) => {
-    const prepared = live.data?.rounds.find((item) => item.config.key === config.key)?.round;
-    return prepared === null || prepared === undefined
-      ? []
-      : [{ key: config.key, id: prepared.id }];
-  });
   const approved = (participants.data ?? []).filter((item) => item.status === "approved");
   const labels = useMemo(() => {
     const map = new Map<string, string>();
@@ -111,13 +93,13 @@ export function GroupingCard(props: { readonly activityId: string }) {
     void queryClient.invalidateQueries({ queryKey: ["grouping", props.activityId] });
   };
 
+  // round_advanced grouping needs a source-participant read; deferred.
   const create = useMutation({
     mutationFn: () =>
       createGroupingStage(props.activityId, commandId("group-create"), {
         stageKey: STAGE_KEY,
         name: STAGE_NAME,
-        rosterSource,
-        ...(rosterSource === "round_advanced" ? { sourceRoundId } : {}),
+        rosterSource: "all_approved",
       }),
     onSuccess: accept,
   });
@@ -244,42 +226,9 @@ export function GroupingCard(props: { readonly activityId: string }) {
       <h2 className="ui-card__title">第一轮分组</h2>
 
       {stage === undefined ? (
-        <>
-          <Select
-            label="名单来源"
-            value={rosterSource}
-            onChange={(event) => {
-              const next = event.target.value as "all_approved" | "round_advanced";
-              setRosterSource(next);
-              if (next === "all_approved") setSourceRoundId("");
-            }}
-          >
-            <option value="all_approved">全部通过</option>
-            <option value="round_advanced">晋级名单</option>
-          </Select>
-          {rosterSource === "round_advanced" ? (
-            <Select
-              label="来源轮次"
-              value={sourceRoundId}
-              onChange={(event) => setSourceRoundId(event.target.value)}
-            >
-              <option value="">请选择轮次</option>
-              {sourceRounds.map((round) => (
-                <option key={round.id} value={round.id}>{round.key}</option>
-              ))}
-            </Select>
-          ) : null}
-          <Button
-            variant="primary"
-            disabled={
-              create.isPending ||
-              (rosterSource === "round_advanced" && sourceRoundId === "")
-            }
-            onClick={() => create.mutate()}
-          >
-            创建分组赛段
-          </Button>
-        </>
+        <Button variant="primary" onClick={() => create.mutate()}>
+          创建分组赛段
+        </Button>
       ) : (
         <>
           <p className="ui-card__description">

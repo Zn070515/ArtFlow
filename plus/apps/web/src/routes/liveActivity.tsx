@@ -47,6 +47,7 @@ function LiveActivityContent() {
 
   function refresh(): void {
     void queryClient.invalidateQueries({ queryKey: ["live-state", activityId] });
+    void queryClient.invalidateQueries({ queryKey: ["round-scores", activityId] });
     void queryClient.invalidateQueries({ queryKey: ["live-activities"] });
   }
 

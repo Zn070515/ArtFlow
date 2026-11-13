@@ -536,8 +536,9 @@ export async function getCurrentRankingSnapshot(
 }
 
 /**
- * Finds the snapshot a decision was computed from. A later resolve can reuse
- * the same input fingerprint, so the newest match is the one the decision read.
+ * Finds the snapshot a decision was computed from. The input fingerprint is
+ * mode-partitioned (it hashes mode-scoped facts), so a match on this round can
+ * only belong to one mode; the newest match is the snapshot the decision read.
  */
 export async function getRankingSnapshotByFingerprint(
   db: Kysely<Database>,
