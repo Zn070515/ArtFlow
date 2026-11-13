@@ -222,7 +222,7 @@ export function ResultActions({
           activityId={activityId}
           stageKey={stageKey}
           publication={publication}
-          canManage={activeReleases.length === 0}
+          canManage={activeReleases.length === 0 && publishingSession !== undefined && formal}
           scope="publishing"
           onSaved={refresh}
         />

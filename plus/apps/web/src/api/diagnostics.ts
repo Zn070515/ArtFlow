@@ -34,14 +34,32 @@ export interface OutboxHealthView {
 
 export function fetchEvents(
   activityId: string,
-  options: { readonly mode?: "test" | "rehearsal" | "formal"; readonly limit?: number } = {},
+  options: {
+    readonly mode?: "test" | "rehearsal" | "formal";
+    readonly limit?: number;
+    readonly after?: number;
+  } = {},
 ): Promise<EventFeedView> {
   const params = new URLSearchParams();
   if (options.mode !== undefined) params.set("mode", options.mode);
+  if (options.after !== undefined) params.set("after", String(options.after));
   params.set("limit", String(options.limit ?? 20));
   return apiFetch<EventFeedView>(
     `/api/activities/${encodeURIComponent(activityId)}/events?${params.toString()}`,
   );
+}
+
+/**
+ * The feed is cursor-forward, so "recent events" means starting near the head.
+ * One probe call reveals the head, then the window is read forward from there.
+ */
+export async function fetchRecentEvents(
+  activityId: string,
+  limit = 20,
+): Promise<EventFeedView> {
+  const head = await fetchEvents(activityId, { limit: 1 });
+  const after = Math.max(0, head.headCursor - limit);
+  return fetchEvents(activityId, { after, limit });
 }
 
 export function fetchExecutionState(

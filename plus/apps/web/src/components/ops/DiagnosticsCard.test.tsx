@@ -2,12 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const fetchEventsMock = vi.hoisted(() => vi.fn());
+const fetchRecentEventsMock = vi.hoisted(() => vi.fn());
 const fetchExecutionStateMock = vi.hoisted(() => vi.fn());
 const fetchOutboxHealthMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/diagnostics.js", () => ({
-  fetchEvents: fetchEventsMock,
+  fetchRecentEvents: fetchRecentEventsMock,
   fetchExecutionState: fetchExecutionStateMock,
   fetchOutboxHealth: fetchOutboxHealthMock,
 }));
@@ -26,7 +26,7 @@ function renderCard(canManage = true): void {
 describe("DiagnosticsCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetchEventsMock.mockResolvedValue({
+    fetchRecentEventsMock.mockResolvedValue({
       events: [{
         sequence: 42,
         type: "RoundLocked",
@@ -63,6 +63,6 @@ describe("DiagnosticsCard", () => {
   it("renders nothing without an operations permission", () => {
     renderCard(false);
     expect(screen.queryByTestId("diagnostics-card")).toBeNull();
-    expect(fetchEventsMock).not.toHaveBeenCalled();
+    expect(fetchRecentEventsMock).not.toHaveBeenCalled();
   });
 });
