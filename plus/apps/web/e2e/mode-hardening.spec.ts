@@ -47,7 +47,7 @@ test("rehearses, resets, then runs the same round formally", async ({ browser })
     await staff.getByRole("button", { name: "生成评委入口链接" }).click();
     const rehearsalLink = await staff.getByLabel("评委入口链接").inputValue();
     await rehearsalJudge.goto(rehearsalLink);
-    await expect(rehearsalJudge.getByRole("heading", { name: "singer-a" })).toBeVisible();
+    await expect(rehearsalJudge.getByRole("heading", { name: "singer-a" })).toBeVisible({ timeout: 15_000 });
     await rehearsalJudge.getByLabel(/演唱技巧/).fill("90");
     await rehearsalJudge.getByLabel(/舞台表现/).fill("92");
     await rehearsalJudge.getByLabel(/情感表达/).fill("91");
@@ -83,7 +83,7 @@ test("rehearses, resets, then runs the same round formally", async ({ browser })
     await expect(staff.getByText(/评委入口链接（v3）/)).toBeVisible();
     const formalLink = await staff.getByLabel("评委入口链接").inputValue();
     await formalJudge.goto(formalLink);
-    await expect(formalJudge.getByRole("heading", { name: "singer-a" })).toBeVisible();
+    await expect(formalJudge.getByRole("heading", { name: "singer-a" })).toBeVisible({ timeout: 15_000 });
     await formalJudge.getByLabel(/演唱技巧/).fill("80");
     await formalJudge.getByLabel(/舞台表现/).fill("80");
     await formalJudge.getByLabel(/情感表达/).fill("80");

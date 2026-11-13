@@ -51,7 +51,7 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
 
     await judge.goto(link);
     await expect(judge.getByRole("heading", { name: seed.title, exact: true })).toBeVisible();
-    await expect(judge.getByRole("heading", { name: "singer-a" })).toBeVisible();
+    await expect(judge.getByRole("heading", { name: "singer-a" })).toBeVisible({ timeout: 15_000 });
     await judge.getByLabel(/演唱技巧/).fill("90");
     await judge.getByLabel(/舞台表现/).fill("92");
     await judge.getByLabel(/情感表达/).fill("91");

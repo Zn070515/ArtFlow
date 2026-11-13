@@ -153,7 +153,8 @@ export const router = createRouter({
   defaultPreload: "intent",
   scrollRestoration: true,
   // The runtime components are ordinary functions; the router types model
-  // them as lazy route components.
+  // them as lazy route components. Their props are still checked by
+  // ErrorComponentProps / RouteComponent at the component definition.
   defaultErrorComponent: RouteError as unknown as ErrorRouteComponent,
   defaultPendingComponent: RoutePending as unknown as RouteComponent,
 });

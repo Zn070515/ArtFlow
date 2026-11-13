@@ -196,3 +196,21 @@
   平局面板此前已投影姓名。
 - **仍存在 ID**：归档包/导出、部分内部诊断表仍以 contestantId 为准；这些是
   运维/集成输出，下一轮按需补 display contract。
+
+## 第三轮高强度审查后的修正
+
+- **a11y 覆盖真实页面**：`/login` 在登录前审计（登录后会被重定向）；Console 面
+  等到真实表格/活动卡出现再分析，避免只扫到 `RequireSession` 的加载态。
+- **姓名解析一致性**：`participantName` 补充 `program` 键，与 runtime 的
+  `displayName` 对齐；公开读只在有可见 release 时查询，且只取快照引用到的
+  participant ids，不再无条件下拉全部 answers。
+- **滚动部署回退**：`ResultsView` 对缺失的 `contestantName` 回退到
+  `contestantId`，旧 API 不会渲染空名字。
+- **error boundary 可恢复**：`RouteError` 的“重试”改为整页重载，能恢复失败的
+  懒加载 chunk；组件用 `ErrorComponentProps` 标注，cast 只桥接 router 的
+  lazy 类型。
+- **测试强度**：Live 表格用例按 caption 精确定位表演表和排名表，两个表都断言
+  姓名；`@axe-core/playwright` 固定到 `4.14.0`。
+- **视觉基线**：用 `--update-snapshots=all` 强制重生成 tokens-1440/390，diff
+  现在真实包含 badge 文字色变化。
+- **懒加载时序**：judge 页面首次加载增加 15s 预算，与 CI 一致。

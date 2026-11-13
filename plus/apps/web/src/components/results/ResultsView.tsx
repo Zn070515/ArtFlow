@@ -37,10 +37,10 @@ function RankRow({
       <span className="rank-number" aria-hidden="true">
         {String(decision.rank).padStart(2, "0")}
       </span>
-      <span className="rank-contestant">{decision.contestantName}</span>
+      <span className="rank-contestant">{decision.contestantName ?? decision.contestantId}</span>
       <span className="rank-score">{scoreText(decision)}</span>
       <span className="sr-only">
-        第 {decision.rank} 名，{decision.contestantName}，
+        第 {decision.rank} 名，{decision.contestantName ?? decision.contestantId}，
         {decision.unit === "percent" ? scoreText(decision) : `${decision.score} 分`}
       </span>
     </li>
@@ -54,7 +54,7 @@ function AwardChips({ awards }: { readonly awards: readonly PublicAward[] }) {
       {awards.map((award) => (
         <li className="award-chip" key={`${award.award}-${award.contestantId}`}>
           <span className="award-name">{award.award}</span>
-          <span className="award-owner">{award.contestantName}</span>
+          <span className="award-owner">{award.contestantName ?? award.contestantId}</span>
         </li>
       ))}
     </ul>

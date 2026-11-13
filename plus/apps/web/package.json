@@ -30,7 +30,7 @@
     "three": "0.187.0"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.14.0",
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",

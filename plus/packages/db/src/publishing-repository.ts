@@ -25,7 +25,7 @@ function json(value: unknown): unknown {
 function participantName(answers: unknown, fallback: string): string {
   const parsed = json(answers);
   if (parsed === null || typeof parsed !== "object") return fallback;
-  for (const key of ["name", "displayName", "title"]) {
+  for (const key of ["name", "displayName", "title", "program"]) {
     const value = (parsed as Record<string, unknown>)[key];
     if (typeof value === "string" && value.trim() !== "") return value.trim();
   }
@@ -463,14 +463,24 @@ export async function selectPublicResults(
     ? ""
     : (json(newest.snapshot) as ResultSnapshot).activityTitle;
   // The release snapshot freezes contestant ids. Names are presentation data
-  // resolved from the activity's registrations at read time.
-  const registrations = await db.selectFrom("registration")
-    .select(["participant_id", "answers"])
-    .where("activity_id", "=", activity.id)
-    .execute();
+  // resolved from the activity's registrations at read time. Only query when
+  // there is something public, and only the referenced participants.
+  const contestantIds = new Set<string>();
+  for (const row of visible) {
+    const snapshot = json(row.snapshot) as ResultSnapshot;
+    for (const decision of snapshot.decisions) contestantIds.add(decision.contestantId);
+    for (const award of snapshot.awards) contestantIds.add(award.contestantId);
+  }
   const names = new Map<string, string>();
-  for (const registration of registrations) {
-    names.set(registration.participant_id, participantName(registration.answers, registration.participant_id));
+  if (contestantIds.size > 0) {
+    const registrations = await db.selectFrom("registration")
+      .select(["participant_id", "answers"])
+      .where("activity_id", "=", activity.id)
+      .where("participant_id", "in", [...contestantIds])
+      .execute();
+    for (const registration of registrations) {
+      names.set(registration.participant_id, participantName(registration.answers, registration.participant_id));
+    }
   }
   const results = visible.map((row) => {
     const snapshot = json(row.snapshot) as ResultSnapshot;
