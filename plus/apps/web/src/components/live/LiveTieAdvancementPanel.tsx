@@ -56,6 +56,14 @@ export function LiveTieAdvancementPanel({
 
   const ranking: Ranking | null = query.data?.ranking ?? null;
   const advancement: Advancement | null = query.data?.advancement ?? null;
+  const roundLocked = query.data?.round.state === "locked";
+  // A ranking snapshot only reflects the score version it was generated from.
+  // Once scores change again, recording a tie or finalizing advancement would
+  // act on a stale snapshot, so both actions stay blocked until a fresh ranking.
+  const staleRanking =
+    query.data !== undefined &&
+    ranking !== null &&
+    ranking.sourceScoreVersion !== query.data.round.scoreVersion;
 
   function complete(message: string): void {
     void queryClient.invalidateQueries({
@@ -145,6 +153,8 @@ export function LiveTieAdvancementPanel({
   // ties the operator can see, not on the raw ranking status.
   const canFinalize =
     ranking !== null &&
+    roundLocked &&
+    !staleRanking &&
     crossing.length === 0 &&
     !finalized &&
     !finalize.isPending;
@@ -175,9 +185,23 @@ export function LiveTieAdvancementPanel({
     return null;
   }
 
+  function renderRoundGate(data: RoundScoresResponse): ReactNode {
+    return data.round.state === "locked" ? null : (
+      <p className="ui-card__description">
+        轮次尚未锁定，请先「锁轮」并生成排名。
+      </p>
+    );
+  }
+
   function renderRanking(data: RoundScoresResponse): ReactNode {
     return (
       <>
+        {renderRoundGate(data)}
+        {staleRanking ? (
+          <p className="ui-field__error" role="alert">
+            排名已过期，请先「锁轮」并重新生成排名。
+          </p>
+        ) : null}
         {crossing.length === 0 ? null : (
           <div className="live-exception-group">
             <p className="ui-card__description">
@@ -220,7 +244,9 @@ export function LiveTieAdvancementPanel({
                   <Button
                     variant="primary"
                     size="sm"
-                    disabled={reason.trim() === "" || decide.isPending}
+                    disabled={
+                      reason.trim() === "" || decide.isPending || !roundLocked || staleRanking
+                    }
                     onClick={() => decide.mutate(group)}
                   >
                     记录裁决
@@ -269,7 +295,12 @@ export function LiveTieAdvancementPanel({
   } else if (query.data === undefined) {
     body = <p className="ui-card__description">正在加载排名…</p>;
   } else if (query.data.ranking === null) {
-    body = <p className="ui-card__description">先生成排名。</p>;
+    body = (
+      <>
+        {renderRoundGate(query.data)}
+        <p className="ui-card__description">先生成排名。</p>
+      </>
+    );
   } else {
     body = renderRanking(query.data);
   }

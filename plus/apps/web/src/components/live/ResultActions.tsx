@@ -43,6 +43,7 @@ export function ResultActions({
 }) {
   const queryClient = useQueryClient();
   const [note, setNote] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
   const [confirmedRevision, setConfirmedRevision] = useState<number | undefined>();
   const publishing = useQuery({
     queryKey: ["live-publishing", activityId],
@@ -108,7 +109,10 @@ export function ResultActions({
   });
   const revoke = useMutation({
     mutationFn: (releaseId: string) => revokeResultRelease(activityId, releaseId, note.trim()),
-    onSuccess: refresh,
+    onSuccess: () => {
+      setStatus("已撤销发布，可重新发布。");
+      refresh();
+    },
   });
   const unlock = useMutation({
     mutationFn: (revision: number) => {
@@ -117,6 +121,7 @@ export function ResultActions({
     },
     onSuccess: () => {
       setConfirmedRevision(undefined);
+      setStatus("已解锁赛果，请重新确认后再发布。");
       refresh();
     },
   });
@@ -229,6 +234,7 @@ export function ResultActions({
           </Button>
         ) : null}
       </div>
+      {status === null ? null : <p className="ui-card__description" role="status">{status}</p>}
       {publishing.error === null || publishing.error === undefined ? null : <p className="ui-field__error" role="alert">赛果状态暂时不可用。</p>}
       {error === null || error === undefined ? null : <p className="ui-field__error" role="alert">{errorText(error)}</p>}
     </Card>

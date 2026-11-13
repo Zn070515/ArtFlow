@@ -40,6 +40,7 @@ const CORRECTION_ERROR_MESSAGES: Record<string, string> = {
   STALE_CONTEXT: "数据已变化，请刷新后重试。",
   CORRECTION_REQUIRED: "修正状态已变化，请刷新后重试。",
   CORRECTION_ALREADY_OPEN: "修正状态已变化，请刷新后重试。",
+  PERFORMANCE_SCORE_OPEN: "请先锁定表演评分。",
 };
 
 function correctionStatusLabel(correction: ScoreFact["correction"]): string {
@@ -205,7 +206,7 @@ export function LiveExceptionPanel({
     }) => recalculateAfterCorrection(activityId, live.config.key, input),
     onSuccess: (_result, input) => {
       clearCorrectionDraft(input.correctionId);
-      finish("重算完成，请点击「生成排名」更新排名。");
+      finish("重算完成，请先「锁轮」再点「生成排名」。");
     },
     onError: fail,
   });
@@ -309,9 +310,17 @@ export function LiveExceptionPanel({
     });
   }
 
-  function renderFactActions(fact: ScoreFact): ReactNode {
+  function renderFactActions(
+    fact: ScoreFact,
+    performanceState: RoundScoresResponse["performances"][number]["state"] | undefined,
+  ): ReactNode {
     const correction = fact.correction;
     if (correction === null) {
+      if (performanceState !== "locked") {
+        return (
+          <p className="ui-card__description">该表演尚未锁定，暂不能修正。</p>
+        );
+      }
       if (openFactId !== fact.id) {
         return (
           <Button
@@ -456,6 +465,9 @@ export function LiveExceptionPanel({
   }
 
   function renderFacts(data: RoundScoresResponse): ReactNode {
+    const performanceStates = new Map(
+      data.performances.map((performance) => [performance.id, performance.state] as const),
+    );
     const performanceIds: string[] = [];
     for (const performance of data.performances) {
       performanceIds.push(performance.id);
@@ -496,7 +508,9 @@ export function LiveExceptionPanel({
                 <span>总分 {fact.total}</span>
                 <span>{correctionStatusLabel(fact.correction)}</span>
               </div>
-              <div className="live-exception-actions">{renderFactActions(fact)}</div>
+              <div className="live-exception-actions">
+                {renderFactActions(fact, performanceStates.get(fact.performanceId))}
+              </div>
             </div>
           );
         })}

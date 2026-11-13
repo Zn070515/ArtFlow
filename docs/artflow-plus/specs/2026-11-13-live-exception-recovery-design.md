@@ -181,10 +181,12 @@ interface RoundScoresResponse {
 
 ### 5.1 LiveExceptionPanel
 
-位置：`apps/web/src/components/live/LiveExceptionPanel.tsx`，由 `LiveRoundPanel`
-在轮次存在时渲染；只对 `competition.manage` 或 `competition.score.write` 显示可写动作。
-平局/晋级实现为同级 `LiveTieAdvancementPanel.tsx`，与评分修正面板并列——轮次
-`locked` 是平局裁决与晋级定稿的正常起点，不能被评分修正的锁定阻塞态一并隐藏。
+位置：`apps/web/src/components/live/LiveExceptionPanel.tsx`，由 Live 活动页
+（`routes/liveActivity.tsx`）在轮次面板 `LiveRoundPanel` 之后按轮次渲染，而不是由
+`LiveRoundPanel` 自身渲染；只对 `competition.manage` 或 `competition.score.write`
+显示可写动作。平局/晋级实现为同级 `LiveTieAdvancementPanel.tsx`，同样由 Live 活动页
+渲染，是评分修正面板的兄弟节点——轮次 `locked` 是平局裁决与晋级定稿的正常起点，
+不能被评分修正的锁定阻塞态一并隐藏。
 
 三个区域：
 
@@ -230,7 +232,9 @@ interface RoundScoresResponse {
   - `撤销发布` 只把 release 置为 revoked，赛段仍 confirmed，可直接再次发布；
   - `解锁赛果` 把赛段变回 ready_to_confirm，并自动 supersede active release，
     必须重新生成候选/确认后才能发布。
-- 成功后刷新 publishing state 与 live state，并提示下一步（重新发布或重新确认）。
+- 成功后刷新 publishing state 与 live state，并提示下一步：`撤销发布` 成功后显示
+  “已撤销发布，可重新发布。”；`解锁赛果` 成功后显示“已解锁赛果，请重新确认后再发布。”
+  解锁后的赛段回到 `ready_to_confirm`，必须重新确认赛果才能再次发布。
   若先解锁再改分，按 §4.3 的 A 顺序执行。
 - 评委赛果（podium）与投票赛果（vote）分别沿用现有 `ResultActions` 与
   `VotingCard` 的确认入口；本设计只补撤销/解锁，不改变两套确认逻辑。
@@ -265,7 +269,10 @@ interface RoundScoresResponse {
   `STALE_ADVANCEMENT` 时提示重新定稿后再建分组。
 - 改分成功后：先 `锁轮`，再 `生成排名`；任何改分都会让已有晋级决策过期，
   面板必须比对 `advancement.inputFingerprint` 与 `ranking.inputFingerprint`。
-- 错误展示复用 `describeLiveError`，不新增错误码映射表；不向前端透出 SQLSTATE。
+- 错误展示以 `describeLiveError` 为基础；评分修正面板在组件内保留一张小型中文映射
+  （`CORRECTION_ERROR_MESSAGES`），只补充该面板特有的状态机错误码（如
+  `PERFORMANCE_SCORE_OPEN`、`CORRECTION_REQUIRED`），不在前端复制服务端错误表；
+  不向前端透出 SQLSTATE。
 
 ## 7. 权限与模式
 

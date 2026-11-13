@@ -1404,7 +1404,7 @@ Run:
 pnpm -C plus run check
 pnpm -C plus --filter @artflow-plus/contract-tools run audit:check
 pnpm -C plus --filter @artflow-plus/web test
-pnpm -C plus run graph:check
+pnpm -C plus --filter @artflow-plus/contract-tools run graph:check
 uv run pytest tests/gates -q
 pnpm -C plus --filter @artflow-plus/web exec playwright test
 ```

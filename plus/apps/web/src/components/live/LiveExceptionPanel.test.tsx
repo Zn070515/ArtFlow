@@ -273,6 +273,22 @@ describe("LiveExceptionPanel", () => {
     });
   });
 
+  it("keeps a fact whose performance is still open read-only", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      performances: [{
+        id: "performance-1",
+        contestantId: "singer-a",
+        sequence: 1,
+        state: "open",
+        contextVersion: 1,
+      }],
+    }));
+    renderPanel();
+
+    expect(await screen.findByText("该表演尚未锁定，暂不能修正。")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "开修正" })).toBeNull();
+  });
+
   it("saves edited criteria with the correction id and expected version", async () => {
     fetchRoundScoresMock.mockResolvedValue(scores({
       facts: [{
@@ -583,7 +599,7 @@ describe("LiveExceptionPanel", () => {
       });
     });
     expect(
-      await screen.findByText("重算完成，请点击「生成排名」更新排名。"),
+      await screen.findByText("重算完成，请先「锁轮」再点「生成排名」。"),
     ).toBeVisible();
   });
 });

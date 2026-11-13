@@ -236,6 +236,38 @@ describe("LiveTieAdvancementPanel", () => {
     expect(screen.getByRole("button", { name: "晋级定稿" })).toBeDisabled();
   });
 
+  it("blocks tie decisions and finalize until the round is locked", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      round: { key: "final", state: "scoring", revision: 2, scoreVersion: 3, advanceCount: 1 },
+    }));
+    renderPanel();
+
+    expect(
+      await screen.findByText("轮次尚未锁定，请先「锁轮」并生成排名。"),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText("裁决原因"), {
+      target: { value: "现场裁决" },
+    });
+    expect(screen.getByRole("button", { name: "记录裁决" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "晋级定稿" })).toBeDisabled();
+  });
+
+  it("blocks decisions when the ranking predates the current score version", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      round: { key: "final", state: "locked", revision: 4, scoreVersion: 4, advanceCount: 1 },
+    }));
+    renderPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "排名已过期，请先「锁轮」并重新生成排名。",
+    );
+    fireEvent.change(screen.getByLabelText("裁决原因"), {
+      target: { value: "现场裁决" },
+    });
+    expect(screen.getByRole("button", { name: "记录裁决" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "晋级定稿" })).toBeDisabled();
+  });
+
   it("warns when the advancement fingerprint is stale", async () => {
     fetchRoundScoresMock.mockResolvedValue(scores({
       ranking: { ...tieRanking, status: "ready", tieGroups: [] },
