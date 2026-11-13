@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ApiError } from "../../api/client.js";
+import type { IssuedSupplementView } from "../../api/ops.js";
 import { issueSupplement } from "../../api/ops.js";
 import type { RegistrationDetail } from "../../api/registrations.js";
 import { Button } from "../ui/Button.js";
@@ -25,14 +26,20 @@ export function SupplementPanel({
 }) {
   const slots = detail.questionnaire.fileSlots;
   const [selected, setSelected] = useState<readonly string[]>([]);
+  const [issued, setIssued] = useState<IssuedSupplementView | undefined>();
   const mutation = useMutation({
     mutationFn: () =>
       issueSupplement(detail.activity.id, detail.registration.id, selected, crypto.randomUUID()),
-    onSuccess: () => {
+    onSuccess: (result) => {
       setSelected([]);
+      setIssued(result);
       onIssued();
     },
   });
+  const supplementLink =
+    issued?.token === null || issued?.token === undefined
+      ? undefined
+      : `${window.location.origin}/supplement?token=${encodeURIComponent(issued.token)}`;
 
   if (slots.length === 0) return null;
   return (
@@ -72,6 +79,12 @@ export function SupplementPanel({
           发出补交授权
         </Button>
       ) : null}
+      {supplementLink === undefined ? null : (
+        <p className="ui-card__description" role="status">
+          补交链接（{new Date(issued!.expiresAt).toLocaleString("zh-CN")} 前有效）：{" "}
+          <a className="table-link" href={supplementLink}>{supplementLink}</a>
+        </p>
+      )}
       {mutation.error === null || mutation.error === undefined ? null : (
         <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p>
       )}

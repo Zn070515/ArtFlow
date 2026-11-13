@@ -108,6 +108,15 @@ const judgeRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/judge.js"), "JudgePage"),
 });
 
+const supplementRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/supplement",
+  validateSearch: (search: Record<string, unknown>) => ({
+    token: typeof search.token === "string" ? search.token : undefined,
+  }),
+  component: lazyRouteComponent(() => import("./routes/supplement.js"), "SupplementPage"),
+});
+
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/workspace",
@@ -143,6 +152,7 @@ const routeTree = rootRoute.addChildren([
   liveActivityRoute,
   voteRoute,
   judgeRoute,
+  supplementRoute,
   workspaceRoute,
   workspaceActivityRoute,
   tokensRoute,

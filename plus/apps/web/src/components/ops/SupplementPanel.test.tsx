@@ -49,7 +49,11 @@ describe("SupplementPanel", () => {
   });
 
   it("issues a supplement for the selected slot only", async () => {
-    issueSupplementMock.mockResolvedValue({});
+    issueSupplementMock.mockResolvedValue({
+      token: "supplement-token",
+      expiresAt: "2026-11-20T10:00:00.000Z",
+      allowedKeys: ["audio"],
+    });
     renderPanel();
     await screen.findByTestId("supplement-panel");
     const issue = screen.getByRole("button", { name: "发出补交授权" });
@@ -62,5 +66,7 @@ describe("SupplementPanel", () => {
       ["audio"],
       expect.any(String),
     ));
+    const link = await screen.findByRole("link", { name: /supplement\?token=supplement-token/ });
+    expect(link).toHaveAttribute("href", expect.stringContaining("/supplement?token=supplement-token"));
   });
 });
