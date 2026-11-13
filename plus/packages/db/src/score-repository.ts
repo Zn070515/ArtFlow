@@ -448,6 +448,7 @@ export async function listLatestCorrectionsForScoreFacts(
   if (scoreFactIds.length === 0) return new Map();
   const rows = await db.selectFrom("score_correction").selectAll()
     .where("score_fact_id", "in", [...scoreFactIds])
+    .orderBy("created_at", "desc")
     .orderBy("revision", "desc")
     .execute();
   const latest = new Map<string, StoredScoreCorrection>();

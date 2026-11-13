@@ -9,7 +9,6 @@ import {
   createDb,
   getCurrentRankingSnapshot,
   getScoreFactForUpdate,
-  insertCorrection,
   insertPerformance,
   insertRankingSnapshot,
   insertRound,
@@ -239,16 +238,33 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
       revision: 0,
     }).execute();
     await insertScoreFact(db, fact);
-    await insertCorrection(db, {
-      id: `correction-1-${fact.id}`, scoreFactId: fact.id, inputFingerprint: "fp-1",
-      state: "open", baseVersion: 1, reason: "第一次", revision: 0,
-    });
-    await insertCorrection(db, {
-      id: `correction-2-${fact.id}`, scoreFactId: fact.id, inputFingerprint: "fp-2",
-      state: "closed", baseVersion: 1, reason: "第二次", revision: 1,
-    });
+    // revision is per-correction, so a newer correction resets to 0. Creation
+    // time is the only reliable order: the older correction has the higher
+    // revision.
+    await db.insertInto("score_correction").values({
+      id: `correction-old-${fact.id}`,
+      score_fact_id: fact.id,
+      input_fingerprint: "fp-old",
+      state: "closed",
+      base_version: 1,
+      reason: "旧修正",
+      revision: 3,
+      created_at: "2026-10-19T10:00:00Z",
+      updated_at: "2026-10-19T10:00:00Z",
+    }).execute();
+    await db.insertInto("score_correction").values({
+      id: `correction-new-${fact.id}`,
+      score_fact_id: fact.id,
+      input_fingerprint: "fp-new",
+      state: "open",
+      base_version: 1,
+      reason: "新修正",
+      revision: 0,
+      created_at: "2026-10-19T11:00:00Z",
+      updated_at: "2026-10-19T11:00:00Z",
+    }).execute();
     const latest = await listLatestCorrectionsForScoreFacts(db, [fact.id, "score-missing"]);
-    expect(latest.get(fact.id)?.id).toBe(`correction-2-${fact.id}`);
+    expect(latest.get(fact.id)?.id).toBe(`correction-new-${fact.id}`);
     expect(latest.get("score-missing")).toBeUndefined();
   });
 });
