@@ -127,10 +127,12 @@ describe("LiveRoundPanel", () => {
 
   it("shows participant names instead of raw contestant ids", () => {
     render(<LiveRoundPanel state={state} live={live} sessionMode="formal" onChanged={vi.fn()} />);
-    const tables = screen.getAllByRole("table");
-    const progress = tables.find((table) => table.getAttribute("aria-label") === null) ?? tables[0]!;
+    const progress = screen.getByRole("table", { name: "表演与评分进度" });
     expect(within(progress).getAllByText("林晓雨").length).toBeGreaterThan(0);
     expect(within(progress).queryByText("singer-a")).toBeNull();
+    const ranking = screen.getByRole("table", { name: /当前排名/ });
+    expect(within(ranking).getAllByText("林晓雨").length).toBeGreaterThan(0);
+    expect(within(ranking).queryByText("singer-a")).toBeNull();
   });
 
   it("hides setup controls from score writers", () => {
