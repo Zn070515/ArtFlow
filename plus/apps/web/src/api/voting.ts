@@ -24,9 +24,19 @@ export interface PodiumCandidateView {
   }[];
 }
 
+export interface PublicationView {
+  readonly id: string;
+  readonly stageKey: string;
+  readonly title: string;
+  readonly content: string;
+  readonly version: number;
+  readonly revision: number;
+}
+
 export interface PublishingStateView {
   readonly stages: readonly { readonly key: string; readonly label: string }[];
   readonly podiumCandidate: PodiumCandidateView | null;
+  readonly publications: readonly PublicationView[];
   readonly stageResults: readonly {
     readonly stageKey: string;
     readonly status: "confirmed" | "ready_to_confirm";
@@ -131,6 +141,26 @@ export async function closeVoteSession(
 
 export async function fetchPublishingState(activityId: string): Promise<PublishingStateView> {
   return apiFetch<PublishingStateView>(`/api/activities/${activityId}/publishing/state`);
+}
+
+export function editPublication(
+  activityId: string,
+  stageKey: string,
+  input: {
+    readonly scope: string;
+    readonly expectedVersion: number;
+    readonly title: string;
+    readonly content: string;
+  },
+): Promise<PublicationView> {
+  return apiFetch<PublicationView>(
+    `/api/activities/${encodeURIComponent(activityId)}/publishing/publications/${encodeURIComponent(stageKey)}`,
+    {
+      method: "PATCH",
+      headers: { "idempotency-key": commandId("publication") },
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export async function recomputePodiumCandidate(

@@ -9,6 +9,8 @@ const checkInAttendanceMock = vi.hoisted(() => vi.fn());
 const undoAttendanceMock = vi.hoisted(() => vi.fn());
 const createAttendancePointMock = vi.hoisted(() => vi.fn());
 const addAttendanceStaffMock = vi.hoisted(() => vi.fn());
+const updateAttendancePointMock = vi.hoisted(() => vi.fn());
+const updateAttendanceStaffMock = vi.hoisted(() => vi.fn());
 const fetchExecutionsMock = vi.hoisted(() => vi.fn());
 const startExecutionMock = vi.hoisted(() => vi.fn());
 const closeExecutionMock = vi.hoisted(() => vi.fn());
@@ -19,6 +21,8 @@ vi.mock("../../api/attendance.js", () => ({
   undoAttendance: undoAttendanceMock,
   createAttendancePoint: createAttendancePointMock,
   addAttendanceStaff: addAttendanceStaffMock,
+  updateAttendancePoint: updateAttendancePointMock,
+  updateAttendanceStaff: updateAttendanceStaffMock,
 }));
 
 vi.mock("../../api/voting.js", () => ({
@@ -75,6 +79,14 @@ function renderCard(
   }]);
   checkInAttendanceMock.mockResolvedValue({});
   undoAttendanceMock.mockResolvedValue({});
+  updateAttendancePointMock.mockResolvedValue(list.points[0]);
+  updateAttendanceStaffMock.mockResolvedValue({
+    id: "staff-1",
+    displayName: "工作人员",
+    actorId: null,
+    active: true,
+    revision: 0,
+  });
   render(
     <QueryClientProvider client={queryClient}>
       <AttendanceCard
@@ -157,6 +169,20 @@ describe("AttendanceCard", () => {
     expect(await screen.findByText("正在加载…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "签到" })).toBeDisabled();
     resolveSecond?.({ ...list, rows: [] });
+  });
+
+  it("edits an existing attendance point through the expected revision", async () => {
+    renderCard();
+    await screen.findByTestId("attendance-management");
+    fireEvent.change(screen.getByLabelText("编辑签到点"), { target: { value: "gate" } });
+    fireEvent.change(screen.getByLabelText("签到点新名称"), { target: { value: "正门" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存签到点" }));
+    await waitFor(() => expect(updateAttendancePointMock).toHaveBeenCalledWith("activity-1", "gate", {
+      expectedRevision: 0,
+      name: "正门",
+      subjectTypes: ["participant", "ticket", "staff"],
+      active: true,
+    }));
   });
 
   it("moves the selected tab with arrow keys", async () => {

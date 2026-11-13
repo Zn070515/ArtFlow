@@ -16,6 +16,7 @@ import {
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
 import { Input } from "../ui/Input.js";
+import { PublicationEditor } from "./PublicationEditor.js";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "操作失败，请稍后重试。";
@@ -79,6 +80,7 @@ export function ResultActions({
     publishing.data?.stages.find((stage) => stage.key === stageKey)?.label ?? stageKey ?? "";
   const stageReleases = publishing.data?.releases.filter((item) => item.stageKey === stageKey) ?? [];
   const activeReleases = stageReleases.filter((item) => item.status === "active");
+  const publication = publishing.data?.publications.find((item) => item.stageKey === stageKey);
   const candidate = publishing.data?.podiumCandidate ?? null;
   const formal = state.session?.mode === "formal";
 
@@ -215,6 +217,16 @@ export function ResultActions({
           </Button>
         ) : null}
       </div>
+      {stageKey === undefined ? null : (
+        <PublicationEditor
+          activityId={activityId}
+          stageKey={stageKey}
+          publication={publication}
+          canManage={activeReleases.length === 0}
+          scope="publishing"
+          onSaved={refresh}
+        />
+      )}
       <Input
         label="发布 / 归档说明"
         value={note}

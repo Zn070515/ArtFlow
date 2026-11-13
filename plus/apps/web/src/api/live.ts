@@ -166,11 +166,14 @@ export function closeSession(
 }
 
 export function prepareRound(activityId: string, roundKey: string): Promise<LiveRoundRecord> {
-  return apiFetch<LiveRoundRecord>(`/api/activities/${activityId}/competition/rounds`, {
-    method: "POST",
-    headers: commandHeaders(crypto.randomUUID()),
-    body: JSON.stringify({ roundKey, scope: JUDGING_SCOPE }),
-  });
+  return apiFetch<LiveRoundRecord>(
+    `/api/activities/${activityId}/competition/rounds/${encodeURIComponent(roundKey)}/prepare`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({ scope: JUDGING_SCOPE }),
+    },
+  );
 }
 
 export function activatePanel(

@@ -1,0 +1,80 @@
+import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
+
+import { ApiError } from "../../api/client.js";
+import { issueSupplement } from "../../api/ops.js";
+import type { RegistrationDetail } from "../../api/registrations.js";
+import { Button } from "../ui/Button.js";
+import { Card } from "../ui/Card.js";
+
+function humanError(error: unknown): string {
+  if (error instanceof ApiError && error.status === 409) {
+    return "报名已被更新，请刷新后重试。";
+  }
+  return error instanceof Error ? error.message : "补交授权失败，请稍后重试。";
+}
+
+export function SupplementPanel({
+  detail,
+  canManage,
+  onIssued,
+}: {
+  readonly detail: RegistrationDetail;
+  readonly canManage: boolean;
+  readonly onIssued: () => void;
+}) {
+  const slots = detail.questionnaire.fileSlots;
+  const [selected, setSelected] = useState<readonly string[]>([]);
+  const mutation = useMutation({
+    mutationFn: () =>
+      issueSupplement(detail.activity.id, detail.registration.id, selected, crypto.randomUUID()),
+    onSuccess: () => {
+      setSelected([]);
+      onIssued();
+    },
+  });
+
+  if (slots.length === 0) return null;
+  return (
+    <Card className="supplement-panel" data-testid="supplement-panel">
+      <h2 className="ui-card__title">补交授权</h2>
+      <p className="ui-card__description">
+        选择允许参与者补交的材料槽位。授权后报名状态会变为「需补充」。
+      </p>
+      <fieldset className="supplement-slots">
+        <legend className="ui-field__label">可补交槽位</legend>
+        {slots.map((slot) => {
+          const checked = selected.includes(slot.key);
+          return (
+            <label key={slot.key} className="supplement-slot">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(event) => {
+                  setSelected(
+                    event.target.checked
+                      ? [...selected, slot.key]
+                      : selected.filter((key) => key !== slot.key),
+                  );
+                }}
+              />
+              <span>{slot.purpose || slot.slot} · {slot.key}</span>
+            </label>
+          );
+        })}
+      </fieldset>
+      {canManage ? (
+        <Button
+          variant="secondary"
+          disabled={mutation.isPending || selected.length === 0}
+          onClick={() => mutation.mutate()}
+        >
+          发出补交授权
+        </Button>
+      ) : null}
+      {mutation.error === null || mutation.error === undefined ? null : (
+        <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p>
+      )}
+    </Card>
+  );
+}

@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const useQueryMock = vi.hoisted(() => vi.fn());
 const useQueryClientMock = vi.hoisted(() => vi.fn());
+const useMutationMock = vi.hoisted(() => vi.fn());
 const useParamsMock = vi.hoisted(() => vi.fn());
 const useSessionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
   useQueryClient: useQueryClientMock,
+  useMutation: useMutationMock,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -45,6 +47,7 @@ describe("OpsRegistrationPage", () => {
       session: { actor: { permissions: ["*"], roles: ["staff"] } },
     });
     useQueryClientMock.mockReturnValue({ invalidateQueries: vi.fn() });
+    useMutationMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: undefined });
     useQueryMock.mockReturnValue({
       data: {
         activity: {

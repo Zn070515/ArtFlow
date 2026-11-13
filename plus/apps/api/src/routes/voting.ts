@@ -1,6 +1,6 @@
 import type { ApiContext } from "../http/context.js";
 import { CloseVoteSessionBodySchema, OpenVoteSessionBodySchema, ReasonBodySchema, SubmitBallotBodySchema, TicketCredentialBodySchema } from "@artflow-plus/contracts";
-import { getLiveState, getVoteSession } from "@artflow-plus/db";
+import { getLiveState, getVoteSession, listTicketAccessSessionsForActivity, listTicketsForActivity } from "@artflow-plus/db";
 import { DomainError, SYSTEM_ACTOR, requirePermission } from "@artflow-plus/domain";
 import { closeVoteSession, getActivity, getClosedVoteScores, issueTicket, openVoteSession, readVotingSessionsState, redeemTicketCredential, revokeTicket, revokeTicketAccessSession, rotateTicketCredential, submitBallot } from "@artflow-plus/runtime";
 import { randomBytes } from "node:crypto";
@@ -152,6 +152,33 @@ export function registerVotingRoutes(ctx: ApiContext): void {
         state: null,
         status: "running",
         stale: true,
+      };
+    },
+  );
+
+  app.get(
+    "/api/activities/:id/ticketing/state",
+    { schema: { params: ActivityParams }, config: { access: "voting" } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const context = await requestDeps(request);
+      requirePermission(context.actor ?? SYSTEM_ACTOR, "ticket.manage");
+      const [tickets, sessions] = await Promise.all([
+        listTicketsForActivity(db, id),
+        listTicketAccessSessionsForActivity(db, id),
+      ]);
+      reply.header("cache-control", "no-store");
+      return {
+        tickets: tickets.map((ticket) => ({
+          id: ticket.id,
+          publicCode: ticket.publicCode,
+          state: ticket.state,
+          credentialVersion: ticket.credentialVersion,
+          issuedAt: ticket.issuedAt,
+          ...(ticket.redeemedAt === undefined ? {} : { redeemedAt: ticket.redeemedAt }),
+          ...(ticket.revokedAt === undefined ? {} : { revokedAt: ticket.revokedAt }),
+        })),
+        sessions,
       };
     },
   );

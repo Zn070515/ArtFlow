@@ -8,6 +8,8 @@ import {
   createAttendancePoint,
   fetchAttendance,
   undoAttendance,
+  updateAttendancePoint,
+  updateAttendanceStaff,
 } from "../../api/attendance.js";
 import { ApiError } from "../../api/client.js";
 import { closeExecution, fetchExecutions, startExecution } from "../../api/voting.js";
@@ -78,6 +80,12 @@ export function AttendanceCard({
   const [staffName, setStaffName] = useState("");
   const [ticketCredential, setTicketCredential] = useState("");
   const [ticketPoint, setTicketPoint] = useState("");
+  const [editPointKey, setEditPointKey] = useState("");
+  const [editPointName, setEditPointName] = useState("");
+  const [editPointActive, setEditPointActive] = useState(true);
+  const [editStaffId, setEditStaffId] = useState("");
+  const [editStaffName, setEditStaffName] = useState("");
+  const [editStaffActive, setEditStaffActive] = useState(true);
 
   const executions = useQuery({
     queryKey: ["attendance-executions", activityId],
@@ -159,6 +167,34 @@ export function AttendanceCard({
       setStaffName("");
       refresh();
     },
+  });
+
+  const pointUpdateMutation = useMutation({
+    mutationFn: () => {
+      const target = attendance.data?.points.find((item) => item.key === editPointKey);
+      if (target === undefined) throw new Error("请选择签到点。");
+      return updateAttendancePoint(activityId, target.key, {
+        expectedRevision: target.revision,
+        name: editPointName,
+        subjectTypes: target.subjectTypes,
+        active: editPointActive,
+      });
+    },
+    onSuccess: refresh,
+  });
+
+  const staffUpdateMutation = useMutation({
+    mutationFn: () => {
+      const target = attendance.data?.staff.find((item) => item.id === editStaffId);
+      if (target === undefined) throw new Error("请选择工作人员。");
+      return updateAttendanceStaff(activityId, target.id, {
+        expectedRevision: target.revision,
+        displayName: editStaffName,
+        actorId: target.actorId,
+        active: editStaffActive,
+      });
+    },
+    onSuccess: refresh,
   });
 
   const ticketMutation = useMutation({
@@ -244,6 +280,58 @@ export function AttendanceCard({
           <Input label="工作人员姓名" value={staffName} onChange={(event) => setStaffName(event.target.value)} placeholder="工作人员姓名" />
           <Button variant="secondary" size="sm" onClick={() => staffMutation.mutate()} disabled={staffName === "" || staffMutation.isPending}>
             添加工作人员
+          </Button>
+          <Select
+            label="编辑签到点"
+            value={editPointKey}
+            onChange={(event) => {
+              const target = data.points.find((item) => item.key === event.target.value);
+              setEditPointKey(event.target.value);
+              setEditPointName(target?.name ?? "");
+              setEditPointActive(target?.active ?? true);
+            }}
+          >
+            <option value="">选择签到点</option>
+            {data.points.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
+          </Select>
+          <Input label="签到点新名称" value={editPointName} onChange={(event) => setEditPointName(event.target.value)} />
+          <label className="supplement-slot">
+            <input type="checkbox" checked={editPointActive} onChange={(event) => setEditPointActive(event.target.checked)} />
+            <span>启用签到点</span>
+          </label>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => pointUpdateMutation.mutate()}
+            disabled={editPointKey === "" || editPointName === "" || pointUpdateMutation.isPending}
+          >
+            保存签到点
+          </Button>
+          <Select
+            label="编辑工作人员"
+            value={editStaffId}
+            onChange={(event) => {
+              const target = data.staff.find((item) => item.id === event.target.value);
+              setEditStaffId(event.target.value);
+              setEditStaffName(target?.displayName ?? "");
+              setEditStaffActive(target?.active ?? true);
+            }}
+          >
+            <option value="">选择工作人员</option>
+            {data.staff.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+          </Select>
+          <Input label="工作人员新姓名" value={editStaffName} onChange={(event) => setEditStaffName(event.target.value)} />
+          <label className="supplement-slot">
+            <input type="checkbox" checked={editStaffActive} onChange={(event) => setEditStaffActive(event.target.checked)} />
+            <span>启用工作人员</span>
+          </label>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => staffUpdateMutation.mutate()}
+            disabled={editStaffId === "" || editStaffName === "" || staffUpdateMutation.isPending}
+          >
+            保存工作人员
           </Button>
         </div>
       ) : null}
@@ -331,6 +419,8 @@ export function AttendanceCard({
       ) : null}
       {mutation.error !== null && mutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p> : null}
       {sessionMutation.error !== null && sessionMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(sessionMutation.error)}</p> : null}
+      {pointUpdateMutation.error !== null && pointUpdateMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(pointUpdateMutation.error)}</p> : null}
+      {staffUpdateMutation.error !== null && staffUpdateMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(staffUpdateMutation.error)}</p> : null}
       </div>
     </Card>
   );
