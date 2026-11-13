@@ -1,3 +1,5 @@
+import type { CompetitionRoundScoresResponse } from "@artflow-plus/contracts";
+
 import { ApiError, apiFetch } from "./client.js";
 
 export const JUDGING_SCOPE = "judging";
@@ -125,59 +127,7 @@ export interface LiveState {
   readonly participantNames: Readonly<Record<string, string>>;
 }
 
-export interface RoundScoresResponse {
-  readonly round: {
-    key: string;
-    state: "prepared" | "scoring" | "locked";
-    revision: number;
-    scoreVersion: number;
-    advanceCount: number;
-  };
-  readonly session: { id: string; mode: "test" | "rehearsal" | "formal"; scope: string } | null;
-  readonly ranking: {
-    id: string;
-    revision: number;
-    status: "ready" | "hold";
-    inputFingerprint: string;
-    rows: readonly { contestantId: string; total: string; judgeCount: number }[];
-    tieGroups: readonly { id: string; total: string; contestants: readonly string[] }[];
-  } | null;
-  readonly advancement: {
-    id: string;
-    revision: number;
-    status: "auto" | "needs_review" | "finalized";
-    inputFingerprint: string;
-    decisions: readonly { contestantId: string; advanced: boolean }[];
-  } | null;
-  readonly performances: readonly {
-    id: string;
-    contestantId: string;
-    sequence: number;
-    state: "not_opened" | "open" | "locked";
-    contextVersion: number;
-  }[];
-  readonly facts: readonly {
-    id: string;
-    performanceId: string;
-    contestantId: string;
-    judgeId: string;
-    seatId: string;
-    source: string;
-    total: string;
-    criteria: Readonly<Record<string, number>>;
-    notes: string;
-    version: number;
-    contextVersion: number;
-    panelSnapshotId: string;
-    correction: {
-      id: string;
-      state: "open" | "revised" | "closed" | "recalculated" | "cancelled";
-      baseVersion: number;
-      reason: string;
-      revision: number;
-    } | null;
-  }[];
-}
+export type RoundScoresResponse = CompetitionRoundScoresResponse;
 
 function commandHeaders(commandId: string): Record<string, string> {
   return { "idempotency-key": commandId };
@@ -353,10 +303,10 @@ export function openScoreCorrection(
   activityId: string,
   roundKey: string,
   input: {
-    performanceId: string;
-    scoreFactId: string;
-    panelSnapshotId: string;
-    reason: string;
+    readonly performanceId: string;
+    readonly scoreFactId: string;
+    readonly panelSnapshotId: string;
+    readonly reason: string;
   },
 ): Promise<unknown> {
   return apiFetch(
@@ -378,15 +328,15 @@ export function editScoreFact(
   activityId: string,
   roundKey: string,
   input: {
-    scoreFactId: string;
-    performanceId: string;
-    panelSnapshotId: string;
-    seatId: string;
-    contextVersion: number;
-    expectedVersion: number;
-    criteria: Record<string, number>;
-    reason: string;
-    correctionId: string;
+    readonly scoreFactId: string;
+    readonly performanceId: string;
+    readonly panelSnapshotId: string;
+    readonly seatId: string;
+    readonly contextVersion: number;
+    readonly expectedVersion: number;
+    readonly criteria: Readonly<Record<string, number>>;
+    readonly reason: string;
+    readonly correctionId: string;
   },
 ): Promise<unknown> {
   return apiFetch(
@@ -413,10 +363,10 @@ export function closeScoreCorrection(
   activityId: string,
   roundKey: string,
   input: {
-    scoreFactId: string;
-    correctionId: string;
-    panelSnapshotId: string;
-    performanceId: string;
+    readonly scoreFactId: string;
+    readonly correctionId: string;
+    readonly panelSnapshotId: string;
+    readonly performanceId: string;
   },
 ): Promise<unknown> {
   return apiFetch(
@@ -437,10 +387,10 @@ export function recalculateAfterCorrection(
   activityId: string,
   roundKey: string,
   input: {
-    scoreFactId: string;
-    correctionId: string;
-    panelSnapshotId: string;
-    performanceId: string;
+    readonly scoreFactId: string;
+    readonly correctionId: string;
+    readonly panelSnapshotId: string;
+    readonly performanceId: string;
   },
 ): Promise<unknown> {
   return apiFetch(
@@ -461,12 +411,12 @@ export function decideTie(
   activityId: string,
   roundKey: string,
   input: {
-    tieId: string;
-    rankingSnapshotId: string;
-    inputFingerprint: string;
-    contestants: readonly string[];
-    order: readonly string[];
-    reason: string;
+    readonly tieId: string;
+    readonly rankingSnapshotId: string;
+    readonly inputFingerprint: string;
+    readonly contestants: readonly string[];
+    readonly order: readonly string[];
+    readonly reason: string;
   },
 ): Promise<unknown> {
   return apiFetch(
