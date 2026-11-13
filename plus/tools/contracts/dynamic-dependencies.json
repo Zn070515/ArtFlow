@@ -35,22 +35,22 @@
   "commands": [
     {
       "commandType": "competition.score.direct_judge",
-      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "provider": "packages/runtime/src/score-submission-service.ts#submitScore",
       "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
     },
     {
       "commandType": "competition.score.staff_rapid",
-      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "provider": "packages/runtime/src/score-submission-service.ts#submitScore",
       "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
     },
     {
       "commandType": "competition.score.staff_proxy",
-      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "provider": "packages/runtime/src/score-submission-service.ts#submitScore",
       "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
     },
     {
       "commandType": "competition.score.paper_dr",
-      "provider": "packages/runtime/src/score-service.ts#submitScore",
+      "provider": "packages/runtime/src/score-submission-service.ts#submitScore",
       "reason": "The command type is built from ScoreSource, not written as a literal at the call site."
     },
     {
