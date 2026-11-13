@@ -315,3 +315,48 @@ it("validates the round scores read contract", () => {
     }],
   })).toBe(true);
 });
+
+it("validates nullable and finalized round score response variants", () => {
+  const base = {
+    round: { key: "final", state: "scoring", revision: 0, scoreVersion: 0, advanceCount: 0 },
+    session: null,
+    ranking: null,
+    advancement: null,
+    performances: [],
+    facts: [],
+  };
+  expect(Value.Check(CompetitionRoundScoresResponseSchema, base)).toBe(true);
+  expect(Value.Check(CompetitionRoundScoresResponseSchema, {
+    ...base,
+    session: { id: "session-1", mode: "rehearsal", scope: "stage" },
+    ranking: {
+      id: "ranking-1", revision: 1, status: "ready", inputFingerprint: "fp",
+      rows: [{ contestantId: "singer-a", total: "90.00", judgeCount: 1 }],
+      tieGroups: [],
+    },
+    advancement: {
+      id: "advancement-1", revision: 1, status: "finalized", inputFingerprint: "fp",
+      decisions: [{ contestantId: "singer-a", advanced: true }],
+    },
+  })).toBe(true);
+  const fact = {
+    id: "score-1", performanceId: "performance-1", contestantId: "singer-a",
+    judgeId: "judge-1", seatId: "seat-1", source: "paper_dr",
+    total: "88.50", criteria: { technique: 30 }, notes: "paper",
+    version: 2, contextVersion: 1, panelSnapshotId: "panel-1",
+  };
+  expect(Value.Check(CompetitionRoundScoresResponseSchema, {
+    ...base,
+    facts: [{
+      ...fact,
+      correction: { id: "correction-1", state: "recalculated", baseVersion: 1, reason: "fix", revision: 2 },
+    }],
+  })).toBe(true);
+  expect(Value.Check(CompetitionRoundScoresResponseSchema, {
+    ...base,
+    facts: [{
+      ...fact,
+      correction: { id: "correction-1", state: "bogus", baseVersion: 1, reason: "void", revision: 0 },
+    }],
+  })).toBe(false);
+});

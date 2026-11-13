@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -9,6 +9,7 @@ import {
   createDb,
   getCurrentRankingSnapshot,
   getScoreFactForUpdate,
+  insertCorrection,
   insertPerformance,
   insertRankingSnapshot,
   insertRound,
@@ -241,30 +242,21 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
     // revision is per-correction, so a newer correction resets to 0. Creation
     // time is the only reliable order: the older correction has the higher
     // revision.
-    await db.insertInto("score_correction").values({
-      id: `correction-old-${fact.id}`,
-      score_fact_id: fact.id,
-      input_fingerprint: "fp-old",
-      state: "closed",
-      base_version: 1,
-      reason: "旧修正",
-      revision: 3,
-      created_at: "2026-10-19T10:00:00Z",
-      updated_at: "2026-10-19T10:00:00Z",
-    }).execute();
-    await db.insertInto("score_correction").values({
-      id: `correction-new-${fact.id}`,
-      score_fact_id: fact.id,
-      input_fingerprint: "fp-new",
-      state: "open",
-      base_version: 1,
-      reason: "新修正",
-      revision: 0,
-      created_at: "2026-10-19T11:00:00Z",
-      updated_at: "2026-10-19T11:00:00Z",
-    }).execute();
+    const oldId = `correction-old-${fact.id}`;
+    const newId = `correction-new-${fact.id}`;
+    await insertCorrection(db, {
+      id: oldId, scoreFactId: fact.id, inputFingerprint: "fp-old",
+      state: "closed", baseVersion: 1, reason: "旧修正", revision: 3,
+    });
+    await insertCorrection(db, {
+      id: newId, scoreFactId: fact.id, inputFingerprint: "fp-new",
+      state: "open", baseVersion: 1, reason: "新修正", revision: 0,
+    });
+    await sql`update score_correction set created_at = ${"2026-10-19T10:00:00Z"} where id = ${oldId}`.execute(db);
+    await sql`update score_correction set created_at = ${"2026-10-19T11:00:00Z"} where id = ${newId}`.execute(db);
     const latest = await listLatestCorrectionsForScoreFacts(db, [fact.id, "score-missing"]);
-    expect(latest.get(fact.id)?.id).toBe(`correction-new-${fact.id}`);
+    expect(latest.get(fact.id)?.id).toBe(newId);
     expect(latest.get("score-missing")).toBeUndefined();
+    expect(await listLatestCorrectionsForScoreFacts(db, [])).toEqual(new Map());
   });
 });
