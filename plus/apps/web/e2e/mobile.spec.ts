@@ -69,7 +69,7 @@ test("mobile console surfaces keep 44px touch targets and avoid horizontal scrol
 
   for (const route of consoleRoutes) {
     await page.goto(route);
-    await expect(page.locator(".console-page")).toBeVisible();
+    await expect(page.locator(".console-page"), `${route} did not render the console shell`).toBeVisible();
 
     const result = await measure(page, touchTargetFloor);
     expect(result.horizontalOverflow, `${route} scrolls horizontally`).toBe(false);
