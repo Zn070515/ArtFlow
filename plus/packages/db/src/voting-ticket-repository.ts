@@ -648,6 +648,43 @@ export async function findTicketAccessSession(
   };
 }
 
+export interface TicketAccessSessionSummary {
+  readonly id: string;
+  readonly ticketId: string;
+  readonly expiresAt: string;
+  readonly revokedAt?: string;
+}
+
+export async function listTicketsForActivity(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly StoredTicket[]> {
+  const rows = await db.selectFrom("ticket").selectAll()
+    .where("activity_id", "=", activityId)
+    .orderBy("created_at", "asc")
+    .execute();
+  return rows.map(ticket);
+}
+
+export async function listTicketAccessSessionsForActivity(
+  db: Kysely<Database>,
+  activityId: string,
+): Promise<readonly TicketAccessSessionSummary[]> {
+  const rows = await db.selectFrom("ticket_access_session").selectAll()
+    .where("activity_id", "=", activityId)
+    .orderBy("created_at", "asc")
+    .execute();
+  return rows.map((row) => {
+    const revokedAt = iso(row.revoked_at);
+    return {
+      id: row.id,
+      ticketId: row.ticket_id,
+      expiresAt: iso(row.expires_at) ?? "",
+      ...(revokedAt === null ? {} : { revokedAt }),
+    };
+  });
+}
+
 export async function insertTicketAccessSession(
   trx: Kysely<Database>,
   input: {

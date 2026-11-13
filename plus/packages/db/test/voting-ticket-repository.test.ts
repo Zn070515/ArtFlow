@@ -13,6 +13,8 @@ import {
   getTicketForUpdate,
   insertTicket,
   insertTicketAccessSession,
+  listTicketAccessSessionsForActivity,
+  listTicketsForActivity,
   migrate,
   revokeTicketAccessSession,
   updateTicket,
@@ -172,6 +174,33 @@ describe.skipIf(!connectionString)("voting ticket repository", () => {
     await db.transaction().execute((trx) => revokeTicketAccessSession(trx, sessionId, "2026-11-13T11:00:00.000Z"));
     const stillRevoked = await findTicketAccessSession(db, tokenDigest);
     expect(stillRevoked?.revokedAt).toBe("2026-11-13T10:00:00.000Z");
+  });
+
+  it("lists tickets and access sessions for one activity without exposing digests", async () => {
+    const first = ticket();
+    const second = ticket();
+    await insertTicket(db, first);
+    await insertTicket(db, second);
+    const sessionId = `session-${randomUUID()}`;
+    await insertTicketAccessSession(db, {
+      id: sessionId,
+      activity_id: activityId,
+      ticket_id: first.id,
+      token_digest: `token-${randomUUID()}`,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      last_seen_at: null,
+      revoked_at: null,
+    });
+
+    const tickets = await listTicketsForActivity(db, activityId);
+    expect(tickets.map((row) => row.id)).toEqual(expect.arrayContaining([first.id, second.id]));
+    expect(tickets.every((row) => row.activityId === activityId)).toBe(true);
+
+    const sessions = await listTicketAccessSessionsForActivity(db, activityId);
+    const listed = sessions.find((row) => row.id === sessionId);
+    expect(listed).toMatchObject({ ticketId: first.id });
+    expect(listed?.revokedAt).toBeUndefined();
+    expect(Object.keys(listed ?? {})).not.toContain("tokenDigest");
   });
 
   it("rejects a duplicate access-session token digest", async () => {
