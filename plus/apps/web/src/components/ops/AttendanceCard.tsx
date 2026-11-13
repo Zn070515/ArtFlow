@@ -192,7 +192,7 @@ export function AttendanceCard({
 
   const data = attendance.data;
   const rows = data.rows.filter((row) => row.subjectType === tab);
-  const loadingNextTab = attendance.isFetching && rows.length === 0;
+  const loadingAttendance = attendance.isFetching;
   const summary = data.summary.find((item) => item.subjectType === tab);
 
   return (
@@ -313,21 +313,20 @@ export function AttendanceCard({
             <Badge tone={STATUS_TONES[row.status]}>{statusLabel(row.status)}</Badge>
             {!row.eligible ? <span className="attendance-ineligible">已不可签到</span> : null}
             {row.eligible && canManage && row.status !== "present" ? (
-              <Button variant="primary" size="sm" onClick={() => mutation.mutate({ row, action: "checkin" })} disabled={mutation.isPending}>
+              <Button variant="primary" size="sm" onClick={() => mutation.mutate({ row, action: "checkin" })} disabled={mutation.isPending || attendance.isFetching}>
                 签到
               </Button>
             ) : null}
             {row.eligible && canManage && row.status === "present" ? (
-              <Button variant="secondary" size="sm" onClick={() => mutation.mutate({ row, action: "undo" })} disabled={mutation.isPending}>
+              <Button variant="secondary" size="sm" onClick={() => mutation.mutate({ row, action: "undo" })} disabled={mutation.isPending || attendance.isFetching}>
                 撤销
               </Button>
             ) : null}
           </li>
         ))}
       </ul>
-      {loadingNextTab ? (
-        <p className="auth-loading">正在加载…</p>
-      ) : rows.length === 0 ? (
+      {loadingAttendance ? <p className="auth-loading">正在加载…</p> : null}
+      {!loadingAttendance && rows.length === 0 ? (
         <p className="auth-loading">当前筛选下没有主体。</p>
       ) : null}
       {mutation.error !== null && mutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p> : null}

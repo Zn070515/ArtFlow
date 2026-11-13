@@ -133,10 +133,26 @@ describe("LiveRoundPanel", () => {
         sessionMode="formal"
         onChanged={vi.fn()}
         canManageSetup={false}
+        canResolve={false}
       />,
     );
     expect(screen.queryByRole("button", { name: "锁轮" })).toBeNull();
     expect(screen.queryByRole("button", { name: "生成排名" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开评分更正窗口" })).toBeNull();
+  });
+
+  it("lets score writers resolve the ranking but not manage the round", () => {
+    render(
+      <LiveRoundPanel
+        state={state}
+        live={lockedLive}
+        sessionMode="formal"
+        onChanged={vi.fn()}
+        canManageSetup={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "锁轮" })).toBeNull();
     expect(screen.queryByRole("button", { name: "打开评分更正窗口" })).toBeNull();
   });
 

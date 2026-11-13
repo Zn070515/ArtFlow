@@ -5,6 +5,7 @@ import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  advancementMatchesMode,
   finalizeAdvancement,
   getRoundScores,
   openScoreCorrection,
@@ -188,6 +189,14 @@ describe.skipIf(!connectionString)("round scores read service", () => {
     });
     expect(after.facts.find((item) => item.id === fact.id)?.correction)
       .toMatchObject({ state: "open" });
+  });
+
+  it("matches advancement decisions only to the same-mode ranking", () => {
+    const decision = { inputFingerprint: "fp" };
+    expect(advancementMatchesMode(decision, { mode: "rehearsal" }, { mode: "formal" })).toBe(false);
+    expect(advancementMatchesMode(decision, { mode: "rehearsal" }, { mode: "rehearsal" })).toBe(true);
+    expect(advancementMatchesMode(null, { mode: "rehearsal" }, { mode: "rehearsal" })).toBe(false);
+    expect(advancementMatchesMode(decision, null, null)).toBe(false);
   });
 
   it("does not pair a formal advancement with a non-formal session", async () => {

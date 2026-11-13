@@ -20,6 +20,18 @@ export interface RoundScoresInput {
   readonly scope: string;
 }
 
+/**
+ * Advancement decisions have no mode column. A decision is only valid next to
+ * a ranking whose snapshot belongs to the same mode as the running session.
+ */
+export function advancementMatchesMode(
+  advancement: { readonly inputFingerprint: string } | null,
+  ranking: { readonly mode: string } | null,
+  source: { readonly mode: string } | null,
+): boolean {
+  return advancement !== null && ranking !== null && source !== null && source.mode === ranking.mode;
+}
+
 /** Permission checks belong to the route/topic caller; this reads the projection. */
 export async function getRoundScores(
   db: Kysely<Database>,
@@ -49,7 +61,7 @@ export async function getRoundScores(
   let advancement = ranking === null ? null : latestAdvancement;
   if (advancement !== null) {
     const source = await getRankingSnapshotByFingerprint(db, round.id, advancement.inputFingerprint);
-    if (source === null || source.mode !== mode) advancement = null;
+    if (!advancementMatchesMode(advancement, ranking, source)) advancement = null;
   }
 
   return {

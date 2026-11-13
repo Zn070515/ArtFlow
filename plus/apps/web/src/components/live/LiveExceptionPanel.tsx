@@ -72,11 +72,13 @@ export function LiveExceptionPanel({
   activityId,
   live,
   state,
+  canManageSetup = true,
   onChanged,
 }: {
   readonly activityId: string;
   readonly live: LiveRound;
   readonly state: LiveState;
+  readonly canManageSetup?: boolean;
   readonly onChanged: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
@@ -529,9 +531,11 @@ export function LiveExceptionPanel({
   } else if (live.round.state === "locked") {
     body = (
       <p className="ui-card__description">
-        {state.session?.mode === "formal"
-          ? "轮次已锁定。请先在轮次操作区点「打开评分更正窗口」，再回到这里修正。"
-          : "轮次已锁定。"}
+        {state.session?.mode !== "formal"
+          ? "轮次已锁定。"
+          : canManageSetup
+            ? "轮次已锁定。请先在轮次操作区点「打开评分更正窗口」，再回到这里修正。"
+            : "轮次已锁定。请联系具备 competition.manage 权限的人员重开本轮后再修正。"}
       </p>
     );
   } else if (query.isPending) {

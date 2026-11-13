@@ -78,6 +78,7 @@
 
 .console-page .primary-button:hover {
   filter: brightness(1.08);
+  translate: 0;
   scale: 1;
 }
 
@@ -723,6 +724,7 @@
 [data-shell="console"] .danger-button:hover:not(:disabled) {
   border-color: var(--color-line-strong);
   filter: none;
+  translate: 0;
   scale: 1;
 }
 
