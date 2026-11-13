@@ -1,5 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type JSX, type ReactNode } from "react";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 
 import { ApiError } from "../../api/client.js";
 import {
@@ -87,15 +92,22 @@ export function LiveExceptionPanel({
     queryFn: () => fetchRoundScores(activityId, live.config.key),
     enabled: live.round !== null,
     retry: false,
+    placeholderData: keepPreviousData,
   });
 
-  const activeCorrectionKey = (query.data?.facts ?? [])
-    .map((fact) => fact.correction?.id ?? "")
-    .filter((id) => id !== "")
-    .sort()
-    .join("|");
+  const lastCorrectionKey = useRef<string | null>(null);
+  const activeCorrectionKey = query.data === undefined
+    ? null
+    : query.data.facts
+        .map((fact) => fact.correction?.id ?? "")
+        .filter((id) => id !== "")
+        .sort()
+        .join("|");
 
   useEffect(() => {
+    if (activeCorrectionKey === null) return;
+    if (lastCorrectionKey.current === activeCorrectionKey) return;
+    lastCorrectionKey.current = activeCorrectionKey;
     const ids = new Set<string>(
       activeCorrectionKey === "" ? [] : activeCorrectionKey.split("|"),
     );
@@ -166,10 +178,7 @@ export function LiveExceptionPanel({
       readonly reason: string;
       readonly correctionId: string;
     }) => editScoreFact(activityId, live.config.key, input),
-    onSuccess: (_result, input) => {
-      clearCorrectionDraft(input.correctionId);
-      finish("修正已保存，请关闭修正窗口。");
-    },
+    onSuccess: () => finish("修正已保存，请关闭修正窗口。"),
     onError: fail,
   });
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/client.js";
@@ -159,6 +159,14 @@ function scores(overrides: Partial<RoundScoresResponse> = {}): RoundScoresRespon
     facts: [baseFact],
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 function renderPanel(options: {
@@ -407,6 +415,118 @@ describe("LiveExceptionPanel", () => {
 
     await waitFor(() => {
       expect((screen.getByLabelText("total") as HTMLInputElement).value).toBe("70");
+    });
+  });
+
+  it("keeps a typed draft across a pending revision refetch and prunes changed corrections", async () => {
+    const first = scores({
+      facts: [
+        {
+          ...baseFact,
+          correction: {
+            id: "correction-1",
+            state: "open",
+            baseVersion: 1,
+            reason: "A",
+            revision: 0,
+          },
+        },
+        {
+          ...baseFact,
+          id: "fact-2",
+          performanceId: "performance-2",
+          contestantId: "singer-b",
+          seatId: "seat-2",
+          criteria: { total: 60 },
+          correction: {
+            id: "correction-2",
+            state: "open",
+            baseVersion: 1,
+            reason: "B",
+            revision: 0,
+          },
+        },
+      ],
+      performances: [
+        {
+          id: "performance-1",
+          contestantId: "singer-a",
+          sequence: 1,
+          state: "locked",
+          contextVersion: 1,
+        },
+        {
+          id: "performance-2",
+          contestantId: "singer-b",
+          sequence: 2,
+          state: "locked",
+          contextVersion: 1,
+        },
+      ],
+    });
+    const pending = deferred<RoundScoresResponse>();
+    fetchRoundScoresMock.mockResolvedValueOnce(first);
+    fetchRoundScoresMock.mockReturnValueOnce(pending.promise);
+
+    const view = renderPanel();
+    await screen.findByTestId("score-fact-fact-2");
+    const inputForB = () =>
+      within(screen.getByTestId("score-fact-fact-2")).getByLabelText("total") as HTMLInputElement;
+
+    fireEvent.change(inputForB(), { target: { value: "55" } });
+    expect(inputForB().value).toBe("55");
+
+    view.rerenderWithLive({ ...live, round: { ...live.round!, revision: 2 } });
+    expect(inputForB().value).toBe("55");
+
+    pending.resolve(scores({
+      facts: [
+        {
+          ...baseFact,
+          correction: {
+            id: "correction-1",
+            state: "open",
+            baseVersion: 1,
+            reason: "A",
+            revision: 0,
+          },
+        },
+        {
+          ...baseFact,
+          id: "fact-2",
+          performanceId: "performance-2",
+          contestantId: "singer-b",
+          seatId: "seat-2",
+          criteria: { total: 20 },
+          correction: {
+            id: "correction-3",
+            state: "open",
+            baseVersion: 2,
+            reason: "B",
+            revision: 0,
+          },
+        },
+      ],
+      performances: [
+        {
+          id: "performance-1",
+          contestantId: "singer-a",
+          sequence: 1,
+          state: "locked",
+          contextVersion: 1,
+        },
+        {
+          id: "performance-2",
+          contestantId: "singer-b",
+          sequence: 2,
+          state: "locked",
+          contextVersion: 1,
+        },
+      ],
+    }));
+
+    await waitFor(() => {
+      expect(inputForB().value).toBe("20");
     });
   });
 
