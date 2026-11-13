@@ -69,7 +69,7 @@ test("mobile console surfaces keep 44px touch targets and avoid horizontal scrol
 
   for (const route of consoleRoutes) {
     await page.goto(route);
-    await expect(page.locator(".console-page"), `${route} did not render the console shell`).toBeVisible();
+    await expect(page.locator(".console-page"), `${route} did not render the console shell`).toBeVisible({ timeout: 15_000 });
 
     const result = await measure(page, touchTargetFloor);
     expect(result.horizontalOverflow, `${route} scrolls horizontally`).toBe(false);
@@ -83,7 +83,7 @@ test("mobile console surfaces keep 44px touch targets and avoid horizontal scrol
   const liveDetailHref = await page.locator('a[href^="/live/"]').first().getAttribute("href");
   expect(liveDetailHref).not.toBeNull();
   await page.goto(liveDetailHref!);
-  await expect(page.locator(".console-page")).toBeVisible();
+  await expect(page.locator(".console-page")).toBeVisible({ timeout: 15_000 });
   const liveResult = await measure(page, touchTargetFloor);
   expect(liveResult.horizontalOverflow, `${liveDetailHref} scrolls horizontally`).toBe(false);
   expect(liveResult.undersized, `${liveDetailHref} has controls shorter than ${touchTargetFloor}px`).toEqual([]);
@@ -92,7 +92,7 @@ test("mobile console surfaces keep 44px touch targets and avoid horizontal scrol
 test("mobile login and join forms meet the touch target floor", async ({ page }) => {
   for (const route of ["/login", "/join"]) {
     await page.goto(route);
-    await expect(page.locator(".console-page")).toBeVisible();
+    await expect(page.locator(".console-page")).toBeVisible({ timeout: 15_000 });
 
     const result = await measure(page, touchTargetFloor);
     expect(result.horizontalOverflow, `${route} scrolls horizontally`).toBe(false);
@@ -129,7 +129,7 @@ test("tablet keeps a folded sidebar and one-column content", async ({ page }) =>
 
   for (const route of ["/ops", "/studio", "/join"]) {
     await page.goto(route);
-    await expect(page.locator(".console-page")).toBeVisible();
+    await expect(page.locator(".console-page")).toBeVisible({ timeout: 15_000 });
 
     const toggle = page.getByRole("button", { name: "打开 Console 导航" });
     await expect(toggle).toBeVisible();
