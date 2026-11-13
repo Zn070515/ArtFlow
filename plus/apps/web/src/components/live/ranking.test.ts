@@ -9,7 +9,9 @@ describe("live display ranks", () => {
       { contestantId: "b", total: "90.00", judgeCount: 2 },
       { contestantId: "c", total: "80.00", judgeCount: 2 },
     ];
-    expect(liveDisplayRanks(rows, [{ total: "90.00", contestants: ["a", "b"] }])).toEqual([1, 1, 3]);
+    expect(
+      liveDisplayRanks(rows, [{ id: "tie-1", total: "90.00", contestants: ["a", "b"] }]),
+    ).toEqual([1, 1, 3]);
   });
 
   it("falls back to ordinal positions when there are no published ties", () => {

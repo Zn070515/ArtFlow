@@ -97,7 +97,12 @@ export interface LiveRanking {
   readonly id: string;
   readonly status: "ready" | "hold";
   readonly rows: readonly LiveRankingRow[];
-  readonly tieGroups: readonly { readonly total: string; readonly contestants: readonly string[] }[];
+  readonly inputFingerprint: string;
+  readonly tieGroups: readonly {
+    readonly id: string;
+    readonly total: string;
+    readonly contestants: readonly string[];
+  }[];
   readonly revision: number;
   readonly sourceScoreVersion: number;
 }
@@ -118,6 +123,60 @@ export interface LiveState {
   readonly rounds: readonly LiveRound[];
   readonly participantIds: readonly string[];
   readonly participantNames: Readonly<Record<string, string>>;
+}
+
+export interface RoundScoresResponse {
+  readonly round: {
+    key: string;
+    state: "prepared" | "scoring" | "locked";
+    revision: number;
+    scoreVersion: number;
+    advanceCount: number;
+  };
+  readonly session: { id: string; mode: "test" | "rehearsal" | "formal"; scope: string } | null;
+  readonly ranking: {
+    id: string;
+    revision: number;
+    status: "ready" | "hold";
+    inputFingerprint: string;
+    rows: readonly { contestantId: string; total: string; judgeCount: number }[];
+    tieGroups: readonly { id: string; total: string; contestants: readonly string[] }[];
+  } | null;
+  readonly advancement: {
+    id: string;
+    revision: number;
+    status: "auto" | "needs_review" | "finalized";
+    inputFingerprint: string;
+    decisions: readonly { contestantId: string; advanced: boolean }[];
+  } | null;
+  readonly performances: readonly {
+    id: string;
+    contestantId: string;
+    sequence: number;
+    state: "not_opened" | "open" | "locked";
+    contextVersion: number;
+  }[];
+  readonly facts: readonly {
+    id: string;
+    performanceId: string;
+    contestantId: string;
+    judgeId: string;
+    seatId: string;
+    source: string;
+    total: string;
+    criteria: Readonly<Record<string, number>>;
+    notes: string;
+    version: number;
+    contextVersion: number;
+    panelSnapshotId: string;
+    correction: {
+      id: string;
+      state: "open" | "revised" | "closed" | "recalculated" | "cancelled";
+      baseVersion: number;
+      reason: string;
+      revision: number;
+    } | null;
+  }[];
 }
 
 function commandHeaders(commandId: string): Record<string, string> {
@@ -278,6 +337,167 @@ export function resolveRound(activityId: string, roundKey: string): Promise<Live
 export function fetchRanking(activityId: string, roundKey: string): Promise<LiveRanking> {
   return apiFetch<LiveRanking>(
     `/api/activities/${activityId}/competition/rounds/${roundKey}/ranking?scope=${JUDGING_SCOPE}`,
+  );
+}
+
+export function fetchRoundScores(
+  activityId: string,
+  roundKey: string,
+): Promise<RoundScoresResponse> {
+  return apiFetch<RoundScoresResponse>(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores?scope=${JUDGING_SCOPE}`,
+  );
+}
+
+export function openScoreCorrection(
+  activityId: string,
+  roundKey: string,
+  input: {
+    performanceId: string;
+    scoreFactId: string;
+    panelSnapshotId: string;
+    reason: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}/corrections`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        performanceId: input.performanceId,
+        panelSnapshotId: input.panelSnapshotId,
+        reason: input.reason,
+      }),
+    },
+  );
+}
+
+export function editScoreFact(
+  activityId: string,
+  roundKey: string,
+  input: {
+    scoreFactId: string;
+    performanceId: string;
+    panelSnapshotId: string;
+    seatId: string;
+    contextVersion: number;
+    expectedVersion: number;
+    criteria: Record<string, number>;
+    reason: string;
+    correctionId: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}`,
+    {
+      method: "PATCH",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        performanceId: input.performanceId,
+        panelSnapshotId: input.panelSnapshotId,
+        seatId: input.seatId,
+        contextVersion: input.contextVersion,
+        expectedVersion: input.expectedVersion,
+        criteria: input.criteria,
+        reason: input.reason,
+        correctionId: input.correctionId,
+      }),
+    },
+  );
+}
+
+export function closeScoreCorrection(
+  activityId: string,
+  roundKey: string,
+  input: {
+    scoreFactId: string;
+    correctionId: string;
+    panelSnapshotId: string;
+    performanceId: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}/corrections/${input.correctionId}/close`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        panelSnapshotId: input.panelSnapshotId,
+        performanceId: input.performanceId,
+      }),
+    },
+  );
+}
+
+export function recalculateAfterCorrection(
+  activityId: string,
+  roundKey: string,
+  input: {
+    scoreFactId: string;
+    correctionId: string;
+    panelSnapshotId: string;
+    performanceId: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}/corrections/${input.correctionId}/recalculate`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        panelSnapshotId: input.panelSnapshotId,
+        performanceId: input.performanceId,
+      }),
+    },
+  );
+}
+
+export function decideTie(
+  activityId: string,
+  roundKey: string,
+  input: {
+    tieId: string;
+    rankingSnapshotId: string;
+    inputFingerprint: string;
+    contestants: readonly string[];
+    order: readonly string[];
+    reason: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/ties/${input.tieId}/decide`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        rankingSnapshotId: input.rankingSnapshotId,
+        inputFingerprint: input.inputFingerprint,
+        contestants: input.contestants,
+        order: input.order,
+        reason: input.reason,
+      }),
+    },
+  );
+}
+
+export function finalizeAdvancement(
+  activityId: string,
+  roundKey: string,
+  expectedRankingRevision: number,
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/advancement/finalize`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({ scope: JUDGING_SCOPE, expectedRankingRevision }),
+    },
   );
 }
 
