@@ -485,6 +485,7 @@ export function LiveExceptionPanel({
             <div
               className="live-exception-fact"
               data-testid={`score-fact-${fact.id}`}
+              data-contestant={fact.contestantId}
               key={fact.id}
             >
               <div className="live-exception-meta">
