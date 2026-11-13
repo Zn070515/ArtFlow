@@ -23,6 +23,9 @@ export interface RecoveryFixture {
   readonly seatId: string;
 }
 
+// Deliberately duplicated by apps/api/test/helpers/competition-read-fixture.ts:
+// there is no shared test-support package, and the API tests may not import
+// another package's test tree at runtime. Keep the seeds in step.
 let tick = 0;
 
 export const recoveryStaff: ActorContext = {

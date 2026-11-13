@@ -12,7 +12,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, 
 import { createRealtimeServer } from "@artflow-plus/realtime/server";
 import { isProductionEnvironment, sessionCookie } from "./cookies.js";
 import { createActivityRealtimeTopic, createVotingRealtimeTopic } from "./realtime-topics.js";
-import type { ApiContext } from "./http/context.js";
+import type { ApiContext, ReadAccess } from "./http/context.js";
 import { bearerToken, cookieValue, errorCode, errorDetails, publicErrorMessage } from "./http/helpers.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
@@ -280,8 +280,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // Every GET route must declare its read surface. The default is not "public":
   // an undeclared route fails at boot, so a new endpoint cannot quietly become
-  // an anonymous internal read.
-  type ReadAccess = "public" | "session" | "operations" | "competition" | "analytics" | "studio" | "tasks" | "attendance" | "voting" | "result" | "archive";
+  // an anonymous internal read. `ReadAccess` lives in the route context so the
+  // registration hook and the route modules cannot drift apart.
   const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "tasks" | "attendance" | "voting" | "result" | "archive", readonly string[]>> = {
     analytics: ACTIVITY_ANALYTICS_READ_PERMISSIONS,
     tasks: [

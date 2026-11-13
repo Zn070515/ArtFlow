@@ -39,6 +39,7 @@ const INTERNAL_READS = [
   "/api/activities/any/execution-state",
   "/api/activities/any/events",
   "/api/activities/any/competition/rounds/final/ranking?scope=judging",
+  "/api/activities/any/competition/rounds/final/scores?scope=judging",
   "/api/activities/any/voting/sessions",
   "/api/activities/any/voting/sessions/any/scores",
   "/api/activities/any/voting/sessions/any/live",

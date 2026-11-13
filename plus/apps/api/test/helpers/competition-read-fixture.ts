@@ -21,6 +21,9 @@ export interface CompetitionReadFixture {
   readonly seatId: string;
 }
 
+// Deliberately duplicates packages/runtime/test/helpers/recovery-fixture.ts:
+// the workspace has no shared test-support package, and the API package must
+// not import another package's test tree at runtime. Keep the seeds in step.
 let tick = 0;
 
 // The competition commands check permissions with exact membership, not the

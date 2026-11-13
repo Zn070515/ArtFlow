@@ -122,3 +122,23 @@ dbIt("rejects anonymous readers", async () => {
   const response = await app.inject({ method: "GET", url: scoresUrl() });
   expect(response.statusCode).toBe(401);
 });
+
+dbIt("returns 404 for an unknown round", async () => {
+  const token = await bearer("competition-reader", "reader-password");
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/activities/${fixture.activityId}/competition/rounds/semifinal/scores?scope=judging`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  expect(response.statusCode).toBe(404);
+});
+
+dbIt("rejects an unsupported scope", async () => {
+  const token = await bearer("competition-reader", "reader-password");
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/activities/${fixture.activityId}/competition/rounds/final/scores?scope=publishing`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  expect(response.statusCode).toBe(400);
+});
