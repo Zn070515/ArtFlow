@@ -62,8 +62,9 @@ test("rehearses, resets, then runs the same round formally", async ({ browser })
     await expect(round.getByRole("table", { name: /当前排名（revision \d+）/ })).toBeVisible();
     await expect(round.getByRole("cell", { name: "273.00", exact: true })).toBeVisible();
 
-    staff.once("dialog", (dialog) => void dialog.accept());
     await round.getByRole("button", { name: "重置排练" }).click();
+    const resetDialog = staff.getByRole("dialog", { name: "清空排练数据？" });
+    await resetDialog.getByRole("button", { name: "清空并回到准备状态" }).click();
     await expect(round.getByRole("heading", { name: /round-1 · prepared/ })).toBeVisible();
     await expect(round.getByTestId("score-count-singer-a")).toHaveCount(0);
     await expect(round.getByRole("table", { name: /当前排名/ })).toHaveCount(0);
