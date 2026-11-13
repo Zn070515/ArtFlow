@@ -112,6 +112,16 @@ export function hasLiveAccess(session: SessionResponse | null): boolean {
   );
 }
 
+export function canManageCompetition(session: SessionResponse | null): boolean {
+  if (session === null) return false;
+  const { permissions } = session.actor;
+  return (
+    permissions.includes("*") ||
+    permissions.includes("competition.manage") ||
+    permissions.includes("competition.score.write")
+  );
+}
+
 export function hasWorkspaceAccess(session: SessionResponse | null): boolean {
   return hasOpsAccess(session) || hasStudioAccess(session) || hasLiveAccess(session);
 }

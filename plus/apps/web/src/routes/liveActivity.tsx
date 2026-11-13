@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { Fragment } from "react";
 
 import { fetchLiveState } from "../api/live.js";
 import { RequireSession } from "../auth/RequireSession.js";
-import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
+import { canManageCompetition, hasLiveAccess, useSession } from "../auth/SessionProvider.js";
+import { LiveExceptionPanel } from "../components/live/LiveExceptionPanel.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
@@ -91,13 +93,22 @@ function LiveActivityContent() {
       <div className="live-workspace">
         <div className="live-main-column live-rounds">
           {state.rounds.map((live) => (
-            <LiveRoundPanel
-              key={live.config.key}
-              state={state}
-              live={live}
-              sessionMode={state.session?.mode}
-              onChanged={refresh}
-            />
+            <Fragment key={live.config.key}>
+              <LiveRoundPanel
+                state={state}
+                live={live}
+                sessionMode={state.session?.mode}
+                onChanged={refresh}
+              />
+              {canManageCompetition(session) ? (
+                <LiveExceptionPanel
+                  activityId={activityId}
+                  live={live}
+                  state={state}
+                  onChanged={refresh}
+                />
+              ) : null}
+            </Fragment>
           ))}
         </div>
         <aside className="live-control-rail">

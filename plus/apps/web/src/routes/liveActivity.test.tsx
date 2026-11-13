@@ -22,8 +22,12 @@ vi.mock("../auth/RequireSession.js", () => ({
   RequireSession: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("../auth/SessionProvider.js", () => ({
+  canManageCompetition: () => true,
   hasLiveAccess: () => true,
   useSession: useSessionMock,
+}));
+vi.mock("../components/live/LiveExceptionPanel.js", () => ({
+  LiveExceptionPanel: () => <section data-testid="live-exception-panel">异常处理</section>,
 }));
 vi.mock("../components/live/LiveRoundPanel.js", () => ({
   LiveRoundPanel: () => <section data-testid="live-round-panel">回合</section>,
