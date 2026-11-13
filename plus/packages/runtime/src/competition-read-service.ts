@@ -3,6 +3,7 @@ import {
   getActivity,
   getCurrentRankingSnapshot,
   getLatestAdvancementDecision,
+  getRankingSnapshotByFingerprint,
   getRound,
   listCurrentScoreFacts,
   listLatestCorrectionsForScoreFacts,
@@ -35,11 +36,21 @@ export async function getRoundScores(
   }
   const session = await findRunningSessionByScope(db, activity.id, input.scope);
   const mode = session?.mode ?? null;
-  const facts = mode === null ? [] : await listCurrentScoreFacts(db, round.id, mode);
+  const [facts, ranking, latestAdvancement, performances] = await Promise.all([
+    mode === null ? Promise.resolve([]) : listCurrentScoreFacts(db, round.id, mode),
+    mode === null ? Promise.resolve(null) : getCurrentRankingSnapshot(db, round.id, mode),
+    getLatestAdvancementDecision(db, round.id),
+    listRoundPerformances(db, round.id),
+  ]);
   const corrections = await listLatestCorrectionsForScoreFacts(db, facts.map((fact) => fact.id));
-  const ranking = mode === null ? null : await getCurrentRankingSnapshot(db, round.id, mode);
-  const advancement = await getLatestAdvancementDecision(db, round.id);
-  const performances = await listRoundPerformances(db, round.id);
+  // Advancement decisions have no mode column; only expose one whose source
+  // ranking snapshot belongs to the running session's mode. A formal decision
+  // must never be paired with a rehearsal/test ranking.
+  let advancement = ranking === null ? null : latestAdvancement;
+  if (advancement !== null) {
+    const source = await getRankingSnapshotByFingerprint(db, round.id, advancement.inputFingerprint);
+    if (source === null || source.mode !== mode) advancement = null;
+  }
 
   return {
     round: {

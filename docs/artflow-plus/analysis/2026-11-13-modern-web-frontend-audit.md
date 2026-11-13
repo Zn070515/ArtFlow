@@ -104,3 +104,33 @@
 1. **P1 可访问性与电池**：1（dialogs）、2（tabs）、3（table）、4（WebGL pause）。
 2. **P2 表单与主题**：5（copy）、6（meta/accent）、7（text-wrap）。
 3. **P3 渐进**：8（transform）、9（container query 试点）、10（drawer）。
+
+## 高强度代码审查后的修正
+
+- **评分事实读模型的 mode 隔离**：`advancement_decision` 没有 mode 列，读投影会把
+  formal 晋级决策配到 rehearsal/test 排名上。读服务现在用决策指纹反查来源 ranking
+  快照，只有 mode 与当前 session 一致时才返回 advancement。
+- **查询并行化**：facts / ranking / advancement / performances 改为 `Promise.all`，
+  corrections 依赖 facts 后单独查询；不再串行 8 次。
+- **修正历史扫描**：`listLatestCorrectionsForScoreFacts` 改用
+  `distinctOn("score_fact_id")` + `created_at desc`，数据库只返回每个事实的最新一条。
+- **分组创建重试**：重复 `stageKey` 的检查移到晋级来源解析之前，重试返回准确的
+  `GROUPING_STAGE_EXISTS`，不再被 `STALE_ADVANCEMENT` 掩盖；同时去掉重复的
+  `getRound`。
+- **`score.write` 的 UI 门槛**：Live 页对只有评分权限的账号隐藏准备/激活/锁轮/
+  重开/重置/生成排名与会话控制，只保留修正、平局/晋级和只读排名。
+- **`<dialog>` 的模块级引用**：`HTMLDialogElement` 检测改为 `typeof` 守卫；
+  不支持时 `showModal` 不执行，关闭态由 `.ui-dialog:not([open])` 隐藏，不会
+  因模块求值白屏。
+- **Attendance 标签切换**：`keepPreviousData` 下切换标签时用 `isFetching` 判断，
+  显示“正在加载…”而不是把上一标签的空行误报成“当前筛选下没有主体”。
+- **再次修正**：`recalculated`/`cancelled` 只是当前修正的终态；同一评分事实可
+  再开新修正，面板显示「再次修正」。
+
+### 保留的权衡
+
+- **`thead { display: none }`**：这是 `responsive-table` 指南的明确要求；卡片
+  标签由 `td::before` 提供，属于该指南的标准堆叠模式。旧 `clip` 方案保留了表头
+  但会与标签重复播报，二者不可兼得。
+- **测试夹具重复**：API 与 runtime 各有一份竞赛种子；仓库没有共享 test-support
+  包，两份文件用互相指向的注释记录了同步义务。

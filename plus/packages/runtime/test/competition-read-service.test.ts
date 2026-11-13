@@ -1,4 +1,4 @@
-import { closeDb, createDb, migrate } from "@artflow-plus/db";
+import { closeDb, createDb, insertSession, migrate } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import { Client } from "pg";
 import type { Kysely } from "kysely";
@@ -188,5 +188,40 @@ describe.skipIf(!connectionString)("round scores read service", () => {
     });
     expect(after.facts.find((item) => item.id === fact.id)?.correction)
       .toMatchObject({ state: "open" });
+  });
+
+  it("does not pair a formal advancement with a non-formal session", async () => {
+    const fixture = await seedLockedRound(db);
+    const ranking = await resolveRound(db, recoveryDeps(recoveryStaff), {
+      commandId: `resolve-mode-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      scope: "judging",
+    });
+    await finalizeAdvancement(db, recoveryDeps(recoveryStaff), {
+      commandId: `advance-mode-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      roundId: fixture.roundId,
+      expectedRankingRevision: ranking.body.revision,
+      scope: "judging",
+    });
+    await db.updateTable("execution_session").set({ status: "closed" })
+      .where("activity_id", "=", fixture.activityId).execute();
+    await insertSession(db, {
+      id: `rehearsal-${fixture.activityId}`,
+      activityId: fixture.activityId,
+      definitionVersion: 1,
+      contentHash: "resolution-release",
+      scope: "judging",
+      mode: "rehearsal",
+      status: "running",
+      revision: 0,
+    }, "2026-10-19T18:30:00Z");
+
+    const result = await getRoundScores(db, {
+      activityId: fixture.activityId, roundId: fixture.roundId, scope: "judging",
+    });
+    expect(result.session?.mode).toBe("rehearsal");
+    expect(result.advancement).toBeNull();
   });
 });

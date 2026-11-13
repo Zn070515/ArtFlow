@@ -206,6 +206,8 @@
     box-shadow: var(--shadow-float);
   }
 
+  .ui-dialog:not([open]) { display: none; }
+
   .ui-dialog:modal { overscroll-behavior: contain; }
 
   .ui-dialog::backdrop {

@@ -16,6 +16,7 @@ vi.mock("../api/auth.js", () => ({
 
 import {
   canManageCompetition,
+  canManageCompetitionSetup,
   defaultLanding,
   hasLiveAccess,
   hasWorkspaceAccess,
@@ -68,6 +69,17 @@ describe("canManageCompetition", () => {
   it("rejects judge-only and null sessions", () => {
     expect(canManageCompetition(session(["judge.manage"]))).toBe(false);
     expect(canManageCompetition(null)).toBe(false);
+  });
+});
+
+describe("canManageCompetitionSetup", () => {
+  it("accepts setup managers and rejects score writers", () => {
+    expect(canManageCompetitionSetup(session(["competition.manage"]))).toBe(true);
+    expect(canManageCompetitionSetup(session(["competition.round.prepare"]))).toBe(true);
+    expect(canManageCompetitionSetup(session(["*"]))).toBe(true);
+    expect(canManageCompetitionSetup(session(["competition.score.write"]))).toBe(false);
+    expect(canManageCompetitionSetup(session(["judge.manage"]))).toBe(false);
+    expect(canManageCompetitionSetup(null)).toBe(false);
   });
 });
 

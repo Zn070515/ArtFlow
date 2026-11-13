@@ -113,6 +113,14 @@ export function hasLiveAccess(session: SessionResponse | null): boolean {
   );
 }
 
+export function canManageCompetitionSetup(session: SessionResponse | null): boolean {
+  if (session === null) return false;
+  const { permissions } = session.actor;
+  return permissions.includes("*") ||
+    permissions.includes("competition.manage") ||
+    permissions.includes("competition.round.prepare");
+}
+
 export function canManageCompetition(session: SessionResponse | null): boolean {
   if (session === null) return false;
   const { permissions } = session.actor;
