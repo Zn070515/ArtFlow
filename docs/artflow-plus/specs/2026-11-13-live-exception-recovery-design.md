@@ -69,6 +69,16 @@ interface RoundScoresResponse {
     readonly revision: number;
     readonly status: "ready" | "hold";
     readonly inputFingerprint: string;
+    readonly rows: readonly {
+      readonly contestantId: string;
+      readonly total: string;
+      readonly judgeCount: number;
+    }[];
+    readonly tieGroups: readonly {
+      readonly id: string;
+      readonly total: string;
+      readonly contestants: readonly string[];
+    }[];
   } | null;
   readonly advancement: {
     readonly id: string;
