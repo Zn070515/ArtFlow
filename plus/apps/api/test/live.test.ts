@@ -30,6 +30,7 @@ const schema = `artflow_api_live_${Date.now()}_${process.pid}`;
 let db: Kysely<Database>;
 let admin: Client;
 let app: FastifyInstance;
+let scoreApp: FastifyInstance;
 let activityId: string;
 let panelId: string;
 let seatId: string;
@@ -41,6 +42,12 @@ const staff: ActorContext = {
   actorType: "user",
   roles: ["staff"],
   permissions: ["competition.manage", "judge.manage"],
+};
+const scoreWriter: ActorContext = {
+  actorId: "live-score-writer",
+  actorType: "user",
+  roles: ["staff"],
+  permissions: ["competition.score.write"],
 };
 const credentialSecret = "live-test-credential-secret";
 const deps: RuntimeDeps = {
@@ -90,6 +97,8 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
     await migrate(db);
     app = await buildApp({ db, deps, actor: staff });
     await app.ready();
+    scoreApp = await buildApp({ db, deps, actor: scoreWriter });
+    await scoreApp.ready();
 
     activityId = `act-${randomUUID()}`;
     const roundId = `round-${randomUUID()}`;
@@ -242,6 +251,7 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
   afterAll(async () => {
     if (!connectionString) return;
     await app.close();
+    await scoreApp.close();
     await closeDb(db);
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
     await admin.end();
@@ -360,6 +370,22 @@ describe.skipIf(!connectionString)("Live and judge context", () => {
       rounds: { performances: { scoreCount: number; expectedJudges: number }[] }[];
     };
     expect(body.rounds[0]?.performances[0]).toMatchObject({ scoreCount: 1, expectedJudges: 1 });
+  });
+
+  it("lets a score-writer read activities and Live but not manage sessions", async () => {
+    const activities = await scoreApp.inject({ method: "GET", url: "/api/activities" });
+    expect(activities.statusCode, activities.body).toBe(200);
+
+    const live = await scoreApp.inject({ method: "GET", url: `/api/activities/${activityId}/live` });
+    expect(live.statusCode, live.body).toBe(200);
+
+    const started = await scoreApp.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/executions`,
+      headers: { "idempotency-key": `score-writer-start-${randomUUID()}` },
+      payload: { scope: "judging", mode: "formal" },
+    });
+    expect(started.statusCode, started.body).toBe(403);
   });
 
   it("replays a judge claim with a usable cookie", async () => {

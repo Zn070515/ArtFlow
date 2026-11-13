@@ -77,8 +77,15 @@ export interface LiveState {
 }
 
 function requireLiveAccess(actor: Parameters<typeof hasPermission>[0]): void {
-  if (!hasPermission(actor, "competition.manage") && !hasPermission(actor, "judge.manage")) {
-    throw new DomainError("FORBIDDEN", "One of competition.manage or judge.manage is required.");
+  if (
+    !hasPermission(actor, "competition.manage") &&
+    !hasPermission(actor, "judge.manage") &&
+    !hasPermission(actor, "competition.score.write")
+  ) {
+    throw new DomainError(
+      "FORBIDDEN",
+      "One of competition.manage, judge.manage, or competition.score.write is required.",
+    );
   }
 }
 

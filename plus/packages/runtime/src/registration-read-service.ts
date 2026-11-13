@@ -120,6 +120,7 @@ export async function listActivitiesForReview(
     "studio.manage",
     "competition.manage",
     "judge.manage",
+    "competition.score.write",
   ]);
   return listActivities(db);
 }
