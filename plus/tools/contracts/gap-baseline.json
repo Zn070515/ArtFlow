@@ -450,10 +450,6 @@
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "ui-route:PATCH /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "ui-route:PATCH /api/activities/:id/publishing/publications/:stageKey",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
@@ -466,36 +462,7 @@
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {
-      "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/advancement/finalize",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
       "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/prepare",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections/:correctionId/close",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline.",
-      "issue": "#60"
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/scores/:scoreFactId/corrections/:correctionId/recalculate",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/competition/rounds/:roundKey/ties/:tieId/decide",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/publishing/releases/:releaseId/revoke",
-      "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
-    },
-    {
-      "id": "ui-route:POST /api/activities/:id/publishing/stage-results/:stageKey/unlock",
       "reason": "No web caller yet; accepted in the 2026-11-11 baseline."
     },
     {

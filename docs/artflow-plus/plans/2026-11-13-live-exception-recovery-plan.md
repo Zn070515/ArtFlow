@@ -1402,6 +1402,7 @@ Expected: PASS。若选择器不稳定，使用 `data-testid`（例如 `data-tes
 Run:
 ```powershell
 pnpm -C plus run check
+pnpm -C plus --filter @artflow-plus/contract-tools run audit:check
 pnpm -C plus --filter @artflow-plus/web test
 pnpm -C plus run graph:check
 uv run pytest tests/gates -q
