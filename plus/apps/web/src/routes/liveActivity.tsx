@@ -7,6 +7,7 @@ import { RequireSession } from "../auth/RequireSession.js";
 import { canManageCompetition, hasLiveAccess, useSession } from "../auth/SessionProvider.js";
 import { LiveExceptionPanel } from "../components/live/LiveExceptionPanel.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
+import { LiveTieAdvancementPanel } from "../components/live/LiveTieAdvancementPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
 import { ResultActions } from "../components/live/ResultActions.js";
@@ -102,12 +103,20 @@ function LiveActivityContent() {
                 onChanged={refresh}
               />
               {canManageCompetition(session) ? (
-                <LiveExceptionPanel
-                  activityId={activityId}
-                  live={live}
-                  state={state}
-                  onChanged={refresh}
-                />
+                <>
+                  <LiveExceptionPanel
+                    activityId={activityId}
+                    live={live}
+                    state={state}
+                    onChanged={refresh}
+                  />
+                  <LiveTieAdvancementPanel
+                    activityId={activityId}
+                    live={live}
+                    state={state}
+                    onChanged={refresh}
+                  />
+                </>
               ) : null}
             </Fragment>
           ))}

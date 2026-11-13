@@ -26,6 +26,28 @@ const participants = vi.hoisted(() => [
 ]);
 const createGroupingStageMock = vi.hoisted(() => vi.fn());
 const recordGroupingGroupsMock = vi.hoisted(() => vi.fn());
+const liveState = vi.hoisted(() => ({
+  rounds: [
+    {
+      config: { key: "final" },
+      round: { id: "round-id-1", roundKey: "final", state: "locked", revision: 1 },
+    },
+  ],
+  config: {
+    rounds: [
+      {
+        key: "final",
+        judgeCount: 1,
+        minimumJudges: 1,
+        completion: "all",
+        advanceCount: 1,
+        scoringMethod: "average",
+      },
+    ],
+    rubric: { criteria: [] },
+    tiePolicy: "review",
+  },
+}));
 
 vi.mock("../../api/grouping.js", () => ({
   fetchGrouping: vi.fn(),
@@ -42,7 +64,9 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { readonly queryKey: readonly unknown[] }) =>
     queryKey[0] === "grouping"
       ? { data: groupingState.current, isLoading: false, isError: false }
-      : { data: participants, isPending: false },
+      : queryKey[0] === "live-state"
+        ? { data: liveState, isLoading: false, isError: false }
+        : { data: participants, isPending: false },
   useMutation: (options: { readonly mutationFn: (arg: unknown) => Promise<unknown> }) => ({
     mutate: (arg: unknown) => {
       void options.mutationFn(arg);
@@ -73,6 +97,25 @@ describe("GroupingCard", () => {
       stageKey: "chorus",
       name: "分组合唱",
       rosterSource: "all_approved",
+    });
+  });
+
+  it("creates a stage from the selected advancement round", () => {
+    render(<GroupingCard activityId="activity-1" />);
+
+    fireEvent.change(screen.getByLabelText("名单来源"), {
+      target: { value: "round_advanced" },
+    });
+    fireEvent.change(screen.getByLabelText("来源轮次"), {
+      target: { value: "round-id-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分组赛段" }));
+
+    expect(createGroupingStageMock).toHaveBeenCalledWith("activity-1", expect.any(String), {
+      stageKey: "chorus",
+      name: "分组合唱",
+      rosterSource: "round_advanced",
+      sourceRoundId: "round-id-1",
     });
   });
 
