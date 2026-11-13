@@ -37,6 +37,8 @@ vi.mock("../auth/SessionProvider.js", () => ({
 }));
 
 vi.mock("../components/ops/GroupingCard.js", () => ({ GroupingCard: () => null }));
+vi.mock("../components/ops/ArchiveCard.js", () => ({ ArchiveCard: () => null }));
+vi.mock("../components/ops/DiagnosticsCard.js", () => ({ DiagnosticsCard: () => null }));
 vi.mock("../components/ops/RegistrationTable.js", () => ({
   RegistrationTable: () => <table aria-label="报名列表" />,
 }));

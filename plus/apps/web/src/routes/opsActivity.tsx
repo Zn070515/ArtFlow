@@ -13,6 +13,8 @@ import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
+import { ArchiveCard } from "../components/ops/ArchiveCard.js";
+import { DiagnosticsCard } from "../components/ops/DiagnosticsCard.js";
 import { ExportCard } from "../components/ops/ExportCard.js";
 import { TicketsCard } from "../components/ops/TicketsCard.js";
 import { Card } from "../components/ui/Card.js";
@@ -149,6 +151,19 @@ function OpsActivityContent() {
             canManage={can(session?.actor.permissions, "tasks.manage")}
           />
         ) : null}
+        <ArchiveCard
+          key={activityId}
+          activityId={activityId}
+          canManage={can(session?.actor.permissions, "archive.manage")}
+        />
+        <DiagnosticsCard
+          key={activityId}
+          activityId={activityId}
+          canManage={
+            can(session?.actor.permissions, "studio.manage") ||
+            can(session?.actor.permissions, "competition.manage")
+          }
+        />
         <ExportCard
           activityId={activityId}
           permissions={session?.actor.permissions ?? []}

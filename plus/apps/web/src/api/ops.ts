@@ -117,12 +117,18 @@ export function finalizeRoster(
   });
 }
 
+export interface IssuedSupplementView {
+  readonly token: string | null;
+  readonly expiresAt: string;
+  readonly allowedKeys: readonly string[];
+}
+
 export function issueSupplement(
   activityId: string,
   registrationId: string,
   allowedKeys: readonly string[],
   commandId: string,
-): Promise<unknown> {
+): Promise<IssuedSupplementView> {
   return apiFetch(
     `/api/activities/${encodeURIComponent(activityId)}/registrations/${encodeURIComponent(registrationId)}/supplement`,
     {

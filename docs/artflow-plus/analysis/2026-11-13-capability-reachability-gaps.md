@@ -141,3 +141,27 @@ pnpm -C plus --filter @artflow-plus/contract-tools run readiness
    Live 排名表，再做公开结果的 read-model contract。
 5. **归档与诊断页面**：按运营需要排期；若不做，保持非目标记录。
 6. **收紧报告**：修完一类后把对应的 `ui-gaps` 类别接成失败门禁，避免回退。
+
+## 7. 2026-11-14 闭环更新
+
+本轮已消除以下条目，`ui-gaps.json` 的 `uiGaps` 已降为 0：
+
+- **票据生命周期**：新增 Ops `TicketsCard`（签发/轮换/撤销票据、撤销会话），配套只读
+  `GET /api/activities/:id/ticketing/state`；`gap-baseline.json` 的 10 条 `ui-route`
+  豁免全部移除。
+- **签到编辑**：`AttendanceCard` 支持签到点与工作人员的改名/停用。
+- **材料审核**：新增 `MaterialsReviewPanel`，按文件批准或退回。
+- **补交**：新增 `/supplement?token=…` 公开补交页（领取、上传、提交），以及
+  Ops `SupplementPanel` 的细粒度授权与一次性补交链接展示。
+- **发布编辑**：Live `PublicationEditor` 接入 `PATCH .../publications/:stageKey`。
+- **归档与诊断**：Ops 新增 `ArchiveCard`（版本化下载）与 `DiagnosticsCard`
+  （outbox 健康度、投影 stale/blocked、最近事件）。
+- **重复路由**：`POST .../competition/rounds` 已声明为 API-only；Web 改用
+  `POST .../competition/rounds/:roundKey/prepare`。
+
+仍然开放（未在本轮处理）：
+
+- `competition.performance.advance` 仍无 HTTP route / UI；
+- `/scores` 只允许 `direct_judge`，纸面、代录、快速评分三种 source 仍不可达；
+- grouping 的 `rosterSource: "round_advanced"` 仍不可选；
+- 图扫描对 `<a href>` 下载与动态 route 模板的盲区未修。
