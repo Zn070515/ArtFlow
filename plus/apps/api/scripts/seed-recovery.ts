@@ -329,6 +329,11 @@ async function seedRound(): Promise<{ readonly roundId: string; readonly scoreVe
 }
 
 async function seedResult(roundId: string, scoreVersion: number): Promise<void> {
+  // Preset-world fixture: the candidate, confirmed stage result, publication and
+  // release below are inserted directly so the journey starts from an already
+  // published result. This pairing is not the state buildPodiumCandidate would
+  // derive from the hold ranking seeded above; never build production
+  // assertions on it.
   const decisions = [
     { rank: 1, contestantId: "singer-a", score: "90.00" },
     { rank: 2, contestantId: "singer-b", score: "90.00" },
