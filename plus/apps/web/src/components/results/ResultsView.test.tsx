@@ -19,10 +19,10 @@ const data: PublicResults = {
       publicTitle: "2026 院十佳 · 正式赛果",
       releasedAt: "2026-10-20T18:00:00.000Z",
       decisions: [
-        { rank: 1, contestantId: "singer-a", score: "98.30" },
-        { rank: 2, contestantId: "singer-b", score: "97.80" },
+        { rank: 1, contestantId: "singer-a", contestantName: "林晓雨", score: "98.30" },
+        { rank: 2, contestantId: "singer-b", contestantName: "陈一", score: "97.80" },
       ],
-      awards: [{ award: "冠军", contestantId: "singer-a" }],
+      awards: [{ award: "冠军", contestantId: "singer-a", contestantName: "林晓雨" }],
     },
   ],
 };
@@ -33,7 +33,8 @@ describe("ResultsView", () => {
     expect(screen.getByRole("heading", { name: "2026 院十佳" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "2026 院十佳 · 正式赛果" })).toBeInTheDocument();
     const rows = screen.getAllByRole("listitem");
-    expect(within(rows[0]!).getByText("singer-a")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("林晓雨")).toBeInTheDocument();
+    expect(within(rows[0]!).queryByText("singer-a")).toBeNull();
     expect(within(rows[1]!).getByText("97.80")).toBeInTheDocument();
     expect(screen.getByText("冠军")).toBeInTheDocument();
   });
@@ -71,7 +72,7 @@ it("renders a percent unit without the score suffix", () => {
             publicTitle: "人气投票 · 投票结果",
             releasedAt: "2026-10-27T10:00:00Z",
             decisions: [
-              { rank: 1, contestantId: "candidate-a", score: "66.67", unit: "percent" },
+              { rank: 1, contestantId: "candidate-a", contestantName: "候选甲", score: "66.67", unit: "percent" },
             ],
             awards: [],
           },
@@ -80,5 +81,5 @@ it("renders a percent unit without the score suffix", () => {
     />,
   );
   expect(screen.getByText("66.67%")).toBeInTheDocument();
-  expect(screen.getByText(/第 1 名.*candidate-a.*66\.67%/)).toBeInTheDocument();
+  expect(screen.getByText(/第 1 名.*候选甲.*66\.67%/)).toBeInTheDocument();
 });

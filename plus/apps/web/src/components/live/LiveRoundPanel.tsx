@@ -250,7 +250,7 @@ export function LiveRoundPanel({
             {live.performances.map((performance) => (
               <tr key={performance.id}>
                 <td data-label="序号">{performance.sequence}</td>
-                <td data-label="选手">{performance.contestantId}</td>
+                <td data-label="选手">{state.participantNames[performance.contestantId] ?? performance.contestantId}</td>
                 <td data-label="状态">{performance.state}</td>
                 <td data-label="评分进度" data-testid={`score-count-${performance.contestantId}`}>
                   {performance.scoreCount}/{performance.expectedJudges}
@@ -318,7 +318,7 @@ export function LiveRoundPanel({
               {live.ranking.rows.map((row, index) => (
                 <tr key={row.contestantId}>
                   <td data-label="名次">{displayRanks[index] ?? index + 1}</td>
-                  <td data-label="选手">{row.contestantId}</td>
+                  <td data-label="选手">{state.participantNames[row.contestantId] ?? row.contestantId}</td>
                   <td data-label="总分">{row.total}</td>
                   <td data-label="评委数">{row.judgeCount}</td>
                 </tr>

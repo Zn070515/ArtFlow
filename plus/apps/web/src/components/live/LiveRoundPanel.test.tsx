@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/live.js", () => ({
@@ -123,6 +123,14 @@ describe("LiveRoundPanel", () => {
     expect(document.querySelectorAll(".ui-table-wrap")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "锁轮" })).toBeVisible();
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
+  });
+
+  it("shows participant names instead of raw contestant ids", () => {
+    render(<LiveRoundPanel state={state} live={live} sessionMode="formal" onChanged={vi.fn()} />);
+    const tables = screen.getAllByRole("table");
+    const progress = tables.find((table) => table.getAttribute("aria-label") === null) ?? tables[0]!;
+    expect(within(progress).getAllByText("林晓雨").length).toBeGreaterThan(0);
+    expect(within(progress).queryByText("singer-a")).toBeNull();
   });
 
   it("hides setup controls from score writers", () => {

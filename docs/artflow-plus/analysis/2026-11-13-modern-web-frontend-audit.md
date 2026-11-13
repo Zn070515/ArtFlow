@@ -186,3 +186,13 @@
 - **token 基线**：badge 文字色变化后重生成 `tokens-1440.png` / `tokens-390.png`。
 - **仍未做**：Ops/Studio/Live/Vote/Results 的 1440/1024/390 全页视觉基线；
   长列表虚拟化/content-visibility 仍等数据量证明需要。
+
+## 选手姓名投影（2026-11-13）
+
+- **公开赛果**：`selectPublicResults` 从当前活动的 registration answers
+  (`name`/`displayName`/`title`) 解析 `contestantName`，无值时回退 contestantId；
+  release snapshot 仍只冻结 ID，姓名是读取时投影，不改变不可变发布记录。
+- **Live 表格**：轮次表演表与排名表改用 `state.participantNames`；修正面板与
+  平局面板此前已投影姓名。
+- **仍存在 ID**：归档包/导出、部分内部诊断表仍以 contestantId 为准；这些是
+  运维/集成输出，下一轮按需补 display contract。

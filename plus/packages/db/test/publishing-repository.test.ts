@@ -31,6 +31,10 @@ const decisions = [
   { rank: 2, contestantId: "singer-b", score: "97.80" },
 ];
 const awards = [{ award: "冠军", contestantId: "singer-a" }];
+const publicDecisions = [
+  { ...decisions[0]!, contestantName: "林晓雨" },
+  { ...decisions[1]!, contestantName: "陈一" },
+];
 const snapshot = {
   activityTitle: "2026 院十佳",
   publicTitle: "2026 院十佳 · 正式赛果",
@@ -52,6 +56,36 @@ async function seed(activityId: string, publicCode: string): Promise<void> {
       active_definition_version: 1,
     })
     .execute();
+  await db.insertInto("registration").values([
+    {
+      id: `registration-${activityId}-singer-a`,
+      activity_id: activityId,
+      participant_id: "singer-a",
+      questionnaire_version: "v1",
+      questionnaire_hash: "hash",
+      status: "approved",
+      answers: JSON.stringify({ name: "林晓雨" }),
+      revision: 1,
+      review_note: "",
+      reviewed_by: "staff",
+      created_at: new Date(),
+      updated_at: new Date(),
+    },
+    {
+      id: `registration-${activityId}-singer-b`,
+      activity_id: activityId,
+      participant_id: "singer-b",
+      questionnaire_version: "v1",
+      questionnaire_hash: "hash",
+      status: "approved",
+      answers: JSON.stringify({ name: "陈一" }),
+      revision: 1,
+      review_note: "",
+      reviewed_by: "staff",
+      created_at: new Date(),
+      updated_at: new Date(),
+    },
+  ]).execute();
   await insertStageResult(db, {
     id: `stage-${activityId}`,
     activityId,
@@ -136,11 +170,13 @@ describe.skipIf(!connectionString)("publishing repository", () => {
     const publicCode = `CODE${activityId.slice(-6).toUpperCase()}`;
     await seed(activityId, publicCode);
     await release(activityId, `release-1-${activityId}`);
-    expect(await selectPublicResults(db, publicCode)).toMatchObject({
+    const publicResults = await selectPublicResults(db, publicCode);
+    expect(publicResults).toMatchObject({
       activity: { publicCode },
       activityTitle: "2026 院十佳",
-      results: [{ stageKey: "final_podium", publicTitle: "2026 院十佳 · 正式赛果", decisions }],
+      results: [{ stageKey: "final_podium", publicTitle: "2026 院十佳 · 正式赛果", decisions: publicDecisions }],
     });
+    expect(publicResults?.results[0]?.awards[0]?.contestantName).toBe("林晓雨");
     expect(JSON.stringify(await selectPublicResults(db, publicCode))).not.toContain("fp-1");
     await updateResultReleaseStatus(db, {
       id: `release-1-${activityId}`,
