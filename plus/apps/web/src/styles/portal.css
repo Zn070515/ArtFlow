@@ -421,7 +421,7 @@
   animation-delay: 270ms;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .site-header,
   .site-main,
   .site-footer {

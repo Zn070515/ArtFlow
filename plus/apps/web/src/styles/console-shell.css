@@ -234,3 +234,18 @@
 .console-page .auth-switch {
   color: var(--color-accent-strong);
 }
+
+/* Touch tier: every topbar and sidebar control is a 44px target on phones. */
+@media (max-width: 767px) {
+  .console-brand,
+  .console-account-link,
+  .console-menu-toggle,
+  .console-nav-link {
+    min-height: 44px;
+  }
+
+  .console-account-link,
+  .console-menu-toggle {
+    min-width: 44px;
+  }
+}

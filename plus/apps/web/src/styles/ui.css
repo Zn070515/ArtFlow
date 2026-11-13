@@ -155,7 +155,10 @@
   @media (max-width: 1023px) { .tokens-page__themes { grid-template-columns: 1fr; } }
 
   @media (max-width: 767px) {
-    .ui-button--sm { height: 40px; min-height: 40px; }
+    /* Touch tier: phone buttons and icon buttons reach the 44px floor too. */
+    .ui-button--sm,
+    .ui-button--md { height: 44px; min-height: 44px; }
+    .ui-button--icon { width: 44px; }
     .ui-input,
     .ui-select,
     .ui-textarea { min-height: 44px; }

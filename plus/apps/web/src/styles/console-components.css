@@ -780,25 +780,57 @@
   box-shadow: none;
 }
 
-@media (max-width: 767px) {
-  .console-page .ui-button--sm {
-    min-height: 40px;
-    height: 40px;
-  }
-
+/* Touch tier: phones get 44px targets, while the 768-1023 tablet tier keeps
+ * 40px (mouse-adjacent density) and larger targets than the old inline text. */
+@media (max-width: 1023px) {
   .console-page a.table-link {
     display: inline-flex;
     align-items: center;
     min-height: 40px;
   }
+}
+
+@media (max-width: 767px) {
+  .console-page :is(button, a.primary-button, a.secondary-button) {
+    min-height: 44px;
+  }
+
+  [data-shell="console"] :is(.primary-button, .secondary-button, .danger-button) {
+    min-height: 44px;
+  }
+
+  [data-shell="console"] .field :is(input, select, textarea) {
+    min-height: 44px;
+  }
+
+  .console-page .ui-button--sm {
+    min-height: 44px;
+    height: 44px;
+  }
+
+  .vote-action-panel .primary-button,
+  .vote-credential-panel .primary-button,
+  .vote-credential-panel input {
+    min-height: 44px;
+  }
+
+  .console-page a.table-link {
+    min-height: 44px;
+  }
 
   .seat-list li {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .seat-list a {
     display: inline-flex;
     align-items: center;
-    min-height: 40px;
+    min-height: 44px;
+  }
+
+  .console-page .auth-switch {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
 }
