@@ -12,7 +12,6 @@ import {
   lockRound,
   openPerformance,
   prepareCompetitionRound,
-  resolveRound,
   submitJudgeScore,
 } from "../../src/index.js";
 import type { RuntimeDeps } from "../../src/index.js";
@@ -178,15 +177,6 @@ export async function seedLockedRound(
     activityId,
     roundId: round.body.id,
     expectedRevision: currentRound.revision,
-    scope: "judging",
-  });
-  // The recovery panel reads the current ranking snapshot, so the fixture must
-  // produce one. A later explicit resolve gets its own command id and a new
-  // revision.
-  await resolveRound(db, recoveryDeps(recoveryStaff), {
-    commandId: `seed-resolve-${activityId}`,
-    activityId,
-    roundId: round.body.id,
     scope: "judging",
   });
   return { activityId, roundId: round.body.id, panelId: panel.body.id, seatId: seat.id };
