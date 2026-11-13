@@ -74,7 +74,8 @@
 - **Focused gates**：`pnpm -C plus --filter @artflow-plus/contracts test`、
   `pnpm -C plus --filter @artflow-plus/db test`、`pnpm -C plus --filter @artflow-plus/runtime test`、
   `pnpm -C plus --filter @artflow-plus/api test`、`pnpm -C plus --filter @artflow-plus/web test`、
-  `pnpm -C plus run check`、`pnpm -C plus run graph:check`、`uv run pytest tests/gates -q`，
+  `pnpm -C plus run check`、`pnpm -C plus --filter @artflow-plus/contract-tools run graph:check`、
+  `pnpm -C plus --filter @artflow-plus/contract-tools run audit:check`、`uv run pytest tests/gates -q`，
   以及 `pnpm -C plus --filter @artflow-plus/web exec playwright test e2e/recovery.spec.ts`。
 
 ---

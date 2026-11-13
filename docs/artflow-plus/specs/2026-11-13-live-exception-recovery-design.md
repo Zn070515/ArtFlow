@@ -322,7 +322,9 @@ interface RoundScoresResponse {
 - **Focused gates**：`pnpm -C plus --filter @artflow-plus/web run test`、
   `pnpm -C plus --filter @artflow-plus/web run check`、
   `pnpm -C plus --filter @artflow-plus/api run test`（含新读入口）、
-  `pnpm -C plus run graph:check`、`uv run pytest tests/gates -q`，
+  `pnpm -C plus --filter @artflow-plus/contract-tools run graph:check`、
+  `pnpm -C plus --filter @artflow-plus/contract-tools run audit:check`、
+  `uv run pytest tests/gates -q`，
   以及新增的 Playwright recovery journey。
 
 ## 8. 实施顺序
