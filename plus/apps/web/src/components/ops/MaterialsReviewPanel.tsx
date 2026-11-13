@@ -1,10 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { ApiError } from "../../api/client.js";
 import type { RegistrationDetail, RegistrationMaterial } from "../../api/registrations.js";
 import { reviewMaterial } from "../../api/registrations.js";
 import { Badge, type BadgeTone } from "../ui/Badge.js";
+import { apiErrorText } from "../ui/apiError.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
 import { Input } from "../ui/Input.js";
@@ -22,13 +22,6 @@ const MATERIAL_LABELS: Readonly<Record<string, string>> = {
   needs_supplement: "需补充",
   rejected: "未通过",
 };
-
-function humanError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) {
-    return "材料已被更新，请刷新后重试。";
-  }
-  return error instanceof Error ? error.message : "材料审核失败，请稍后重试。";
-}
 
 export function MaterialsReviewPanel({
   detail,
@@ -100,7 +93,7 @@ export function MaterialsReviewPanel({
         />
       ) : null}
       {mutation.error === null || mutation.error === undefined ? null : (
-        <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p>
+        <p className="ui-field__error" role="alert">{apiErrorText(mutation.error, "材料审核失败，请稍后重试。", "材料已被更新，请刷新后重试。")}</p>
       )}
     </Card>
   );
