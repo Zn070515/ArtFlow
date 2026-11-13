@@ -211,6 +211,28 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
     await admin.end();
   });
 
+  it("materializes one material check per questionnaire file slot at registration start", async () => {
+    const activityId = await seedActivity();
+    const started = await startRegistration(db, deps(participant), {
+      commandId: `start-checks-${activityId}`,
+      activityId,
+      participantId: participant.actorId,
+    });
+
+    const checks = await db.selectFrom("material_check").selectAll()
+      .where("registration_id", "=", started.body.id)
+      .execute();
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({
+      slot_key: "audio",
+      item_name: "伴奏",
+      purpose: "accompaniment",
+      status: "missing",
+      required: true,
+      revision: 0,
+    });
+  });
+
   it("starts from the released questionnaire snapshot and rejects an unknown question", async () => {
     const activityId = await seedActivity();
     const started = await startRegistration(db, deps(participant), {

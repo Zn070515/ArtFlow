@@ -6,6 +6,7 @@ import {
   getRelease,
   findReleaseByQuestionnaireHash,
   getRosterForUpdate,
+  insertMaterialCheck,
   insertRegistration,
   listApprovedRegistrationCount,
   listMaterials,
@@ -191,6 +192,26 @@ export async function startRegistration(
         questionnaireHash: questionnaire.schemaHash,
       });
       await insertRegistration(trx, registration);
+      // The material review and supplement surfaces authorize against
+      // material_check rows. Create one per declared file slot with the
+      // registration, in the same transaction, so the checks never lag behind
+      // the questionnaire snapshot they belong to.
+      for (const question of questionnaire.questions) {
+        if (question.type !== "file" || question.file === undefined) continue;
+        await insertMaterialCheck(trx, {
+          id: idFromCommand("material-check", `${registration.id}:${question.key}`),
+          activityId: registration.activityId,
+          registrationId: registration.id,
+          slotKey: question.key,
+          itemName: question.label,
+          purpose: question.file.purpose,
+          acceptedPurposes: [question.file.purpose],
+          status: "missing",
+          required: question.required,
+          reviewNote: "",
+          revision: 0,
+        });
+      }
       await appendEngineEvent(trx, deps, {
         type: "RegistrationStarted",
         activityId: input.activityId,
