@@ -535,6 +535,23 @@ export async function getCurrentRankingSnapshot(
   return row === undefined ? null : ranking(row);
 }
 
+/**
+ * Finds the snapshot a decision was computed from. A later resolve can reuse
+ * the same input fingerprint, so the newest match is the one the decision read.
+ */
+export async function getRankingSnapshotByFingerprint(
+  db: Kysely<Database>,
+  roundId: string,
+  inputFingerprint: string,
+): Promise<StoredRankingSnapshot | null> {
+  const row = await db.selectFrom("ranking_snapshot").selectAll()
+    .where("round_id", "=", roundId)
+    .where("input_fingerprint", "=", inputFingerprint)
+    .orderBy("revision", "desc")
+    .executeTakeFirst();
+  return row === undefined ? null : ranking(row);
+}
+
 export async function insertAdvancementDecision(db: Kysely<Database>, value: StoredAdvancementDecision): Promise<void> {
   await db.insertInto("advancement_decision").values({
     id: value.id,

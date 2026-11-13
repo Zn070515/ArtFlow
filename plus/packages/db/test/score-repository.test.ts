@@ -8,6 +8,7 @@ import {
   closeDb,
   createDb,
   getCurrentRankingSnapshot,
+  getRankingSnapshotByFingerprint,
   getScoreFactForUpdate,
   insertCorrection,
   insertPerformance,
@@ -175,6 +176,32 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
     await insertRankingSnapshot(db, { ...base, id: "ranking-rehearsal", mode: "rehearsal" });
     expect((await getCurrentRankingSnapshot(db, fact.roundId, "formal"))?.id).toBe("ranking-formal");
     expect((await getCurrentRankingSnapshot(db, fact.roundId, "rehearsal"))?.id).toBe("ranking-rehearsal");
+  });
+
+  it("finds the newest ranking snapshot for an input fingerprint", async () => {
+    const fact = await seedScoreFact();
+    const base = {
+      activityId: fact.activityId,
+      roundId: fact.roundId,
+      mode: "formal" as const,
+      sourceScoreVersion: 0,
+      status: "ready" as const,
+      rows: [],
+      tieGroups: [],
+    };
+    await insertRankingSnapshot(db, {
+      ...base, id: "ranking-fp-old", inputFingerprint: "fp-old", revision: 1,
+    });
+    await insertRankingSnapshot(db, {
+      ...base, id: "ranking-fp-new", inputFingerprint: "fp-old", revision: 2,
+    });
+    await insertRankingSnapshot(db, {
+      ...base, id: "ranking-fp-other", inputFingerprint: "fp-other", revision: 3,
+    });
+
+    expect((await getRankingSnapshotByFingerprint(db, fact.roundId, "fp-old"))?.id)
+      .toBe("ranking-fp-new");
+    expect(await getRankingSnapshotByFingerprint(db, fact.roundId, "fp-missing")).toBeNull();
   });
 
   it("updates a fact with CAS and keeps an immutable revision row", async () => {

@@ -32,7 +32,7 @@ export const recoveryStaff: ActorContext = {
   actorId: "resolution-staff",
   actorType: "user",
   roles: ["staff"],
-  permissions: ["competition.manage", "competition.round.prepare"],
+  permissions: ["competition.manage", "competition.round.prepare", "grouping.manage"],
 };
 export const recoveryJudge: ActorContext = {
   actorId: "judge-1",
@@ -59,7 +59,7 @@ export async function seedLockedRound(
     title: "Resolution runtime",
     status: "active",
     revision: 1,
-    enabled_capabilities: JSON.stringify(["competition"]),
+    enabled_capabilities: JSON.stringify(["competition", "grouping"]),
     active_definition_version: 1,
   }).execute();
   await insertRelease(db, {
