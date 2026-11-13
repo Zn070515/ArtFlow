@@ -1430,3 +1430,30 @@ git commit -m "test(web): cover the live exception recovery journey"
 - Spec §7 权限 → Task 3 的 `competition` 读级别。
 - Spec Test architecture → 本计划各任务的测试与 Task 8 门禁。
 - 没有占位符；所有新增类型、函数名在前后任务中一致。
+
+## Implementation notes (delivered)
+
+执行过程中根据真实类型与生命周期纠正了计划里的几处假设：
+
+- **回合状态**：`RoundState` 只有 `prepared | scoring | locked`，没有 `resolved`；
+  读契约已删除该分支。
+- **修正状态**：`ScoreCorrectionState` 还包含 `cancelled`；晋级状态还包含 `finalized`，
+  契约、Web 类型与测试均已覆盖。
+- **最近一条修正**：`revision` 是单条修正自己的版本号，不能跨修正比较；仓储按
+  `created_at desc, revision desc` 选取。
+- **恢复顺序**：`resolveRound` 只接受 `locked` 轮次，所以实际顺序是
+  **重算 → 锁轮 → 生成排名**，不是计划草稿里的“生成排名 → 锁轮”。
+- **晋级定稿**：只看“是否仍有跨线平局”；非跨线的 `hold` 排名可以定稿，
+  后端会自动晋级。计划草稿里的“ranking 必须 ready”过严。
+- **平局/晋级 UI**：实现为独立的 `LiveTieAdvancementPanel`，与评分修正面板并列，
+  避免 locked 轮次被修正面板的阻塞态隐藏。
+- **分组 `round_advanced` UI**：推迟。live 读模型没有晋级来源参与者集合，
+  自动平均分组只能基于全部通过名单；后端命令、指纹守卫与 `sourceRoundId`
+  字段已就绪。
+- **E2E 选择器**：评分事实行用 `data-testid="score-fact-${fact.id}"` 与
+  `data-contestant="${contestantId}"`，不再使用 contestant-based testid。
+- **E2E 种子**：额外插入 `podium_candidate` 行，否则真实 `releaseResult` 会因
+  候选指纹/来源不匹配拒绝预置的已确认赛果；种子可重复执行，并在注释中标明
+  这是 preset world。
+- **门禁命令**：`graph:check` 位于 contract-tools 包：
+  `pnpm -C plus --filter @artflow-plus/contract-tools run graph:check`。

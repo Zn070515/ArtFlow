@@ -50,15 +50,17 @@
   session 时返回 `session: null` 与空列表。`scope` 只接受 judging（或来源轮次绑定的
   评分 scope），其他值返回 400。
 - 只返回 `current = true` 的评分事实；每个事实附带最近一条修正
-  （`open`/`revised`/`closed`/`recalculated`），没有则为 `null`。
-  `recalculated` 只用于展示终态，不再提供动作。
+  （`open`/`revised`/`closed`/`recalculated`/`cancelled`），没有则为 `null`。
+  `recalculated`/`cancelled` 只用于展示终态，不再提供动作。最近一条按
+  `created_at desc, revision desc` 选取——`revision` 是单条修正自己的版本号，
+  新修正会重置为 0，不能跨修正比较。
 - 响应：
 
 ```ts
 interface RoundScoresResponse {
   readonly round: {
     readonly key: string;
-    readonly state: "prepared" | "scoring" | "locked" | "resolved";
+    readonly state: "prepared" | "scoring" | "locked";
     readonly revision: number;
     readonly scoreVersion: number;
     readonly advanceCount: number;
@@ -83,7 +85,7 @@ interface RoundScoresResponse {
   readonly advancement: {
     readonly id: string;
     readonly revision: number;
-    readonly status: "auto" | "needs_review";
+    readonly status: "auto" | "needs_review" | "finalized";
     readonly inputFingerprint: string;
     readonly decisions: readonly { readonly contestantId: string; readonly advanced: boolean }[];
   } | null;
@@ -109,7 +111,7 @@ interface RoundScoresResponse {
     readonly panelSnapshotId: string;
     readonly correction: {
       readonly id: string;
-      readonly state: "open" | "revised" | "closed" | "recalculated";
+      readonly state: "open" | "revised" | "closed" | "recalculated" | "cancelled";
       readonly baseVersion: number;
       readonly reason: string;
       readonly revision: number;
@@ -152,8 +154,8 @@ interface RoundScoresResponse {
 3. 确保有运行中的 judging 正式会话；
 4. 若轮次为 `locked`，先用现有“打开评分更正窗口”重开；
 5. 开修正 → 改分 → 关闭 → 重算；
-6. `生成排名`（新的 ranking snapshot，revision +1）；
-7. `锁轮`（领奖候选要求所有轮次 locked）；
+6. `锁轮`（`resolveRound` 只接受 locked 轮次）；
+7. `生成排名`（新的 ranking snapshot，revision +1）；
 8. 若存在晋级/平局，重新裁决/定稿；
 9. `生成领奖候选` → `确认评委赛果` → `发布赛果`。
 
@@ -166,7 +168,7 @@ interface RoundScoresResponse {
 **C. 未发布改分**
 
 - 轮次 `locked` 时先重开，`scoring` 时直接修正；
-- 修正 → 重算 → 生成排名 → 锁轮；需要发布时再确认/发布。
+- 修正 → 重算 → 锁轮 → 生成排名；需要发布时再确认/发布。
 
 **D. 平局与晋级**
 
@@ -181,6 +183,8 @@ interface RoundScoresResponse {
 
 位置：`apps/web/src/components/live/LiveExceptionPanel.tsx`，由 `LiveRoundPanel`
 在轮次存在时渲染；只对 `competition.manage` 或 `competition.score.write` 显示可写动作。
+平局/晋级实现为同级 `LiveTieAdvancementPanel.tsx`，与评分修正面板并列——轮次
+`locked` 是平局裁决与晋级定稿的正常起点，不能被评分修正的锁定阻塞态一并隐藏。
 
 三个区域：
 
@@ -196,7 +200,8 @@ interface RoundScoresResponse {
    - `关闭修正`（仅 `revised`）→ `closeScoreCorrection`；`重算`（仅 `closed`）→
      `recalculateAfterCorrection`；`recalculated` 为终态，不再提供动作。
    - 每次命令成功后重新拉取 scores、publishing state 与 live state；**重算后必须由
-     panel 提示并触发“生成排名”**，否则排名不会变化。
+     panel 提示先“锁轮”再“生成排名”**——`resolveRound` 只接受 locked 轮次，否则
+     排名不会变化。
 2. **平局与晋级**
    - 展示 ranking status；`hold` 时列出 tie groups（id、总分、选手）。
    - 顺序编辑：每个平局组给出可上下移动的列表，必须包含全部组员；reason 必填。
@@ -205,8 +210,9 @@ interface RoundScoresResponse {
    - 多个跨线平局组逐个裁决；每次裁决后重新计算哪些组仍跨晋级线，全部解决前
      `晋级定稿` 禁用。
    - `晋级定稿` → `finalizeAdvancement`（用刷新后的 ranking.revision 与
-     round.advanceCount）；已有与当前 ranking fingerprint 一致的 `auto` 决策时显示
-     终态并禁用。`needs_review` 不算终态：先裁决平局，再用新的 revision 定稿。
+     round.advanceCount）。启用条件只看“仍有跨线平局”：非跨线的 `hold` 排名也可以
+     定稿，后端会自动晋级。已有与当前 ranking fingerprint 一致的 `auto`/`finalized`
+     决策时显示终态并禁用。`needs_review` 不算终态：先裁决平局，再用新的 revision 定稿。
    - `advancement.inputFingerprint` 与 `ranking.inputFingerprint` 不一致时显示
      “晋级名单已过期，请重新定稿”。
 3. **会话与阻塞**
@@ -234,8 +240,10 @@ interface RoundScoresResponse {
 创建赛段时增加 rosterSource 与来源轮次选择：
 
 - `all_approved`（默认，保持现状），不传 `sourceRoundId`；
-- `round_advanced`：必须选择 `sourceRoundId`；Web 包装函数与表单一起增加该字段。
-  来源轮次列表复用 `fetchLiveState(activityId).config.rounds`，不新增读接口。
+- `round_advanced`：Web 包装函数保留 `sourceRoundId`，但 UI 选择器本轮**推迟**。
+  原因：当前 live 读模型不暴露晋级来源的参与者集合，卡片的自动平均分组只能基于
+  全部通过名单，无法完成 `round_advanced` 赛段。后端命令、指纹守卫和 API 字段
+  已就绪；待补 source-participant 读模型后再恢复 UI。
 - 命令只接受状态为 `auto` 的最新晋级决策；若最新决策是 `needs_review`、不存在，
   或其 `inputFingerprint` 与来源轮次当前 ranking 不一致，返回
   `GROUPING_SOURCE_UNKNOWN` / `STALE_ADVANCEMENT`，表单原样展示原因。
@@ -255,7 +263,7 @@ interface RoundScoresResponse {
 - `SESSION_NOT_RUNNING`：提示先启动对应的 judging / publishing 会话。
 - 晋级：`FORMAL_MODE_REQUIRED` 时提示只能正式模式定稿；平局跨线时提示先裁决；
   `STALE_ADVANCEMENT` 时提示重新定稿后再建分组。
-- 改分成功后：先 `生成排名`，再 `锁轮`；任何改分都会让已有晋级决策过期，
+- 改分成功后：先 `锁轮`，再 `生成排名`；任何改分都会让已有晋级决策过期，
   面板必须比对 `advancement.inputFingerprint` 与 `ranking.inputFingerprint`。
 - 错误展示复用 `describeLiveError`，不新增错误码映射表；不向前端透出 SQLSTATE。
 
@@ -286,7 +294,7 @@ interface RoundScoresResponse {
   边；`publishing/state` 与 `ranking` 只扩展现有消费者的字段，不新增读模型。
 - **Lifecycle, terminal guards, and mode isolation**：修正只允许在运行中的、
   目标 performance 已 locked 的 session 内进行；open → revised → closed →
-  recalculated 四个状态各有前置条件；晋级要求 ranking ready 且 formal；发布
+  recalculated 四个状态各有前置条件；晋级要求无跨线平局且 formal；发布
   撤销/解锁要求当前 candidateRevision 匹配。读入口的 mode 来自服务端 session，
   UI 不能指定 formal/test/rehearsal。评分事实读接口用新的 `competition` 读级别，
   只有 judge.manage 的评委必须被拒绝。
@@ -319,7 +327,7 @@ interface RoundScoresResponse {
    成功后刷新与“重算后生成排名”提示、单元测试。
 4. 平局与晋级：tie 顺序编辑、裁决后刷新、定稿与过期检测、Grouping
    rosterSource + sourceRoundId + 指纹守卫、单元测试。
-5. E2E recovery journey：解锁 → 重开 → 改分 → 重算 → 生成排名 → 锁轮 →
+5. E2E recovery journey：解锁 → 重开 → 改分 → 重算 → 锁轮 → 生成排名 →
    裁决/定稿 → 重新确认/发布，另加撤销后重新发布。
 6. 文档、Consumer Graph 检查与全量门禁。
 
@@ -333,7 +341,7 @@ interface RoundScoresResponse {
 - **Grouping rosterSource**：只加选择器与来源轮次，不在本轮自动计算晋级名单；
   命令失败时由界面展示原因，并用 fingerprint 守卫拒绝过期决策。
 - **重算与排名解耦**：不在 `recalculateAfterCorrection` 内自动 resolve；恢复流程
-  显式“重算 → 生成排名”，避免修正命令承担排名副作用。面板负责提示这一步。
+  显式“重算 → 锁轮 → 生成排名”，避免修正命令承担排名副作用。面板负责提示这一步。
 - **晋级决策过期**：不把“最新决策”当成永远有效；面板与 grouping 都比对
   `inputFingerprint`，改分后必须重新定稿。
 - **重复定稿**：`finalizeAdvancement` 本身不幂等；面板用最新决策的 revision 与
