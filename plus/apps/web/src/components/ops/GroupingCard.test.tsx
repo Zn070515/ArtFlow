@@ -42,7 +42,9 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { readonly queryKey: readonly unknown[] }) =>
     queryKey[0] === "grouping"
       ? { data: groupingState.current, isLoading: false, isError: false }
-      : { data: participants, isPending: false },
+      : queryKey[0] === "live-state"
+        ? { data: { rounds: [{ round: { id: "round-final", roundKey: "final" } }] }, isPending: false }
+        : { data: participants, isPending: false },
   useMutation: (options: { readonly mutationFn: (arg: unknown) => Promise<unknown> }) => ({
     mutate: (arg: unknown) => {
       void options.mutationFn(arg);
@@ -73,6 +75,21 @@ describe("GroupingCard", () => {
       stageKey: "chorus",
       name: "分组合唱",
       rosterSource: "all_approved",
+    });
+  });
+
+  it("creates from a round-advanced source", () => {
+    render(<GroupingCard activityId="activity-1" />);
+
+    fireEvent.change(screen.getByLabelText("名单来源"), { target: { value: "round_advanced" } });
+    fireEvent.change(screen.getByLabelText("来源回合"), { target: { value: "round-final" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建分组赛段" }));
+
+    expect(createGroupingStageMock).toHaveBeenCalledWith("activity-1", expect.any(String), {
+      stageKey: "chorus",
+      name: "分组合唱",
+      rosterSource: "round_advanced",
+      sourceRoundId: "round-final",
     });
   });
 
