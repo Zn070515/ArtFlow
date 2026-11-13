@@ -236,6 +236,9 @@ export async function finalizeAdvancement(
     if (session.mode !== "formal") throw new DomainError("FORMAL_MODE_REQUIRED", "Only a formal execution can advance contestants.");
     const rankingSnapshot = await getCurrentRankingSnapshot(trx, round.id, session.mode);
     if (rankingSnapshot === null) throw new DomainError("NOT_FOUND", "The round has no ranking snapshot.");
+    if (rankingSnapshot.sourceScoreVersion !== round.scoreVersion) {
+      throw new DomainError("STALE_RESOLUTION_INPUT", "The ranking is stale; generate the ranking again before finalizing advancement.");
+    }
     if (rankingSnapshot.revision !== input.expectedRankingRevision) throw new DomainError("STALE_REVISION", "The ranking changed since it was read.");
     const ranking = rankingFromSnapshot(rankingSnapshot);
     const needsReview = ranking.status === "hold" && tieCrossesCutoff(ranking, round.advanceCount);
@@ -308,6 +311,9 @@ export async function recordTieDecision(
     const current = await getCurrentRankingSnapshot(trx, round.id, session.mode);
     if (current === null || current.id !== input.rankingSnapshotId || current.inputFingerprint !== input.inputFingerprint) {
       throw new DomainError("STALE_RESOLUTION_INPUT", "The ranking snapshot is stale.");
+    }
+    if (current.sourceScoreVersion !== round.scoreVersion) {
+      throw new DomainError("STALE_RESOLUTION_INPUT", "The ranking is stale; generate the ranking again before deciding ties.");
     }
     const ranking = rankingFromSnapshot(current);
     const target = ranking.tieGroups.find((group) =>

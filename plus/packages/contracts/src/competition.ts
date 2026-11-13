@@ -2,6 +2,12 @@ import { Type, type Static } from "@sinclair/typebox";
 
 const ScopeSchema = Type.String({ minLength: 1, maxLength: 100 });
 const RoundKeySchema = Type.String({ minLength: 1, maxLength: 100 });
+const ScoreSourceSchema = Type.Union([
+  Type.Literal("direct_judge"),
+  Type.Literal("staff_rapid"),
+  Type.Literal("staff_proxy"),
+  Type.Literal("paper_dr"),
+]);
 export const CompetitionRoundParamsSchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   roundKey: RoundKeySchema,
@@ -52,12 +58,7 @@ export const CompetitionScoreBodySchema = Type.Object({
   seatId: Type.String({ minLength: 1, maxLength: 100 }),
   contextVersion: Type.Integer({ minimum: 0 }),
   scope: ScopeSchema,
-  source: Type.Union([
-    Type.Literal("direct_judge"),
-    Type.Literal("staff_rapid"),
-    Type.Literal("staff_proxy"),
-    Type.Literal("paper_dr"),
-  ]),
+  source: ScoreSourceSchema,
   criteria: Type.Record(Type.String({ minLength: 1, maxLength: 100 }), Type.Number()),
   notes: Type.Optional(Type.String({ maxLength: 2000 })),
   sourceReference: Type.Optional(Type.String({ maxLength: 200 })),
@@ -123,3 +124,102 @@ export const TieDecisionBodySchema = Type.Object({
 }, { additionalProperties: false });
 
 export type CompetitionScoreBody = Static<typeof CompetitionScoreBodySchema>;
+
+export const RoundScoreCorrectionSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  state: Type.Union([
+    Type.Literal("open"),
+    Type.Literal("revised"),
+    Type.Literal("closed"),
+    Type.Literal("recalculated"),
+    Type.Literal("cancelled"),
+  ]),
+  baseVersion: Type.Integer({ minimum: 0 }),
+  reason: Type.String(),
+  revision: Type.Integer({ minimum: 0 }),
+}, { additionalProperties: false });
+
+export const RoundScoreFactSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  performanceId: Type.String({ minLength: 1 }),
+  contestantId: Type.String({ minLength: 1 }),
+  judgeId: Type.String({ minLength: 1 }),
+  seatId: Type.String({ minLength: 1 }),
+  source: ScoreSourceSchema,
+  total: Type.String(),
+  criteria: Type.Record(Type.String(), Type.Number()),
+  notes: Type.String(),
+  version: Type.Integer({ minimum: 0 }),
+  contextVersion: Type.Integer({ minimum: 0 }),
+  panelSnapshotId: Type.String({ minLength: 1 }),
+  correction: Type.Union([RoundScoreCorrectionSchema, Type.Null()]),
+}, { additionalProperties: false });
+
+export const CompetitionRoundScoresQuerySchema = Type.Object({
+  scope: ScopeSchema,
+}, { additionalProperties: false });
+
+export const CompetitionRoundScoresResponseSchema = Type.Object({
+  round: Type.Object({
+    key: RoundKeySchema,
+    state: Type.Union([
+      Type.Literal("prepared"),
+      Type.Literal("scoring"),
+      Type.Literal("locked"),
+    ]),
+    revision: Type.Integer({ minimum: 0 }),
+    scoreVersion: Type.Integer({ minimum: 0 }),
+    advanceCount: Type.Integer({ minimum: 0 }),
+  }, { additionalProperties: false }),
+  session: Type.Union([
+    Type.Object({
+      id: Type.String({ minLength: 1 }),
+      mode: Type.Union([Type.Literal("test"), Type.Literal("rehearsal"), Type.Literal("formal")]),
+      scope: ScopeSchema,
+    }, { additionalProperties: false }),
+    Type.Null(),
+  ]),
+  ranking: Type.Union([
+    Type.Object({
+      id: Type.String({ minLength: 1 }),
+      revision: Type.Integer({ minimum: 0 }),
+      status: Type.Union([Type.Literal("ready"), Type.Literal("hold")]),
+      sourceScoreVersion: Type.Integer({ minimum: 0 }),
+      inputFingerprint: Type.String({ minLength: 1, maxLength: 64 }),
+      rows: Type.Array(Type.Object({
+        contestantId: Type.String({ minLength: 1 }),
+        total: Type.String(),
+        judgeCount: Type.Integer({ minimum: 0 }),
+      }, { additionalProperties: false })),
+      tieGroups: Type.Array(Type.Object({
+        id: Type.String({ minLength: 1 }),
+        total: Type.String(),
+        contestants: Type.Array(Type.String({ minLength: 1 })),
+      }, { additionalProperties: false })),
+    }, { additionalProperties: false }),
+    Type.Null(),
+  ]),
+  advancement: Type.Union([
+    Type.Object({
+      id: Type.String({ minLength: 1 }),
+      revision: Type.Integer({ minimum: 0 }),
+      status: Type.Union([Type.Literal("auto"), Type.Literal("needs_review"), Type.Literal("finalized")]),
+      inputFingerprint: Type.String({ minLength: 1, maxLength: 64 }),
+      decisions: Type.Array(Type.Object({
+        contestantId: Type.String({ minLength: 1 }),
+        advanced: Type.Boolean(),
+      }, { additionalProperties: false })),
+    }, { additionalProperties: false }),
+    Type.Null(),
+  ]),
+  performances: Type.Array(Type.Object({
+    id: Type.String({ minLength: 1 }),
+    contestantId: Type.String({ minLength: 1 }),
+    sequence: Type.Integer({ minimum: 1 }),
+    state: Type.Union([Type.Literal("not_opened"), Type.Literal("open"), Type.Literal("locked")]),
+    contextVersion: Type.Integer({ minimum: 0 }),
+  }, { additionalProperties: false })),
+  facts: Type.Array(RoundScoreFactSchema),
+}, { additionalProperties: false });
+
+export type CompetitionRoundScoresResponse = Static<typeof CompetitionRoundScoresResponseSchema>;

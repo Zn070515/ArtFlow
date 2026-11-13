@@ -41,7 +41,7 @@ function LiveContent() {
     return (
       <EmptyState
         title="没有 Live 权限"
-        description="当前账号缺少 competition.manage 或 judge.manage。"
+        description="当前账号缺少 competition.manage、competition.score.write 或 judge.manage。"
       />
     );
   }

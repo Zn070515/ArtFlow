@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -8,12 +8,15 @@ import {
   closeDb,
   createDb,
   getCurrentRankingSnapshot,
+  getRankingSnapshotByFingerprint,
   getScoreFactForUpdate,
+  insertCorrection,
   insertPerformance,
   insertRankingSnapshot,
   insertRound,
   insertScoreFact,
   insertScoreRevision,
+  listLatestCorrectionsForScoreFacts,
   migrate,
   updateScoreFact,
 } from "../src/index.js";
@@ -175,6 +178,32 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
     expect((await getCurrentRankingSnapshot(db, fact.roundId, "rehearsal"))?.id).toBe("ranking-rehearsal");
   });
 
+  it("finds the newest ranking snapshot for an input fingerprint", async () => {
+    const fact = await seedScoreFact();
+    const base = {
+      activityId: fact.activityId,
+      roundId: fact.roundId,
+      mode: "formal" as const,
+      sourceScoreVersion: 0,
+      status: "ready" as const,
+      rows: [],
+      tieGroups: [],
+    };
+    await insertRankingSnapshot(db, {
+      ...base, id: "ranking-fp-old", inputFingerprint: "fp-old", revision: 1,
+    });
+    await insertRankingSnapshot(db, {
+      ...base, id: "ranking-fp-new", inputFingerprint: "fp-old", revision: 2,
+    });
+    await insertRankingSnapshot(db, {
+      ...base, id: "ranking-fp-other", inputFingerprint: "fp-other", revision: 3,
+    });
+
+    expect((await getRankingSnapshotByFingerprint(db, fact.roundId, "fp-old"))?.id)
+      .toBe("ranking-fp-new");
+    expect(await getRankingSnapshotByFingerprint(db, fact.roundId, "fp-missing")).toBeNull();
+  });
+
   it("updates a fact with CAS and keeps an immutable revision row", async () => {
     const fact = await seedScoreFact();
     await db.insertInto("panel_snapshot").values({
@@ -213,5 +242,48 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
     });
     await expect(updateScoreFact(db, { ...updated, total: "90.00", version: 3 }, 1)).rejects.toMatchObject({ code: "STALE_REVISION" });
     await expect(db.selectFrom("score_revision").selectAll().where("score_fact_id", "=", fact.id).execute()).resolves.toHaveLength(1);
+  });
+
+  it("returns the latest correction per score fact", async () => {
+    const fact = await seedScoreFact();
+    await db.insertInto("panel_snapshot").values({
+      id: fact.panelSnapshotId,
+      activity_id: fact.activityId,
+      round_id: fact.roundId,
+      version: 1,
+      state: "active",
+      expected_judges: 5,
+      minimum_judges: 3,
+      roster_digest: "roster",
+      context_version: 1,
+      current: true,
+    }).execute();
+    await db.insertInto("judge_seat").values({
+      id: fact.seatId,
+      panel_id: fact.panelSnapshotId,
+      judge_id: "judge-1",
+      state: "assigned",
+      revision: 0,
+    }).execute();
+    await insertScoreFact(db, fact);
+    // revision is per-correction, so a newer correction resets to 0. Creation
+    // time is the only reliable order: the older correction has the higher
+    // revision.
+    const oldId = `correction-old-${fact.id}`;
+    const newId = `correction-new-${fact.id}`;
+    await insertCorrection(db, {
+      id: oldId, scoreFactId: fact.id, inputFingerprint: "fp-old",
+      state: "closed", baseVersion: 1, reason: "旧修正", revision: 3,
+    });
+    await insertCorrection(db, {
+      id: newId, scoreFactId: fact.id, inputFingerprint: "fp-new",
+      state: "open", baseVersion: 1, reason: "新修正", revision: 0,
+    });
+    await sql`update score_correction set created_at = ${"2026-10-19T10:00:00Z"} where id = ${oldId}`.execute(db);
+    await sql`update score_correction set created_at = ${"2026-10-19T11:00:00Z"} where id = ${newId}`.execute(db);
+    const latest = await listLatestCorrectionsForScoreFacts(db, [fact.id, "score-missing"]);
+    expect(latest.get(fact.id)?.id).toBe(newId);
+    expect(latest.get("score-missing")).toBeUndefined();
+    expect(await listLatestCorrectionsForScoreFacts(db, [])).toEqual(new Map());
   });
 });

@@ -33,6 +33,14 @@ export interface PublishingStateView {
     readonly candidateRevision: number;
     readonly inputFingerprint: string;
   }[];
+  readonly releases: readonly {
+    readonly id: string;
+    readonly stageKey: string;
+    readonly status: "active" | "revoked" | "superseded";
+    readonly note: string;
+    readonly releasedAt: string;
+    readonly revokedAt?: string;
+  }[];
 }
 
 export interface VoteResultCandidateView {
@@ -170,6 +178,31 @@ export async function releasePodiumResult(
     method: "POST",
     headers: { "idempotency-key": commandId("podium-release") },
     body: JSON.stringify({ stageKey, scope: "publishing", expectedCandidateRevision, note }),
+  });
+}
+
+export async function revokeResultRelease(
+  activityId: string,
+  releaseId: string,
+  note: string,
+): Promise<unknown> {
+  return apiFetch(`/api/activities/${activityId}/publishing/releases/${releaseId}/revoke`, {
+    method: "POST",
+    headers: { "idempotency-key": commandId("publish-revoke") },
+    body: JSON.stringify({ scope: "publishing", note }),
+  });
+}
+
+export async function unlockStageResult(
+  activityId: string,
+  stageKey: string,
+  expectedCandidateRevision: number,
+  note: string,
+): Promise<unknown> {
+  return apiFetch(`/api/activities/${activityId}/publishing/stage-results/${stageKey}/unlock`, {
+    method: "POST",
+    headers: { "idempotency-key": commandId("publish-unlock") },
+    body: JSON.stringify({ scope: "publishing", expectedCandidateRevision, note }),
   });
 }
 

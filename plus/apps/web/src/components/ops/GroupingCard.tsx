@@ -93,6 +93,7 @@ export function GroupingCard(props: { readonly activityId: string }) {
     void queryClient.invalidateQueries({ queryKey: ["grouping", props.activityId] });
   };
 
+  // round_advanced grouping needs a source-participant read; deferred.
   const create = useMutation({
     mutationFn: () =>
       createGroupingStage(props.activityId, commandId("group-create"), {

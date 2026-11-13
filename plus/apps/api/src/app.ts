@@ -12,7 +12,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, 
 import { createRealtimeServer } from "@artflow-plus/realtime/server";
 import { isProductionEnvironment, sessionCookie } from "./cookies.js";
 import { createActivityRealtimeTopic, createVotingRealtimeTopic } from "./realtime-topics.js";
-import type { ApiContext } from "./http/context.js";
+import type { ApiContext, ReadAccess } from "./http/context.js";
 import { bearerToken, cookieValue, errorCode, errorDetails, publicErrorMessage } from "./http/helpers.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
@@ -135,6 +135,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   CORRECTION_NOT_FOUND: 404,
   CORRECTION_ALREADY_OPEN: 409,
   STALE_RESOLUTION_INPUT: 409,
+  STALE_ADVANCEMENT: 409,
   TIE_DECISION_REQUIRED: 422,
   TIE_DECISION_INVALID: 422,
   VOTE_SESSION_NOT_OPEN: 409,
@@ -280,8 +281,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // Every GET route must declare its read surface. The default is not "public":
   // an undeclared route fails at boot, so a new endpoint cannot quietly become
-  // an anonymous internal read.
-  type ReadAccess = "public" | "session" | "operations" | "analytics" | "studio" | "tasks" | "attendance" | "voting" | "result" | "archive";
+  // an anonymous internal read. `ReadAccess` lives in the route context so the
+  // registration hook and the route modules cannot drift apart.
   const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "tasks" | "attendance" | "voting" | "result" | "archive", readonly string[]>> = {
     analytics: ACTIVITY_ANALYTICS_READ_PERMISSIONS,
     tasks: [
@@ -333,6 +334,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       await requireStudio(request);
       return;
     }
+    // Deliberately not "operations": that level also admits judge-only readers,
+    // and the round scores projection returns other judges' criteria and notes.
+    if (access === "competition") {
+      const actor = await requestActor(request);
+      const allowed = ["competition.manage", "competition.score.write", "studio.manage"];
+      if (!allowed.some((permission) => hasPermission(actor, permission))) {
+        throw new DomainError("FORBIDDEN", "A competition read permission is required.");
+      }
+      return;
+    }
     const actor = await requestActor(request);
     const allowed = [...READ_ACCESS_PERMISSIONS[access], ...OPERATIONS_READ_PERMISSIONS];
     if (!allowed.some((permission) => hasPermission(actor, permission))) {
@@ -350,7 +361,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (route.url === "/api/realtime") return;
     const access = (route.config as { access?: ReadAccess } | undefined)?.access;
     if (access === undefined) {
-      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, analytics, studio, tasks, attendance, voting, result, archive).`);
+      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, competition, analytics, studio, tasks, attendance, voting, result, archive).`);
     }
     const guard = async (request: FastifyRequest): Promise<void> => {
       await requireReadAccess(request, access);

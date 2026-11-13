@@ -1,3 +1,5 @@
+import type { CompetitionRoundScoresResponse } from "@artflow-plus/contracts";
+
 import { ApiError, apiFetch } from "./client.js";
 
 export const JUDGING_SCOPE = "judging";
@@ -97,7 +99,12 @@ export interface LiveRanking {
   readonly id: string;
   readonly status: "ready" | "hold";
   readonly rows: readonly LiveRankingRow[];
-  readonly tieGroups: readonly { readonly total: string; readonly contestants: readonly string[] }[];
+  readonly inputFingerprint: string;
+  readonly tieGroups: readonly {
+    readonly id: string;
+    readonly total: string;
+    readonly contestants: readonly string[];
+  }[];
   readonly revision: number;
   readonly sourceScoreVersion: number;
 }
@@ -119,6 +126,8 @@ export interface LiveState {
   readonly participantIds: readonly string[];
   readonly participantNames: Readonly<Record<string, string>>;
 }
+
+export type RoundScoresResponse = CompetitionRoundScoresResponse;
 
 function commandHeaders(commandId: string): Record<string, string> {
   return { "idempotency-key": commandId };
@@ -278,6 +287,167 @@ export function resolveRound(activityId: string, roundKey: string): Promise<Live
 export function fetchRanking(activityId: string, roundKey: string): Promise<LiveRanking> {
   return apiFetch<LiveRanking>(
     `/api/activities/${activityId}/competition/rounds/${roundKey}/ranking?scope=${JUDGING_SCOPE}`,
+  );
+}
+
+export function fetchRoundScores(
+  activityId: string,
+  roundKey: string,
+): Promise<RoundScoresResponse> {
+  return apiFetch<RoundScoresResponse>(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores?scope=${JUDGING_SCOPE}`,
+  );
+}
+
+export function openScoreCorrection(
+  activityId: string,
+  roundKey: string,
+  input: {
+    readonly performanceId: string;
+    readonly scoreFactId: string;
+    readonly panelSnapshotId: string;
+    readonly reason: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}/corrections`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        performanceId: input.performanceId,
+        panelSnapshotId: input.panelSnapshotId,
+        reason: input.reason,
+      }),
+    },
+  );
+}
+
+export function editScoreFact(
+  activityId: string,
+  roundKey: string,
+  input: {
+    readonly scoreFactId: string;
+    readonly performanceId: string;
+    readonly panelSnapshotId: string;
+    readonly seatId: string;
+    readonly contextVersion: number;
+    readonly expectedVersion: number;
+    readonly criteria: Readonly<Record<string, number>>;
+    readonly reason: string;
+    readonly correctionId: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}`,
+    {
+      method: "PATCH",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        performanceId: input.performanceId,
+        panelSnapshotId: input.panelSnapshotId,
+        seatId: input.seatId,
+        contextVersion: input.contextVersion,
+        expectedVersion: input.expectedVersion,
+        criteria: input.criteria,
+        reason: input.reason,
+        correctionId: input.correctionId,
+      }),
+    },
+  );
+}
+
+export function closeScoreCorrection(
+  activityId: string,
+  roundKey: string,
+  input: {
+    readonly scoreFactId: string;
+    readonly correctionId: string;
+    readonly panelSnapshotId: string;
+    readonly performanceId: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}/corrections/${input.correctionId}/close`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        panelSnapshotId: input.panelSnapshotId,
+        performanceId: input.performanceId,
+      }),
+    },
+  );
+}
+
+export function recalculateAfterCorrection(
+  activityId: string,
+  roundKey: string,
+  input: {
+    readonly scoreFactId: string;
+    readonly correctionId: string;
+    readonly panelSnapshotId: string;
+    readonly performanceId: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/scores/${input.scoreFactId}/corrections/${input.correctionId}/recalculate`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        panelSnapshotId: input.panelSnapshotId,
+        performanceId: input.performanceId,
+      }),
+    },
+  );
+}
+
+export function decideTie(
+  activityId: string,
+  roundKey: string,
+  input: {
+    readonly tieId: string;
+    readonly rankingSnapshotId: string;
+    readonly inputFingerprint: string;
+    readonly contestants: readonly string[];
+    readonly order: readonly string[];
+    readonly reason: string;
+  },
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/ties/${input.tieId}/decide`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({
+        scope: JUDGING_SCOPE,
+        rankingSnapshotId: input.rankingSnapshotId,
+        inputFingerprint: input.inputFingerprint,
+        contestants: input.contestants,
+        order: input.order,
+        reason: input.reason,
+      }),
+    },
+  );
+}
+
+export function finalizeAdvancement(
+  activityId: string,
+  roundKey: string,
+  expectedRankingRevision: number,
+): Promise<unknown> {
+  return apiFetch(
+    `/api/activities/${activityId}/competition/rounds/${roundKey}/advancement/finalize`,
+    {
+      method: "POST",
+      headers: commandHeaders(crypto.randomUUID()),
+      body: JSON.stringify({ scope: JUDGING_SCOPE, expectedRankingRevision }),
+    },
   );
 }
 

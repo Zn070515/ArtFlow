@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@artflow-plus/contracts": "workspace:*",
     "@artflow-plus/db": "workspace:*",
     "@artflow-plus/domain": "workspace:*",
     "fflate": "^0.8.3",

@@ -22,8 +22,17 @@ vi.mock("../auth/RequireSession.js", () => ({
   RequireSession: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("../auth/SessionProvider.js", () => ({
+  canManageCompetition: () => true,
   hasLiveAccess: () => true,
   useSession: useSessionMock,
+}));
+vi.mock("../components/live/LiveExceptionPanel.js", () => ({
+  LiveExceptionPanel: () => <section data-testid="live-exception-panel">异常处理</section>,
+}));
+vi.mock("../components/live/LiveTieAdvancementPanel.js", () => ({
+  LiveTieAdvancementPanel: () => (
+    <section data-testid="live-tie-advancement-panel">平局与晋级</section>
+  ),
 }));
 vi.mock("../components/live/LiveRoundPanel.js", () => ({
   LiveRoundPanel: () => <section data-testid="live-round-panel">回合</section>,
@@ -86,5 +95,7 @@ describe("LiveActivityPage", () => {
     expect(document.querySelector(".live-workspace")).not.toBeNull();
     expect(document.querySelector(".live-main-column")).not.toBeNull();
     expect(document.querySelector(".live-control-rail")).not.toBeNull();
+    expect(screen.getByTestId("live-exception-panel")).toBeVisible();
+    expect(screen.getByTestId("live-tie-advancement-panel")).toBeVisible();
   });
 });

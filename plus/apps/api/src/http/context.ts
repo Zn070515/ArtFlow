@@ -12,9 +12,11 @@ export type ReadAccess =
   | "public"
   | "session"
   | "operations"
+  | "competition"
   | "analytics"
   | "studio"
   | "tasks"
+  | "attendance"
   | "voting"
   | "result"
   | "archive";

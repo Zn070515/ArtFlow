@@ -394,6 +394,9 @@ importers:
 
   packages/runtime:
     dependencies:
+      '@artflow-plus/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@artflow-plus/db':
         specifier: workspace:*
         version: link:../db

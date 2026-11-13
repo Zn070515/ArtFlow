@@ -14,9 +14,11 @@ import {
   deactivateGroupingGroups,
   deleteGroupingGroups,
   getActivityForUpdate,
+  getCurrentRankingSnapshot,
   getGroupingStageByKey,
   getGroupingStageForUpdate,
   getLatestAdvancementDecision,
+  getRankingSnapshotByFingerprint,
   getRelease,
   getRoster,
   getRound,
@@ -133,6 +135,21 @@ async function resolveGroupingSource(
   const decision = await getLatestAdvancementDecision(trx, round.id);
   if (decision === null || decision.status !== "auto") {
     throw new DomainError("GROUPING_SOURCE_UNKNOWN", "The source round has no final advancement decision.");
+  }
+  // The decision names a ranking fingerprint, not a mutable "current" row.
+  // Re-resolving after a correction keeps the old decision readable, so a
+  // grouping stage must reject it instead of grouping the pre-correction
+  // contestants.
+  const sourceRanking = await getRankingSnapshotByFingerprint(trx, round.id, decision.inputFingerprint);
+  if (sourceRanking === null) {
+    throw new DomainError("STALE_ADVANCEMENT", "The advancement decision no longer matches a ranking.");
+  }
+  const currentRanking = await getCurrentRankingSnapshot(trx, round.id, sourceRanking.mode);
+  if (currentRanking === null || currentRanking.inputFingerprint !== decision.inputFingerprint) {
+    throw new DomainError("STALE_ADVANCEMENT", "The advancement decision no longer matches the current ranking.");
+  }
+  if (currentRanking.sourceScoreVersion !== round.scoreVersion) {
+    throw new DomainError("STALE_ADVANCEMENT", "The advancement ranking is stale; re-resolve ranking before grouping.");
   }
   const participantIds = advancementParticipantIds(decision.decisions);
   return {
@@ -300,6 +317,12 @@ export async function createGroupingStage(
       if (round === null || round.activityId !== activity.id) {
         throw new DomainError("NOT_FOUND", "The source round was not found in this activity.");
       }
+      // Fail the draft at creation when its named advancement is stale; the
+      // same check runs on record/confirm/freeze.
+      await resolveGroupingSource(trx, activity.id, {
+        rosterSource: input.rosterSource,
+        sourceRoundId: input.sourceRoundId,
+      });
     } else if (input.sourceRoundId !== undefined) {
       throw new DomainError("INVALID_INPUT", "An all-approved stage cannot name a source round.");
     }

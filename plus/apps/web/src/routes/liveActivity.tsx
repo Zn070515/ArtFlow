@@ -1,10 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { Fragment } from "react";
 
 import { fetchLiveState } from "../api/live.js";
 import { RequireSession } from "../auth/RequireSession.js";
-import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
+import { canManageCompetition, hasLiveAccess, useSession } from "../auth/SessionProvider.js";
+import { LiveExceptionPanel } from "../components/live/LiveExceptionPanel.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
+import { LiveTieAdvancementPanel } from "../components/live/LiveTieAdvancementPanel.js";
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
 import { ResultActions } from "../components/live/ResultActions.js";
@@ -31,6 +34,7 @@ function LiveActivityContent() {
     allowed ? `activity:${activityId}` : null,
     () => {
       void queryClient.invalidateQueries({ queryKey: ["live-state", activityId] });
+      void queryClient.invalidateQueries({ queryKey: ["round-scores", activityId] });
     },
   );
   const query = useQuery({
@@ -43,6 +47,7 @@ function LiveActivityContent() {
 
   function refresh(): void {
     void queryClient.invalidateQueries({ queryKey: ["live-state", activityId] });
+    void queryClient.invalidateQueries({ queryKey: ["round-scores", activityId] });
     void queryClient.invalidateQueries({ queryKey: ["live-activities"] });
   }
 
@@ -50,7 +55,7 @@ function LiveActivityContent() {
     return (
       <EmptyState
         title="没有 Live 权限"
-        description="当前账号缺少 competition.manage 或 judge.manage。"
+        description="当前账号缺少 competition.manage、competition.score.write 或 judge.manage。"
       />
     );
   }
@@ -91,13 +96,30 @@ function LiveActivityContent() {
       <div className="live-workspace">
         <div className="live-main-column live-rounds">
           {state.rounds.map((live) => (
-            <LiveRoundPanel
-              key={live.config.key}
-              state={state}
-              live={live}
-              sessionMode={state.session?.mode}
-              onChanged={refresh}
-            />
+            <Fragment key={live.config.key}>
+              <LiveRoundPanel
+                state={state}
+                live={live}
+                sessionMode={state.session?.mode}
+                onChanged={refresh}
+              />
+              {canManageCompetition(session) ? (
+                <>
+                  <LiveExceptionPanel
+                    activityId={activityId}
+                    live={live}
+                    state={state}
+                    onChanged={refresh}
+                  />
+                  <LiveTieAdvancementPanel
+                    activityId={activityId}
+                    live={live}
+                    state={state}
+                    onChanged={refresh}
+                  />
+                </>
+              ) : null}
+            </Fragment>
           ))}
         </div>
         <aside className="live-control-rail">

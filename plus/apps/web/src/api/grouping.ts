@@ -39,12 +39,22 @@ export async function fetchGrouping(activityId: string): Promise<GroupingState> 
 export async function createGroupingStage(
   activityId: string,
   commandId: string,
-  input: { stageKey: string; name: string; rosterSource: "all_approved" | "round_advanced" },
+  input: {
+    stageKey: string;
+    name: string;
+    rosterSource: "all_approved" | "round_advanced";
+    sourceRoundId?: string;
+  },
 ): Promise<GroupingStage> {
   return apiFetch<GroupingStage>(`/api/activities/${activityId}/grouping/stages`, {
     method: "POST",
     headers: { "idempotency-key": commandId },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      stageKey: input.stageKey,
+      name: input.name,
+      rosterSource: input.rosterSource,
+      ...(input.sourceRoundId === undefined ? {} : { sourceRoundId: input.sourceRoundId }),
+    }),
   });
 }
 

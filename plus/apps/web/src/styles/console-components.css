@@ -834,3 +834,10 @@
     min-height: 44px;
   }
 }
+
+.live-exception-panel { display: grid; gap: 12px; }
+.live-exception-group { display: grid; gap: 8px; }
+.live-exception-meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; }
+.live-exception-fact { display: grid; gap: 8px; padding: 12px; border-bottom: 1px solid var(--color-line); }
+.live-exception-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.live-exception-criteria { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }

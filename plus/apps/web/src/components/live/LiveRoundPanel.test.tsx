@@ -86,6 +86,7 @@ const live: LiveRound = {
     id: "ranking-1",
     status: "ready",
     rows: [{ contestantId: "singer-a", total: "90.00", judgeCount: 1 }],
+    inputFingerprint: "fingerprint-1",
     tieGroups: [],
     revision: 1,
     sourceScoreVersion: 1,

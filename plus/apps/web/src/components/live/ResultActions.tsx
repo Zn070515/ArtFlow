@@ -9,7 +9,9 @@ import {
   fetchPublishingState,
   recomputePodiumCandidate,
   releasePodiumResult,
+  revokeResultRelease,
   startExecution,
+  unlockStageResult,
 } from "../../api/voting.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
@@ -17,6 +19,17 @@ import { Input } from "../ui/Input.js";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "操作失败，请稍后重试。";
+}
+
+function releaseStatusText(status: "active" | "revoked" | "superseded"): string {
+  switch (status) {
+    case "active":
+      return "生效";
+    case "revoked":
+      return "已撤销";
+    case "superseded":
+      return "已替代";
+  }
 }
 
 export function ResultActions({
@@ -30,6 +43,7 @@ export function ResultActions({
 }) {
   const queryClient = useQueryClient();
   const [note, setNote] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
   const [confirmedRevision, setConfirmedRevision] = useState<number | undefined>();
   const publishing = useQuery({
     queryKey: ["live-publishing", activityId],
@@ -54,6 +68,17 @@ export function ResultActions({
     .map((round) => round.round?.id)
     .filter((id): id is string => id !== undefined);
   const stageKey = publishing.data?.stages[0]?.key;
+  const stageResult = publishing.data?.stageResults.find((item) => item.stageKey === stageKey);
+  const effectiveConfirmedRevision =
+    publishing.data === undefined
+      ? confirmedRevision
+      : stageResult?.status === "confirmed"
+        ? stageResult.candidateRevision
+        : undefined;
+  const stageLabel =
+    publishing.data?.stages.find((stage) => stage.key === stageKey)?.label ?? stageKey ?? "";
+  const stageReleases = publishing.data?.releases.filter((item) => item.stageKey === stageKey) ?? [];
+  const activeReleases = stageReleases.filter((item) => item.status === "active");
   const candidate = publishing.data?.podiumCandidate ?? null;
   const formal = state.session?.mode === "formal";
 
@@ -77,10 +102,28 @@ export function ResultActions({
   });
   const release = useMutation({
     mutationFn: () => {
-      if (stageKey === undefined || confirmedRevision === undefined) throw new Error("先确认赛果。");
-      return releasePodiumResult(activityId, stageKey, confirmedRevision, note.trim());
+      if (stageKey === undefined || effectiveConfirmedRevision === undefined) throw new Error("先确认赛果。");
+      return releasePodiumResult(activityId, stageKey, effectiveConfirmedRevision, note.trim());
     },
     onSuccess: refresh,
+  });
+  const revoke = useMutation({
+    mutationFn: (releaseId: string) => revokeResultRelease(activityId, releaseId, note.trim()),
+    onSuccess: () => {
+      setStatus("已撤销发布，可重新发布。");
+      refresh();
+    },
+  });
+  const unlock = useMutation({
+    mutationFn: (revision: number) => {
+      if (stageKey === undefined) throw new Error("没有可解锁的赛段。");
+      return unlockStageResult(activityId, stageKey, revision, note.trim());
+    },
+    onSuccess: () => {
+      setConfirmedRevision(undefined);
+      setStatus("已解锁赛果，请重新确认后再发布。");
+      refresh();
+    },
   });
   const close = useMutation({
     mutationFn: () => closeActivity(activityId, state.activity.revision),
@@ -99,11 +142,20 @@ export function ResultActions({
     recompute.isPending ||
     confirm.isPending ||
     release.isPending ||
+    revoke.isPending ||
+    unlock.isPending ||
     close.isPending ||
     archive.isPending ||
     unarchive.isPending;
   const error =
-    recompute.error ?? confirm.error ?? release.error ?? close.error ?? archive.error ?? unarchive.error;
+    recompute.error ??
+    confirm.error ??
+    release.error ??
+    revoke.error ??
+    unlock.error ??
+    close.error ??
+    archive.error ??
+    unarchive.error;
 
   return (
     <Card className="result-actions-card" data-testid="live-result-actions">
@@ -139,9 +191,29 @@ export function ResultActions({
         <Button variant="secondary" disabled={busy || publishingSession === undefined || candidate?.status !== "candidate"} onClick={() => confirm.mutate()}>
           确认评委赛果
         </Button>
-        <Button variant="primary" disabled={busy || publishingSession === undefined || confirmedRevision === undefined || note.trim() === ""} onClick={() => release.mutate()}>
+        <Button variant="primary" disabled={busy || publishingSession === undefined || effectiveConfirmedRevision === undefined || activeReleases.length > 0 || note.trim() === ""} onClick={() => release.mutate()}>
           发布赛果
         </Button>
+        {stageReleases.length === 0 ? null : (
+          <ul className="seat-list">
+            {stageReleases.map((item) => (
+              <li key={item.id} data-testid="release-status" data-release-status={item.status}>
+                {stageLabel} · {releaseStatusText(item.status)} ·{" "}
+                {new Date(item.releasedAt).toLocaleString("zh-CN")}
+              </li>
+            ))}
+          </ul>
+        )}
+        {activeReleases.map((item) => (
+          <Button key={item.id} variant="secondary" disabled={busy || publishingSession === undefined || note.trim() === ""} onClick={() => revoke.mutate(item.id)}>
+            撤销发布
+          </Button>
+        ))}
+        {stageResult?.status === "confirmed" ? (
+          <Button variant="secondary" disabled={busy || note.trim() === "" || publishingSession === undefined} onClick={() => unlock.mutate(stageResult.candidateRevision)}>
+            解锁赛果
+          </Button>
+        ) : null}
       </div>
       <Input
         label="发布 / 归档说明"
@@ -162,6 +234,7 @@ export function ResultActions({
           </Button>
         ) : null}
       </div>
+      {status === null ? null : <p className="ui-card__description" role="status">{status}</p>}
       {publishing.error === null || publishing.error === undefined ? null : <p className="ui-field__error" role="alert">赛果状态暂时不可用。</p>}
       {error === null || error === undefined ? null : <p className="ui-field__error" role="alert">{errorText(error)}</p>}
     </Card>

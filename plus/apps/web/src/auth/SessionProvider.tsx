@@ -108,7 +108,18 @@ export function hasLiveAccess(session: SessionResponse | null): boolean {
   return (
     permissions.includes("*") ||
     permissions.includes("competition.manage") ||
+    permissions.includes("competition.score.write") ||
     permissions.includes("judge.manage")
+  );
+}
+
+export function canManageCompetition(session: SessionResponse | null): boolean {
+  if (session === null) return false;
+  const { permissions } = session.actor;
+  return (
+    permissions.includes("*") ||
+    permissions.includes("competition.manage") ||
+    permissions.includes("competition.score.write")
   );
 }
 
