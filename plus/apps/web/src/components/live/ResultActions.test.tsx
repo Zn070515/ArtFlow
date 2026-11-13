@@ -85,9 +85,9 @@ const activeRelease = {
   releasedAt: "2026-11-13T10:00:00Z",
 };
 
-function renderResultActions(): void {
+function renderResultActions() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  return render(
     <QueryClientProvider client={queryClient}>
       <ResultActions activityId="act-1" state={state} onChanged={vi.fn()} />
     </QueryClientProvider>,
@@ -106,11 +106,14 @@ describe("ResultActions", () => {
 
   it("revokes an active release and unlocks a confirmed stage", async () => {
     fetchPublishingState.mockResolvedValue(publishingState([activeRelease]));
-    renderResultActions();
+    const { container } = renderResultActions();
 
-    const status = await screen.findByTestId("release-status");
-    expect(status).toHaveAttribute("data-release-status", "active");
-    expect(status).toHaveTextContent("决赛 · 生效 · 2026-11-13T10:00:00Z");
+    await screen.findByRole("button", { name: "解锁赛果" });
+    const status = container.querySelector('[data-release-status="active"]');
+    expect(status).not.toBeNull();
+    expect(status).toHaveTextContent(
+      `决赛 · 生效 · ${new Date(activeRelease.releasedAt).toLocaleString("zh-CN")}`,
+    );
 
     typeNote("现场撤回");
     expect(screen.getByRole("button", { name: "发布赛果" })).toBeDisabled();

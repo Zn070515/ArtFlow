@@ -69,7 +69,11 @@ export function ResultActions({
   const stageKey = publishing.data?.stages[0]?.key;
   const stageResult = publishing.data?.stageResults.find((item) => item.stageKey === stageKey);
   const effectiveConfirmedRevision =
-    stageResult?.status === "confirmed" ? stageResult.candidateRevision : confirmedRevision;
+    publishing.data === undefined
+      ? confirmedRevision
+      : stageResult?.status === "confirmed"
+        ? stageResult.candidateRevision
+        : undefined;
   const stageLabel =
     publishing.data?.stages.find((stage) => stage.key === stageKey)?.label ?? stageKey ?? "";
   const stageReleases = publishing.data?.releases.filter((item) => item.stageKey === stageKey) ?? [];
@@ -189,7 +193,8 @@ export function ResultActions({
           <ul className="seat-list">
             {stageReleases.map((item) => (
               <li key={item.id} data-testid="release-status" data-release-status={item.status}>
-                {stageLabel} · {releaseStatusText(item.status)} · {item.releasedAt}
+                {stageLabel} · {releaseStatusText(item.status)} ·{" "}
+                {new Date(item.releasedAt).toLocaleString("zh-CN")}
               </li>
             ))}
           </ul>
