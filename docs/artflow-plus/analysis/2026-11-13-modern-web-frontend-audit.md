@@ -168,3 +168,21 @@
 - **模态滚动**：保留指南的 `dialog:modal`/`::backdrop` `overscroll-behavior`
   方案，不采用 `body { overflow: hidden }`——指南明确禁止修改根滚动容器，
   会移除滚动条、造成布局位移并破坏 sticky。该行为按渐进增强处理。
+
+## 工程韧性补强（2026-11-13）
+
+- **路由级 error boundary**：`createRouter` 配置 `defaultErrorComponent` /
+  `defaultPendingComponent`，渲染异常落到 `ErrorState`，不再白屏；懒加载期间
+  显示“正在加载…”。
+- **路由拆分**：所有路由改为 `lazyRouteComponent`，主包从 **178.5 KB gzip**
+  降到 **107.6 KB gzip**；Studio、Live、Ops、Vote、Judge、Workspace 等按路由
+  拆成独立 chunk，Aurora 3D 保持独立懒加载。`defaultPreload: "intent"` 让 hover
+  时预取。
+- **axe smoke**：新增 `e2e/a11y.spec.ts`，覆盖 `/`、`/login`、`/workspace`、
+  `/ops`、`/studio`、`/live`、`/results/E2E-DEMO`，只拦截 serious/critical。
+  首跑发现 12 个 `color-contrast` 节点（`ui-badge--success/warning` 的彩色小字
+  在浅色主题上只有 4.3:1）；badge 改为“底色 + 边框承载 tone，文字使用正常
+  text 色”，重跑 0 violations。
+- **token 基线**：badge 文字色变化后重生成 `tokens-1440.png` / `tokens-390.png`。
+- **仍未做**：Ops/Studio/Live/Vote/Results 的 1440/1024/390 全页视觉基线；
+  长列表虚拟化/content-visibility 仍等数据量证明需要。
