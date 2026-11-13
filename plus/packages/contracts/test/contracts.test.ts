@@ -9,6 +9,8 @@ import {
   CapabilityManifestSchema,
   CloseExecutionBodySchema,
   CommandEnvelopeSchema,
+  CompetitionRoundScoresQuerySchema,
+  CompetitionRoundScoresResponseSchema,
   DomainEventEnvelopeSchema,
   ErrorResponseSchema,
   errorResponse,
@@ -278,4 +280,38 @@ it("bounds attendance query modes and limits", () => {
   expect(Value.Check(AttendanceQuerySchema, { mode: "formal", limit: 100 })).toBe(true);
   expect(Value.Check(AttendanceQuerySchema, { mode: "rehearsal" })).toBe(false);
   expect(Value.Check(AttendanceQuerySchema, { limit: 501 })).toBe(false);
+});
+
+it("validates the round scores read contract", () => {
+  expect(Value.Check(CompetitionRoundScoresQuerySchema, { scope: "judging" })).toBe(true);
+  expect(Value.Check(CompetitionRoundScoresQuerySchema, { scope: "judging", mode: "formal" })).toBe(false);
+  expect(Value.Check(CompetitionRoundScoresResponseSchema, {
+    round: { key: "final", state: "locked", revision: 2, scoreVersion: 3, advanceCount: 1 },
+    session: { id: "session-1", mode: "formal", scope: "judging" },
+    ranking: {
+      id: "ranking-1",
+      revision: 1,
+      status: "hold",
+      inputFingerprint: "fingerprint",
+      rows: [{ contestantId: "singer-a", total: "90.00", judgeCount: 1 }],
+      tieGroups: [{ id: "tie-1", total: "90.00", contestants: ["singer-a", "singer-b"] }],
+    },
+    advancement: null,
+    performances: [{ id: "performance-1", contestantId: "singer-a", sequence: 1, state: "locked", contextVersion: 1 }],
+    facts: [{
+      id: "score-1",
+      performanceId: "performance-1",
+      contestantId: "singer-a",
+      judgeId: "judge-1",
+      seatId: "seat-1",
+      source: "direct_judge",
+      total: "90.00",
+      criteria: { total: 90 },
+      notes: "",
+      version: 1,
+      contextVersion: 1,
+      panelSnapshotId: "panel-1",
+      correction: null,
+    }],
+  })).toBe(true);
 });

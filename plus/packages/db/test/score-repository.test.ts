@@ -9,11 +9,13 @@ import {
   createDb,
   getCurrentRankingSnapshot,
   getScoreFactForUpdate,
+  insertCorrection,
   insertPerformance,
   insertRankingSnapshot,
   insertRound,
   insertScoreFact,
   insertScoreRevision,
+  listLatestCorrectionsForScoreFacts,
   migrate,
   updateScoreFact,
 } from "../src/index.js";
@@ -213,5 +215,40 @@ describe.skipIf(!connectionString)("score persistence on PostgreSQL", () => {
     });
     await expect(updateScoreFact(db, { ...updated, total: "90.00", version: 3 }, 1)).rejects.toMatchObject({ code: "STALE_REVISION" });
     await expect(db.selectFrom("score_revision").selectAll().where("score_fact_id", "=", fact.id).execute()).resolves.toHaveLength(1);
+  });
+
+  it("returns the latest correction per score fact", async () => {
+    const fact = await seedScoreFact();
+    await db.insertInto("panel_snapshot").values({
+      id: fact.panelSnapshotId,
+      activity_id: fact.activityId,
+      round_id: fact.roundId,
+      version: 1,
+      state: "active",
+      expected_judges: 5,
+      minimum_judges: 3,
+      roster_digest: "roster",
+      context_version: 1,
+      current: true,
+    }).execute();
+    await db.insertInto("judge_seat").values({
+      id: fact.seatId,
+      panel_id: fact.panelSnapshotId,
+      judge_id: "judge-1",
+      state: "assigned",
+      revision: 0,
+    }).execute();
+    await insertScoreFact(db, fact);
+    await insertCorrection(db, {
+      id: `correction-1-${fact.id}`, scoreFactId: fact.id, inputFingerprint: "fp-1",
+      state: "open", baseVersion: 1, reason: "第一次", revision: 0,
+    });
+    await insertCorrection(db, {
+      id: `correction-2-${fact.id}`, scoreFactId: fact.id, inputFingerprint: "fp-2",
+      state: "closed", baseVersion: 1, reason: "第二次", revision: 1,
+    });
+    const latest = await listLatestCorrectionsForScoreFacts(db, [fact.id, "score-missing"]);
+    expect(latest.get(fact.id)?.id).toBe(`correction-2-${fact.id}`);
+    expect(latest.get("score-missing")).toBeUndefined();
   });
 });

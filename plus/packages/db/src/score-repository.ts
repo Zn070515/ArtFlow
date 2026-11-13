@@ -441,6 +441,23 @@ export async function insertCorrection(db: Kysely<Database>, value: StoredScoreC
   }).execute();
 }
 
+export async function listLatestCorrectionsForScoreFacts(
+  db: Kysely<Database>,
+  scoreFactIds: readonly string[],
+): Promise<ReadonlyMap<string, StoredScoreCorrection>> {
+  if (scoreFactIds.length === 0) return new Map();
+  const rows = await db.selectFrom("score_correction").selectAll()
+    .where("score_fact_id", "in", [...scoreFactIds])
+    .orderBy("revision", "desc")
+    .execute();
+  const latest = new Map<string, StoredScoreCorrection>();
+  for (const row of rows) {
+    const value = correction(row);
+    if (!latest.has(value.scoreFactId)) latest.set(value.scoreFactId, value);
+  }
+  return latest;
+}
+
 export async function listUnsettledCorrectionsForActivity(
   db: Kysely<Database>,
   activityId: string,
