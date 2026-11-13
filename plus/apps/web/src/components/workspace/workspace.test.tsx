@@ -71,6 +71,17 @@ describe("organizer workspace components", () => {
     expect(screen.getByText("SPRING-1")).toBeInTheDocument();
   });
 
+  it("announces a failed copy without disabling the button", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    render(<WorkspaceActivityCard activity={activity} attentionCount={0} primaryAction={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "复制公开码" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("复制失败"));
+    expect(screen.getByRole("button", { name: "复制公开码" })).toBeEnabled();
+  });
+
   it("renders a clear empty next-action state", () => {
     render(<WorkspaceNextAction action={null} pending={false} />);
 

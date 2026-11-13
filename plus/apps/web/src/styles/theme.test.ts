@@ -21,6 +21,14 @@ describe("ArtFlow visual theme styles", () => {
     expect(global).toContain(".console-table-wrap");
   });
 
+  it("declares the color scheme early and brands native controls", async () => {
+    const themes = await readFile(`${stylesDirectory}/themes.css`, "utf8");
+    const html = await readFile(join(process.cwd(), "index.html"), "utf8");
+
+    expect(html).toContain('<meta name="color-scheme" content="light dark" />');
+    expect(themes).toContain("accent-color: var(--color-accent)");
+  });
+
   it("keeps Console surfaces opaque and avoids Portal-only blur", async () => {
     const global = await readAllStyles(stylesDirectory);
     const consoleCss = global.slice(global.indexOf(".console-shell"));

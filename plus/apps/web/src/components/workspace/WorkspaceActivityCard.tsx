@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge, type BadgeTone } from "../ui/Badge.js";
 import { Button } from "../ui/Button.js";
@@ -55,14 +55,25 @@ export function WorkspaceActivityCard({
   readonly primaryAction: NextAction | null;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimer.current !== null) clearTimeout(resetTimer.current);
+  }, []);
+
+  function report(state: "copied" | "failed"): void {
+    if (resetTimer.current !== null) clearTimeout(resetTimer.current);
+    setCopyState(state);
+    resetTimer.current = setTimeout(() => setCopyState("idle"), 2000);
+  }
 
   async function copyPublicCode(): Promise<void> {
     try {
       if (navigator.clipboard === undefined) throw new Error("Clipboard is unavailable.");
       await navigator.clipboard.writeText(activity.publicCode);
-      setCopyState("copied");
+      report("copied");
     } catch {
-      setCopyState("failed");
+      report("failed");
     }
   }
 
@@ -80,7 +91,11 @@ export function WorkspaceActivityCard({
         <Button variant="secondary" size="sm" onClick={() => void copyPublicCode()}>
           复制公开码
         </Button>
-        <span className="sr-only" role="status" aria-live="polite">
+        <span
+          className={`workspace-copy-status is-${copyState}`}
+          role="status"
+          aria-live="polite"
+        >
           {copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : ""}
         </span>
       </div>

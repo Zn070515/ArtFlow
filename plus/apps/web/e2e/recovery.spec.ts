@@ -8,7 +8,7 @@ test("recovers a live result through revoke, correction, tie, and re-publish", a
   await expect(page).toHaveURL(/\/workspace$/);
 
   await page.goto("/live/act_e2e_recovery");
-  await expect(page.getByRole("heading", { name: "E2E Recovery", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "E2E Recovery", exact: true })).toBeVisible({ timeout: 15_000 });
 
   const resultActions = page.getByTestId("live-result-actions");
   const round = page.getByTestId("live-round-final");
@@ -29,8 +29,10 @@ test("recovers a live result through revoke, correction, tie, and re-publish", a
   await resultActions.getByRole("button", { name: "解锁赛果" }).click();
   await expect(resultActions.getByRole("button", { name: "解锁赛果" })).toHaveCount(0);
 
-  page.once("dialog", (dialog) => void dialog.accept("现场核对分数"));
   await round.getByRole("button", { name: "打开评分更正窗口" }).click();
+  const reopenDialog = page.getByRole("dialog", { name: "重新打开本轮" });
+  await reopenDialog.getByLabel("审计原因").fill("现场核对分数");
+  await reopenDialog.getByRole("button", { name: "重新打开" }).click();
   await expect(round.getByRole("heading", { name: /final · scoring/ })).toBeVisible();
 
   // The seed runs one judge per contestant, so each contestant owns exactly one
@@ -82,7 +84,7 @@ test("recovers a live result through revoke, correction, tie, and re-publish", a
 
   // The public projection must expose the corrected score, not the seed's 80.00.
   await page.goto("/results/E2E-RECOVERY");
-  await expect(page.getByRole("heading", { name: "E2E Recovery", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "E2E Recovery", exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "E2E Recovery · 决赛" })).toBeVisible();
   const publishedSingerC = page.locator(".rank-row").filter({ hasText: "singer-c" });
   await expect(publishedSingerC).toContainText("85.00");

@@ -42,9 +42,11 @@
      `thead` 用 `position:absolute` + `clip` 隐藏；`Table.tsx` 的 `.ui-table-wrap`
      没有 `tabindex`/`role="region"`。
    - 指南：`responsive-table`。
-   - 建议：`.ui-table-wrap { container-type: inline-size; }` + `@container`，
-     卡片模式 `thead { display: none }`；wrapper 加 `tabindex="0"`、
-     `role="region"` 和 `aria-labelledby`（指向 caption 的 id）。
+   - 已做：wrapper 加 `tabindex="0"`、`role="region"` 和 `aria-labelledby`
+     （指向 caption 的 id）；手机卡片模式 `thead { display: none }`。
+   - 推迟：容器查询。Console 主列在桌面也会窄于视口（240 侧栏 + 360 rail），
+     按容器宽度卡片化会让 1024 的 Ops 表格也变成卡片，破坏桌面表格语义；
+     需要先按组件逐页决定容器阈值，再做试点。
 
 4. **Aurora WebGL 在页面隐藏后仍在渲染**
    - 证据：`AuroraCanvas.tsx` 的 `<Canvas>` 没有 `frameloop` 控制，也没有

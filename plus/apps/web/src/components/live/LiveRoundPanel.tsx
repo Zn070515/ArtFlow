@@ -16,6 +16,7 @@ import {
 import { Badge } from "../ui/Badge.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { ConfirmDialog, ReasonDialog } from "../ui/Dialog.js";
 import { Input } from "../ui/Input.js";
 import { Select } from "../ui/Select.js";
 import { Table } from "../ui/Table.js";
@@ -47,6 +48,8 @@ export function LiveRoundPanel({
   );
   const [contestantId, setContestantId] = useState(state.participantIds[0] ?? "");
   const [busy, setBusy] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function run(action: () => Promise<void>, fallback: string): Promise<void> {
@@ -114,10 +117,8 @@ export function LiveRoundPanel({
     return run(() => resolveRound(state.activity.id, config.key).then(() => undefined), "生成排名失败。");
   }
 
-  function reopenForCorrection(): Promise<void> {
+  function reopenForCorrection(reason: string): Promise<void> {
     if (round === null) return Promise.resolve();
-    const reason = window.prompt("请输入重新打开本轮的审计原因：", "发布前核对评委评分");
-    if (reason === null || reason.trim() === "") return Promise.resolve();
     return run(
       () => reopenRoundForCorrection(state.activity.id, config.key, round.revision, reason).then(() => undefined),
       "打开评分更正窗口失败。",
@@ -128,7 +129,6 @@ export function LiveRoundPanel({
     if (round === null || (sessionMode !== "test" && sessionMode !== "rehearsal")) {
       return Promise.resolve();
     }
-    if (!window.confirm("清空本回合排练数据并回到准备状态？")) return Promise.resolve();
     return run(
       () => resetRehearsal(state.activity.id, config.key, sessionMode).then(() => undefined),
       "重置排练失败。",
@@ -283,7 +283,7 @@ export function LiveRoundPanel({
             生成排名
           </Button>
           {sessionMode === "formal" && round.state === "locked" ? (
-            <Button variant="secondary" disabled={busy} onClick={() => void reopenForCorrection()}>
+            <Button variant="secondary" disabled={busy} onClick={() => setReopenOpen(true)}>
               打开评分更正窗口
             </Button>
           ) : null}
@@ -322,7 +322,7 @@ export function LiveRoundPanel({
 
       {round !== null && (sessionMode === "test" || sessionMode === "rehearsal") ? (
         <div className="session-controls">
-          <Button variant="danger" disabled={busy} onClick={() => void reset()}>
+          <Button variant="danger" disabled={busy} onClick={() => setResetOpen(true)}>
             重置排练
           </Button>
         </div>
@@ -333,6 +333,33 @@ export function LiveRoundPanel({
           {error}
         </p>
       )}
+
+      <ReasonDialog
+        open={reopenOpen}
+        title="重新打开本轮"
+        description="轮次会回到评分状态，所有修正都会留下审计记录。"
+        label="审计原因"
+        defaultValue="发布前核对评委评分"
+        confirmLabel="重新打开"
+        onCancel={() => setReopenOpen(false)}
+        onConfirm={(reason) => {
+          setReopenOpen(false);
+          void reopenForCorrection(reason);
+        }}
+      />
+
+      <ConfirmDialog
+        open={resetOpen}
+        title="清空排练数据？"
+        description="本回合的排练分数会被清除，并回到准备状态。"
+        confirmLabel="清空并回到准备状态"
+        danger
+        onCancel={() => setResetOpen(false)}
+        onConfirm={() => {
+          setResetOpen(false);
+          void reset();
+        }}
+      />
     </Card>
   );
 }

@@ -125,4 +125,13 @@ describe("AttendanceCard", () => {
       subjectId: "registration-1",
     }));
   });
+
+  it("moves the selected tab with arrow keys", async () => {
+    renderCard();
+    const participant = await screen.findByRole("tab", { name: "参赛者" });
+    participant.focus();
+    fireEvent.keyDown(participant, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "票据" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "参赛者" })).toHaveAttribute("aria-selected", "false");
+  });
 });

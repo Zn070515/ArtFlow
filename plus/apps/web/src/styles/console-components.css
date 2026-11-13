@@ -841,3 +841,68 @@
 .live-exception-fact { display: grid; gap: 8px; padding: 12px; border-bottom: 1px solid var(--color-line); }
 .live-exception-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .live-exception-criteria { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+
+/* Attendance tabs: the selected tab needs a shape, not only a color. */
+.attendance-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.attendance-tabs [role="tab"] {
+  position: relative;
+  border-radius: 0;
+  background: transparent;
+}
+
+.attendance-tabs [role="tab"][aria-selected="true"] {
+  color: var(--color-text);
+}
+
+.attendance-tabs [role="tab"][aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  border-block-end: 2px solid var(--color-accent);
+}
+
+.attendance-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.attendance-summary {
+  margin: 0 0 12px;
+  color: var(--color-text-muted);
+}
+
+.attendance-rows {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attendance-rows li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.attendance-ticket-credential {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.attendance-ineligible {
+  color: var(--color-text-subtle);
+  font-size: var(--text-1);
+}
