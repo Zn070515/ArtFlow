@@ -1452,6 +1452,7 @@ git commit -m "test(web): cover the live exception recovery journey"
 - **分组 `round_advanced` UI**：推迟。live 读模型没有晋级来源参与者集合，
   自动平均分组只能基于全部通过名单；后端命令、指纹守卫与 `sourceRoundId`
   字段已就绪。
+- **再次修正**：`recalculated`/`cancelled` 只结束当前这一条修正；同一评分事实可以再开新修正，面板显示「再次修正」。
 - **E2E 选择器**：评分事实行用 `data-testid="score-fact-${fact.id}"` 与
   `data-contestant="${contestantId}"`，不再使用 contestant-based testid。
 - **E2E 种子**：额外插入 `podium_candidate` 行，否则真实 `releaseResult` 会因

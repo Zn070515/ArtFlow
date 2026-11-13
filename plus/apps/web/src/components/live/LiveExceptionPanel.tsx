@@ -315,7 +315,11 @@ export function LiveExceptionPanel({
     performanceState: RoundScoresResponse["performances"][number]["state"] | undefined,
   ): ReactNode {
     const correction = fact.correction;
-    if (correction === null) {
+    const canOpenNew =
+      correction === null ||
+      correction.state === "recalculated" ||
+      correction.state === "cancelled";
+    if (canOpenNew) {
       if (performanceState !== "locked") {
         return (
           <p className="ui-card__description">该表演尚未锁定，暂不能修正。</p>
@@ -332,7 +336,7 @@ export function LiveExceptionPanel({
               setOpenReason("");
             }}
           >
-            开修正
+            {correction === null ? "开修正" : "再次修正"}
           </Button>
         );
       }

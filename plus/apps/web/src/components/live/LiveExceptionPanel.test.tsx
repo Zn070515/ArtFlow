@@ -602,4 +602,33 @@ describe("LiveExceptionPanel", () => {
       await screen.findByText("重算完成，请先「锁轮」再点「生成排名」。"),
     ).toBeVisible();
   });
+
+  it("opens a new correction after the previous one was recalculated", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      facts: [{
+        ...baseFact,
+        correction: {
+          id: "correction-1",
+          state: "recalculated",
+          baseVersion: 1,
+          reason: "看错分",
+          revision: 3,
+        },
+      }],
+    }));
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "再次修正" }));
+    fireEvent.change(screen.getByLabelText("修正原因"), { target: { value: "再改一次" } });
+    fireEvent.click(screen.getByRole("button", { name: "确认开修正" }));
+
+    await waitFor(() => {
+      expect(openScoreCorrectionMock).toHaveBeenCalledWith("act-1", "round-1", {
+        performanceId: "performance-1",
+        scoreFactId: "fact-1",
+        panelSnapshotId: "panel-1",
+        reason: "再改一次",
+      });
+    });
+  });
 });
