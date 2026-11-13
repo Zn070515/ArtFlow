@@ -184,6 +184,39 @@ describe("LiveTieAdvancementPanel", () => {
     });
   });
 
+  it("finalizes a hold ranking whose tie does not cross the cutoff", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores({
+      ranking: {
+        ...tieRanking,
+        status: "hold",
+        rows: [
+          { contestantId: "singer-c", total: "90.00", judgeCount: 1 },
+          { contestantId: "singer-a", total: "80.00", judgeCount: 1 },
+          { contestantId: "singer-b", total: "80.00", judgeCount: 1 },
+        ],
+        tieGroups: [{ id: "tie-2", total: "80.00", contestants: ["singer-a", "singer-b"] }],
+      },
+    }));
+    renderPanel();
+
+    const button = await screen.findByRole("button", { name: "晋级定稿" });
+    expect(button).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "记录裁决" })).toBeNull();
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(finalizeAdvancementMock).toHaveBeenCalledWith("act-1", "final", 1);
+    });
+  });
+
+  it("blocks finalize while a crossing tie is unresolved", async () => {
+    fetchRoundScoresMock.mockResolvedValue(scores());
+    renderPanel();
+
+    expect(await screen.findByRole("button", { name: "记录裁决" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "晋级定稿" })).toBeDisabled();
+  });
+
   it("warns when the advancement fingerprint is stale", async () => {
     fetchRoundScoresMock.mockResolvedValue(scores({
       ranking: { ...tieRanking, status: "ready", tieGroups: [] },

@@ -131,9 +131,11 @@ export function LiveTieAdvancementPanel({
     ranking !== null && advancement !== null &&
     (advancement.status === "auto" || advancement.status === "finalized") &&
     advancement.inputFingerprint === ranking.inputFingerprint;
+  // A hold caused by a non-crossing tie is still auto-advanceable: the
+  // backend reviews only ties that cross the cutoff. Gate on the crossing
+  // ties the operator can see, not on the raw ranking status.
   const canFinalize =
     ranking !== null &&
-    ranking.status === "ready" &&
     crossing.length === 0 &&
     !finalized &&
     !finalize.isPending;
