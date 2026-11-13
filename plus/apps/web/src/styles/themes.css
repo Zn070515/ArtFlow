@@ -1,6 +1,7 @@
 @layer tokens {
   [data-theme="paper"] {
     color-scheme: light;
+    accent-color: var(--color-accent);
     --color-page: var(--p-neutral-100);
     --color-surface: var(--p-neutral-0);
     --color-surface-raised: var(--p-neutral-50);
@@ -22,6 +23,7 @@
 
   [data-theme="graphite"] {
     color-scheme: dark;
+    accent-color: var(--color-accent);
     --color-page: var(--p-neutral-900);
     --color-surface: var(--p-graphite-800);
     --color-surface-raised: var(--p-graphite-700);
@@ -44,6 +46,7 @@
   :root,
   [data-theme="afterglow"] {
     color-scheme: dark;
+    accent-color: var(--color-accent);
     --color-page: var(--p-neutral-900);
     --color-surface: var(--p-ink-soft);
     --color-surface-raised: var(--p-ink-raised);

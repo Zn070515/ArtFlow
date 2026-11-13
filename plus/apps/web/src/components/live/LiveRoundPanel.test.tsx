@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/live.js", () => ({
   activatePanel: vi.fn(),
@@ -14,6 +14,7 @@ vi.mock("../../api/live.js", () => ({
 }));
 
 import type { LiveRound, LiveState } from "../../api/live.js";
+import { reopenRoundForCorrection, resetRehearsal } from "../../api/live.js";
 import { LiveRoundPanel } from "./LiveRoundPanel.js";
 
 const state: LiveState = {
@@ -93,6 +94,27 @@ const live: LiveRound = {
   },
 };
 
+const lockedLive = {
+  ...live,
+  round: live.round === null ? null : { ...live.round, state: "locked" as const },
+};
+
+beforeAll(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value: function showModal(this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value: function close(this: HTMLDialogElement) {
+      this.removeAttribute("open");
+      this.dispatchEvent(new Event("close"));
+    },
+  });
+});
+
 describe("LiveRoundPanel", () => {
   it("keeps round actions visible and wraps operational tables for narrow screens", () => {
     render(<LiveRoundPanel state={state} live={live} sessionMode="formal" onChanged={vi.fn()} />);
@@ -101,5 +123,23 @@ describe("LiveRoundPanel", () => {
     expect(document.querySelectorAll(".ui-table-wrap")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "锁轮" })).toBeVisible();
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
+  });
+
+  it("collects the reopen reason in a dialog", async () => {
+    render(<LiveRoundPanel state={state} live={lockedLive} sessionMode="formal" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "打开评分更正窗口" }));
+    const input = await screen.findByLabelText("审计原因");
+    fireEvent.change(input, { target: { value: "现场核对" } });
+    fireEvent.click(screen.getByRole("button", { name: "重新打开" }));
+    await waitFor(() =>
+      expect(reopenRoundForCorrection).toHaveBeenCalledWith("activity-1", "round-1", 1, "现场核对"),
+    );
+  });
+
+  it("confirms before clearing rehearsal data", async () => {
+    render(<LiveRoundPanel state={state} live={lockedLive} sessionMode="test" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "重置排练" }));
+    fireEvent.click(await screen.findByRole("button", { name: "清空并回到准备状态" }));
+    await waitFor(() => expect(resetRehearsal).toHaveBeenCalledWith("activity-1", "round-1", "test"));
   });
 });

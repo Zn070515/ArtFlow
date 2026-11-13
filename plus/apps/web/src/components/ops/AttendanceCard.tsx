@@ -1,6 +1,6 @@
 import type { AttendanceRow } from "@artflow-plus/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type KeyboardEvent } from "react";
 
 import {
   addAttendanceStaff,
@@ -18,6 +18,8 @@ import { Input } from "../ui/Input.js";
 import { Select } from "../ui/Select.js";
 
 type AttendanceTab = "participant" | "ticket" | "staff";
+
+const TABS: readonly AttendanceTab[] = ["participant", "ticket", "staff"];
 
 function tabLabel(tab: AttendanceTab): string {
   return { participant: "参赛者", ticket: "票据", staff: "工作人员" }[tab];
@@ -52,6 +54,19 @@ export function AttendanceCard({
   const queryClient = useQueryClient();
   const [point, setPoint] = useState("");
   const [tab, setTab] = useState<AttendanceTab>("participant");
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: AttendanceTab): void {
+    const index = TABS.indexOf(current);
+    let next: AttendanceTab | undefined;
+    if (event.key === "ArrowRight") next = TABS[(index + 1) % TABS.length];
+    if (event.key === "ArrowLeft") next = TABS[(index - 1 + TABS.length) % TABS.length];
+    if (event.key === "Home") next = TABS[0];
+    if (event.key === "End") next = TABS[TABS.length - 1];
+    if (next === undefined) return;
+    event.preventDefault();
+    setTab(next);
+    document.getElementById(`attendance-tab-${next}`)?.focus();
+  }
   const [search, setSearch] = useState("");
   const [note, setNote] = useState("");
   // Rehearsal has no attendance partition; default to the test partition so a
@@ -79,6 +94,8 @@ export function AttendanceCard({
     queryKey: ["ops-attendance", activityId, point, tab, search, mode],
     queryFn: () => fetchAttendance(activityId, { point, subjectType: tab, query: search, mode }),
     retry: false,
+    // Keep the tablist mounted while the next tab loads.
+    placeholderData: keepPreviousData,
   });
 
   const refresh = () => {
@@ -230,21 +247,26 @@ export function AttendanceCard({
         </div>
       ) : null}
 
-      <div role="tablist" className="attendance-tabs">
-        {(["participant", "ticket", "staff"] as const).map((item) => (
+      <div role="tablist" className="attendance-tabs" aria-label="签到名单类型">
+        {TABS.map((item) => (
           <Button
             key={item}
+            id={`attendance-tab-${item}`}
             role="tab"
             aria-selected={tab === item}
+            aria-controls="attendance-panel"
+            tabIndex={tab === item ? 0 : -1}
             variant="ghost"
             size="sm"
             onClick={() => setTab(item)}
+            onKeyDown={(event) => onTabKeyDown(event, item)}
           >
             {tabLabel(item)}
           </Button>
         ))}
       </div>
 
+      <div id="attendance-panel" role="tabpanel" aria-labelledby={`attendance-tab-${tab}`}>
       <div className="attendance-filters">
         <Select label="签到点" value={point} onChange={(event) => setPoint(event.target.value)}>
           <option value="">全部</option>
@@ -305,6 +327,7 @@ export function AttendanceCard({
       {rows.length === 0 ? <p className="auth-loading">当前筛选下没有主体。</p> : null}
       {mutation.error !== null && mutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p> : null}
       {sessionMutation.error !== null && sessionMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(sessionMutation.error)}</p> : null}
+      </div>
     </Card>
   );
 }

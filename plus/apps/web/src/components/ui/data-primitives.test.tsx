@@ -16,6 +16,18 @@ describe("Table and Toolbar", () => {
     expect(document.querySelector(".ui-table-wrap")).not.toBeNull();
   });
 
+  it("makes the table wrapper a labelled, keyboard-scrollable region", () => {
+    render(
+      <Table caption="活动列表">
+        <thead><tr><th scope="col">活动</th></tr></thead>
+        <tbody><tr><td data-label="活动">春季歌手赛</td></tr></tbody>
+      </Table>,
+    );
+    const region = screen.getByRole("region", { name: "活动列表" });
+    expect(region).toHaveClass("ui-table-wrap");
+    expect(region).toHaveAttribute("tabindex", "0");
+  });
+
   it("renders a labelled toolbar", () => {
     render(<Toolbar label="活动筛选"><input aria-label="搜索" /></Toolbar>);
     expect(screen.getByRole("search", { name: "活动筛选" })).toHaveClass("ui-toolbar");

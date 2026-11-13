@@ -235,3 +235,17 @@
     min-width: 0;
   }
 }
+
+.workspace-copy-status {
+  min-width: 3.5em;
+  color: var(--color-text-muted);
+  font-size: var(--text-1);
+}
+
+.workspace-copy-status.is-copied {
+  color: var(--color-success);
+}
+
+.workspace-copy-status.is-failed {
+  color: var(--color-danger);
+}
