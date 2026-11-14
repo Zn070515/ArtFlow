@@ -4,6 +4,8 @@ import { useState } from "react";
 import {
   createAccount,
   fetchAccounts,
+  inviteAccount,
+  revokeAccountInvite,
   revokeAccountSessions,
   updateAccount,
   type AccountSummary,
@@ -57,6 +59,13 @@ function AccountsContent() {
     roles: "staff",
     permissions: "",
   });
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({
+    username: "",
+    roles: "staff",
+    permissions: "",
+  });
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [editing, setEditing] = useState<AccountSummary | null>(null);
   const [editForm, setEditForm] = useState({
     roles: "",
@@ -102,6 +111,43 @@ function AccountsContent() {
       await query.refetch();
     } catch (cause) {
       setError(apiErrorText(cause, "创建账号失败。", "账号已存在或状态冲突。"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitInvite(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await inviteAccount({
+        username: inviteForm.username.trim(),
+        roles: splitList(inviteForm.roles),
+        permissions: splitList(inviteForm.permissions),
+      });
+      setInviteLink(`${window.location.origin}/claim#${created.token}`);
+      setInviteOpen(false);
+      setInviteForm({ username: "", roles: "staff", permissions: "" });
+      await query.refetch();
+    } catch (cause) {
+      setError(apiErrorText(
+        cause,
+        "创建邀请失败。",
+        "该账号已启用；请改用重置密码或撤销会话。",
+      ));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitRevokeInvite(account: AccountSummary): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      await revokeAccountInvite(account.username);
+      await query.refetch();
+    } catch (cause) {
+      setError(apiErrorText(cause, "撤销邀请失败。", "邀请已失效。"));
     } finally {
       setBusy(false);
     }
@@ -176,6 +222,16 @@ function AccountsContent() {
         <Button variant="primary" onClick={() => setCreateOpen(true)}>
           新建账号
         </Button>
+        <Button
+          variant="secondary"
+          disabled={busy}
+          onClick={() => {
+            setInviteForm({ username: "", roles: "staff", permissions: "" });
+            setInviteOpen(true);
+          }}
+        >
+          邀请成员
+        </Button>
         <label className="ui-field__label">
           <input
             type="checkbox"
@@ -212,20 +268,33 @@ function AccountsContent() {
                 <td data-label="账号">{account.username}</td>
                 <td data-label="角色">{account.roles.join(", ") || "—"}</td>
                 <td data-label="权限">{account.permissions.join(", ") || "—"}</td>
-                <td data-label="状态">{account.active ? "启用" : "已停用"}</td>
+                <td data-label="状态">
+                  {account.invited ? "待认领" : account.active ? "启用" : "已停用"}
+                </td>
                 <td data-label="操作">
                   <div className="ui-inline-actions">
                     <Button size="sm" onClick={() => beginEdit(account)}>
                       编辑
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => setRevoking(account)}
-                    >
-                      撤销会话
-                    </Button>
+                    {account.invited ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => { void submitRevokeInvite(account); }}
+                      >
+                        撤销邀请
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => setRevoking(account)}
+                      >
+                        撤销会话
+                      </Button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -277,6 +346,64 @@ function AccountsContent() {
           onChange={(event) => setCreateForm({ ...createForm, permissions: event.target.value })}
           hint="逗号或空格分隔，例如 registration.review"
         />
+      </FormDialog>
+
+      <FormDialog
+        open={inviteOpen}
+        title="邀请成员"
+        description="生成一次性链接；对方设置密码后才能登录。链接只显示一次。"
+        confirmLabel="生成链接"
+        onCancel={() => setInviteOpen(false)}
+        onConfirm={() => {
+          setInviteOpen(false);
+          void submitInvite();
+        }}
+        validate={() => {
+          if (!USERNAME_PATTERN.test(inviteForm.username.trim())) {
+            return "用户名需为 3-64 位字母、数字、点、横线或下划线。";
+          }
+          return null;
+        }}
+      >
+        <Input
+          label="用户名"
+          value={inviteForm.username}
+          onChange={(event) => setInviteForm({ ...inviteForm, username: event.target.value })}
+          autoFocus
+        />
+        <Input
+          label="角色"
+          value={inviteForm.roles}
+          onChange={(event) => setInviteForm({ ...inviteForm, roles: event.target.value })}
+          hint="逗号或空格分隔，例如 staff, judge"
+        />
+        <Input
+          label="权限"
+          value={inviteForm.permissions}
+          onChange={(event) => setInviteForm({ ...inviteForm, permissions: event.target.value })}
+          hint="逗号或空格分隔，例如 registration.review"
+        />
+      </FormDialog>
+
+      <FormDialog
+        open={inviteLink !== null}
+        title="邀请链接（仅显示一次）"
+        description="通过安全渠道发送；对方打开后设置密码并立即生效。"
+        confirmLabel="完成"
+        onCancel={() => setInviteLink(null)}
+        onConfirm={() => setInviteLink(null)}
+      >
+        <Input label="邀请链接" readOnly value={inviteLink ?? ""} />
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            if (inviteLink !== null) void navigator.clipboard?.writeText(inviteLink);
+          }}
+        >
+          复制链接
+        </Button>
       </FormDialog>
 
       <FormDialog

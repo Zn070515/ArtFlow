@@ -46,6 +46,7 @@ export const AccountSummarySchema = Type.Object(
     roles: Type.Array(Type.String()),
     permissions: Type.Array(Type.String()),
     active: Type.Boolean(),
+    invited: Type.Boolean(),
     accessRevision: Type.Integer({ minimum: 0 }),
     createdAt: Type.String(),
   },
@@ -70,6 +71,51 @@ export const RevokeSessionsResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const InviteAccountBodySchema = Type.Object(
+  {
+    username: Type.String({
+      minLength: 3,
+      maxLength: 64,
+      pattern: "^[A-Za-z0-9_.-]+$",
+    }),
+    roles: AccountRolesSchema,
+    permissions: AccountPermissionsSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const InviteAccountResponseSchema = Type.Object(
+  {
+    account: AccountSummarySchema,
+    token: Type.String({ minLength: 1 }),
+    expiresAt: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+export const InvitePreviewBodySchema = Type.Object(
+  { token: Type.String({ minLength: 1, maxLength: 200 }) },
+  { additionalProperties: false },
+);
+
+export const InvitePreviewResponseSchema = Type.Object(
+  { username: Type.String(), expiresAt: Type.String() },
+  { additionalProperties: false },
+);
+
+export const ClaimInviteBodySchema = Type.Object(
+  {
+    token: Type.String({ minLength: 1, maxLength: 200 }),
+    password: Type.String({ minLength: 12, maxLength: 128 }),
+  },
+  { additionalProperties: false },
+);
+
+export const InviteRevokeResponseSchema = Type.Object(
+  { revoked: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+
 export const AccountListQuerySchema = Type.Object(
   {
     includeParticipants: Type.Optional(Type.Boolean()),
@@ -84,3 +130,6 @@ export type UpdateAccountBody = Static<typeof UpdateAccountBodySchema>;
 export type AccountParams = Static<typeof AccountParamsSchema>;
 export type AccountSummary = Static<typeof AccountSummarySchema>;
 export type AccountListQuery = Static<typeof AccountListQuerySchema>;
+export type InviteAccountBody = Static<typeof InviteAccountBodySchema>;
+export type InvitePreviewBody = Static<typeof InvitePreviewBodySchema>;
+export type ClaimInviteBody = Static<typeof ClaimInviteBodySchema>;

@@ -96,9 +96,12 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   replace the default `admin` role. Once an `account.manage` account exists,
   organizers manage staff from the Console `/accounts` page: permission changes
   apply to existing sessions on their next request, while deactivation or a
-  password reset revokes every session. Production runs the same command
-  against the production database URL with a secret-managed password. Do not
-  reuse the development password.
+  password reset revokes every session. Prefer **邀请成员** over setting an
+  initial password: it creates an inactive account and a one-time
+  `/claim#<token>` link (72 hours, fragment only), and the staff member sets
+  their own 12+ character password. Production runs the same command against
+  the production database URL with a secret-managed password. Do not reuse the
+  development password.
 - **Production proxy boundary**: `ARTFLOW_PLUS_TRUST_PROXY` is an explicit,
   comma-separated list of internal proxy IPs/CIDRs. It defaults to empty, so
   public `X-Forwarded-For` headers cannot change rate-limit identity. The Plus

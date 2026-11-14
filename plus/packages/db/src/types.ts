@@ -6,6 +6,16 @@ import type { ColumnType, Generated } from "kysely";
 
 // pg returns jsonb as an object, but a parameter must be sent as JSON text.
 
+export interface AccountInviteRow {
+  id: string;
+  username: string;
+  token_digest: string;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  claimed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  issued_by: string;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+}
+
 export interface ActivityRow {
   id: string;
   title: string;
@@ -741,6 +751,7 @@ export interface VoteSessionRow {
 }
 
 export interface Database {
+  account_invite: AccountInviteRow;
   activity: ActivityRow;
   advancement_decision: AdvancementDecisionRow;
   archive_package: ArchivePackageRow;

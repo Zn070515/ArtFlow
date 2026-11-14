@@ -37,6 +37,25 @@ export function registerParticipant(username: string, password: string): Promise
   });
 }
 
+export interface InvitePreview {
+  readonly username: string;
+  readonly expiresAt: string;
+}
+
+export function previewInvite(token: string): Promise<InvitePreview> {
+  return apiFetch<InvitePreview>("/api/auth/invite-preview", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function claimInvite(token: string, password: string): Promise<SessionResponse> {
+  return apiFetch<SessionResponse>("/api/auth/claim-invite", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
 export async function logout(): Promise<void> {
   await apiFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
 }

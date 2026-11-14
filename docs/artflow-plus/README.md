@@ -60,6 +60,8 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 - 授权以账号当前状态为准：会话只证明认证；降权、停用、删除在下一次请求生效；
   `account.manage` 收口账号管理（ADR-0042）。
 - 活动复制只复制能力组合与当前草稿；发布、报名、评分、会话与结果不被复制。
+- 员工开户支持邀请：管理员只生成一次性令牌，原始令牌不落库；员工通过
+  `/claim#<token>` 自设 12 位以上密码后账号才激活。
 - Release 不可变：冻结 capability 版本、scopes 与冲突策略。
 - 模式隔离：事实/选票/排名/事件/投影按 mode 分区。
 - 实时通道只做失效提示；HTTP 是恢复权威；只有 `packages/realtime` 拥有传输。

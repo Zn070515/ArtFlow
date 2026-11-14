@@ -4,15 +4,21 @@ import {
   AccountParamsSchema,
   AccountResponseSchema,
   CreateAccountBodySchema,
+  InviteAccountBodySchema,
+  InviteAccountResponseSchema,
+  InviteRevokeResponseSchema,
   RevokeSessionsResponseSchema,
   UpdateAccountBodySchema,
   type AccountListQuery,
   type CreateAccountBody,
+  type InviteAccountBody,
   type UpdateAccountBody,
 } from "@artflow-plus/contracts";
 import {
   createAccount,
+  createAccountInvite,
   listAccounts,
+  revokeAccountInvite,
   revokeAccountSessions,
   updateAccount,
 } from "@artflow-plus/runtime";
@@ -71,6 +77,35 @@ export function registerAdminRoutes(ctx: ApiContext): void {
       const { username } = request.params as { username: string };
       const body = request.body as UpdateAccountBody;
       return { account: await updateAccount(db, await requestActor(request), username, body) };
+    },
+  );
+
+  app.post(
+    "/api/admin/accounts/invites",
+    {
+      schema: {
+        body: InviteAccountBodySchema,
+        response: { 201: InviteAccountResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      const body = request.body as InviteAccountBody;
+      const invite = await createAccountInvite(db, await requestActor(request), body);
+      return reply.status(201).send(invite);
+    },
+  );
+
+  app.delete(
+    "/api/admin/accounts/:username/invite",
+    {
+      schema: {
+        params: AccountParamsSchema,
+        response: { 200: InviteRevokeResponseSchema },
+      },
+    },
+    async (request) => {
+      const { username } = request.params as { username: string };
+      return revokeAccountInvite(db, await requestActor(request), username);
     },
   );
 
