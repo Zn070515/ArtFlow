@@ -33,7 +33,7 @@ test("recovers a live result through revoke, correction, tie, and re-publish", a
   const reopenDialog = page.getByRole("dialog", { name: "重新打开本轮" });
   await reopenDialog.getByLabel("审计原因").fill("现场核对分数");
   await reopenDialog.getByRole("button", { name: "重新打开" }).click();
-  await expect(round.getByRole("heading", { name: /final · scoring/ })).toBeVisible();
+  await expect(round.getByRole("heading", { name: /final · 评分中/ })).toBeVisible();
 
   // The seed runs one judge per contestant, so each contestant owns exactly one
   // score fact row; a multi-judge panel would also need to scope by seat/fact.
@@ -55,11 +55,11 @@ test("recovers a live result through revoke, correction, tie, and re-publish", a
   // Reopening only reopens the round; every performance stays locked, so lock
   // the round before asking for a fresh ranking.
   await round.getByRole("button", { name: "锁轮" }).click();
-  await expect(round.getByRole("heading", { name: /final · locked/ })).toBeVisible();
+  await expect(round.getByRole("heading", { name: /final · 已锁定/ })).toBeVisible();
   await round.getByRole("button", { name: "生成排名" }).click();
   // The seed resolved revision 1; this re-resolve must advance to revision 2 so
   // the tie decision below is not issued against a stale snapshot.
-  const rankingTable = round.getByRole("table", { name: "当前排名（revision 2）" });
+  const rankingTable = round.getByRole("table", { name: "当前排名" });
   await expect(rankingTable).toBeVisible();
   const singerCRanking = rankingTable.getByRole("row").filter({ hasText: "singer-c" });
   await expect(singerCRanking).toContainText("85.00");

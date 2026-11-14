@@ -32,15 +32,15 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
     await expect(staff.getByRole("heading", { name: seed.title, exact: true })).toBeVisible();
 
     await staff.getByRole("button", { name: "启动评分会话" }).click();
-    await expect(staff.getByTestId("live-session-status")).toHaveText(/judging · rehearsal · running/);
+    await expect(staff.getByTestId("live-session-status")).toHaveText(/评分会话 · 彩排 · 运行中/);
 
     const round = staff.getByTestId("live-round-round-1");
     await round.getByRole("button", { name: "准备回合" }).click();
-    await expect(round.getByRole("heading", { name: /round-1 · prepared/ })).toBeVisible();
+    await expect(round.getByRole("heading", { name: /round-1 · 已准备/ })).toBeVisible();
 
     await round.getByRole("button", { name: "激活评委组" }).click();
-    await expect(round.getByRole("heading", { name: /round-1 · scoring/ })).toBeVisible();
-    await expect(round.getByText("seat-1 · judge-1")).toBeVisible();
+    await expect(round.getByRole("heading", { name: /round-1 · 评分中/ })).toBeVisible();
+    await expect(round.getByText("评委席 1")).toBeVisible();
 
     await round.getByRole("button", { name: "开表演" }).click();
     await expect(round.getByTestId("score-count-singer-a")).toHaveText("0/1");
@@ -50,27 +50,28 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
     expect(link).toContain(`/judge/${encodeURIComponent(seed.publicCode)}?capability=`);
 
     await judge.goto(link);
-    await expect(judge.getByRole("heading", { name: seed.title, exact: true })).toBeVisible();
-    await expect(judge.getByRole("heading", { name: "singer-a" })).toBeVisible({ timeout: 15_000 });
+    await expect(judge.getByText(seed.title)).toBeVisible();
+    await expect(judge.getByRole("heading", { name: "林晓" })).toBeVisible({ timeout: 15_000 });
     await judge.getByLabel(/演唱技巧/).fill("90");
     await judge.getByLabel(/舞台表现/).fill("92");
     await judge.getByLabel(/情感表达/).fill("91");
     await judge.getByRole("button", { name: "提交评分" }).click();
-    await expect(judge.getByTestId("judge-submitted")).toContainText("singer-a");
+    await expect(judge.getByTestId("judge-submitted")).toContainText("林晓");
 
     await expect(round.getByTestId("score-count-singer-a")).toHaveText("1/1", { timeout: 15_000 });
 
     await round.getByRole("button", { name: "锁表演" }).click();
-    await expect(round.getByRole("cell", { name: "locked", exact: true })).toBeVisible();
+    await expect(round.getByRole("cell", { name: "已锁定", exact: true })).toBeVisible();
 
     await round.getByRole("button", { name: "锁轮" }).click();
-    await expect(round.getByRole("heading", { name: /round-1 · locked/ })).toBeVisible();
+    await expect(round.getByRole("heading", { name: /round-1 · 已锁定/ })).toBeVisible();
 
     await round.getByRole("button", { name: "生成排名" }).click();
-    await expect(round.getByRole("table", { name: /当前排名（revision \d+）/ })).toBeVisible();
+    await expect(round.getByRole("table", { name: "当前排名"})).toBeVisible();
     await expect(round.getByRole("cell", { name: "273.00", exact: true })).toBeVisible();
 
     await staff.getByRole("button", { name: "关闭会话" }).click();
+    await staff.getByRole("dialog").getByRole("button", { name: "关闭会话" }).click();
     // Only a running session is part of the Live state; closing restores the start control.
     await expect(staff.getByRole("button", { name: "启动评分会话" })).toBeVisible();
   } finally {

@@ -9,7 +9,7 @@ test("anonymous visitor opens the official results", async ({ page }) => {
   await expect(page).toHaveURL(/\/results\/E2E-DEMO$/);
   await expect(page.getByRole("heading", { name: "2026 院十佳", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "2026 院十佳 · 正式赛果" })).toBeVisible();
-  await expect(page.getByText("singer-a").first()).toBeVisible();
+  await expect(page.getByText("林晓").first()).toBeVisible();
   await expect(page.getByText("98.30").first()).toBeVisible();
   await expect(page.getByText("冠军")).toBeVisible();
   await expect(page.locator("body")).not.toContainText("fingerprint-not-public");
