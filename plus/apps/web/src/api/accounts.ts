@@ -38,17 +38,23 @@ export interface UpdateAccountInput {
   readonly expectedRevision: number;
 }
 
-export async function fetchAccounts(
-  includeParticipants = false,
-): Promise<readonly AccountSummary[]> {
-  const response = includeParticipants
-    ? await apiFetch<{ accounts: readonly AccountSummary[]; total: number }>(
-        "/api/admin/accounts?includeParticipants=true",
-      )
-    : await apiFetch<{ accounts: readonly AccountSummary[]; total: number }>(
-        "/api/admin/accounts",
-      );
-  return response.accounts;
+export interface FetchAccountsOptions {
+  readonly includeParticipants?: boolean;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export interface AccountPage {
+  readonly accounts: readonly AccountSummary[];
+  readonly total: number;
+}
+
+export function fetchAccounts(options: FetchAccountsOptions = {}): Promise<AccountPage> {
+  return apiFetch<AccountPage>("/api/admin/accounts", {}, {
+    ...(options.includeParticipants === true ? { includeParticipants: true } : {}),
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+    ...(options.offset === undefined ? {} : { offset: options.offset }),
+  });
 }
 
 export async function createAccount(input: CreateAccountInput): Promise<AccountSummary> {
