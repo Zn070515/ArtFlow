@@ -1,6 +1,6 @@
 # ADR-0031: Operational adoption, source-aware consumption, and public fail-closed
 
-- Status: accepted
+- Status: superseded by ADR-0036
 - Date: 2026-10-27
 - Supersedes: none; completes ADR-0030 for the v1 → v2 transition
 

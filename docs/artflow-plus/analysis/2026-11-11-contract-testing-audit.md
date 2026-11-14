@@ -77,7 +77,7 @@
 
 | 种子 | 规模 | 价值 |
 | --- | ---: | --- |
-| Capability 注册 | 11 个 Capability 文件 | dependencies / conflicts / commands / events / permissions / scopes / commandScopes |
+| Capability 注册 | 当时 11 个 Capability 文件（当前 13 个） | dependencies / conflicts / commands / events / permissions / scopes / commandScopes |
 | `executeCommand` 调用点 | 70 处，分布在 16 个 runtime 文件 | 命令 → 服务 → 事务边界 |
 | `appendEngineEvent` 调用点 | 76 处，分布在 17 个 runtime 文件 | 事实 → 事件 → 投影 / 实时 |
 | API 路由模块 | `plus/apps/api/src/routes/` 下按产品面拆分 | HTTP → runtime 服务 |

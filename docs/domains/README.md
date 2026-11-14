@@ -14,6 +14,10 @@ capability 拥有自己的业务语义与更丰富的生命周期。
 | Results / Publishing / Correction | [results.md](results.md) | RES-01…08、LIFE-03/04 |
 | Archive / Retention / Export | [archive.md](archive.md) | RES-07、DEPL-06、AUTH-05 |
 | Grouping / Group Chorus | [grouping.md](grouping.md) | GRP-01…09、LIFE-03/04 |
+| Tasks / Readiness | [tasks.md](tasks.md) | 版本化任务项、OCC、只读 readiness、不写 source capability |
+| Attendance / Check-in | [attendance.md](attendance.md) | ATT-01…08、append-only、mode 分区、票据分离 |
+| Schedule / Program Release | [schedule.md](schedule.md) | 单写路径、OCC、mode 隔离、append-only release |
+| Incident / Recovery | [incident.md](incident.md) | 显式状态机、OCC、事件审计、mode 隔离 |
 | Realtime（transport core） | [realtime.md](realtime.md) | RT-01…08 |
 
 `Evaluation` 是业务领域名称；当前 Plus registry 由 `competition` capability 负责
@@ -24,6 +28,7 @@ capability 拥有自己的业务语义与更丰富的生命周期。
 `RealtimeTopic`，不得自己建立连接。
 
 阅读顺序建议：activity → registration → evaluation → results → archive；
-voting/tickets 作为交叉 capability，grouping 发生在名单与比赛轮次之后，realtime
-是横切传输核心。Activity Pack 是这些 capability 的 opinionated 组合，不是新的
+voting/tickets 作为交叉 capability，grouping 发生在名单与比赛轮次之后，schedule
+在 Ops 与 Live 之间提供节目顺序，incident 横跨 Ops/Live 记录现场问题，tasks 与
+attendance 分别承载准备清单和现场到场，realtime 是横切传输核心。Activity Pack 是这些 capability 的 opinionated 组合，不是新的
 Activity 子类。

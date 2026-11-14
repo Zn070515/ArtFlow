@@ -1,6 +1,6 @@
 # ADR-0034: Split the public Portal and the operations Console shells
 
-- Status: proposed (direction fixed 2026-10-27; implementation in the next frontend round)
+- Status: accepted (direction fixed 2026-10-27; implemented)
 - Date: 2026-10-27
 - Related: ADR-0016, ADR-0002
 
@@ -54,6 +54,13 @@ acceptance gates live in
   become a gate failure.
 - The migration is visual and structural, not a product behavior change. API,
   authority, and E2E business journeys remain untouched.
+
+## Implementation
+
+`plus/apps/web/src/components/shell/PortalShell.tsx` and `ConsoleShell.tsx` are the
+two shells; Console routes (`/ops`, `/studio`, `/live`, `/judge`, `/join`, login)
+use the neutral workspace layout, while Portal keeps Afterglow. M15.4 added the
+public `/program/:publicCode` page to the Portal shell.
 
 ## Verification
 

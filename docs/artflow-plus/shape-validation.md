@@ -1,6 +1,6 @@
 # 三类活动验证报告（M8e-4）
 
-日期：2026-10-26
+日期：2026-10-26（M15.4/M15.5 后补注：stage-show 已含 schedule 与可选 incident）
 证据：`plus/packages/domain/test/registry-packs.test.ts`（pack 编译）+
 `plus/apps/api/test/activity-shapes.test.ts`（三条关键旅程）。
 
@@ -12,7 +12,7 @@
 | 形状 | Pack | 能力组合 | 关键旅程 |
 | --- | --- | --- | --- |
 | 现场歌手赛 | `singer-competition` | competition, registration, questionnaire, materials, publishing, archive | 创建/发布 → 报名/审核/名单 → judging session → prepare → panel → 开表演 → 2 位评委录分 → 锁表演/锁轮 → resolve → ranking |
-| 毕晚/节目征集 | `stage-show` | registration, questionnaire, materials, archive, schedule | 创建/发布 → 报名 + 问卷 + 作品 metadata → 审核 → 名单 final → close → archive；无 competition/publishing 行 |
+| 毕晚/节目征集 | `stage-show` | registration, questionnaire, materials, archive, schedule, incident（可选，默认关闭） | 创建/发布 → 报名 + 问卷 + 作品 metadata → 审核 → 名单 final → close → archive；无 competition/publishing 行 |
 | 作品评审赛 | `review-awards` | competition, publishing, archive, registration, questionnaire, materials | 创建/发布 → 报名/名单 → judging session → review 轮 → panel → 作品作为 performance → 录分 → 锁/排名 → publishing session → podium → confirm → release → 公开赛果 |
 
 ## 只靠配置就能成立的差异
@@ -33,7 +33,8 @@
 
 - singer pack 提供 1 个 final 轮（3 评委 / 最低 2 / average）与三项 rubric；
 - review-awards 提供 1 个 review 轮与主题/完成度/表现力 rubric；
-- stage-show 提供节目问卷与作品文件槽位。
+- stage-show 提供节目问卷、作品文件槽位与开场/节目/谢幕三个排期槽位；
+  singer/stage-show/review 都可选启用 `incident`（默认关闭）。
 
 Guided 创建因此产出可直接编译、发布、运行的 activity；Expert 仍可替换任意
 definition。

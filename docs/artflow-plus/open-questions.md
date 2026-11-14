@@ -9,7 +9,7 @@
 | Q2 | 实时通道选 WebSocket 还是 SSE？是否需要 Redis 广播？（已决，2026-10-27） | realtime 进程、降级策略 | WebSocket 核心 + 轮询兜底（ADR-0027）；SSE 已退役（ADR-0029）；Redis 多实例广播仍未实现 |
 | Q3 | 媒体/附件存本地卷还是对象存储？ | media 模块、备份、签名 URL | v2.0 本地卷 + 存储适配器；对象存储作为可选 |
 | Q4 | 历史数据迁移范围：只迁当前活动，还是全部历史？（已决，2026-11-06） | 导入命令、对账、存储 | 不迁移 v1 数据；v1 数据随源码归档，数据导入与 adoption 已删除 |
-| Q5 | 是否保留 v1 的 XLSX 导出格式？ | 归档/运营习惯 | 尚未实现；登记在 `skeleton-coverage.md` 的缺口表，计划保留人读 XLSX + 机器可读 JSON |
+| Q5 | 是否保留 v1 的 XLSX 导出格式？（已决，2026-11-14） | 归档/运营习惯 | 已实现：API 与 Console 均支持 CSV/DOCX/XLSX；DOCX/XLSX 经可选 export sidecar 渲染 |
 | Q6 | capability 的 scope 冲突策略由谁声明、如何版本化？（已决，2026-10-19） | execution session、Live 调度 | 每个 capability 在注册时声明 `scopeConflicts`；`validateComposition` 合并参与组合的能力；内核只执行策略 |
 | Q11 | Activity Pack 的依赖/冲突/兼容规则如何表达与校验？（已决，2026-10-19） | Studio 引导、capability 注册表 | `CapabilityManifest` 显式声明依赖/冲突；`createCapabilityRegistry` 在组装期校验，`instantiateActivityPack` 在实例化期返回带 code/path 的诊断（M2） |
 | Q12 | 第三个“结构不同的活动”选什么来验证抽象？（已决，2026-10-26） | 成功标准 §27 | 选 review-awards（作品评审+发布）；第四形状 vote-poll 也已验证。见 `shape-validation.md` |

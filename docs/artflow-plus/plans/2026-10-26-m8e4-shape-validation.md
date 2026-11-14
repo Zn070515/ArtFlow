@@ -1,5 +1,7 @@
 # M8e-4 Shape Validation Implementation Plan
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship three Guided packs with default capability definitions and prove the singer, stage-show, and review-awards shapes through automated key journeys and an isolated validation report. A real-activity rehearsal is not part of acceptance.

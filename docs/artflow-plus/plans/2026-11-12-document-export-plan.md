@@ -1,5 +1,7 @@
 # Controlled DOCX/XLSX Export Implementation Plan
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 - Date: 2026-11-12
 - Design: [document-export-design](../specs/2026-11-12-document-export-design.md)
 - Status: implemented (2026-11-12)

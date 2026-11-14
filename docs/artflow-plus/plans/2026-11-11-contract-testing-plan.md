@@ -1,5 +1,7 @@
 # 契约测试与消费者故障注入：实施计划
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 日期：2026-11-11。
 范围：`plus/`。
 任务书：[2026-11-11-contract-testing-program-design.md](../specs/2026-11-11-contract-testing-program-design.md)。

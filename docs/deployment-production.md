@@ -15,13 +15,16 @@ proxy（Caddy，唯一发布主机端口的服务）
   ↓ artflow_internal
   ├── plus-web   静态前端 + /api 反向代理（不发布主机端口）
   ├── plus-api   Fastify HTTP + WebSocket（不发布主机端口）
-  └── plus-worker outbox relay（不发布端口）
+  ├── plus-worker outbox relay（不发布端口）
+  └── plus-export 可选 export profile；只渲染 DOCX/XLSX（不发布端口、无数据库凭证）
         ↓
 plus-db（PostgreSQL 18，持久卷 plus_postgres_data）
 ```
 
-三个 Plus 镜像（`artflow-plus-api`、`artflow-plus-worker`、`artflow-plus-web`）必须
-来自同一个 `v*` release，并在 `.env.production` 中用 `@sha256:...` digest 固定。
+四个发布镜像（`artflow-plus-api`、`artflow-plus-worker`、`artflow-plus-web`、
+`artflow-plus-export`）必须来自同一个 `v*` tag，并在 `.env.production` 中用
+`@sha256:...` digest 固定。`plus-export` 是可选 profile：启用时只做文档渲染，
+不接数据库、不发布端口；不启用时 API 仍提供 CSV，DOCX/XLSX 返回 503。
 `GET /healthz` 匿名可用且只返回通用状态。
 
 ## 启动前
@@ -30,7 +33,7 @@ plus-db（PostgreSQL 18，持久卷 plus_postgres_data）
    `set-a-` 占位值。
 2. 为 `plus-db` 设置强数据库口令；`ARTFLOW_PLUS_CREDENTIAL_SECRET` 至少 32 字节，
    不要复用数据库口令或 v1 密钥。
-3. 三个 Plus 镜像、PostgreSQL 和 Caddy 都必须是 digest 引用；`ARTFLOW_RELEASE_SHA`
+3. 四个 Plus 镜像、PostgreSQL 和 Caddy 都必须是 digest 引用；`ARTFLOW_RELEASE_SHA`
    与镜像的 OCI revision 一致。
 4. `CADDY_SITE_ADDRESS` 的 DNS 必须已经指向本机，并允许 ACME 流量。
 5. `ARTFLOW_PLUS_MEDIA_DIR` 和 `ARTFLOW_PLUS_ARCHIVE_DIR` 指向持久卷；不要把它们
@@ -42,8 +45,9 @@ plus-db（PostgreSQL 18，持久卷 plus_postgres_data）
 docker compose -f deploy/compose.production.yml --env-file .env.production up -d --wait
 ```
 
-如果部署环境启用了 Compose profile，按环境文档追加 `--profile plus`。只通过
-`proxy` 访问服务；`plus-api`、`plus-worker`、`plus-db` 不发布主机端口。
+如需 DOCX/XLSX 导出，追加 `--profile export` 启动 `plus-export`；其余服务不需要
+profile。只通过 `proxy` 访问服务；`plus-api`、`plus-worker`、`plus-db`、`plus-export`
+不发布主机端口。
 
 检查：
 
@@ -65,13 +69,14 @@ pnpm --filter @artflow-plus/api create-account --username organizer
 
 生产环境对生产库执行同一命令，口令由密钥管理提供；不要复用开发库口令。重复执行会
 更新同一用户名。默认权限覆盖 Studio、报名审核、名单定稿、比赛、评委入口、票据、
-投票、结果、归档、材料和签到；需要收窄时用 `--permissions a,b`。
+投票、结果、归档、材料、签到；Tasks、Schedule、Incident 需要显式追加
+`tasks.manage`、`schedule.manage`、`incident.manage`。需要收窄时用 `--permissions a,b`。
 
 ## 发布与升级
 
 - 发布只由 `v*` tag 触发；普通 push 不构建生产镜像。
 - 升级前先按 [备份与恢复](artflow-plus/backup-restore.md) 生成 Plus 备份。
-- 三个镜像必须来自同一个 tag，并在 `.env.production` 中同时替换 digest 和
+- 四个镜像必须来自同一个 tag，并在 `.env.production` 中同时替换 digest 和
   `ARTFLOW_RELEASE_SHA`。
 - 不要用根目录的本地 Compose 管理生产卷；不要执行会删除 `plus_postgres_data`、
   `plus_archive_data` 或 `plus_media_data` 的命令。

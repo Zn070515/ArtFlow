@@ -21,6 +21,14 @@ v1 的现场部署经验：浏览器必须只看到一个 origin；慢媒体下�
 - **健康检查**：liveness 与 readiness 分离；可选依赖不参与 readiness。
 - **发布**：只有显式版本 tag 触发镜像发布；生产锁版本或 digest。
 
+## 补注（2026-11-14）
+
+当前 ArtFlow-Plus 不再使用单个应用镜像加 web/media/realtime 进程角色。生产拓扑是
+`plus-api`、`plus-worker`、`plus-web` 三个常驻镜像，外加可选 `export` profile 的
+`plus-export`（只渲染 DOCX/XLSX，无数据库凭证、不发布端口）。单来源、不可变镜像、
+digest 固定与 tag-only 发布仍然有效；媒体目前经 API 受控路由读取，不再有独立 media
+worker。
+
 ## 后果
 
 - 部署脚本与契约测试需要覆盖上述不变量；

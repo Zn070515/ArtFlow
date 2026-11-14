@@ -1,5 +1,8 @@
 # M2-D1 结果闭场恶意彩排矩阵
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
 本矩阵只允许在本机或专用隔离环境执行。目标是验证 `StageResult`、`StageAwardDecision`、`Award` 和原始事实锁定之间的 authority 边界，不是证明公网抗 DDoS。默认脚本只接受 localhost/127.0.0.1/::1 目标，单请求 5 秒超时，按顺序发少量 mutation/export 请求，不做并发压测，禁止对学校网络、公共域名或第三方服务发压测。
 
 ## 放行不变量

@@ -1,7 +1,7 @@
 # Controlled DOCX/XLSX Export Design
 
 - Date: 2026-11-12
-- Status: accepted for implementation
+- Status: implemented (renderer-only sidecar + Ops ExportCard)
 - Scope: the four existing controlled export datasets, plus DOCX/XLSX rendering
 - Roadmap: [product-path gaps](../roadmap.md)
 

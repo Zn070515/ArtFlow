@@ -71,8 +71,9 @@ environment 中出现；模板、manifest 和 settings 三处集合相等。
 
 ## DEPL-04 一个公开来源，内部进程不发布端口
 
-**规则**：浏览器只看到一个 origin；`/media/*` 和 `/ws/*` 由同一来源代理到
-专用 worker；web/media/realtime/db 不直接发布 host port。
+**规则**：浏览器只看到一个 origin；当前由 `plus-web` 代理 `/api` 与 WebSocket，
+私有媒体经受控 API 路由读取；`plus-api`、`plus-worker`、`plus-web`、可选
+`plus-export` 与 `plus-db` 都不直接发布 host port，只有 `proxy` 发布 443。
 
 **为什么**：v1 的 event profile 只发布 proxy；否则页面会从 8000 拼 WebSocket
 URL 去连 Gunicorn，实时协作静默退化为轮询。

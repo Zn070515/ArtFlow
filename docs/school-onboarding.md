@@ -24,9 +24,13 @@ Judge 是活动范围内的临时身份；工作人员和管理员仍是唯一�
 
 生产 Web 只允许通过批准的反向代理进入；TLS 证书、可信 forwarded-header 配置、WAF、连接超时、慢连接防护、连接数限制和 volumetric DDoS 由学校网络或批准的边缘平台负责。应用限流、请求体上限和会话撤销是纵深防御，不能替代边缘防护。上线前应保留配置审查、告警测试和小规模受控攻击测试证据；禁止在学校公网执行未批准的压力或攻击实验。
 
-数据库保持私有，PostgreSQL 备份必须恢复到隔离目标并运行 Django check；恢复演练不得重置源卷。生产环境、域名、TLS、WAF 和备份目标均需由部署方提供实际证据。
+数据库保持私有，PostgreSQL 备份必须按 [Plus 备份与恢复](artflow-plus/backup-restore.md)
+恢复到隔离目标并运行 `restore_plus_verify.sh`；恢复演练不得重置源卷。生产环境、域名、TLS、WAF 和备份目标均需由部署方提供实际证据。
 
-## 本地结果闭场证据的边界
+## 本地结果闭场证据的边界（v1 历史证据）
+
+> 以下 M2-D1/D2 描述的是 v1 Django 的 `PublicPost`/`ResultRelease` 术语，仅作历史证据；
+> 当前 Plus 对应 `publishing` capability 与 [结果领域](domains/results.md)。
 
 ArtFlow 的 M2-D1 闭场预检只证明应用内部结果链条可以解释：当前冻结赛制、当前输入指纹、原始事实锁定、上游核定、Award/晋级入口来源和管理员纠正审计。`READY_TO_CONFIRM` 不是正式结果；解锁后的旧来源也不能作为正式列表或导出的 authority。该预检不创建公开文章，不代表 `PublicPost.PUBLISHED`，更不产生 `RELEASED` 的学校业务状态。
 
@@ -37,7 +41,7 @@ M2-D2 的结果公示边界同样只属于应用内部 authority：`PublicPost.P
 不包含完整指纹、token、评分明细或学生私密字段。该链条不能替代学校对公开内容审批、
 SSO/MFA、TLS/WAF、DDoS、留存和部署责任的书面证据。
 
-部署交接时可以把闭场报告作为应用证据附件，但必须另外提供学校/部署方签署的身份与 MFA、代理 forwarded-header 信任、TLS、WAF、慢连接/连接数/volumetric DDoS、数据库私网、备份隔离恢复、保存期限和事件联系人证据。缺少任一外部证据，学校接入结论仍为 `HOLD`；本地 Pyright、Django 测试或 bounded rehearsal 不能替代这些责任。
+部署交接时可以把闭场报告作为应用证据附件，但必须另外提供学校/部署方签署的身份与 MFA、代理 forwarded-header 信任、TLS、WAF、慢连接/连接数/volumetric DDoS、数据库私网、备份隔离恢复、保存期限和事件联系人证据。缺少任一外部证据，学校接入结论仍为 `HOLD`；本地 typecheck、Plus 测试或 bounded rehearsal 不能替代这些责任。
 
 ## 交接结论
 

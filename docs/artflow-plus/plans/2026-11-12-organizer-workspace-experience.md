@@ -1,5 +1,7 @@
 # Organizer Workspace Experience Implementation Plan
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a role-aware organizer workspace that turns the existing Studio, Ops, Live, and Portal capabilities into one navigable activity workflow without adding a second business authority.

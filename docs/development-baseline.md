@@ -91,7 +91,9 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   to appear in the command line. Running the command again updates that
   username. The default permission set covers Studio, registration review,
   roster finalization, competition, judge entry, ticketing, voting, results,
-  archive, materials, and attendance. Pass `--permissions a,b` to replace that
+  archive, materials, and attendance. Tasks, schedule, and incident are not in
+  the default set; add `--permissions ...,tasks.manage,schedule.manage,incident.manage`
+  when those capabilities are enabled. Pass `--permissions a,b` to replace the
   set, or `--roles` to replace the default `admin` role. Production runs the
   same command against the production database URL with a secret-managed
   password. Do not reuse the development password.
@@ -147,8 +149,9 @@ pnpm --filter @artflow-plus/web exec playwright install --with-deps chromium
 pnpm --filter @artflow-plus/web test:e2e
 ```
 
-The E2E seed command populates the public result, registration, live, grouping, and
-voting journeys. It never touches the development schema.
+The E2E seed command populates the public result, registration, live, grouping,
+voting, studio, schedule, and incident journeys. It never touches the development
+schema.
 
 ## Troubleshooting
 

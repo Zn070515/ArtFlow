@@ -1,5 +1,8 @@
 # 院十佳决赛生产流程
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
 这份说明面向操作当前学年院十佳决赛的工作人员，记录从历史模板到当年正式运行的完整路径，以及各步骤背后的权威边界。工程约定见[开发基线](development-baseline.md)；验收使用自动化关键旅程、隔离 smoke 与 owner acceptance，不安排真实活动彩排。
 
 ## 活动语义

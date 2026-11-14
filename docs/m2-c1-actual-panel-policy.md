@@ -1,6 +1,7 @@
 # M2-C1 Actual Panel Policy
 
-状态：批准进入实现
+状态：历史设计记录（当时批准进入实现）；当前行为以 Plus `competition` capability 与
+[`docs/domains/evaluation.md`](domains/evaluation.md) 为准。
 
 ## 目标
 

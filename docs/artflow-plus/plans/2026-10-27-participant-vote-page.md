@@ -1,5 +1,7 @@
 # Participant Vote Page Implementation Plan
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give voters a public `/vote/<sessionId>` page that loads candidates, records a browser/ anonymous ballot, shows an already-voted state, and lets Ops share a link + QR.

@@ -7,10 +7,10 @@ imports it.
 
 ## Current state
 
-M0–M15.2 are complete. The workspace covers the full activity journey —
+M0–M15.5 are complete. The workspace covers the full activity journey —
 registration → evaluation → voting → publishing → archive — plus grouping, the
-public vote page, ticket-backed voting, analytics, tasks, and one protected
-realtime core. Milestone exits and evidence live in
+public vote page, ticket-backed voting, analytics, tasks, attendance, schedule
+release, incident recovery, and one protected realtime core. Milestone exits and evidence live in
 `docs/artflow-plus/roadmap.md`; the remaining v1 coverage gaps are tracked in
 `docs/artflow-plus/skeleton-coverage.md`.
 
@@ -31,8 +31,13 @@ source capability. M15.3 adds an optional independent `attendance` capability:
 activity points, a staff roster, append-only check-in facts, and a
 mode-partitioned current projection. Check-in and undo require a running
 `checkin` execution session; ticket check-in stays independent of ticket redeem
-and never changes ticket state. The next slices are schedule/program release and
-incident/recovery.
+and never changes ticket state. M15.4 adds `schedule`: ordered program slots,
+versioned entry/release rows, a mode-partitioned current pointer, an Ops editor,
+a Live summary, and an anonymous `/program/<publicCode>` page that fails closed.
+M15.5 adds `incident`: an open → acknowledged → resolved → reopened lifecycle,
+mode isolation, audited commands, and Ops/Live surfaces. Studio Professional Mode
+adds per-capability structured editors plus the raw JSON tab without dropping
+unknown fields.
 
 The Live console and the voting card share the single WebSocket core in
 `packages/realtime`. Sockets only invalidate queries; HTTP remains the recovery
@@ -127,7 +132,8 @@ development. The [development baseline](../docs/development-baseline.md)
 has the same step.
 
 Local start uses `tsx` so workspace packages resolve TypeScript sources directly;
-production packaging is part of the M8 deployment slice.
+production images are built from `deploy/compose.production.yml` and pinned by
+`@sha256:` digest.
 
 The root `check:plus` / `test:plus` scripts delegate to the same pnpm commands.
 The Gates workflow runs both on every `artflow-plus` push/PR and supplies the
@@ -150,7 +156,8 @@ instantiateActivityPack(SINGER_COMPETITION_PACK, registry, { answers })
 
 The default registry exposes every implemented capability (`registration`,
 `questionnaire`, `materials`, `competition`, `voting`, `ticketing`,
-`publishing`, `archive`, and `grouping`). A Pack that references an unknown
+`publishing`, `archive`, `grouping`, `tasks`, `attendance`, `schedule`, and
+`incident`). A Pack that references an unknown
 capability fails with `CAPABILITY_UNKNOWN` diagnostics rather than producing
 placeholders.
 
@@ -314,16 +321,13 @@ new architecture.
 1. Close the remaining v1 coverage gaps in
    `docs/artflow-plus/skeleton-coverage.md`. The Django source is already gone
    from `main` and is preserved in tag `v1.0.2`.
-2. Close the remaining product gaps: a public program page for stage shows,
-   bracket/composite scoring, XLSX export, on-site display, and multi-instance
-   realtime broadcast.
-3. Split the frontend into the public Portal shell and the operations Console
-   shell before the next UX round; the fixed direction, desktop layout and
-   acceptance gates are in `docs/artflow-plus/frontend-design-direction.md`.
-4. Close the M7→M13.3 high review findings (production relay, proxy rate limits,
-   body ceilings, adopted-archive keys, historical read-only, post-confirmation
-   score correction, and the P2 items) listed in
-   `docs/artflow-plus/reviews/2026-10-27-m7-m13-high-review.md`.
+2. Close the remaining product gaps: bracket/composite scoring, a generic
+   registration/result QR entry, on-site display, post-event feedback, and
+   multi-instance realtime broadcast.
+3. The Portal/Console shell split is implemented (ADR-0034); continue page-level
+   polish against `docs/artflow-plus/frontend-design-direction.md`.
+4. The M7→M13.3 high review findings are closed; keep their regressions in the
+   focused gates rather than reopening the list.
 
 ## M7a publishing / results
 
@@ -523,10 +527,11 @@ $env:ARTFLOW_PLUS_DATABASE_URL = "postgresql://artflow:artflow_dev@127.0.0.1:543
 pnpm -C plus --filter @artflow-plus/api exec vitest run test/activity-shapes.test.ts
 ```
 
-Known gaps (documented in `docs/artflow-plus/shape-validation.md`): no public
-program page for stage shows, no bracket/composite scoring, no XLSX export,
-on-site display, or multi-instance realtime broadcast. Participant account
-claim is delivered by M14.1; ticket-backed voting entry is delivered by M14.
+Known gaps (documented in `docs/artflow-plus/shape-validation.md`): no
+bracket/composite scoring, no on-site display, and no multi-instance realtime
+broadcast. The public program page (M15.4), Console CSV/Word/Excel export
+(Word/Excel need the optional export sidecar), participant accounts, and
+ticket-backed voting entry are delivered.
 
 ## M6 feature slice and M6.5 authority hardening complete
 

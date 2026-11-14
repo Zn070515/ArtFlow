@@ -153,7 +153,7 @@ React 19 + Vite 8 + TanStack Router/Query、Vitest 5 + fast-check 4、Playwright
 
 ## 部署与可靠性
 
-- 模块化单体优先；一个应用镜像，web/media/realtime 三个进程角色。
+- 模块化单体优先；四个发布镜像：`plus-api`、`plus-worker`、`plus-web`，以及可选 `plus-export`（renderer-only）。
 - 单公开来源；媒体经受控网关；静态产物与镜像同版。
 - PostgreSQL 事实源；outbox + pg-boss；Redis 仅增强实时。
 - 实时失败只降低可见性，不破坏正确性。
@@ -162,7 +162,7 @@ React 19 + Vite 8 + TanStack Router/Query、Vitest 5 + fast-check 4、Playwright
 ## 测试与门禁
 
 - 领域单元 + 反例 + 属性测试（fast-check）。
-- 实现无关 Golden fixtures（v1 与 v2 共用）。
+- 实现无关 Golden fixtures（Plus-only；v1 adapter 已移除）。
 - Contract tests（capability 之间、HTTP 错误码）。
 - 真实 PostgreSQL 双线程并发测试。
 - 关键现场旅程 E2E。
@@ -172,4 +172,4 @@ React 19 + Vite 8 + TanStack Router/Query、Vitest 5 + fast-check 4、Playwright
 
 - v1 是 reference implementation，不是必须保留的架构。
 - 按 vertical slice 切换；同一业务事实在任一时刻只有一个实现是权威。
-- v1 的实现 bug 只修 v1；业务不变量提炼进 Golden/不变量，用 v2 重新实现。
+- v1 已归档在 tag `v1.0.2`；修复只落 `main`/v2，业务不变量提炼进 Golden/不变量。

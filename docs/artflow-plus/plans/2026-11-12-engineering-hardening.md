@@ -1,5 +1,7 @@
 # 工程加固：文件拆分、DB 生成链、L3/L4 测试与文档口径
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 日期：2026-11-12。
 范围：`plus/` 与 `docs/`。
 上游材料：[契约测试任务书](../specs/2026-11-11-contract-testing-program-design.md)、

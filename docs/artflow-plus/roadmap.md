@@ -1,9 +1,9 @@
 # ArtFlow-Plus 路线图
 
-状态：**M0–M15.2 已完成**（2026-10-28），并完成单线化与 v1 兼容层移除（2026-11-06）；`main` 是唯一开发主线，v2 是唯一产品线。
+状态：**M0–M15.5 已完成**（2026-11-14），并完成单线化与 v1 兼容层移除（2026-11-06）；`main` 是唯一开发主线，v2 是唯一产品线。
 v1 兼容层（legacy bundle 导入、运营接管、参与者认领、v1 媒体桥、cutover）已按
-ADR-0036 删除；Django 1.x 源码暂留到外部审核与
-[v1→v2 覆盖审计](skeleton-coverage.md) 关闭。产品与架构身份的权威是根目录
+ADR-0036 删除；Django 1.x 源码已从 `main` 移除，完整源码保存在 tag `v1.0.2`，
+功能记录见 [`docs/archive/v1/`](../archive/v1/README.md)。产品与架构身份的权威是根目录
 `GOAL.md`；本文件记录每个里程碑的可执行出口（测试/golden/门禁）与证据。已完成
 里程碑的段落保留当时的实现描述；标有"已移除"的段落只作历史记录，不再对应代码。
 
@@ -57,7 +57,7 @@ fast-check 已迁移，属性测试覆盖 hash 稳定性、陈旧 revision、clo
 **出口**：Singer Pack 在完整注册表上生成可编译的空定义；依赖/冲突诊断正确；
 Gate 检查 capability 边界。真实 Registration 等 capability 在
 M4–M7 分片实现；M2 当时的默认注册表只暴露 `competition`，后续里程碑已扩展到
-当前全部九个 capability。
+当前全部 13 个 capability。
 
 ## M3 — Execution Runtime（已完成，2026-10-19）
 
@@ -109,7 +109,7 @@ Evaluation/Voting 等 capability 仍由 M5-M7 实现。
 - 报名 DRAFT→OPEN→REVIEW→FINAL；问卷版本与文件槽位；材料 metadata、所有权与审核
   权威已完成，实际字节存储/受控媒体网关留给后续媒体 slice。
 - 名单 FINAL/UNKNOWN；执行边界 fail closed。
-- 从 v1 导入历史报名（可重放）。
+- ~~从 v1 导入历史报名（可重放）。~~ 已移除（ADR-0036）；v2 不导入 v1 数据。
 
 - 本地 session 登录与 bearer actor 派生已接入 M4 HTTP 写路径；权限在 command
   handler 内检查，actor 不从 body/header 自定义字段读取。
@@ -189,9 +189,9 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
 > ready。
 
 - Studio/Ops/Live/Portal 四个产品面按 capability 贡献组装。
-- 按入口切换 v1 → v2；双环境并行验证。
-- 数据导入/对账；回滚开关；操作手册。
-- v1 只读保留窗口结束后再删除。
+- ~~按入口切换 v1 → v2；双环境并行验证。~~ 已完成并随 ADR-0036 归档。
+- ~~数据导入/对账；回滚开关；操作手册。~~ 已移除（ADR-0036）；v2 不导入 v1 数据。
+- v1 源码已从 `main` 删除，保存在 tag `v1.0.2`。
 
 ### M8a — Web Shell + Portal（已完成，2026-10-26）
 
@@ -243,8 +243,8 @@ registration/material/vote/score 的 mode 缺口留给后续 hardening。
   媒体只迁元数据；历史快照直接导入并可在公开页展示；无法表达的结构进入
   `unsupported`。ADR-0021。
 - **M8e-3 入口切换与回滚（已完成，2026-10-26）**：Plus api/web 生产镜像
-  （esbuild + nginx）、Compose `plus` profile、Caddy site profile 主域名整体
-  替换、只读 smoke、cutover runbook、staff 账号 provision。回滚边界为首次 v2
+  （esbuild + nginx）、Compose 部署（当时使用 `plus` profile；现无通用 profile，仅 `export` 可选）、
+  Caddy site profile 主域名整体替换、只读 smoke、cutover runbook、staff 账号 provision。回滚边界为首次 v2
   正式写入前；切后参与者只读。ADR-0023。
 - **M8e-4 自动化三类活动验证（已完成，2026-10-26）**：新增 stage-show /
   review-awards packs，Pack 可携带默认 capability definitions；三条关键旅程
@@ -266,7 +266,7 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - 新 `grouping` capability：四态生命周期、append-only 成员历史、两种名单来源、
   材料窗口状态、release `groupCount` 校验、活动级消费保护。
 - Ops 三步卡片（分组 → 确认 → 冻结），修正/取消/材料窗口收进「更多操作」。
-- 归档阻塞与归档包 `grouping.json`/CSV；v1 导出与导入分组。
+- 归档阻塞与归档包 `grouping.json`/CSV；v1 导出与导入分组（已按 ADR-0036 移除）。
 - 出口：domain/db/runtime/api/web E2E 全绿；GRP-01…09 写入不变量。
 
 ## M10 — Vote-Result Publishing（已完成，2026-10-27）
@@ -498,5 +498,4 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 
 - 多租户、计费、开放生态。
 - 全量 UI 先行的重写；页面必须跟随 slice。
-- 一次性删掉 v1；先证明没有入口指向它。
 - 把非比赛活动强行塞进比赛 DAG。

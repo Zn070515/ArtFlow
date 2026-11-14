@@ -31,7 +31,8 @@ secret/session token 不得进入 manifest、日志、导出或演练产物。�
 `pg_restore` 前先验证两个归档 SHA，并拒绝运行 web 镜像的 OCI revision 与 manifest 不一致。
 失败时保留源服务和卷，记录失败原因后重新演练。
 
-当前生产数据库基线是 PostgreSQL 16；Web 镜像内的 `pg_dump`/`pg_restore` 也固定为
+v1 当时的生产数据库基线是 PostgreSQL 16（当前 ArtFlow-Plus 使用 PostgreSQL 18，见
+[Plus 备份与恢复](artflow-plus/backup-restore.md)）；v1 Web 镜像内的 `pg_dump`/`pg_restore` 固定为
 `postgresql-client-16`，避免用更高版本生成数据库 16 无法读取的 custom-format dump。
 如果未来升级 PostgreSQL 主版本，必须同步更新生产数据库镜像、Web 镜像客户端和隔离
 恢复目标，并重新完成整套备份恢复验收。

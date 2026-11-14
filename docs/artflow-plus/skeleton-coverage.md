@@ -1,8 +1,8 @@
 # v1 → v2 功能覆盖审计
 
-状态：执行基线（2026-11-06）。本文回答一个问题：**在删除 1.x Django 源码之前，
-Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与删除门槛，不是"v1 功能
-必须逐行移植"的清单；v2 以 capability 组合实现同一业务事实。
+状态：已关闭（2026-11-06 删除 1.x 源码；2026-11-14 补齐 M15 能力）。本文回答
+一个问题：**Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与删除门槛，
+不是"v1 功能必须逐行移植"的清单；v2 以 capability 组合实现同一业务事实。
 
 ## 覆盖结论
 
@@ -16,7 +16,8 @@ Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与�
 | 赛制/轮次/席位 | `ruleset/`、`singer_contest` | `competition` | 已覆盖 |
 | 评委评分/快速录分/代录/纠错 | `singer_contest`、`judge_*` | `competition` | 已覆盖 |
 | 观众投票 | `voting/` | `voting` | 已覆盖 |
-| 票据/入场/签到 | `tickets/`、`entry_access/` | `ticketing` | 已覆盖 |
+| 票据/入场 | `tickets/`、`entry_access/` | `ticketing` | 已覆盖 |
+| 现场签到 | `entry_access/`、staff 手工登记 | `attendance`（participant/ticket/staff） | 已覆盖 |
 | 结果候选/核定/发布/撤销 | `public_portal/services.py` | `publishing` / Results | 已覆盖 |
 | 归档包 | `archive/` | `archive` | 已覆盖 |
 | Live 状态/断线恢复 | `realtime/`、`public_portal/live_state.py` | `@artflow-plus/realtime` + HTTP 恢复 | 已覆盖 |
@@ -27,18 +28,19 @@ Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与�
 | 实时通道 | v1 Channels | 单一 WebSocket 核心 | 已覆盖 |
 | 运营分析 | v1 staff 统计页 | `analytics` + Ops | 已覆盖 |
 | 任务/准备清单 | v1 无对应 | `tasks` | v2 新增 |
+| 节目单/节目顺序 | `farewell_show/` 的 `Program` 与 order | `schedule` + `/program` | 已覆盖 |
+| 事故记录 | `incidents/` | `incident` | 已覆盖 |
 
-## 仍缺口的 v1 功能
+## 覆盖跟进（含已关闭项）
 
 | 缺口 | v1 证据 | 影响 | 计划 |
 | --- | --- | --- | --- |
 | 公开公告 / 往届风采 / 活动文章 | `public_portal/` 的 `PublicPost` 类型与页面 | Portal 只有活动结果与报名入口 | 新 capability 或扩展 `publishing` 的非结果内容 |
-| 舞台类节目单公开页 / 节目顺序 | `farewell_show/` 的 `Program` 与 order | 已由 M15.4 `schedule` + `/program` 页覆盖 | 已完成 |
-| XLSX 导出 | `exports/`、`staff_panel` 导出 | API 已支持 csv/docx/xlsx；Console 仍只暴露 CSV 入口 | 补 Console 格式选择，不塞进 capability |
-| Word / 微信推文生成 | `exports/` 的 `ArticleTemplate`、`GeneratedDocument` | 无法一键生成推文 | 独立内容生成模块 |
+| XLSX/Word 导出 | `exports/`、`staff_panel` 导出 | 已覆盖：API 与 Console 均支持 csv/docx/xlsx；DOCX/XLSX 需要可选的 export sidecar | 已完成 |
+| 微信推文生成 | `exports/` 的 `ArticleTemplate`、`GeneratedDocument` | Word/DOCX 已由 export sidecar 覆盖；推文仍无法一键生成 | 独立内容生成模块 |
 | bracket / 对阵 / 复合分 | `ruleset/` 的淘汰赛表达 | v2 competition 只表达 round/panel/score | 新 capability |
 | 现场大屏 | v1 结果板/主持手卡视图 | Live 只做失效提示与操作台 | 展示层项目 |
-| 事故记录 | `incidents/` | 已由 M15.5 `incident` 覆盖（open/acknowledge/resolve/reopen） | 已完成 |
+| 活动后反馈 | v1 无对应 | 没有 post-event feedback | incident milestone 的后续 slice |
 | 活动克隆 | `staff_panel` clone | v2 只能新建 definition | 可评估为"有意放弃" |
 | SSO provider | 无（v1 本地账号） | 当前使用本地会话 | 待 RFC |
 | 多实例实时广播 | v1 Channels + Redis | 单实例实时；HTTP 恢复仍可靠 | 待规模需要 |

@@ -1,6 +1,6 @@
 # ArtFlow-Plus 前端视觉方向：Portal / Console 双壳
 
-状态：**Proposed**（2026-10-27）——方向已固定，前端实现与页面迁移留到下一轮。
+状态：**Implemented**（方向固定于 2026-10-27；Console 壳与逐页迁移已完成，ADR-0034 accepted）。
 
 > Token、primitive 与响应式的实施规格见
 > [`2026-11-12-design-token-system-design.md`](specs/2026-11-12-design-token-system-design.md)。
@@ -31,7 +31,7 @@ Afterglow（深墨底、香槟金、FBM 极光、金属圆环、Fraunces 展示�
 2. **新建 Console 壳，承接 Ops / Studio / Live / Judge。**
 3. 两壳共享颜色与品牌标记，不共享页面骨架、字号体系、动效和卡片密度。
 
-下一轮先按本文件实现 Console Shell 与 Ops 页面，再逐页迁移；公开 Portal 只做收敛，不做第二次重设计。
+Console Shell 与 Ops/Studio/Live/Judge 页面已按本文件迁移；公开 Portal 只做收敛，不做第二次重设计。
 
 ## 2. 现状证据
 
@@ -39,13 +39,13 @@ Afterglow（深墨底、香槟金、FBM 极光、金属圆环、Fraunces 展示�
 |---|---|
 | 全屏 WebGL 背景挂载在所有路由 | `src/routes/__root.tsx:13` 无条件渲染 `AuroraScene` |
 | 内部页复用公开结果页的标题样式 | `src/routes/ops.tsx:45`、`opsActivity.tsx:61`、`studio.tsx:45`、`studioActivity.tsx:102`、`live.tsx:45`、`liveActivity.tsx:63`、`judge.tsx:120` 均使用 `display results-title` |
-| 内部标题最大 6.4rem（约 102px） | `src/styles/global.css:972` |
-| 内容区顶部 8vh、底部 12vh | `src/styles/global.css:152` |
-| 玻璃卡统一 26px 模糊 + 30/90 阴影 | `src/styles/global.css:463`、`:977`、`:167` |
-| 只有 720px 与 900px 两个布局断点 | `src/styles/global.css` 的 `@media` |
-| 15 种字号，5 种低于 0.75rem（约 9.9–11.8px） | `src/styles/global.css` 字号统计 |
+| 内部标题最大 6.4rem（约 102px） | `src/styles/console.css` 与 `base.css` 的字号 token |
+| 内容区顶部 8vh、底部 12vh | `src/styles/base.css` 的布局间距 |
+| 玻璃卡统一 26px 模糊 + 30/90 阴影 | `src/styles/base.css` 的卡片样式 |
+| 只有 720px 与 900px 两个布局断点 | `src/styles/*.css` 的 `@media` |
+| 15 种字号，5 种低于 0.75rem（约 9.9–11.8px） | `src/styles/base.css` 与 `console.css` 的字号统计 |
 | 使用但 CSS 未定义的 class | `button-primary`、`button-secondary`、`grouping-card`、`question-field`、`review-panel`、`studio-editor`、`voting-actions`、`voting-new`、`voting-sessions` |
-| 投票卡缺布局，桌面截图出现控件重叠 | `VotingCard.tsx:189` 的 `.voting-sessions` 未定义；`:210` 的 `.voting-new` 未定义；CSS 只定义了相邻的 `.voting-session-row`（`global.css:1332`） |
+| 投票卡缺布局，桌面截图出现控件重叠 | `VotingCard.tsx:189` 的 `.voting-sessions` 未定义；`:210` 的 `.voting-new` 未定义；CSS 只定义了相邻的 `.voting-session-row` |
 | 主按钮命名不一致 | `GroupingCard.tsx:220` 使用 `button-primary`，CSS 实际是 `primary-button` |
 | 大量裸 `<button>` / `<input>` | VotingCard、ReviewPanel、Studio Session/Release 面板等 |
 | 中文标题字体依赖系统回退 | `tokens.css:16` 的 Noto Serif SC / Songti SC / SimSun；包内只装了 Fraunces 与 Space Grotesk（`package.json:17-18`） |
