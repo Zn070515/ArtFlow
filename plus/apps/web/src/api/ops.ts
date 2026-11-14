@@ -35,7 +35,10 @@ export type ReviewStatus = "approved" | "need_supplement" | "rejected";
 
 export async function fetchOpsActivities(): Promise<readonly OpsActivitySummary[]> {
   const response = await apiFetch<{ activities: readonly OpsActivitySummary[] }>("/api/activities");
-  return response.activities;
+  // Activity cards and tables use the activity id as the React key. A
+  // projection that ever repeats a row must not turn into duplicate keys and
+  // a duplicated/omitted card, so dedupe at the read boundary.
+  return [...new Map(response.activities.map((activity) => [activity.id, activity])).values()];
 }
 
 export async function fetchOpsRegistrations(
