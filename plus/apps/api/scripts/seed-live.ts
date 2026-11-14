@@ -140,7 +140,7 @@ async function seedLiveActivity(id: string, code: string, label: string): Promis
       questionnaireVersion: "live",
       questionnaireHash: "live",
       status: "approved",
-      answers: {},
+      answers: { name: "林晓" },
       revision: 1,
     });
     await upsertRoster(trx, id, {

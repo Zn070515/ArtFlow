@@ -129,5 +129,30 @@ if (existing === null) {
   }).where("activity_id", "=", activityId).execute();
 }
 
+// The public result snapshot stores contestant ids; the read model resolves
+// names from these registrations. Keeping names in the seed also proves the
+// public page never has to fall back to an internal id.
+for (const [participantId, name] of [["singer-a", "林晓"], ["singer-b", "周然"], ["singer-c", "陈默"]] as const) {
+  const existingRegistration = await db
+    .selectFrom("registration")
+    .select("id")
+    .where("activity_id", "=", activityId)
+    .where("participant_id", "=", participantId)
+    .executeTakeFirst();
+  if (existingRegistration === undefined) {
+    await db.insertInto("registration").values({
+      id: `seed-public-${participantId}`,
+      activity_id: activityId,
+      participant_id: participantId,
+      questionnaire_version: "seed-v1",
+      questionnaire_hash: "seed-public",
+      status: "approved",
+      answers: JSON.stringify({ name }),
+      revision: 1,
+      reviewed_by: null,
+    }).execute();
+  }
+}
+
 await closeDb(db);
 console.log("Seeded public results for E2E-DEMO");
