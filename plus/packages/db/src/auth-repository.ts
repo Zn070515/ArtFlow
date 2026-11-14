@@ -1,7 +1,7 @@
 import type { ActorContext, ActorType } from "@artflow-plus/domain";
 import type { Kysely, Selectable } from "kysely";
 
-import type { Database, LocalAccountRow, LocalSessionRow } from "./types.js";
+import type { Database, LocalAccountRow } from "./types.js";
 
 export interface StoredLocalAccount {
   readonly username: string;
@@ -36,21 +36,6 @@ function account(row: Selectable<LocalAccountRow>): StoredLocalAccount {
     username: row.username,
     passwordDigest: row.password_digest,
     active: row.active,
-    actor: {
-      actorId: row.actor_id,
-      actorType: row.actor_type as ActorType,
-      roles: jsonArray(row.roles),
-      permissions: jsonArray(row.permissions),
-      ...(row.auth_context === null ? {} : { authContext: row.auth_context }),
-    },
-  };
-}
-
-function session(row: Selectable<LocalSessionRow>): StoredLocalSession {
-  return {
-    token: row.token,
-    expiresAt: iso(row.expires_at),
-    ...(row.revoked_at === null ? {} : { revokedAt: iso(row.revoked_at) }),
     actor: {
       actorId: row.actor_id,
       actorType: row.actor_type as ActorType,
@@ -113,19 +98,46 @@ export async function insertLocalSession(
     .execute();
 }
 
-export async function getLocalSession(
+/**
+ * Authorization reads the account, never the session snapshot. A session only
+ * proves that the holder authenticated once; its roles and permissions columns
+ * are an immutable record of what was true at login. Downgrades, deactivation,
+ * and deletion therefore take effect on the next request.
+ */
+export async function getLocalSessionWithAccount(
   db: Kysely<Database>,
   token: string,
   now: string,
 ): Promise<StoredLocalSession | null> {
   const row = await db
-    .selectFrom("local_session")
-    .selectAll()
-    .where("token", "=", token)
-    .where("expires_at", ">", new Date(now))
-    .where("revoked_at", "is", null)
+    .selectFrom("local_session as s")
+    .innerJoin("local_account as a", "a.actor_id", "s.actor_id")
+    .select([
+      "s.token as token",
+      "s.expires_at as expires_at",
+      "a.actor_id as actor_id",
+      "a.actor_type as actor_type",
+      "a.roles as roles",
+      "a.permissions as permissions",
+    ])
+    .where("s.token", "=", token)
+    .where("s.expires_at", ">", new Date(now))
+    .where("s.revoked_at", "is", null)
+    .where("a.active", "=", true)
+    .orderBy("a.created_at", "asc")
     .executeTakeFirst();
-  return row === undefined ? null : session(row);
+  if (row === undefined) return null;
+  return {
+    token: row.token,
+    expiresAt: iso(row.expires_at),
+    actor: {
+      actorId: row.actor_id,
+      actorType: row.actor_type as ActorType,
+      roles: jsonArray(row.roles),
+      permissions: jsonArray(row.permissions),
+      authContext: token,
+    },
+  };
 }
 
 export async function revokeLocalSession(
