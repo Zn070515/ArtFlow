@@ -436,8 +436,21 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   [`docs/invariants/attendance.md`](../invariants/attendance.md)，决策见
   [ADR-0038](../architecture/adr/0038-attendance-observational-authority.md)。
 
-后续按顺序实现 M15.4 Schedule/Program Release、M15.5 Incident/Recovery/Feedback；
-仍不把真实活动彩排作为验收前置条件。
+## M15.4 — Schedule / Program Release（已完成，2026-11-14）
+
+- 新增可选/可组合的 `schedule` capability：槽位定义（program/break/ceremony、时长）、
+  有序节目条目、`schedule_state` OCC、正式/彩排/测试 mode 分区。
+- 命令：`schedule.entry.upsert/reorder/remove`、`schedule.release/revoke`、
+  `schedule.current.advance`（绑定运行中的 schedule session）。
+- 公开：`GET /api/public/schedule/:publicCode` 只返回 formal 最新未撤销快照；
+  `/program/:publicCode` 优先读取排期 release，无 release 时回退报名投影。
+- 产品面：Ops `ScheduleCard`、Live `ScheduleSummary`、Studio `ScheduleEditor`；
+  Stage Show Pack 默认启用 schedule。
+- 出口：domain/runtime/API/web 测试、`e2e/schedule.spec.ts`、`graph:check`、
+  `audit:check`、`schema:check` 与结构门禁全绿。详见
+  [`M15.4 设计`](specs/2026-11-14-m15.4-schedule-design.md)。
+
+后续按顺序实现 M15.5 Incident/Recovery/Feedback；仍不把真实活动彩排作为验收前置条件。
 
 ## 工程质量线 — 加固（已完成，2026-11-12）
 
