@@ -350,4 +350,72 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
     });
     expect(response.statusCode).toBe(400);
   });
+
+  it("keeps the OpenAPI document on the operations read surface", async () => {
+    const anonymous = await app.inject({ method: "GET", url: "/openapi.json" });
+    expect(anonymous.statusCode).toBe(401);
+
+    const username = `openapi-${randomUUID().slice(0, 8)}`;
+    await insertLocalAccount(db, {
+      username,
+      passwordDigest: hashPassword("participant-password"),
+      actor: {
+        actorId: username,
+        actorType: "user",
+        roles: ["participant"],
+        permissions: [],
+      },
+      active: true,
+    });
+    const participantToken = await token(username, "participant-password");
+    const participant = await app.inject({
+      method: "GET",
+      url: "/openapi.json",
+      headers: { authorization: `Bearer ${participantToken}` },
+    });
+    expect(participant.statusCode).toBe(403);
+
+    const staffToken = await token("auth-staff", "staff-password");
+    const staff = await app.inject({
+      method: "GET",
+      url: "/openapi.json",
+      headers: { authorization: `Bearer ${staffToken}` },
+    });
+    expect(staff.statusCode).toBe(200);
+    expect(staff.json().openapi).toBeDefined();
+  });
+
+  it("rate limits repeated registration attempts for one username", async () => {
+    const counts = new Map<string, number>();
+    const limited = await buildApp({
+      db,
+      deps,
+      rateLimiter: {
+        allow: ({ key, limit }) => {
+          if (!key.startsWith("auth-register-user:")) return true;
+          const next = (counts.get(key) ?? 0) + 1;
+          counts.set(key, next);
+          return next <= limit;
+        },
+      },
+    });
+    await limited.ready();
+    try {
+      const username = `enum-${randomUUID().slice(0, 8)}`;
+      const statuses: number[] = [];
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const response = await limited.inject({
+          method: "POST",
+          url: "/api/auth/register",
+          headers: headers(),
+          payload: { username, password: "participant-password" },
+        });
+        statuses.push(response.statusCode);
+      }
+      expect(statuses.slice(0, 3)).toEqual([201, 409, 409]);
+      expect(statuses[3]).toBe(429);
+    } finally {
+      await limited.close();
+    }
+  });
 });

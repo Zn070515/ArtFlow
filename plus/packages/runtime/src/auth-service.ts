@@ -95,6 +95,39 @@ export async function resolveLocalSession(
  * Self-service participant account. The actor id is opaque; the username is the
  * login name, not a public identity.
  */
+// Registration is the only self-service way to create an account, so the
+// policy lives here rather than in the HTTP schema: direct callers must not be
+// able to bypass it. Length alone is not enough for the most common choices.
+const COMMON_REGISTRATION_PASSWORDS = new Set([
+  "password",
+  "password1",
+  "password12",
+  "password123",
+  "password1234",
+  "password12345",
+  "qwertyuiop12",
+  "123456789012",
+  "111111111111",
+  "letmein12345",
+  "iloveyou1234",
+  "welcome12345",
+  "admin1234567",
+  "abc123456789",
+]);
+
+export function validateRegistrationPassword(password: string, username: string): void {
+  if (password.length < 12 || password.length > 128) {
+    throw new DomainError("INVALID_INPUT", "Password must be 12-128 characters.");
+  }
+  const normalized = password.trim().toLowerCase();
+  if (normalized === username.trim().toLowerCase()) {
+    throw new DomainError("INVALID_INPUT", "Password must not be the username.");
+  }
+  if (COMMON_REGISTRATION_PASSWORDS.has(normalized)) {
+    throw new DomainError("INVALID_INPUT", "Password is too common.");
+  }
+}
+
 export async function registerParticipantAccount(
   db: Kysely<Database>,
   input: { readonly username: string; readonly password: string },
@@ -103,9 +136,7 @@ export async function registerParticipantAccount(
   if (!/^[A-Za-z0-9_.-]{3,64}$/.test(username)) {
     throw new DomainError("INVALID_INPUT", "Username must be 3-64 letters, numbers, dots, dashes, or underscores.");
   }
-  if (input.password.length < 8 || input.password.length > 128) {
-    throw new DomainError("INVALID_INPUT", "Password must be 8-128 characters.");
-  }
+  validateRegistrationPassword(input.password, username);
   if ((await getLocalAccount(db, username)) !== null) {
     throw new DomainError("USERNAME_TAKEN", "This username is already registered.");
   }

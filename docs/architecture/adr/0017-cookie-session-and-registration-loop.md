@@ -21,6 +21,12 @@ password 8-128, 5/min/IP). The actor id is opaque (`participant:<uuid>`) and the
 account has no permissions. Open self-registration is a product choice; an
 invite code or email verification can be added later.
 
+> **Amendment 2026-11-14**: the password rule is now 12-128 characters and also
+> rejects a common-password blocklist and passwords equal to the username. The
+> original 8-128 rule accepted `password`. The per-IP limit remains 5/min; a
+> per-username limit of 3/min slows username enumeration through the
+> `USERNAME_TAKEN` response until email verification exists.
+
 The registration loop reads the questionnaire frozen into the registration's
 release, not the current activity definition. Participants can enter a public
 code, start/resume their registration, save text answers, register material

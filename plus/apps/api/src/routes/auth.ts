@@ -67,6 +67,9 @@ export function registerAuthRoutes(ctx: ApiContext): void {
     async (request, reply) => {
       await requirePublicRateLimit(request, "auth-register", 5);
       const body = request.body as { username: string; password: string };
+      // A duplicate username is deliberately reported for usability, so make
+      // enumeration cost more than the shared per-IP budget alone.
+      await requireRateLimit(`auth-register-user:${body.username.trim().toLowerCase()}`, 3);
       const result = await registerParticipantAccount(db, body);
       const csrf = csrfTokenFor(result.token, sessionSecret);
       setSessionCookies(reply, result.token, csrf);
