@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type SubmitEvent, type ReactNode } from "react";
 
 import { Button } from "./Button.js";
 import { Input } from "./Input.js";
@@ -89,7 +89,7 @@ function DialogShell({
     };
   }, []);
 
-  function submit(event: FormEvent<HTMLFormElement>): void {
+  function submit(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     const message = validate?.() ?? null;
     if (message !== null) {

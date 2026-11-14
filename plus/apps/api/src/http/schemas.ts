@@ -355,3 +355,78 @@ export const ScheduleReleaseParams = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export const IncidentModeSchema = Type.Union([
+  Type.Literal("test"),
+  Type.Literal("rehearsal"),
+  Type.Literal("formal"),
+]);
+
+export const IncidentSeveritySchema = Type.Union([
+  Type.Literal("low"),
+  Type.Literal("medium"),
+  Type.Literal("high"),
+  Type.Literal("critical"),
+]);
+
+export const IncidentCategorySchema = Type.Union([
+  Type.Literal("participant"),
+  Type.Literal("judge"),
+  Type.Literal("stage"),
+  Type.Literal("technical"),
+  Type.Literal("safety"),
+  Type.Literal("other"),
+]);
+
+export const IncidentQuery = Type.Object(
+  { mode: Type.Optional(IncidentModeSchema) },
+  { additionalProperties: false },
+);
+
+export const IncidentBody = Type.Object(
+  {
+    mode: IncidentModeSchema,
+    severity: IncidentSeveritySchema,
+    category: IncidentCategorySchema,
+    title: Type.String({ minLength: 1, maxLength: 200 }),
+    detail: Type.Optional(Type.String({ maxLength: 2000 })),
+    location: Type.Optional(Type.String({ maxLength: 200 })),
+    relatedType: Type.Optional(Type.Union([
+      Type.Literal("schedule_entry"),
+      Type.Literal("performance"),
+      Type.Literal("round"),
+      Type.Literal("registration"),
+    ])),
+    relatedId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+  },
+  { additionalProperties: false },
+);
+
+export const IncidentParams = Type.Object(
+  {
+    id: Type.String({ minLength: 1 }),
+    incidentId: Type.String({ minLength: 1, maxLength: 100 }),
+  },
+  { additionalProperties: false },
+);
+
+export const IncidentRevisionBody = Type.Object(
+  { expectedRevision: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+
+export const ResolveIncidentBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    resolution: Type.String({ minLength: 1, maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+
+export const ReopenIncidentBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    reason: Type.String({ minLength: 1, maxLength: 500 }),
+  },
+  { additionalProperties: false },
+);

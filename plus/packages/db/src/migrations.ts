@@ -26,6 +26,7 @@ import { migration as m0022_tasks } from "./migrations/0022_tasks.js";
 import { migration as m0023_drop_legacy_bridge } from "./migrations/0023_drop_legacy_bridge.js";
 import { migration as m0024_attendance } from "./migrations/0024_attendance.js";
 import { migration as m0025_schedule } from "./migrations/0025_schedule.js";
+import { migration as m0026_incident } from "./migrations/0026_incident.js";
 
 import type { Database } from "./types.js";
 
@@ -55,6 +56,7 @@ const migrations: Record<string, Migration> = {
   "0023_drop_legacy_bridge": m0023_drop_legacy_bridge,
   "0024_attendance": m0024_attendance,
   "0025_schedule": m0025_schedule,
+  "0026_incident": m0026_incident,
 };
 
 class StaticMigrationProvider implements MigrationProvider {

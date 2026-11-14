@@ -20,6 +20,12 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
   baselineCapabilities: ["competition"],
   questions: [
     {
+      id: "incident",
+      prompt: "是否需要现场事故记录？",
+      capability: "incident",
+      default: false,
+    },
+    {
       id: "registration-required",
       prompt: "报名是否必需？",
       capability: "registration",
@@ -151,6 +157,12 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
   baselineCapabilities: ["registration", "questionnaire", "materials", "archive", "schedule"],
   questions: [
     {
+      id: "incident",
+      prompt: "是否需要现场事故记录？",
+      capability: "incident",
+      default: false,
+    },
+    {
       id: "audience-voting",
       prompt: "是否需要观众投票？",
       capability: "voting",
@@ -214,6 +226,12 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
   title: "Review & Awards",
   baselineCapabilities: ["competition", "publishing", "archive"],
   questions: [
+    {
+      id: "incident",
+      prompt: "是否需要现场事故记录？",
+      capability: "incident",
+      default: false,
+    },
     {
       id: "registration-required",
       prompt: "是否需要报名？",

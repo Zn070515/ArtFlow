@@ -1,5 +1,5 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type SubmitEvent } from "react";
 
 import { ApiError } from "../api/client.js";
 import { defaultLanding, useSession } from "../auth/SessionProvider.js";
@@ -31,7 +31,7 @@ export function LoginPage() {
     void navigate({ to: target ?? defaultLanding(session) });
   }, [session, target, navigate]);
 
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function submit(event: SubmitEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setError(null);
     if (mode === "register" && password !== confirm) {

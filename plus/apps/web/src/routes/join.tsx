@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 
 import { readJoinedActivities } from "../components/form/joinedActivities.js";
 import { Button } from "../components/ui/Button.js";
@@ -12,7 +12,7 @@ export function JoinPage() {
   const [error, setError] = useState<string | null>(null);
   const joined = readJoinedActivities();
 
-  function submit(event: FormEvent<HTMLFormElement>): void {
+  function submit(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     const trimmed = code.trim();
     if (!trimmed) {

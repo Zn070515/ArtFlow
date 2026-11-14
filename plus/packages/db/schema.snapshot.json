@@ -1386,6 +1386,130 @@
       ]
     },
     {
+      "name": "incident",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mode",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "severity",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "category",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "title",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "detail",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "location",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "related_type",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "related_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "assignee_id",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "resolution",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "opened_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "judge_seat",
       "columns": [
         {
