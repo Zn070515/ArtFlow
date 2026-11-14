@@ -5,8 +5,8 @@
 
 相关文档：
 
-- [前端视觉方向](../frontend-design-direction.md)
-- [ADR-0034：Portal / Console 壳拆分](../../architecture/adr/0034-portal-console-shell-split.md)
+- [前端视觉方向](../../../artflow-plus/frontend-design-direction.md)
+- [ADR-0034：Portal / Console 壳拆分](../../../architecture/adr/0034-portal-console-shell-split.md)
 
 ## 1. 决策摘要
 

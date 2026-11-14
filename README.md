@@ -115,7 +115,7 @@ pnpm --filter @artflow-plus/api create-account --username organizer
 | [`docs/invariants/`](docs/invariants/README.md) | 领域不变量（AUTH/LIFE/CONC/SCOR/RES/TICK/GRP/RT/DEPL/ATT） |
 | [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / schedule / incident / realtime） |
 | [`docs/gates/`](docs/gates/README.md) | 结构/golden/架构门禁 |
-| [`docs/artflow-plus/specs/`](docs/artflow-plus/specs/) · [`plans/`](docs/artflow-plus/plans/) | 每个 slice 的设计与实现计划 |
+| [`docs/artflow-plus/specs/`](docs/artflow-plus/specs/) · [`docs/archive/v2/`](docs/archive/v2/README.md) | 现行设计记录与已完成里程碑的归档（计划、设计、审计、评审） |
 
 ### 部署
 

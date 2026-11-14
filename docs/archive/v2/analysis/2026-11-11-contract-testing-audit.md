@@ -2,7 +2,7 @@
 
 日期：2026-11-11。
 范围：`main` / `plus/`（ArtFlow-Plus v2）。
-对应任务书：[2026-11-11-contract-testing-program-design.md](../specs/2026-11-11-contract-testing-program-design.md)。
+对应任务书：[2026-11-11-contract-testing-program-design.md](../../../artflow-plus/specs/2026-11-11-contract-testing-program-design.md)。
 对应计划：[2026-11-11-contract-testing-plan.md](../plans/2026-11-11-contract-testing-plan.md)。
 
 ## 1. 结论摘要

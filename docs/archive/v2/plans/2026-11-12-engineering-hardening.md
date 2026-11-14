@@ -4,8 +4,8 @@
 
 日期：2026-11-12。
 范围：`plus/` 与 `docs/`。
-上游材料：[契约测试任务书](../specs/2026-11-11-contract-testing-program-design.md)、
-[自审计测试体系设计](../specs/2026-11-11-self-auditing-test-system-design.md)。
+上游材料：[契约测试任务书](../../../artflow-plus/specs/2026-11-11-contract-testing-program-design.md)、
+[自审计测试体系设计](../../../artflow-plus/specs/2026-11-11-self-auditing-test-system-design.md)。
 
 ## 1. 目标与边界
 

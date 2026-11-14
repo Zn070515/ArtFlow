@@ -420,7 +420,7 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - 出口：domain/DB/runtime/API/Web focused 与 Plus full check/build/test、结构门禁、文档门禁
   通过；没有真实活动彩排前置条件。详见
   [`M15.2 自建检查`](checks/2026-10-28-tasks-readiness-checks.md) 与
-  [`M15.2 设计`](specs/2026-10-28-tasks-readiness-design.md)。
+  [`M15.2 设计`](../archive/v2/specs/2026-10-28-tasks-readiness-design.md)。
 
 ## M15.3 — Attendance / Check-in（已完成，2026-11-10）
 
@@ -448,7 +448,7 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   Stage Show Pack 默认启用 schedule。
 - 出口：domain/runtime/API/web 测试、`e2e/schedule.spec.ts`、`graph:check`、
   `audit:check`、`schema:check` 与结构门禁全绿。详见
-  [`M15.4 设计`](specs/2026-11-14-m15.4-schedule-design.md)。
+  [`M15.4 设计`](../archive/v2/specs/2026-11-14-m15.4-schedule-design.md)。
 
 ## M15.5 — Incident / Recovery（已完成，2026-11-14）
 
@@ -461,7 +461,7 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   Singer/Stage Show/Review Packs 增加可选问题，默认关闭。
 - 出口：domain/runtime/API/web 测试、`e2e/incident.spec.ts`、`graph:check`、
   `audit:check`、`schema:check`、结构门禁全绿。详见
-  [`M15.5 设计`](specs/2026-11-14-m15.5-incident-recovery-design.md)。
+  [`M15.5 设计`](../archive/v2/specs/2026-11-14-m15.5-incident-recovery-design.md)。
 
 远期反馈（post-event feedback）作为同一里程碑的后续 slice，不在本次实现。
 仍不把真实活动彩排作为验收前置条件。
@@ -480,8 +480,8 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   执行，当前覆盖 singer 报名 → 审核 → 名单定稿。
 - **文档口径**：权威文档只描述 Plus 单线；v1 时代文档加历史横幅；`check_docs.ps1`
   增加权威文档的退役命令门禁。详见
-  [`工程加固计划`](plans/2026-11-12-engineering-hardening.md) 与
-  [`文档口径审计`](analysis/2026-11-12-documentation-consistency.md)。
+  [`工程加固计划`](../archive/v2/plans/2026-11-12-engineering-hardening.md) 与
+  [`文档口径审计`](../archive/v2/analysis/2026-11-12-documentation-consistency.md)。
 - **缺口清理第一轮**：Pack readiness 3 → 0；新增 `api-only.json` 显式声明机制；
   补关闭评委入口、重命名活动、取消归档三条 UI；baseline 156 → 145。
 

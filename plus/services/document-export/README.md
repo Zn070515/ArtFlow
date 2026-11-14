@@ -4,8 +4,8 @@ A renderer-only .NET 9 service behind the Node API. It turns an authorized
 `TableExport` into DOCX or XLSX. It has no database credentials, no file
 storage, and no public port.
 
-Design: [document-export-design](../../../docs/artflow-plus/specs/2026-11-12-document-export-design.md).
-Plan: [document-export-plan](../../../docs/artflow-plus/plans/2026-11-12-document-export-plan.md).
+Design: [document-export-design](../../../docs/archive/v2/specs/2026-11-12-document-export-design.md).
+Plan: [document-export-plan](../../../docs/archive/v2/plans/2026-11-12-document-export-plan.md).
 
 ## Endpoints
 

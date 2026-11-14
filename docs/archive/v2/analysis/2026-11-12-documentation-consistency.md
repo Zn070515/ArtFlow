@@ -27,7 +27,7 @@ plans/analysis、`docs/archive/`、`docs/advices/` 与 `docs/superpowers/` 作�
 - `docs/local-load-simulation-plan.md`（已执行记录）
 - `docs/private-test-data-runbook.md`（v1 私测）
 - `docs/postgres-backup-restore.md`（v1 Compose 演练；当前备份见
-  [`backup-restore.md`](../backup-restore.md)）
+  [`backup-restore.md`](../../../artflow-plus/backup-restore.md)）
 - `docs/singer-questionnaire-workflow.md`（v1 问卷）
 - `docs/audit-2026-10.md`、`docs/artflow_feature_research.md`、
   `docs/artflow-v1-v2-comparative-analysis-2026-10.md`

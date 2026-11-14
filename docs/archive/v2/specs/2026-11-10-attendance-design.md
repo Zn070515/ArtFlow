@@ -3,7 +3,7 @@
 - Date: 2026-11-10
 - Status: implemented and merged (2026-11-10, M15.3)
 - Scope: M15.3 only
-- Roadmap: [M15.3](../roadmap.md)
+- Roadmap: [M15.3](../../../artflow-plus/roadmap.md)
 
 ## Intent
 
@@ -341,7 +341,7 @@ The slice updates:
 - `docs/invariants/` with `ATT-01` through `ATT-08`;
 - a new ADR recording the observational attendance authority and the ticket /
   redeem separation;
-- the M15.3 section in [the roadmap](../roadmap.md);
+- the M15.3 section in [the roadmap](../../../artflow-plus/roadmap.md);
 - the next-slice line in `docs/artflow-plus/README.md`;
 - the runbook-grade operator notes in the Ops card help text.
 
