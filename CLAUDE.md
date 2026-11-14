@@ -26,7 +26,7 @@ The API migrates on start. Browser E2E uses the `artflow_e2e` schema with `worke
 
 Python is used only for structural gates: `uv sync --locked --extra dev`, `uv run pytest tests/gates -q`, `uv run python tests/golden/validate_fixtures.py`, and `pwsh -NoProfile -File scripts/check_docs.ps1`.
 
-.NET 9 is used only by the renderer-only document export sidecar under `plus/services/document-export/`; verify it with `dotnet restore --locked-mode` and `dotnet test` on that solution. It never receives database credentials.
+.NET 11 is used only by the renderer-only document export sidecar under `plus/services/document-export/`; verify it with `dotnet restore --locked-mode` and `dotnet test` on that solution. It never receives database credentials.
 
 ## Runtime operations
 
