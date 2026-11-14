@@ -10,7 +10,7 @@ ArtFlow is a single-line repository. `main` carries **ArtFlow-Plus (v2)**; the 1
 v2 is a pnpm 12 workspace with Node 24, Fastify 5, Kysely/PostgreSQL 18, and React 19:
 
 - `plus/apps/api/`: Fastify HTTP + the single `/api/realtime` WebSocket endpoint; command routes, public reads, cookie sessions/CSRF.
-- `plus/apps/web/`: React + Vite + TanStack Router/Query; Studio, Ops, Live, Portal, and `/vote/<sessionId>`.
+- `plus/apps/web/`: React + Vite + TanStack Router/Query; Studio, Ops, Live, Portal, `/vote/<sessionId>`, and `/program/<publicCode>`.
 - `plus/apps/worker/`: outbox relay (in-process 250ms loop + pg-boss backstop).
 - `plus/packages/domain/`: pure domain, capability registry, packs, compilers, command/event model.
 - `plus/packages/runtime/`: command handlers, projections, and capability services.

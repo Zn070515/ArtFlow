@@ -24,10 +24,10 @@ Three shapes are validated end-to-end against the same kernel:
 The differences between the shapes are capability composition and default
 definitions. No shape copies round/panel/performance/score/publishing logic.
 
-The gaps are explicit rather than emulated: stage shows have no public program
-page, vote-only activities have no publishing path (publishing depends on
-competition), brackets/composite scoring have no capability, and imported
-participants have no login/claim flow. Each is a separate slice.
+The gaps are explicit rather than emulated. **2026-11-14 addendum:** the stage-show
+public program page is delivered by `schedule` (M15.4); vote-only publishing is
+delivered by the `publishing` vote source (M10); imported participants and the
+claim flow are removed by ADR-0036. Bracket/composite scoring remains a gap.
 
 ## Alternatives rejected
 

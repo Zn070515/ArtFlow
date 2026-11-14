@@ -7,11 +7,11 @@
 | --- | --- | --- |
 | [stale-static-assets](stale-static-assets.md) | DEPL-02/04 | GATE-RELEASE-01 / GATE-DEPLOY-01 |
 | [duplicate-score-fact](duplicate-score-fact.md) | SCOR-01/06 | `duplicate-score-fact.json` |
-| [revoked-result-media](revoked-result-media.md) | AUTH-07、RES-05 | GATE-MEDIA-01 / result golden |
+| [revoked-result-media](revoked-result-media.md) | AUTH-07、RES-05 | GATE-MEDIA-01（v1，已退役）/ result golden |
 | [admin-reauth-405](admin-reauth-405.md) | 拒绝可恢复性 | accounts 行为测试 |
 | [archive-public-title-identity](archive-public-title-identity.md) | RES-02/06/07 | `archive-identity.json` |
 | [unknown-roster-deferred](unknown-roster-deferred.md) | LIFE-07 | `unknown-roster.json` |
-| [base-manager-bypass](base-manager-bypass.md) | AUTH-01/02 | GATE-AUTH-01 |
+| [base-manager-bypass](base-manager-bypass.md) | AUTH-01/02 | GATE-AUTH-01（v1，已退役） |
 
 新增事故的规则：写下“当时以为是什么 / 实际是什么 / 为什么测试没抓住 / 哪条
 规则现在能抓住它”。没有门禁或 golden 的事故，要在 roadmap 里留跟进项。

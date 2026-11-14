@@ -44,3 +44,10 @@ ArtFlow 1.x（含线上 v1.0.2）已完成使命。仓库此前维护 `main`（1
 - 参与者改用 v2 本地账号；不再有跨代身份链接。
 - 外部审核通过前，Django 源码仍是只读对照物；删除时需要同步清理
   `pyproject.toml`、`pyrightconfig.json`、Tailwind、Docker 与 Dependabot 条目。
+
+## 实施结果（2026-11-06）
+
+外部审核与覆盖审计已关闭；Django 源码已从 `main` 删除，完整源码保存在
+tag `v1.0.2`，功能记录在 [`docs/archive/v1/`](../../archive/v1/README.md)。
+`pyproject.toml`、`pyrightconfig.json`、Tailwind/Docker/Dependabot 中的 v1
+条目已同步清理。

@@ -1,14 +1,14 @@
 # ArtFlow-Plus 自建责任清单与监护要点
 
-更新时间：2026-11-06
+更新时间：2026-11-14
 
 适用范围：代码全部由 agent 编写、维护者不直接写代码的项目
 
 取材：`main` 在合并 ArtFlow-Plus 后的 v2 工作区；1.x Django 源码仅作审核对照
 
-M15.2 的独立任务 capability 使用逐项检查表
-[`Tasks / Readiness checks`](checks/2026-10-28-tasks-readiness-checks.md)；该表的测试、门禁和
-PostgreSQL 证据全部取得后，才允许把任务能力标记为完成。
+M15.2–M15.5（Tasks、Attendance、Schedule、Incident）各自使用逐项检查表；
+测试、门禁和 PostgreSQL 证据全部取得后，才允许把对应能力标记为完成。M15.2 的
+记录见 [`Tasks / Readiness checks`](checks/2026-10-28-tasks-readiness-checks.md)。
 
 ---
 

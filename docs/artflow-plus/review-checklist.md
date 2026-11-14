@@ -54,7 +54,7 @@
 - [x] HTTP mutation 将 path resource ID 传入 command，在事务内先校验 performance、
   score fact 与 tie identity，不用 mutation 后检查补救。
 - [x] duplicate-score golden、panel/score 双连接 PostgreSQL 并发、runtime/API focused
-  tests 已通过；root Django 全量 test 按 Plus 重构约束未运行。
+  tests 已通过；v1 Django suite 已随源码删除，不再运行。
 
 ### M6 Voting / Ticketing
 
@@ -77,7 +77,7 @@
 - [x] 评委分数、加权总分、平均、排名比较、票数百分比使用 Decimal.js 与
   PostgreSQL numeric 的 `ROUND_HALF_UP` 语义；不使用 `Number(row.total)` authority 读回。
 - [x] ticket redeem、ticket ballot、judge seat claim 使用真实 PostgreSQL 双连接并发
-  回归；runtime/API focused gates 已通过，root Django 全量 test 按 Plus 重构约束未运行。
+  回归；runtime/API focused gates 已通过，v1 Django suite 已随源码删除，不再运行。
 
 ### M6.5 / Plus authority follow-up
 
@@ -155,7 +155,7 @@
       `(activity, seat key)` 幂等。
 - [x] competition score body schema 是单一封闭对象；没有用两个 closed object 的
       Intersect（Fastify AJV `removeAdditional` 会互相删字段）。
-- [x] Live 页 SSE 失败退化为 5s 轮询；events/execution-state 仍是恢复权威。
+- [x] Live 页通过 `@artflow-plus/realtime` 失效主题；socket 失败退化为 5s 轮询；`/events` + `/execution-state` 仍是恢复权威。
 - [x] E2E 覆盖启动会话 → 准备 → 评委组 → 开表演 → 链接 → 评分 → 锁表演/锁轮 →
       排名 → 关闭会话。
 
@@ -191,11 +191,11 @@
       `FORMAL_FACTS_EXIST` 且无副作用。
 - [x] `reset-rehearsal` 只删非 formal 数据、supersede panel、回合回到 prepared；
       有 formal 事实时拒绝且无副作用。
-- [x] 报名/材料仍为 formal-only；测试报名走独立测试活动（导入策略留给 M8e-2）。
+- [x] 报名/材料仍为 formal-only；测试报名走独立测试活动（v1 导入已按 ADR-0036 移除）。
 - [x] Live 与 judge context 按运行中 session 的 mode 读取计数与已提交分。
 - [x] E2E 覆盖“排练 → reset → 正式重跑”同活动链路。
 
-### M8e-2 Legacy import
+### M8e-2 Legacy import（已移除，ADR-0036）
 
 - [x] v1 导出只读正式行；`is_test_data` 行进入 `excluded` 计数，不写入 v2。
 - [x] bundle 不含原始密码、token、session key、IP；历史 ballot 统一匿名。
@@ -208,7 +208,7 @@
 
 ### 2026-10-26 M8 review fixes
 
-- [x] `/events` 与 `/stream` 需要 `studio.manage`/`competition.manage`/`judge.manage`；
+- [x] `/events` 需要 `studio.manage`/`competition.manage`/`judge.manage`（`/stream` 已随 SSE 退役）；
       匿名读不到评分/审核私有事实。
 - [x] v1 snake_case 结果快照在导入时归一化为 v2 camelCase，公开结果页可见。
 - [x] v1 投票目的 `selection`/`repechage` 映射为 `popularity` 并记入 `unsupported`。
@@ -220,12 +220,11 @@
 - [x] 同一 round 多个 panel 只有最后一个 current，版本号递增。
 - [x] MemoryRateLimiter 定期清扫过期窗口，避免 key 无限增长。
 
-### M8e-3 Cutover
+### M8e-3 Cutover（历史记录，已随 ADR-0036 归档）
 
 - [x] Plus API 以 esbuild 单文件 bundle 运行；不在运行时加载 workspace TS 包。
-- [x] api/web 镜像分离，但同一 Dockerfile 多 target；nginx 负责 SPA、`/api`
-      反代与 SSE buffering off。
-- [x] Plus 使用独立 DB/卷/credential secret；`--profile plus` 默认不启动。
+- [x] api/web 镜像分离，但同一 Dockerfile 多 target；nginx 负责 SPA 与 `/api` 反代。
+- [x] Plus 使用独立 DB/卷/credential secret；生产编排不需要 `plus` profile，只有 `export` 为可选 profile。
 - [x] 主域名切换只改 Caddy site profile + 重建 proxy；不按活动/路径混跑。
 - [x] 回滚边界是首次 v2 正式写入前；v1 切后只读并保留一个活动周期。
 - [x] 首个 cutover 在报名截止后，参与者只读；不迁移参与者账号。

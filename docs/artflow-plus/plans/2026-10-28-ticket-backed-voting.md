@@ -1,5 +1,7 @@
 # Ticket-Backed Voting Implementation Plan
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 > For agentic workers: REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 Goal: Complete the public ArtFlow-Plus ticket-backed voting journey using the existing one-time ticket redemption and HttpOnly access-session authority.

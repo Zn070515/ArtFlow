@@ -7,10 +7,10 @@
 完整源码保存在 tag `v1.0.2`，功能记录见 [`docs/archive/v1/`](../archive/v1/README.md)。
 仓库不再维护双线，也不再提供 legacy bundle 导入、运营接管、参与者认领或 v1 媒体桥。
 
-## 当前阶段（2026-11-12）
+## 当前阶段（2026-11-14）
 
-v2 已完成 **M0–M15.3**（含 M13.1–M13.3、票据投票、运营分析、Tasks 与签到），并完成单线化与 v1 兼容层移除；
-1.x 的功能覆盖审计已进入执行清单。逐项出口与证据在 [roadmap.md](roadmap.md)。
+v2 已完成 **M0–M15.5**（含 M13.1–M13.3、票据投票、运营分析、Tasks、签到、排期与事故恢复），并完成单线化与 v1 兼容层移除；
+1.x 的功能覆盖审计已关闭（2026-11-06，M15 后补齐）。逐项出口与证据在 [roadmap.md](roadmap.md)。
 
 工程质量线（契约测试、Consumer Graph、缺口棘轮、变异审计、L3 模型测试与 L4
 Journey runner）同样在 `main` 上持续推进；契约工具只用于开发/CI，不进入运行时
@@ -30,11 +30,11 @@ Journey runner）同样在 `main` 上持续推进；契约工具只用于开发/
 | M9 Grouping | 已完成 | `grouping` capability、Ops 三步卡片、归档 |
 | M10 Vote-Result Publishing | 已完成 | publishing 解耦 competition、投票赛果确认与百分比公示 |
 | M11 Realtime Core + Voting UI | 已完成 | `@artflow-plus/realtime`、实时投票卡片、核心门禁 |
-| M12 Participant Vote Page | 已完成 | `/vote/<sessionId>` 公开投票页与二维码 |
+| M12 Participant Vote Page | 已完成 | `/vote/<sessionId>` 公开投票页与投票页二维码 |
 | M13 Live on the Realtime Core | 已完成 | `activity:<id>` 失效主题；SSE 与 `useLiveEvents` 退役 |
 | M14 Ticket-backed Voting | 已完成 | 票据 fragment、手工兑换与观众投票入口 |
-| M15 Operations Analytics | 已完成 | 运营对比分析与审计视图 |
-| M16 Tasks Readiness | 已完成 | 版本化任务项、审计命令与 Ops 控制台 |
+| M15.1 Operations Analytics | 已完成 | 运营对比分析与审计视图 |
+| M15.2 Tasks Readiness | 已完成 | 版本化任务项、审计命令与 Ops 控制台 |
 | M15.3 Attendance | 已完成 | 统一签到（participant/ticket/staff）、签到点与 staff roster、Ops/Live 到场视图 |
 | M15.4 Schedule / Program Release | 已完成 | schedule capability、Ops/Live 排期、公开节目单快照、Studio 排期编辑器 |
 | M15.5 Incident / Recovery | 已完成 | incident capability、Ops 事故卡、Live 未解决事故摘要、reopen 审计 |
@@ -44,11 +44,11 @@ Journey runner）同样在 `main` 上持续推进；契约工具只用于开发/
 
 ```text
 plus/apps/api      Fastify 5 + TypeBox；app.ts 只做组合，路由在 src/routes/<surface>.ts
-plus/apps/api/src/routes  system/auth/public/activity/tasks/registration/grouping/competition/voting/archive/publishing
-plus/apps/web      React 19 + Vite；Studio / Ops / Live / Portal / /vote/<sessionId>
+plus/apps/api/src/routes  system/auth/public/activity/tasks/registration/grouping/competition/voting/archive/publishing/attendance/exports/incident/schedule
+plus/apps/web      React 19 + Vite；Studio / Ops / Live / Portal / /vote/<sessionId> / /program/<publicCode>
 plus/apps/worker   outbox relay（250ms 循环 + pg-boss 兜底）
 plus/packages/domain    Activity、capability registry、compiler、Pack
-plus/packages/runtime   command handler、投影、各 capability 服务
+plus/packages/runtime   command handler、投影、各 capability 服务（含 schedule/incident）
 plus/packages/db        Kysely schema、module-owned migrations、repository
 plus/packages/contracts 共享 TypeBox schema
 plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
@@ -64,15 +64,15 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
   stale 并 supersede 旧 release；内部读面在启动期为每个 GET 声明权限（ADR-0030）。
 - 公开 selector 自己要求 confirmed/source/stale 检查；runtime contract v2 拒绝
   无 command ownership 的旧 release（ADR-0031）。
-- 已关闭的流程缺口：分组、投票结果发布、观众投票页、Live 实时迁移、票据投票；
+- 已关闭的流程缺口：分组、投票结果发布、观众投票页、Live 实时迁移、票据投票、
+  运营分析、Tasks、签到、排期/公开节目单、事故恢复；
   M13 之后完成一轮 authority closure（scope、provenance、consumption、read plane）。
 
 ### 仍开放的缺口
 
-- bracket/对阵、Console 的 XLSX/Word 导出入口、二维码、现场大屏。
+- bracket/对阵、活动报名/结果的通用二维码、现场大屏、post-event feedback。
 - SSO provider；当前使用本地会话。
 - 多实例实时广播（Redis）与权限实时撤销。
-- 1.x 源码已删除；功能记录在 `docs/archive/v1/`，源码见 tag `v1.0.2`。
 
 ## 文档与规划基线
 
@@ -96,7 +96,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 文档口径审计 | [analysis/2026-11-12-documentation-consistency.md](analysis/2026-11-12-documentation-consistency.md) |
 | Journey spec 目录 | [tools/contracts/journeys](../../plus/tools/contracts/journeys/) |
 | 领域模型 | [domains](../domains/) |
-| 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT） | [invariants](../invariants/README.md) |
+| 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT/ATT） | [invariants](../invariants/README.md) |
 | 真实事故库 | [incidents](../incidents/) |
 | 结构门禁 | [gates](../gates/README.md) |
 | Golden fixtures | [tests/golden](../../tests/golden/README.md) |
@@ -111,7 +111,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 1.x 的实现细节不再向 `main` 回灌。历史 bug、业务不变量与部署事故已经沉淀为：
 
 - `docs/domains/` 的领域模型；
-- `docs/invariants/` 的 54 条不变量；
+- `docs/invariants/` 的 81 条不变量（54 条 v1 提炼 + 后续补充）；
 - `tests/golden/` 的实现无关样例；
 - `docs/incidents/` 的真实事故与根因。
 

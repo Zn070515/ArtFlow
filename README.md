@@ -6,7 +6,7 @@
 
 <p>
   <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/gates.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/gates.yml?branch=main&label=Gates" alt="Gates status"></a>
-  <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/workflow-lint.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/workflow-lint.yml?branch=main&label=Workflow%20lint" alt="Workflow lint status"></a>
   <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/security.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/security.yml?branch=main&label=Security" alt="Security"></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-PolyForm%20Dual-6f42c1?style=flat" alt="PolyForm dual license"></a>
 </p>
@@ -47,7 +47,7 @@ ArtFlow 是面向学院文艺部的 **EventOps 活动运行平台**：把原本�
 | 项目 | 说明 |
 |---|---|
 | 开发主线 | `main`，Node 24 / Fastify 5 / TypeBox / Kysely / React 19 / PostgreSQL 18 |
-| 状态 | M0–M13.3 与后续能力已完成；v2 是唯一在开发与部署的产品线 |
+| 状态 | M0–M15.5 已完成（2026-11-14）；v2 是唯一在开发与部署的产品线 |
 | 1.x 代码 | 已从 `main` 删除；完整源码与功能记录归档在 tag `v1.0.2` / [`docs/archive/v1/`](docs/archive/v1/README.md) |
 | v1 兼容 | 已移除：不再支持 legacy bundle 导入、运营接管、参与者认领或 v1 媒体桥 |
 
@@ -58,17 +58,17 @@ v2 把 v1 的「按 app 与页面切分」重写成 **薄 Activity + capability 
 | 层 | 目录 | 职责 |
 |---|---|---|
 | API | [`plus/apps/api`](plus/apps/api) | Fastify 5 + TypeBox OpenAPI；command 路由、公开读、Cookie 会话与 CSRF、单一 WebSocket 端点 `/api/realtime` |
-| Web | [`plus/apps/web`](plus/apps/web) | React 19 + Vite + TanStack Router/Query；Studio / Ops / Live / Portal，以及观众投票页 `/vote/<sessionId>` |
+| Web | [`plus/apps/web`](plus/apps/web) | React 19 + Vite + TanStack Router/Query；Studio / Ops / Live / Portal、观众投票页 `/vote/<sessionId>`，以及公开节目单 `/program/<publicCode>` |
 | Worker | [`plus/apps/worker`](plus/apps/worker) | 事务 outbox → 投影 relay（进程内 250ms 循环 + pg-boss 分钟级兜底） |
 | Domain | [`plus/packages/domain`](plus/packages/domain) | 纯领域：Activity、capability registry、compiler、Pack、command/event 模型 |
-| Runtime | [`plus/packages/runtime`](plus/packages/runtime) | command handler、投影、competition/voting/publishing/archive/grouping |
+| Runtime | [`plus/packages/runtime`](plus/packages/runtime) | command handler、投影、各 capability 服务（competition/voting/publishing/archive/grouping/tasks/attendance/schedule/incident） |
 | DB | [`plus/packages/db`](plus/packages/db) | Kysely schema、module-owned migrations、repository |
 | Contracts | [`plus/packages/contracts`](plus/packages/contracts) | 服务端与浏览器共享的 TypeBox schema |
 | Realtime | [`plus/packages/realtime`](plus/packages/realtime) | 受保护的 WebSocket 核心（`/protocol`、`/server`、`/client`），契约见 [CORE.md](plus/packages/realtime/CORE.md) |
 
-**capability**：`registration`、`questionnaire`、`materials`、`competition`、`voting`、`ticketing`、`publishing`、`archive`、`grouping`、`tasks`。**Pack**：`singer-competition`、`stage-show`、`review-awards`、`vote-poll`。三种结构的活动加纯投票活动已在同一内核上验证；新增形状只改组合与默认 definition。
+**capability**：`registration`、`questionnaire`、`materials`、`competition`、`voting`、`ticketing`、`publishing`、`archive`、`grouping`、`tasks`、`attendance`、`schedule`、`incident`。**Pack**：`singer-competition`、`stage-show`、`review-awards`、`vote-poll`。三种结构的活动加纯投票活动已在同一内核上验证；新增形状只改组合与默认 definition。
 
-**里程碑**：M0 Legacy Extraction → M1 Engine Kernel → M2 Capability Composition → M3 Execution Runtime → M4 Registration → M5 Competition/Evaluation → M6 Voting/Ticketing → M7 Publishing/Archive → M8 Product Surfaces → M9 Grouping → M10 投票结果发布 → M11 实时核心与投票 UI → M12 参与者投票页 → M13 Live 迁移到实时核心 → M13.1–M13.3 运营、语义与材料收口。逐项出口见 [roadmap](docs/artflow-plus/roadmap.md)。
+**里程碑**：M0 Legacy Extraction → M1 Engine Kernel → M2 Capability Composition → M3 Execution Runtime → M4 Registration → M5 Competition/Evaluation → M6 Voting/Ticketing → M7 Publishing/Archive → M8 Product Surfaces → M9 Grouping → M10 投票结果发布 → M11 实时核心与投票 UI → M12 参与者投票页 → M13 Live 迁移到实时核心 → M13.1–M13.3 运营、语义与材料收口 → M14 票据投票 → M15 运营分析/Tasks/签到/排期/事故恢复。逐项出口见 [roadmap](docs/artflow-plus/roadmap.md)。
 
 **关键不变量**：单写路径（receipt + audit + fact + outbox 同事务）、release 不可变、事件/投影按 mode 分区、公开结果唯一 selector、实时通道只做失效提示（HTTP 是恢复权威）。规则全集见 [不变量索引](docs/invariants/README.md)，结构门禁见 [门禁索引](docs/gates/README.md)。
 
@@ -98,7 +98,7 @@ $env:ARTFLOW_PLUS_ACCOUNT_PASSWORD = "<至少 8 位>"
 pnpm --filter @artflow-plus/api create-account --username organizer
 ```
 
-再次执行会更新这个用户名。默认权限覆盖建活动、审核报名、定稿、评分、评委入口、投票、公示、归档、材料和签到。需要收窄时加上 `--permissions a,b`。生产环境对生产库执行同一命令，口令由密钥管理提供。步骤与权限列表见[开发基线](docs/development-baseline.md)。
+再次执行会更新这个用户名。默认权限覆盖建活动、审核报名、定稿、评分、评委入口、投票、公示、归档、材料和签到；Tasks、Schedule、Incident 需要显式追加对应的 `.manage` 权限。需要收窄时加上 `--permissions a,b`。生产环境对生产库执行同一命令，口令由密钥管理提供。步骤与权限列表见[开发基线](docs/development-baseline.md)。
 
 环境变量：`ARTFLOW_PLUS_DATABASE_URL`（必填）、`ARTFLOW_PLUS_DB_SCHEMA`、`PORT` / `HOST`、`ARTFLOW_PLUS_CREDENTIAL_SECRET`、`ARTFLOW_PLUS_ARCHIVE_DIR`、`ARTFLOW_PLUS_MEDIA_DIR`、`ARTFLOW_PLUS_INLINE_RELAY=1`（单进程/E2E 时在 API 内跑 relay）、`VITE_API_TARGET`。浏览器 E2E 使用独立 schema `artflow_e2e`。
 
@@ -111,15 +111,15 @@ pnpm --filter @artflow-plus/api create-account --username organizer
 | [`docs/artflow-plus/shape-validation.md`](docs/artflow-plus/shape-validation.md) | 三类活动验证与明确缺口 |
 | [`docs/artflow-plus/skeleton-coverage.md`](docs/artflow-plus/skeleton-coverage.md) | v1 → v2 功能覆盖审计与待办缺口 |
 | [`docs/artflow-plus/frontend-design-direction.md`](docs/artflow-plus/frontend-design-direction.md) | Portal / Console 双壳视觉方向与桌面布局规格 |
-| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0037） |
-| [`docs/invariants/`](docs/invariants/README.md) | 领域不变量（AUTH/LIFE/CONC/SCOR/RES/TICK/GRP/RT/DEPL） |
-| [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / realtime） |
+| [`docs/architecture/adr/`](docs/architecture/adr/README.md) | v2 架构决策（ADR-0001…0041） |
+| [`docs/invariants/`](docs/invariants/README.md) | 领域不变量（AUTH/LIFE/CONC/SCOR/RES/TICK/GRP/RT/DEPL/ATT） |
+| [`docs/domains/`](docs/domains/README.md) | capability 领域模型与实时核心（含 grouping / schedule / incident / realtime） |
 | [`docs/gates/`](docs/gates/README.md) | 结构/golden/架构门禁 |
 | [`docs/artflow-plus/specs/`](docs/artflow-plus/specs/) · [`plans/`](docs/artflow-plus/plans/) | 每个 slice 的设计与实现计划 |
 
 ### 部署
 
-v2 使用 `deploy/compose.production.yml` 的 `plus` profile：独立 PostgreSQL 库/卷/凭证，Caddy 将主域名指向 plus-web。三个镜像由同一个 `v*` tag 构建，生产镜像必须填写 workflow 输出的 `@sha256:...` digest。备份恢复见 [backup-restore](docs/artflow-plus/backup-restore.md)。
+v2 使用 `deploy/compose.production.yml`，不设通用 profile：独立 PostgreSQL 库/卷/凭证，Caddy 将主域名指向 plus-web；`plus-export` 是可选 `export` profile。四个镜像由同一个 `v*` tag 构建，生产镜像必须填写 workflow 输出的 `@sha256:...` digest。备份恢复见 [backup-restore](docs/artflow-plus/backup-restore.md)。
 
 ## 先读这些 · Read these first
 

@@ -1,5 +1,8 @@
 # M2-D2 结果公示 Release Authority 恶意彩排矩阵
 
+> **历史文档（v1 时代 / 已完成记录）**：仅用于追溯当时的行为、证据与事故，不代表当前实现。
+> 当前操作以 [开发基线](development-baseline.md)、[ArtFlow-Plus 主线](artflow-plus/README.md) 和 [生产部署](deployment-production.md) 为准。
+
 本矩阵只允许在本机或专用隔离 Compose 环境执行。它验证应用层的结果公示 authority，
 不是公网容量、WAF 或 volumetric DDoS 证明。彩排 fixture 在非 production 环境创建一组
 正式生命周期但专属于演练的活动，脚本结束后只清理该 fixture；不得使用

@@ -2,8 +2,8 @@
 
 ## 0. 状态
 
-Accepted for implementation. 与 M15.4 Schedule/Program Release 同一轮开发，
-最终统一走 PR。
+Implemented and merged (2026-11-14) through PR #98, together with M15.4
+Schedule / Program Release. 结构化编辑器与高级 JSON 均保留未知字段。
 
 ## 1. 背景
 

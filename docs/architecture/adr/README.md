@@ -38,9 +38,9 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0031](0031-operational-adoption.md) | 历史导入与运营接管分离、按来源消费、公开 selector fail-closed、runtime contract v2 | superseded by 0036 |
 | [0032](0032-semantic-adoption-closure.md) | Adoption Definition 由 bundle 生成、canonical round id、registration lifecycle、媒体桥、语义 readiness | superseded by 0036 |
 | [0033](0033-participant-material-cutover.md) | MaterialCheck 进 bundle、补交 capability、原子材料上传、生产媒体卷、Unicode 路径、128 MiB 传输上限 | superseded by 0036 |
-| [0034](0034-portal-console-shell-split.md) | 公开 Portal 与运营 Console 双壳；品牌 token 共享，页面骨架与动效分离 | proposed |
+| [0034](0034-portal-console-shell-split.md) | 公开 Portal 与运营 Console 双壳；品牌 token 共享，页面骨架与动效分离 | accepted |
 | [0035](0035-participant-account-claim.md) | 通过一次性 fragment Claim 认领导入的参与者身份 | superseded by 0036 |
-| [0036](0036-single-main-line.md) | main 单线承载 v2；删除 v1 兼容层，Django 源码待审核后删除 | accepted |
+| [0036](0036-single-main-line.md) | main 单线承载 v2；删除 v1 兼容层与 Django 源码（源码保留在 tag `v1.0.2`） | accepted |
 | [0037](0037-http-route-modules-and-schema-drift.md) | HTTP 路由按 surface 拆模块；schema drift gate 阻断类型/迁移漂移 | accepted |
 | [0038](0038-attendance-observational-authority.md) | 签到是独立的观测 capability；票据签到与 redeem 分离；绑定 check-in session | accepted |
 | [0039](0039-judge-session-replay.md) | judge session token 由 session id 确定性派生；重放返回同一 session 的可用凭证 | accepted |

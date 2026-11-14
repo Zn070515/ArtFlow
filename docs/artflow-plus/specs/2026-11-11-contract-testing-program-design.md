@@ -1,6 +1,6 @@
 # 全平台契约测试与消费者故障注入体系（任务书）
 
-状态：提案，第一轮只做审核、调研与可行性设计。
+状态：已实施（P0–P3，2026-11-12）；契约工具持续维护，不进入运行时镜像。
 日期：2026-11-11。
 范围：`plus/` 的 Capability、Runtime Service、Repository、API、Realtime、前端与 Worker。
 

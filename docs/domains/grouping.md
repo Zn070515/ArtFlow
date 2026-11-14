@@ -50,7 +50,7 @@ v2 没有可编辑赛制草稿，release 不可变，因此改为确认时对照
 
 - 独立 `grouping` capability（依赖 registration + competition），不塞进 competition。
 - 每次订阅/命令都在 Activity 锁内；成员唯一性由数据库部分唯一索引兜底。
-- 归档包携带 `grouping.json` / `grouping.csv`；legacy 导入按原状态导入。
+- 归档包携带 `grouping.json` / `grouping.csv`；v1 导入已按 ADR-0036 移除。
 - 组级材料文件与「补交限定」仍归媒体 slice；当前只保留材料窗口状态。
 
 ## 待决问题

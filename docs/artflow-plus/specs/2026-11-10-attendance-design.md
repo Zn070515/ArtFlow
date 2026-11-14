@@ -1,7 +1,7 @@
 # M15.3 Attendance / Check-in Capability Design
 
 - Date: 2026-11-10
-- Status: accepted for implementation
+- Status: implemented and merged (2026-11-10, M15.3)
 - Scope: M15.3 only
 - Roadmap: [M15.3](../roadmap.md)
 

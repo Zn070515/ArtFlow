@@ -8,21 +8,21 @@
 | 层 | 形式 | 运行时机 |
 | --- | --- | --- |
 | 结构门禁 | `tests/gates/`（静态/契约检查，不需要业务数据） | 每次提交 / PR |
-| Golden 门禁 | `tests/golden/`（实现无关的领域样例） | v1 与 Plus 适配器均已接入 |
+| Golden 门禁 | `tests/golden/`（实现无关的领域样例） | Plus 适配器接入；v1 adapter 已移除 |
 | 架构门禁 | Plus 的 domain contract（状态机、selector 唯一性） | Plus runtime/domain 测试 |
 
 ## 已自动化的结构门禁
 
 | Gate | 对应不变量 | 检查什么 | 文件 |
 | --- | --- | --- | --- |
-| GATE-AUTH-01 | AUTH-01/02 | 所有 `AuthorityQuerySetMixin` 管理的模型必须 `base_manager_name="objects"`；`authority_write/authorized` 的 scope 必须在 `common.authority` 注册 | `tests/gates/test_authority_gate.py` |
-| GATE-MEDIA-01 | AUTH-04 | 任何 `urls.py` 都不得挂载静态 media；`controlled_media` 是唯一 `/media/` 路由 | `tests/gates/test_media_gate.py` |
-| GATE-LIST-01 | DEPL-03 | ruff / mypy / pyright / coverage / Tailwind / tsconfig / Docker / Dependabot 的清单必须覆盖全部 app 和产物族 | `tests/gates/test_config_lists.py` |
-| GATE-RELEASE-01 | DEPL-01/07 | publish 只由 `v*` tag 触发；bake `github.sha`；带 provenance；生产不发布 `latest` | `tests/gates/test_release_artifacts.py` |
-| GATE-DEPLOY-01 | DEPL-02/03/04 | 只有 proxy 发布端口；media/realtime 只读挂载 static；`collectstatic --clear`；每个 manifest 变量都有文档 | 同上 |
-| GATE-ARTIFACT-01 | AUTH-04/DEPL-06 | Git 不得跟踪 `.env`、SQLite、media/staticfiles/backups/logs、zip/log/密钥 | `tests/gates/test_no_tracked_artifacts.py` |
+| GATE-RELEASE-01 | DEPL-01/07 | publish 只由 `v*` tag 触发；bake `github.sha`；带 provenance；生产不发布 `latest`；四个 Plus target 来自同一 tag | `tests/gates/test_release_artifacts.py` |
+| GATE-DEPLOY-01 | DEPL-02/03/04 | 生产 manifest 单 origin、镜像 digest、PostgreSQL 18 挂载点、release SHA 注入 | 同上 |
+| GATE-SECURITY-HEADERS-01 | DEPL-02 | Plus 站点设置安全响应头；HSTS 只出现在 HTTPS site | `tests/gates/test_deploy_security_headers.py` |
+| GATE-ARTIFACT-01 | AUTH-04/DEPL-06 | Git 不得跟踪 `.env`、数据库、media/staticfiles/backups/logs、zip/log/密钥 | `tests/gates/test_no_tracked_artifacts.py` |
 | GATE-PLUS-BOUNDARY-01 | ADR-0009/0010/0011 | Plus capability 只能导入 engine 模块与自身；domain 不导入 persistence；engine assembly 不硬编码具体 capability；runtime/API/worker 不直接 import 具体 capability；API/worker 不得 import DB mutator | `tests/gates/test_plus_capability_boundaries.py` |
+| GATE-PLUS-ROUTES-01 | ADR-0037 | `app.ts` 只做组合；每个 route module 都被注册；method+URL 不重复；模块不超过 900 行 | `tests/gates/test_plus_route_modules.py` |
 | GATE-REALTIME-CORE-01 | RT-01…RT-08 / ADR-0027 | 只有 `packages/realtime` 可 import `ws` / `@fastify/websocket`；只有 `src/client` 与该包测试可 `new WebSocket`；realtime 不 import domain/db/runtime | `tests/gates/test_plus_realtime_core.py` |
+| GATE-SPEC-TEST-ARCH-01 | 自审计测试体系 | `docs/artflow-plus/specs/` 与 `plans/` 的新文档必须包含 Test architecture 段 | `tests/gates/test_spec_test_architecture.py` |
 | GAP-RATCHET-01 | 自审计测试体系 | UI 消费者、Pack 就绪、Manifest 闭合、文档/部署漂移、不变量测试覆盖；新增缺口失败，修复后必须删除 baseline 条目 | `plus/tools/contracts/src/audit/gaps.ts`、`gap-baseline.json` |
 
 运行：
@@ -32,14 +32,14 @@ uv run pytest tests/gates -q
 uv run python tests/golden/validate_fixtures.py
 ```
 
-`artflow-plus` 的 `.github/workflows/gates.yml` 会在每次 push/PR 时跑这两条。
+`main` 的 `.github/workflows/gates.yml` 会在每次 push/PR 时跑这两条。
 
-## Golden 门禁（v1 与 Plus 适配器均已接入）
+## Golden 门禁（Plus 适配器接入；v1 adapter 已移除）
 
 | Gate | 对应不变量 | 样例 |
 | --- | --- | --- |
 | GATE-SCORE-01 | SCOR-01/02/06 | `duplicate-score-fact.json` |
-| GATE-RESULT-01 | RES-01…RES-06 | `result-release-lifecycle.json`（v1 已执行） |
+| GATE-RESULT-01 | RES-01…RES-06 | `result-release-lifecycle.json`（历史：v1 已执行） |
 | GATE-ARCHIVE-01 | RES-06/07 | `archive-identity.json` |
 | GATE-TICKET-01 | TICK-01…TICK-03 | `capability-reissue-close.json` |
 | GATE-ROSTER-01 | LIFE-07 | `unknown-roster.json` |
@@ -47,7 +47,7 @@ uv run python tests/golden/validate_fixtures.py
 
 ## 架构门禁在 Plus 的落点
 
-这些无法靠 v1 源码静态检查得出，现在由 Plus 的领域实现与测试覆盖：
+这些规则现在由 Plus 的领域实现与测试覆盖：
 
 1. **单一 selector**：`selectPublicResults` 是公开结果的唯一读入口，其他模块
    不得自行拼查询（RES-02/RES-05）。

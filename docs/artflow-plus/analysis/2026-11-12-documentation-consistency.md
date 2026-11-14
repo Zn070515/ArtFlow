@@ -12,7 +12,7 @@ plans/analysis、`docs/archive/`、`docs/advices/` 与 `docs/superpowers/` 作�
 | 本地数据库 | `artflow-plus-postgres`，`127.0.0.1:5433`，可空 schema 由测试创建 | `docs/development-baseline.md` |
 | 测试 schema | 浏览器 E2E 用 `artflow_e2e`，`workers: 1` | `docs/development-baseline.md` |
 | 开发服务 | `pnpm --filter @artflow-plus/api start` / `... web dev` | `docs/development-baseline.md` |
-| 生产编排 | `deploy/compose.production.yml` + `plus` profile，三镜像按 digest 固定 | `docs/deployment-production.md` |
+| 生产编排 | `deploy/compose.production.yml`，四个发布镜像按 digest 固定；`export` 是可选 profile（2026-11-14 更正：不存在 `plus` profile） | `docs/deployment-production.md` |
 | Schema 维护 | 迁移 → `schema.snapshot.json` → `src/types.ts` | `docs/development-baseline.md` |
 | 契约工具 | `tools/contracts`，仅开发/CI，不进运行时镜像 | `docs/artflow-plus/README.md` |
 | 文档门禁 | 链接、禁用内容、权威文档的退役命令 | `scripts/check_docs.ps1` |

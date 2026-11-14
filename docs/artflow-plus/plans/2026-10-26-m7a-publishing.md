@@ -1,5 +1,7 @@
 # M7a Publishing / Results Implementation Plan
 
+> 历史执行计划：`artflow-plus` 分支已合并并删除；当前唯一主线是 `main`（ADR-0036）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add the `publishing` capability so a confirmed podium candidate becomes an immutable public result release, with revoke/unlock/re-release and one anonymous selector.

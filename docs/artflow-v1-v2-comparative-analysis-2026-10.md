@@ -5,7 +5,7 @@
 
 
 日期：2026-10-28
-代码参考：`e2c7805`（`artflow-plus`，M15.1 前的干净基线）；统计快照为 2026-10-28 的 M15.1 当前工作树
+代码参考：`e2c7805`（`artflow-plus` 历史分支，已合并并删除；M15.1 前的干净基线）；统计快照为 2026-10-28 的 M15.1 当前工作树
 统计工具：[`scripts/artflow_comparison.py`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/scripts/artflow_comparison.py)
 统计测试：[`scripts/tests/test_artflow_comparison.py`](https://github.com/Zn070515/ArtFlow/blob/v1.0.2/scripts/tests/test_artflow_comparison.py)
 
@@ -17,7 +17,8 @@
 2. v2 的领域层确实更纯：`packages/domain` 不依赖 Django、数据库或 HTTP；权限、release provenance、session scope、结果来源级消费、备份恢复都形成了可自动验证的边界。
 3. v2 的主要真实成本不是 TypeScript 本身，而是把 Django 原本承担的 auth、CSRF、forms、admin、迁移检测、i18n 与运维习惯重新交给项目维护。
 4. 统计上，v2 约用一半生产源代码覆盖了更泛化的能力，但测试声明密度明显低于 v1，且 HTTP 层和 DB schema 仍是集中式手写边界。
-5. 外部成熟项目的共同缺口不是“再做一个更灵活的比赛规则”，而是 Ops 组织执行层：活动准备度、任务/排期、签到、现场状态、权限化报表、公开传播。v2 目前已覆盖比赛/投票/结果闭环，但还没有通用 check-in、任务、schedule、resource 或 incident capability。
+5. 外部成熟项目的共同缺口不是“再做一个更灵活的比赛规则”，而是 Ops 组织执行层：活动准备度、任务/排期、签到、现场状态、权限化报表、公开传播。v2 当时已覆盖比赛/投票/结果闭环，但还没有通用 check-in、任务、schedule、resource 或 incident capability。
+（2026-11-14 补注：M15.2–M15.5 已补齐 tasks、attendance、schedule、incident；resource 仍无。）
 6. 本轮已实现的第一步是 `GET /api/activities/:id/operations/analytics`：它只读现有权威事实，返回活动级统计和注意项，不引入第二套状态机，也不把分析结果当成业务决策。
 
 ## 1. 统计口径

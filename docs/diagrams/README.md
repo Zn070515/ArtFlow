@@ -1,5 +1,11 @@
 # 流程图 · Diagrams
 
+> **历史文档（v1 时代 / 已完成记录）**：本目录的图源与渲染产物描述的是 1.x Django
+> 实现，仅用于追溯当时的行为与事故，不代表当前 ArtFlow-Plus（v2）实现。
+> 当前产品与架构口径以 [GOAL.md](../../GOAL.md)、[ArtFlow-Plus 主线](../artflow-plus/README.md)
+> 和 [路线图](../artflow-plus/roadmap.md) 为准。
+
+
 本目录保存活动流程、角色手册与模块全景的**渲染产物**与**图源定义**；根 README 与各运维文档按需引用：
 
 | 文件 | 说明 |

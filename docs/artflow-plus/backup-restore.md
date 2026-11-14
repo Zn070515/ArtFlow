@@ -1,10 +1,10 @@
 # ArtFlow-Plus 备份与隔离恢复
 
-这份文档是 Plus 生产卷的运维闭环。它只覆盖 Plus 自己的 PostgreSQL、归档包和私有材料；v1 的数据库、`media_data`、静态文件和部署配置仍按 [v1 备份恢复文档](../postgres-backup-restore.md) 管理。
+这份文档是 Plus 生产卷的运维闭环。它只覆盖 Plus 自己的 PostgreSQL、归档包和私有材料；v1 数据不迁移进 v2，其历史备份流程见 [v1 备份恢复文档](../postgres-backup-restore.md)。
 
 ## 覆盖范围
 
-Plus Compose profile 中有三块需要一起保存的持久数据：
+Plus Compose 部署中有三块需要一起保存的持久数据：
 
 | 数据 | Compose volume | 备份文件 | 用途 |
 | --- | --- | --- | --- |
@@ -12,14 +12,15 @@ Plus Compose profile 中有三块需要一起保存的持久数据：
 | 归档包 | `plus_archive_data` | `archives.tar.gz` | 已封存的结果包 |
 | 私有材料 | `plus_media_data` | `media.tar.gz` | Plus 上传的材料字节 |
 
-`media_data` 是 adoption 期间给 Plus 读取的 v1 只读桥接卷，不属于 Plus 的权威材料卷，也不会被 `backup_plus.sh` 悄悄合并进 Plus 备份。需要保留它时，继续按 v1 备份流程保存。
+v1 的 `media_data` 桥接卷已随 ADR-0036 删除，不属于 Plus 的权威材料卷，也不会被 `backup_plus.sh` 合并进 Plus 备份。
 
 ## 生成备份
 
-先确认 `.env.production` 中的三个 Plus 镜像是同一 release 的 digest，并且 Plus profile 已经运行：
+先确认 `.env.production` 中 api/worker/web（以及可选的 export）镜像是同一 release 的
+digest，并且服务已经运行：
 
 ```powershell
-docker compose -f deploy/compose.production.yml --env-file .env.production --profile plus ps
+docker compose -f deploy/compose.production.yml --env-file .env.production ps
 ```
 
 执行：
@@ -30,7 +31,7 @@ bash scripts/backup_plus.sh backups/artflow-plus
 
 宿主机需要 Python 3.12+、Docker Compose 和 `sha256sum`。也可以通过
 `ARTFLOW_ENV_FILE`、`ARTFLOW_COMPOSE_PROJECT` 和 `ARTFLOW_COMPOSE_FILE` 指定部署环境。
-命令需要正在运行的 `plus-db`、`plus-api`、`plus-worker` 和 `plus-web`；它从容器中读取 PostgreSQL 和两个 Plus 文件卷，输出一个新的目录：
+命令需要正在运行的 `plus-db`、`plus-api`、`plus-worker` 和 `plus-web`（`plus-export` 可选，不参与备份）；它从容器中读取 PostgreSQL 和两个 Plus 文件卷，输出一个新的目录：
 
 ```text
 backups/artflow-plus/<UTC时间>-<release-sha>/
@@ -73,5 +74,6 @@ Plus backup restore verification passed; source services and volumes were not re
 ## 与 v1 流程的边界
 
 - `scripts/backup_plus.sh` / `scripts/restore_plus_verify.sh` 只处理 Plus 三块持久数据。
-- `scripts/backup.sh` / `scripts/restore-verify.sh` 只服务保留的 v1 Django 源码；v1 不再部署。
+- v1 的 `scripts/backup.sh` / `scripts/restore-verify.sh` 已随 v1 源码移除；v1 不再部署，
+  其历史流程仅见 [v1 备份恢复文档](../postgres-backup-restore.md)。
 - 这一步是部署数据完整性检查，不创建活动，也不改变正式事实。
