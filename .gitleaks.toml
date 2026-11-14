@@ -4,3 +4,11 @@
 
 [extend]
 useDefault = true
+
+# The registration blocklist intentionally contains common passwords. This is
+# data, not a credential; keep the exception narrow to that file and value.
+[allowlist]
+description = "Common-password blocklist entry in the registration policy."
+condition = "AND"
+paths = ['''^plus/packages/runtime/src/auth-service\.ts$''']
+regexes = ['''password1234''']
