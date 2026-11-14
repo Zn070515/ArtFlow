@@ -234,7 +234,7 @@ journey，要么显式声明 `notInJourney`。
 已自动化：`mutation:audit` 通过临时修改 + `finally` 恢复运行 8 个关键变异。
 首次运行 6/8 caught，发现材料扩展名没有测试、Realtime 只测了 authorize 阶段关闭；
 补测试后 8/8 caught。详见
-[变异审计结果](../analysis/2026-11-11-mutation-audit-findings.md)。
+[变异审计结果](../../archive/v2/analysis/2026-11-11-mutation-audit-findings.md)。
 
 ## 9. 已实现与下一步
 

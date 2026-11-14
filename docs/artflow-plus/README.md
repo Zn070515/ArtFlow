@@ -84,16 +84,16 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | v1 → v2 功能覆盖审计 | [skeleton-coverage.md](skeleton-coverage.md) |
 | 目标架构与模块边界 | [architecture/target](../architecture/target/README.md) |
 | 前端视觉方向（Portal / Console 双壳） | [frontend-design-direction.md](frontend-design-direction.md) |
-| M7→M13.3 代码 review（high） | [reviews/2026-10-27-m7-m13-high-review.md](reviews/2026-10-27-m7-m13-high-review.md) |
+| M7→M13.3 代码 review（high，归档） | [reviews/2026-10-27-m7-m13-high-review.md](../archive/v2/reviews/2026-10-27-m7-m13-high-review.md) |
 | 架构决策 | [architecture/adr](../architecture/adr/README.md) |
 | 契约测试与消费者故障注入任务书 | [specs/2026-11-11-contract-testing-program-design.md](specs/2026-11-11-contract-testing-program-design.md) |
-| 契约测试现状审核（P0） | [analysis/2026-11-11-contract-testing-audit.md](analysis/2026-11-11-contract-testing-audit.md) |
-| 契约测试实施计划 | [plans/2026-11-11-contract-testing-plan.md](plans/2026-11-11-contract-testing-plan.md) |
-| 外部审核驱动的测试体系加固 | [analysis/2026-11-11-external-review-test-hardening.md](analysis/2026-11-11-external-review-test-hardening.md) |
+| 契约测试现状审核（P0，归档） | [analysis/2026-11-11-contract-testing-audit.md](../archive/v2/analysis/2026-11-11-contract-testing-audit.md) |
+| 契约测试实施计划（归档） | [plans/2026-11-11-contract-testing-plan.md](../archive/v2/plans/2026-11-11-contract-testing-plan.md) |
+| 外部审核驱动的测试体系加固（归档） | [analysis/2026-11-11-external-review-test-hardening.md](../archive/v2/analysis/2026-11-11-external-review-test-hardening.md) |
 | 自审计测试体系设计 | [specs/2026-11-11-self-auditing-test-system-design.md](specs/2026-11-11-self-auditing-test-system-design.md) |
-| 变异审计结果 | [analysis/2026-11-11-mutation-audit-findings.md](analysis/2026-11-11-mutation-audit-findings.md) |
-| 工程加固（拆分、L3/L4、DB 生成链、文档口径） | [plans/2026-11-12-engineering-hardening.md](plans/2026-11-12-engineering-hardening.md) |
-| 文档口径审计 | [analysis/2026-11-12-documentation-consistency.md](analysis/2026-11-12-documentation-consistency.md) |
+| 变异审计结果（归档） | [analysis/2026-11-11-mutation-audit-findings.md](../archive/v2/analysis/2026-11-11-mutation-audit-findings.md) |
+| 工程加固（拆分、L3/L4、DB 生成链、文档口径，归档） | [plans/2026-11-12-engineering-hardening.md](../archive/v2/plans/2026-11-12-engineering-hardening.md) |
+| 文档口径审计（归档） | [analysis/2026-11-12-documentation-consistency.md](../archive/v2/analysis/2026-11-12-documentation-consistency.md) |
 | Journey spec 目录 | [tools/contracts/journeys](../../plus/tools/contracts/journeys/) |
 | 领域模型 | [domains](../domains/) |
 | 领域不变量（AUTH/LIFE/GRP/CONC/SCOR/RES/TICK/DEPL/RT/ATT） | [invariants](../invariants/README.md) |
@@ -101,8 +101,9 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 结构门禁 | [gates](../gates/README.md) |
 | Golden fixtures | [tests/golden](../../tests/golden/README.md) |
 | 497 条 fix 的经验 | [analysis/fix-lessons.md](analysis/fix-lessons.md) |
-| v2 架构优势与警惕债务 | [analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md](analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md) |
-| P0 安全基线还账计划 | [plans/2026-10-28-security-baseline-debt.md](plans/2026-10-28-security-baseline-debt.md) |
+| v2 架构优势与警惕债务（归档） | [analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md](../archive/v2/analysis/2026-10-28-v2-architecture-advantages-and-watchpoints.md) |
+| P0 安全基线还账计划（归档） | [plans/2026-10-28-security-baseline-debt.md](../archive/v2/plans/2026-10-28-security-baseline-debt.md) |
+| 已完成里程碑归档（计划、设计、审计、评审） | [archive/v2](../archive/v2/README.md) |
 | 重构前待决问题 | [open-questions.md](open-questions.md) |
 | PR 审查清单 | [review-checklist.md](review-checklist.md) |
 

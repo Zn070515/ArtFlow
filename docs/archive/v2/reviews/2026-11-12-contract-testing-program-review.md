@@ -4,10 +4,10 @@
 来源：外部任务书 `C:\Users\16275\Desktop\advices\ChatGPT.md`（2026-11-11）。
 对照：
 
-- [任务书规格](../specs/2026-11-11-contract-testing-program-design.md)
+- [任务书规格](../../../artflow-plus/specs/2026-11-11-contract-testing-program-design.md)
 - [P0 现状审核](../analysis/2026-11-11-contract-testing-audit.md)
 - [实施计划](../plans/2026-11-11-contract-testing-plan.md)
-- [自审计测试体系设计](../specs/2026-11-11-self-auditing-test-system-design.md)
+- [自审计测试体系设计](../../../artflow-plus/specs/2026-11-11-self-auditing-test-system-design.md)
 
 ## 1. 结论
 

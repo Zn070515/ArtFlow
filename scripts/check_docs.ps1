@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $docsPath = Join-Path $repositoryRoot 'docs'
-$superpowersDocsPath = Join-Path $docsPath 'superpowers'
+$archiveDocsPath = Join-Path $docsPath 'archive'
 # Root Markdown is opt-in: this list contains the repository's user-facing root
 # documents. Other root Markdown is not scanned unless it is added here.
 $rootDocumentNames = @('README.md', 'CLAUDE.md', 'AGENTS.md', 'CHANGELOG.md', 'GOAL.md')
@@ -57,13 +57,7 @@ function Get-UserFacingDocuments {
     }
 
     if (Test-Path -LiteralPath $docsPath -PathType Container) {
-        $documents += Get-ChildItem -LiteralPath $docsPath -Recurse -File -Filter '*.md' |
-            Where-Object {
-                -not $_.FullName.StartsWith(
-                    $superpowersDocsPath + [IO.Path]::DirectorySeparatorChar,
-                    [StringComparison]::OrdinalIgnoreCase
-                )
-            }
+        $documents += Get-ChildItem -LiteralPath $docsPath -Recurse -File -Filter '*.md'
     }
 
     return $documents
@@ -165,7 +159,17 @@ $forbiddenPatterns = @(
 )
 $violations = @()
 
-foreach ($document in $documents) {
+# Archived documents are immutable history: their v1-era wording and counts are
+# evidence, not instructions. Link validation still covers them; the stale-content
+# checks apply to active documentation only.
+$activeDocuments = $documents | Where-Object {
+    -not $_.FullName.StartsWith(
+        $archiveDocsPath + [IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase
+    )
+}
+
+foreach ($document in $activeDocuments) {
     $content = Get-Content -LiteralPath $document.FullName -Raw
     foreach ($rule in $forbiddenPatterns) {
         if ($content -match $rule.Pattern) {
@@ -179,8 +183,8 @@ if ($violations.Count -gt 0) {
 }
 
 # Authoritative operating documents must describe the current Plus line only.
-# Historical material lives under docs/archive/, docs/advices/, docs/superpowers/
-# or a document whose first section carries an explicit historical banner.
+# Historical material lives under docs/archive/, docs/advices/ or a document
+# whose first section carries an explicit historical banner.
 $authoritativeDocuments = @(
     'README.md',
     'AGENTS.md',
@@ -222,4 +226,4 @@ if ($legacyViolations.Count -gt 0) {
     throw ("Authoritative documentation describes a retired v1 workflow:`n" + ($legacyViolations -join "`n"))
 }
 
-Write-Host "Documentation validation passed for $($documents.Count) user-facing Markdown file(s); docs/superpowers was skipped."
+Write-Host "Documentation validation passed for $($documents.Count) user-facing Markdown file(s)."

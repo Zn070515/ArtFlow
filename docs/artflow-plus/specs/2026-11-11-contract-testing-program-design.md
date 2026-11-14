@@ -6,8 +6,8 @@
 
 配套文档：
 
-- 现状审核：[2026-11-11-contract-testing-audit.md](../analysis/2026-11-11-contract-testing-audit.md)
-- 实施计划：[2026-11-11-contract-testing-plan.md](../plans/2026-11-11-contract-testing-plan.md)
+- 现状审核：[2026-11-11-contract-testing-audit.md](../../archive/v2/analysis/2026-11-11-contract-testing-audit.md)
+- 实施计划：[2026-11-11-contract-testing-plan.md](../../archive/v2/plans/2026-11-11-contract-testing-plan.md)
 
 ## 1. 背景
 
@@ -310,7 +310,7 @@ Consumer D: Publishing Service
 6. Capability Manifest 与共享 Schema 之间的契约漂移。
 
 第一轮已在最新代码上逐项复核，结论与证据见
-[审核文档 §5](../analysis/2026-11-11-contract-testing-audit.md#5-已知问题复核)。对仍然
+[审核文档 §5](../../archive/v2/analysis/2026-11-11-contract-testing-audit.md#5-已知问题复核)。对仍然
 存在的问题，实施顺序固定为：
 
 1. 先添加能复现问题的测试；

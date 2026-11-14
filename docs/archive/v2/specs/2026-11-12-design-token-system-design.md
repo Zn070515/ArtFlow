@@ -2,7 +2,7 @@
 
 状态：Console 完成并默认 `paper`；Vote / Login / Join / 报名表单已迁移（2026-11-12）；Portal 展示页保留 Afterglow。
 
-相关：[前端视觉方向](../frontend-design-direction.md)、
+相关：[前端视觉方向](../../../artflow-plus/frontend-design-direction.md)、
 [主办方工作台设计](2026-11-12-organizer-workspace-experience-design.md)。
 
 ## 1. 目标

@@ -4,7 +4,7 @@
 
 日期：2026-11-11。
 范围：`plus/`。
-任务书：[2026-11-11-contract-testing-program-design.md](../specs/2026-11-11-contract-testing-program-design.md)。
+任务书：[2026-11-11-contract-testing-program-design.md](../../../artflow-plus/specs/2026-11-11-contract-testing-program-design.md)。
 P0 审核：[2026-11-11-contract-testing-audit.md](../analysis/2026-11-11-contract-testing-audit.md)。
 
 ## 1. 总体策略
@@ -522,7 +522,7 @@ ADR-0039/0040。仍开放的 Manifest 声明缺口（competition commands、
   发现材料扩展名没有拒绝测试、Realtime 只测了 authorize 阶段关闭；补两个测试
   后 8/8 caught。详见
   [变异审计结果](../analysis/2026-11-11-mutation-audit-findings.md)。
-- 设计文档：[自审计测试体系设计](../specs/2026-11-11-self-auditing-test-system-design.md)。
+- 设计文档：[自审计测试体系设计](../../../artflow-plus/specs/2026-11-11-self-auditing-test-system-design.md)。
 
 后续优先级：
 

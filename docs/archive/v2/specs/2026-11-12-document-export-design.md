@@ -3,7 +3,7 @@
 - Date: 2026-11-12
 - Status: implemented (renderer-only sidecar + Ops ExportCard)
 - Scope: the four existing controlled export datasets, plus DOCX/XLSX rendering
-- Roadmap: [product-path gaps](../roadmap.md)
+- Roadmap: [product-path gaps](../../../artflow-plus/roadmap.md)
 
 ## Intent
 

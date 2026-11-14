@@ -2,9 +2,9 @@
 
 日期：2026-11-11。
 来源：GitHub Issues `#51`–`#65`（2026-11-11，提交 `facd56ce` 的彩排记录）。
-关联：[契约测试任务书](../specs/2026-11-11-contract-testing-program-design.md)、
+关联：[契约测试任务书](../../../artflow-plus/specs/2026-11-11-contract-testing-program-design.md)、
 [实施计划](../plans/2026-11-11-contract-testing-plan.md)、
-[ADR-0041](../../architecture/adr/0041-contract-harness.md)。
+[ADR-0041](../../../architecture/adr/0041-contract-harness.md)。
 
 ## 1. 先说结论
 
