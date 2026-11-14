@@ -24,7 +24,9 @@ export function registerSystemRoutes(ctx: ApiContext): void {
       return reply.status(503).send({ status: "unavailable" });
     }
   });
-  app.get("/openapi.json", { schema: { hide: true }, config: { access: "public" } }, async () => app.swagger());
+  // The schema enumerates every command and read surface. It is an operator
+  // tool, not public event content, so it follows the operations read level.
+  app.get("/openapi.json", { schema: { hide: true }, config: { access: "operations" } }, async () => app.swagger());
 
   app.get("/api/capabilities", { config: { access: "public" } }, async () => ({
     capabilities: registry.list().map((registration) => registration.manifest),

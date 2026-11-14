@@ -718,8 +718,15 @@ dbIt("records the injected actor in the receipt and audit log", async () => {
   }
 });
 
-dbIt("publishes the OpenAPI document", async () => {
-  const response = await app.inject({ method: "GET", url: "/openapi.json" });
+dbIt("publishes the OpenAPI document to operations readers", async () => {
+  const anonymous = await app.inject({ method: "GET", url: "/openapi.json" });
+  expect(anonymous.statusCode).toBe(401);
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/openapi.json",
+    headers: { authorization: `Bearer ${studioToken}` },
+  });
   expect(response.statusCode).toBe(200);
   expect(response.json().openapi).toBeDefined();
 });

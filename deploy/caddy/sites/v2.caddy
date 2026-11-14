@@ -3,6 +3,11 @@
 # (ARTFLOW_PLUS_MEDIA_DIR) and are served only through the Plus API.
 http://127.0.0.1:8081 {
 	@health path /healthz /healthz/ /readyz /readyz/
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
 	reverse_proxy @health plus-web:8080 {
 		header_up Host {$CADDY_SITE_ADDRESS}
 		header_up X-Forwarded-Proto https
@@ -14,6 +19,13 @@ https://{$CADDY_SITE_ADDRESS} {
 		max_size 128MB
 	}
 	header -Server
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+	}
 	reverse_proxy plus-web:8080 {
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto https

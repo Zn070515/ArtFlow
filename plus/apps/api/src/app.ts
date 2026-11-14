@@ -436,6 +436,21 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
   });
 
+  // The API is JSON, but it still belongs to the same origin as the shell.
+  // Set the headers here as well so a direct (non-proxied) deployment and the
+  // tests do not depend on the edge for the baseline. HSTS stays at the TLS
+  // edge because the API itself does not terminate HTTPS.
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "no-referrer");
+    reply.header(
+      "content-security-policy",
+      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    );
+    return payload;
+  });
+
   await app.register(swagger, {
     openapi: {
       info: { title: "ArtFlow-Plus API", version: "0.0.0" },
