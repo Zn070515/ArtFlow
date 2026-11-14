@@ -13,6 +13,8 @@ export interface RealtimeServerOptions {
   readonly fastify: FastifyInstance;
   readonly path?: string;
   readonly authenticate: (request: FastifyRequest) => Promise<RealtimeActor | null>;
+  /** Re-read account state; return null to close a revoked socket. */
+  readonly revalidate?: (actorId: string) => Promise<RealtimeActor | null>;
   readonly topics: readonly RealtimeTopic[];
   readonly pollIntervalMs?: number;
   readonly heartbeatIntervalMs?: number;
@@ -68,6 +70,7 @@ export async function createRealtimeServer(
           logger,
           randomUUID(),
           options.heartbeatTimeoutMs ?? HEARTBEAT.serverPongTimeoutMs,
+          options.revalidate,
         );
         connections.add(connection);
         socket.once("close", () => {
@@ -85,7 +88,12 @@ export async function createRealtimeServer(
   }, options.heartbeatIntervalMs ?? HEARTBEAT.serverPingIntervalMs);
   pingTimer.unref?.();
   const aliveTimer = setInterval(() => {
-    for (const connection of connections) connection.checkAlive();
+    for (const connection of connections) {
+      connection.checkAlive();
+      // A revoked or deactivated account must not keep an open subscription;
+      // the sweep bounds that window to one heartbeat.
+      void connection.refreshActor();
+    }
   }, options.heartbeatTimeoutMs ?? HEARTBEAT.serverPongTimeoutMs);
   aliveTimer.unref?.();
 

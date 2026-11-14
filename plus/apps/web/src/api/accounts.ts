@@ -6,6 +6,7 @@ export interface AccountSummary {
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
   readonly active: boolean;
+  readonly accessRevision: number;
   readonly createdAt: string;
 }
 
@@ -21,10 +22,19 @@ export interface UpdateAccountInput {
   readonly permissions?: readonly string[];
   readonly active?: boolean;
   readonly password?: string;
+  readonly expectedRevision: number;
 }
 
-export async function fetchAccounts(): Promise<readonly AccountSummary[]> {
-  const response = await apiFetch<{ accounts: readonly AccountSummary[] }>("/api/admin/accounts");
+export async function fetchAccounts(
+  includeParticipants = false,
+): Promise<readonly AccountSummary[]> {
+  const response = includeParticipants
+    ? await apiFetch<{ accounts: readonly AccountSummary[]; total: number }>(
+        "/api/admin/accounts?includeParticipants=true",
+      )
+    : await apiFetch<{ accounts: readonly AccountSummary[]; total: number }>(
+        "/api/admin/accounts",
+      );
   return response.accounts;
 }
 

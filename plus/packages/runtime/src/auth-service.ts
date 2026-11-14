@@ -21,6 +21,20 @@ export function hashPassword(password: string): string {
   return `${salt}:${digest}`;
 }
 
+/** Async variant for live requests; never block the event loop while hashing. */
+export function hashPasswordAsync(password: string): Promise<string> {
+  if (!password) {
+    return Promise.reject(new DomainError("INVALID_INPUT", "Password cannot be empty."));
+  }
+  const salt = randomBytes(16).toString("hex");
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, PASSWORD_KEY_LENGTH, (error, key) => {
+      if (error !== null) reject(error);
+      else resolve(`${salt}:${key.toString("hex")}`);
+    });
+  });
+}
+
 function derivePassword(password: string, salt: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     // Verification runs on the async thread pool so failed logins cannot block

@@ -38,12 +38,13 @@ export class RealtimeConnection implements RealtimePeer {
 
   constructor(
     private readonly socket: WebSocket,
-    private readonly actor: RealtimeActor,
+    private actor: RealtimeActor,
     private readonly topics: ReadonlyMap<string, RealtimeTopic>,
     private readonly hub: RealtimeHub,
     private readonly logger: RealtimeLogger,
     id: string,
     heartbeatTimeoutMs: number = HEARTBEAT.serverPongTimeoutMs,
+    private readonly revalidate?: (actorId: string) => Promise<RealtimeActor | null>,
   ) {
     this.id = id;
     this.heartbeatTimeoutMs = heartbeatTimeoutMs;
@@ -101,6 +102,22 @@ export class RealtimeConnection implements RealtimePeer {
   close(code: number, reason: string): void {
     this.closed = true;
     this.socket.close(code, reason);
+  }
+
+  /**
+   * A socket proves who connected, not who is still authorized. Re-read the
+   * account before serving another subscribe and on the liveness sweep.
+   */
+  async refreshActor(): Promise<boolean> {
+    if (this.revalidate === undefined) return true;
+    const next = await this.revalidate(this.actor.actorId);
+    if (this.closed) return false;
+    if (next === null) {
+      this.close(CLOSE_CODES.unauthenticated, "session revoked");
+      return false;
+    }
+    this.actor = next;
+    return true;
   }
 
   private error(id: string | undefined, code: RealtimeErrorCode, message: string): void {
@@ -183,6 +200,7 @@ export class RealtimeConnection implements RealtimePeer {
       return;
     }
     const target: RealtimeTarget = { topic, ...parsedTarget };
+    if (!(await this.refreshActor())) return;
     const allowed = await definition.authorize(this.actor, target);
     if (this.closed) return;
     if (!allowed) {

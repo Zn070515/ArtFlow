@@ -34,6 +34,7 @@ function fakeTopic(): RealtimeTopic & { setSeq(seq: number): void } {
 async function listen(options: {
   readonly topic?: RealtimeTopic;
   readonly authenticate?: () => Promise<RealtimeActor | null>;
+  readonly revalidate?: (actorId: string) => Promise<RealtimeActor | null>;
   readonly pollIntervalMs?: number;
   readonly heartbeatIntervalMs?: number;
   readonly heartbeatTimeoutMs?: number;
@@ -42,6 +43,7 @@ async function listen(options: {
   const realtime = await createRealtimeServer({
     fastify: app,
     authenticate: options.authenticate ?? (async () => actor),
+    ...(options.revalidate === undefined ? {} : { revalidate: options.revalidate }),
     topics: [options.topic ?? fakeTopic()],
     pollIntervalMs: options.pollIntervalMs ?? 20,
     heartbeatIntervalMs: options.heartbeatIntervalMs ?? 2000,
@@ -133,6 +135,44 @@ describe("realtime server", () => {
     socket.send(JSON.stringify({ v: 1, type: "ping", at: 5 }));
     expect(await nextMessage(socket, (m) => m.type === "pong")).toMatchObject({ at: 5 });
     socket.close();
+  });
+
+  it("closes a socket when its account is revoked before a new subscribe", async () => {
+    let revoked = false;
+    const { app, realtime, url } = await listen({
+      revalidate: async () => (revoked ? null : actor),
+    });
+    closers.push(async () => {
+      await realtime.close();
+      await app.close();
+    });
+    const socket = await open(url);
+    await nextMessage(socket, (message) => message.type === "hello");
+    socket.send(JSON.stringify({ v: 1, type: "subscribe", id: "s1", topic: "probe:act-1" }));
+    await nextMessage(socket, (message) => message.type === "subscribed");
+
+    revoked = true;
+    const closed = new Promise<number>((resolve) => socket.once("close", resolve));
+    socket.send(JSON.stringify({ v: 1, type: "subscribe", id: "s2", topic: "probe:act-2" }));
+    expect(await closed).toBe(CLOSE_CODES.unauthenticated);
+  });
+
+  it("closes a revoked socket on the liveness sweep", async () => {
+    let revoked = false;
+    const { app, realtime, url } = await listen({
+      revalidate: async () => (revoked ? null : actor),
+      heartbeatTimeoutMs: 50,
+    });
+    closers.push(async () => {
+      await realtime.close();
+      await app.close();
+    });
+    const socket = await open(url);
+    await nextMessage(socket, (message) => message.type === "hello");
+
+    const closed = new Promise<number>((resolve) => socket.once("close", resolve));
+    revoked = true;
+    expect(await closed).toBe(CLOSE_CODES.unauthenticated);
   });
 
   it("reports unknown topics and forbidden subscriptions without closing", async () => {

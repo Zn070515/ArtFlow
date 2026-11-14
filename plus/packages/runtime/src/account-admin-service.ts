@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  countActiveAccountManagers,
   getLocalAccountSummary,
   insertAudit,
   insertLocalAccount,
@@ -8,12 +9,17 @@ import {
   revokeLocalSessionsForActor,
   updateLocalAccountAccess,
 } from "@artflow-plus/db";
-import type { Database, StoredLocalAccountSummary } from "@artflow-plus/db";
+import type {
+  Database,
+  ListLocalAccountsOptions,
+  LocalAccountPage,
+  StoredLocalAccountSummary,
+} from "@artflow-plus/db";
 import { DomainError, requirePermission } from "@artflow-plus/domain";
 import type { ActorContext } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
-import { hashPassword } from "./auth-service.js";
+import { hashPasswordAsync } from "./auth-service.js";
 
 /** Only this permission may read or mutate the account registry. */
 export const ACCOUNT_MANAGE_PERMISSION = "account.manage";
@@ -30,10 +36,16 @@ export interface UpdateAccountInput {
   readonly permissions?: readonly string[];
   readonly active?: boolean;
   readonly password?: string;
+  readonly expectedRevision: number;
 }
 
 function requireAccountManager(actor: ActorContext): void {
   requirePermission(actor, ACCOUNT_MANAGE_PERMISSION);
+}
+
+/** `*` is every permission, including account administration. */
+function canAdminister(permissions: readonly string[]): boolean {
+  return permissions.includes("*") || permissions.includes(ACCOUNT_MANAGE_PERMISSION);
 }
 
 function normalize(values: readonly string[]): readonly string[] {
@@ -59,9 +71,10 @@ async function writeAccountAudit(
 export async function listAccounts(
   db: Kysely<Database>,
   actor: ActorContext,
-): Promise<readonly StoredLocalAccountSummary[]> {
+  options: ListLocalAccountsOptions = {},
+): Promise<LocalAccountPage> {
   requireAccountManager(actor);
-  return listLocalAccounts(db);
+  return listLocalAccounts(db, options);
 }
 
 export async function createAccount(
@@ -80,12 +93,15 @@ export async function createAccount(
   const roles = normalize(input.roles);
   const permissions = normalize(input.permissions);
   const actorId = `user:${username}`;
+  // Hash before the transaction: scrypt is CPU work and must not hold a
+  // database connection or row locks.
+  const passwordDigest = await hashPasswordAsync(input.password);
 
   try {
     return await db.transaction().execute(async (trx) => {
       await insertLocalAccount(trx, {
         username,
-        passwordDigest: hashPassword(input.password),
+        passwordDigest,
         actor: { actorId, actorType: "user", roles, permissions },
         active: true,
       });
@@ -110,29 +126,33 @@ export async function updateAccount(
 ): Promise<StoredLocalAccountSummary> {
   requireAccountManager(actor);
   const trimmed = username.trim();
+  if (input.password !== undefined && input.password.length < 8) {
+    throw new DomainError("INVALID_INPUT", "Password must be at least 8 characters.");
+  }
+  const passwordDigest = input.password === undefined
+    ? undefined
+    : await hashPasswordAsync(input.password);
 
   return db.transaction().execute(async (trx) => {
     const current = await getLocalAccountSummary(trx, trimmed);
     if (current === null) throw new DomainError("NOT_FOUND", `Account ${trimmed} was not found.`);
+    if (current.accessRevision !== input.expectedRevision) {
+      throw new DomainError("STALE_REVISION", "The account changed since it was read.");
+    }
 
     const nextRoles = input.roles === undefined ? current.roles : normalize(input.roles);
     const nextPermissions = input.permissions === undefined ? current.permissions : normalize(input.permissions);
     const nextActive = input.active ?? current.active;
 
     // Losing the last administrator would make the registry unmanageable.
-    if (current.active && current.permissions.includes(ACCOUNT_MANAGE_PERMISSION)) {
-      const losesAdministration = !nextActive || !nextPermissions.includes(ACCOUNT_MANAGE_PERMISSION);
+    if (current.active && canAdminister(current.permissions)) {
+      const losesAdministration = !nextActive || !canAdminister(nextPermissions);
       if (losesAdministration) {
         // Serialize administrator removals: two concurrent downgrades must not
         // both observe a surviving admin and leave the registry unmanageable.
         await trx.selectFrom("local_account").select("username").forUpdate().execute();
-        const accounts = await listLocalAccounts(trx);
-        const remaining = accounts.filter(
-          (candidate) => candidate.username !== trimmed &&
-            candidate.active &&
-            candidate.permissions.includes(ACCOUNT_MANAGE_PERMISSION),
-        );
-        if (remaining.length === 0) {
+        const remaining = await countActiveAccountManagers(trx, trimmed);
+        if (remaining === 0) {
           throw new DomainError(
             "LAST_ADMIN",
             "At least one active account must keep account.manage.",
@@ -141,26 +161,42 @@ export async function updateAccount(
       }
     }
 
-    const updated = await updateLocalAccountAccess(trx, trimmed, {
+    const result = await updateLocalAccountAccess(trx, trimmed, {
       roles: nextRoles,
       permissions: nextPermissions,
       active: nextActive,
-      ...(input.password === undefined ? {} : { passwordDigest: hashPassword(input.password) }),
-    });
-    if (updated === null) throw new DomainError("NOT_FOUND", `Account ${trimmed} was not found.`);
+      ...(passwordDigest === undefined ? {} : { passwordDigest }),
+    }, input.expectedRevision);
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        throw new DomainError("NOT_FOUND", `Account ${trimmed} was not found.`);
+      }
+      throw new DomainError("STALE_REVISION", "The account changed since it was read.");
+    }
+    const updated = result.account;
 
     // Deactivation and password resets invalidate every device immediately.
     // Permission edits do not need this: authorization reads the account.
-    const sessionsRevoked = !nextActive || input.password !== undefined;
+    const sessionsRevoked = !nextActive || passwordDigest !== undefined;
     if (sessionsRevoked) {
       await revokeLocalSessionsForActor(trx, current.actorId, new Date().toISOString());
     }
 
     await writeAccountAudit(trx, actor, "account.update", {
       username: trimmed,
-      before: { roles: current.roles, permissions: current.permissions, active: current.active },
-      after: { roles: updated.roles, permissions: updated.permissions, active: updated.active },
-      passwordChanged: input.password !== undefined,
+      before: {
+        roles: current.roles,
+        permissions: current.permissions,
+        active: current.active,
+        accessRevision: current.accessRevision,
+      },
+      after: {
+        roles: updated.roles,
+        permissions: updated.permissions,
+        active: updated.active,
+        accessRevision: updated.accessRevision,
+      },
+      passwordChanged: passwordDigest !== undefined,
       sessionsRevoked,
     });
     return updated;

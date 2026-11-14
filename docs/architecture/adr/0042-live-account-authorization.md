@@ -37,8 +37,16 @@ session TTL。同时工作人员只能通过 CLI `create-account` 创建，缺�
 
 ## 后果
 
-- 降权、停用、删除账号在下一次请求立即生效；撤销会话对所有设备立即生效。
-- 每个请求多一次 `local_session ⨝ local_account` 查询，后续可加短 TTL 缓存。
+- 降权、停用、删除账号在下一次 HTTP 请求或下一次实时订阅时生效；已经打开
+  的实时连接在最迟一个心跳内被关闭，不能继续订阅。
+- `local_account(actor_id)` 是唯一索引，`local_session(actor_id)` 有索引：
+  每请求的账号 join 不再扫描整张账号表。
+- 账号编辑使用 `access_revision` 做 compare-and-set；并发编辑返回
+  `STALE_REVISION`，不会把刚停用的账号静默改回启用。
+- `permissions: ["*"]` 与 `account.manage` 等价，最后一个管理员判断同样识别通配符。
+- scrypt 在事务外异步执行，不占用数据库连接或行锁。
+- 账号列表默认排除参与者账号并分页；`includeParticipants=true` 才返回报名用户。
 - 组织/活动级授权范围仍未建模，留到多租户设计阶段。
 - 回归证据：降权后 403、恢复权限后 200、停用后 401、撤销会话后 401、
-  最后一个管理员变更返回 `LAST_ADMIN`（409）。
+  最后一个管理员变更返回 `LAST_ADMIN`（409）、陈旧编辑返回 `STALE_REVISION`、
+  通配符管理员受同等保护、撤销后的实时连接被关闭。

@@ -1,7 +1,12 @@
 import {
+  AccountListQuerySchema,
+  AccountListResponseSchema,
   AccountParamsSchema,
+  AccountResponseSchema,
   CreateAccountBodySchema,
+  RevokeSessionsResponseSchema,
   UpdateAccountBodySchema,
+  type AccountListQuery,
   type CreateAccountBody,
   type UpdateAccountBody,
 } from "@artflow-plus/contracts";
@@ -19,15 +24,33 @@ export function registerAdminRoutes(ctx: ApiContext): void {
 
   app.get(
     "/api/admin/accounts",
-    { config: { access: "admin" } },
-    async (request) => ({
-      accounts: await listAccounts(db, await requestActor(request)),
-    }),
+    {
+      schema: {
+        querystring: AccountListQuerySchema,
+        response: { 200: AccountListResponseSchema },
+      },
+      config: { access: "admin" },
+    },
+    async (request) => {
+      const query = request.query as AccountListQuery;
+      return listAccounts(db, await requestActor(request), {
+        ...(query.includeParticipants === undefined
+          ? {}
+          : { includeParticipants: query.includeParticipants }),
+        ...(query.limit === undefined ? {} : { limit: query.limit }),
+        ...(query.offset === undefined ? {} : { offset: query.offset }),
+      });
+    },
   );
 
   app.post(
     "/api/admin/accounts",
-    { schema: { body: CreateAccountBodySchema } },
+    {
+      schema: {
+        body: CreateAccountBodySchema,
+        response: { 201: AccountResponseSchema },
+      },
+    },
     async (request, reply) => {
       const body = request.body as CreateAccountBody;
       const account = await createAccount(db, await requestActor(request), body);
@@ -37,7 +60,13 @@ export function registerAdminRoutes(ctx: ApiContext): void {
 
   app.put(
     "/api/admin/accounts/:username",
-    { schema: { params: AccountParamsSchema, body: UpdateAccountBodySchema } },
+    {
+      schema: {
+        params: AccountParamsSchema,
+        body: UpdateAccountBodySchema,
+        response: { 200: AccountResponseSchema },
+      },
+    },
     async (request) => {
       const { username } = request.params as { username: string };
       const body = request.body as UpdateAccountBody;
@@ -47,7 +76,12 @@ export function registerAdminRoutes(ctx: ApiContext): void {
 
   app.post(
     "/api/admin/accounts/:username/revoke-sessions",
-    { schema: { params: AccountParamsSchema } },
+    {
+      schema: {
+        params: AccountParamsSchema,
+        response: { 200: RevokeSessionsResponseSchema },
+      },
+    },
     async (request) => {
       const { username } = request.params as { username: string };
       return revokeAccountSessions(db, await requestActor(request), username);
