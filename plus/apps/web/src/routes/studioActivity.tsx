@@ -1,14 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { ApiError } from "../api/client.js";
 import {
   activateStudioActivity,
+  duplicateStudioActivity,
   fetchStudioState,
   renameStudioActivity,
   type StudioState,
 } from "../api/studio.js";
+import { FormDialog } from "../components/ui/Dialog.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { DefinitionEditor } from "../components/studio/DefinitionEditor.js";
@@ -52,12 +54,16 @@ function GuidedSummary({ state }: { readonly state: StudioState }) {
 
 function StudioActivityContent() {
   const { activityId } = useParams({ from: "/studio/$activityId" });
+  const navigate = useNavigate();
   const { session } = useSession();
   const queryClient = useQueryClient();
   const allowed = hasStudioAccess(session);
   const [activating, setActivating] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateTitle, setDuplicateTitle] = useState("");
+  const [duplicating, setDuplicating] = useState(false);
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const query = useQuery({
@@ -89,6 +95,27 @@ function StudioActivityContent() {
       setError(caught instanceof ApiError ? caught.message : "重命名失败，请稍后重试。");
     } finally {
       setRenaming(false);
+    }
+  }
+
+  async function duplicate(): Promise<void> {
+    setDuplicating(true);
+    setError(null);
+    try {
+      const created = await duplicateStudioActivity(
+        activityId,
+        crypto.randomUUID(),
+        duplicateTitle.trim() === "" ? undefined : duplicateTitle.trim(),
+      );
+      setDuplicateOpen(false);
+      await navigate({
+        to: "/studio/$activityId",
+        params: { activityId: created.id },
+      });
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "复制活动失败，请稍后重试。");
+    } finally {
+      setDuplicating(false);
     }
   }
 
@@ -145,6 +172,16 @@ function StudioActivityContent() {
         <div className="task-actions">
           <Button
             variant="secondary"
+            disabled={duplicating}
+            onClick={() => {
+              setDuplicateTitle("");
+              setDuplicateOpen(true);
+            }}
+          >
+            复制活动
+          </Button>
+          <Button
+            variant="secondary"
             disabled={state.activity.status === "archived"}
             onClick={() => {
               setTitle(state.activity.title);
@@ -185,6 +222,21 @@ function StudioActivityContent() {
           {error}
         </p>
       )}
+      <FormDialog
+        open={duplicateOpen}
+        title="复制活动"
+        description="复制能力组合与当前草稿；发布、报名、评分与结果不会被复制。"
+        confirmLabel="复制"
+        onCancel={() => setDuplicateOpen(false)}
+        onConfirm={() => { void duplicate(); }}
+      >
+        <Input
+          label="新活动标题（可选）"
+          value={duplicateTitle}
+          onChange={(event) => setDuplicateTitle(event.target.value)}
+          hint="留空则使用“原标题（副本）”"
+        />
+      </FormDialog>
       <div className="studio-grid studio-workspace">
         <div className="studio-main-column">
           <DefinitionEditor state={state} onChanged={refresh} />

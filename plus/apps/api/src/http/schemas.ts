@@ -426,6 +426,11 @@ export const ResolveIncidentBody = Type.Object(
   { additionalProperties: false },
 );
 
+export const DuplicateActivityBody = Type.Object(
+  { title: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) },
+  { additionalProperties: false },
+);
+
 export const ReopenIncidentBody = Type.Object(
   {
     expectedRevision: Type.Integer({ minimum: 0 }),

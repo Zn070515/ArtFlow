@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,8 @@ const useQueryMock = vi.hoisted(() => vi.fn());
 const useQueryClientMock = vi.hoisted(() => vi.fn());
 const useParamsMock = vi.hoisted(() => vi.fn());
 const useSessionMock = vi.hoisted(() => vi.fn());
+const navigateMock = vi.hoisted(() => vi.fn());
+const duplicateMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
@@ -16,10 +18,13 @@ vi.mock("@tanstack/react-router", () => ({
     <a href={to} {...props}>{children}</a>
   ),
   useParams: useParamsMock,
+  useNavigate: () => navigateMock,
 }));
 vi.mock("../api/studio.js", () => ({
   activateStudioActivity: vi.fn(),
+  duplicateStudioActivity: duplicateMock,
   fetchStudioState: vi.fn(),
+  renameStudioActivity: vi.fn(),
 }));
 vi.mock("../auth/RequireSession.js", () => ({
   RequireSession: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
@@ -76,5 +81,25 @@ describe("StudioActivityPage", () => {
     expect(document.querySelector(".studio-workspace")).not.toBeNull();
     expect(document.querySelector(".studio-main-column")).not.toBeNull();
     expect(document.querySelector(".studio-rail")).not.toBeNull();
+  });
+
+  it("duplicates the activity and opens the copy", async () => {
+    duplicateMock.mockResolvedValue({ id: "activity-2", title: "冬季赛" });
+    render(<StudioActivityPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制活动" }));
+    const dialog = document.querySelector("dialog") as HTMLElement;
+    fireEvent.change(within(dialog).getByLabelText("新活动标题（可选）"), {
+      target: { value: "冬季赛" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "复制", hidden: true }));
+
+    await waitFor(() => {
+      expect(duplicateMock).toHaveBeenCalledWith("activity-1", expect.any(String), "冬季赛");
+    });
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/studio/$activityId",
+      params: { activityId: "activity-2" },
+    });
   });
 });

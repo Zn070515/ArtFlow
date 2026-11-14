@@ -109,6 +109,18 @@ export function createStudioActivity(
   });
 }
 
+export function duplicateStudioActivity(
+  activityId: string,
+  commandId: string,
+  title?: string,
+): Promise<StudioActivity> {
+  return apiFetch<StudioActivity>(`/api/activities/${activityId}/duplicate`, {
+    method: "POST",
+    headers: { "idempotency-key": commandId },
+    body: JSON.stringify(title === undefined ? {} : { title }),
+  });
+}
+
 export function renameStudioActivity(
   activityId: string,
   commandId: string,
