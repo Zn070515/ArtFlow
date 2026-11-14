@@ -172,6 +172,17 @@ schema.
 - If migrations are unapplied, start the API once (it migrates on start) or run the
   migration path through the API/worker boot.
 
+## On-site recovery
+
+If a live surface fails, follow the v1-derived
+[onsite degradation design](artflow-plus/specs/2026-11-14-onsite-degradation-design.md):
+degrade to paper/manual work, keep the server authoritative, and re-enter through the
+normal command path with the recorded source, paper reference, reason and operator.
+Do not use a reset, a volume wipe, a client-side offline queue or a paper record that
+silently becomes a direct fact. Before resuming, compare attendance/score/vote/result
+counts with the paper record, sample the audit trail, and have the responsible
+organizer approve the release of traffic.
+
 ## Security and source control
 
 Never commit `.env`, credentials, database files, uploads, exports, archives, or

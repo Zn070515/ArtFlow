@@ -174,7 +174,10 @@ describe.skipIf(!connectionString)("attendance API", () => {
       payload: { pointKey: "gate", subjectType: "participant", subjectId: registrationId },
     });
     expect(duplicate.statusCode).toBe(409);
-    expect(duplicate.json()).toMatchObject({ code: "ALREADY_CHECKED_IN" });
+    expect(duplicate.json()).toMatchObject({
+      code: "ALREADY_CHECKED_IN",
+      details: { checkedInAt: deps.now(), pointKey: "gate" },
+    });
 
     const list = await readerApp.inject({
       method: "GET",
@@ -200,6 +203,67 @@ describe.skipIf(!connectionString)("attendance API", () => {
     });
     expect(undo.statusCode, undo.body).toBe(200);
     expect(undo.json()).toMatchObject({ status: "undone" });
+  });
+
+  it("records a paper check-in source and rejects incomplete paper entries", async () => {
+    const { activityId, registrationId } = await seedActivity();
+    await startSession(activityId);
+    await createPoint(activityId);
+
+    const missingReference = await managerApp.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/attendance/checkin`,
+      headers: headers(`paper-missing-${randomUUID()}`),
+      payload: {
+        pointKey: "gate",
+        subjectType: "participant",
+        subjectId: registrationId,
+        source: "manual_paper",
+      },
+    });
+    expect(missingReference.statusCode).toBe(400);
+    expect(missingReference.json().code).toBe("INVALID_INPUT");
+
+    const directWithReference = await managerApp.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/attendance/checkin`,
+      headers: headers(`direct-ref-${randomUUID()}`),
+      payload: {
+        pointKey: "gate",
+        subjectType: "participant",
+        subjectId: registrationId,
+        source: "direct",
+        sourceReference: "PAPER-17",
+      },
+    });
+    expect(directWithReference.statusCode).toBe(400);
+    expect(directWithReference.json().code).toBe("INVALID_INPUT");
+
+    const commandId = `paper-${randomUUID()}`;
+    const paper = await managerApp.inject({
+      method: "POST",
+      url: `/api/activities/${activityId}/attendance/checkin`,
+      headers: headers(commandId),
+      payload: {
+        pointKey: "gate",
+        subjectType: "participant",
+        subjectId: registrationId,
+        source: "manual_paper",
+        sourceReference: "PAPER-17",
+      },
+    });
+    expect(paper.statusCode, paper.body).toBe(200);
+
+    const fact = await db
+      .selectFrom("attendance_fact")
+      .selectAll()
+      .where("command_id", "=", commandId)
+      .executeTakeFirst();
+    expect(fact).toMatchObject({
+      source: "manual_paper",
+      source_reference: "PAPER-17",
+      action: "checkin",
+    });
   });
 
   it("checks in a ticket credential without consuming the ticket", async () => {
