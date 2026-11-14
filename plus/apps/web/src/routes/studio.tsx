@@ -6,6 +6,7 @@ import { fetchStudioActivities } from "../api/studio.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { ConsolePagination } from "../components/console/ConsolePagination.js";
+import { ACTIVITY_STATUS_LABELS, capabilityLabels, label } from "../components/format/labels.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
 import { Input } from "../components/ui/Input.js";
@@ -95,7 +96,7 @@ function StudioContent() {
               onChange={(event) => setStatusFilter(event.target.value)}
             >
               <option value="">全部状态</option>
-              {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+              {statuses.map((status) => <option key={status} value={status}>{label(ACTIVITY_STATUS_LABELS, status)}</option>)}
             </Select>
           </Toolbar>
           {filteredActivities.length === 0 ? (
@@ -107,7 +108,7 @@ function StudioContent() {
                   <th scope="col">活动</th>
                   <th scope="col">公开码</th>
                   <th scope="col">状态</th>
-                  <th scope="col">已启用 capability</th>
+                  <th scope="col">已启用能力</th>
                 </tr>
               </thead>
               <tbody>
@@ -123,8 +124,8 @@ function StudioContent() {
                       </Link>
                     </td>
                     <td data-label="公开码">{activity.publicCode}</td>
-                    <td data-label="状态">{activity.status}</td>
-                    <td data-label="已启用 capability">{activity.enabledCapabilities.join(", ")}</td>
+                    <td data-label="状态">{label(ACTIVITY_STATUS_LABELS, activity.status)}</td>
+                    <td data-label="已启用能力">{capabilityLabels(activity.enabledCapabilities)}</td>
                   </tr>
                 ))}
               </tbody>

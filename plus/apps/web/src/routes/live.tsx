@@ -6,6 +6,7 @@ import { fetchLiveActivities } from "../api/live.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasLiveAccess, useSession } from "../auth/SessionProvider.js";
 import { ConsolePagination } from "../components/console/ConsolePagination.js";
+import { ACTIVITY_STATUS_LABELS, capabilityLabels, label } from "../components/format/labels.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
 import { Input } from "../components/ui/Input.js";
@@ -57,8 +58,15 @@ function LiveContent() {
     );
   }
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
-  const statuses = [...new Set(query.data.map((activity) => activity.status))].sort();
-  const filteredActivities = query.data.filter((activity) => {
+  // Live is for activities that can actually be run on site. A registration-only
+  // or archive-only activity has no judging, voting, check-in, or ticket surface.
+  const liveActivities = query.data.filter((activity) =>
+    activity.enabledCapabilities.some((capability) =>
+      ["competition", "voting", "attendance", "ticketing"].includes(capability),
+    ),
+  );
+  const statuses = [...new Set(liveActivities.map((activity) => activity.status))].sort();
+  const filteredActivities = liveActivities.filter((activity) => {
     const matchesSearch = normalizedSearch.length === 0 ||
       `${activity.title} ${activity.publicCode}`.toLocaleLowerCase().includes(normalizedSearch);
     return matchesSearch && (statusFilter.length === 0 || activity.status === statusFilter);
@@ -72,8 +80,8 @@ function LiveContent() {
       <header>
         <h1 className="ui-page-title">活动</h1>
       </header>
-      {query.data.length === 0 ? (
-        <EmptyState title="还没有活动" description="有可执评的活动后会出现在这里。" />
+      {liveActivities.length === 0 ? (
+        <EmptyState title="还没有可执评的活动" description="启用比赛、投票、签到或票据能力后，活动会出现在这里。" />
       ) : (
         <>
           <Toolbar label="活动筛选">
@@ -90,7 +98,7 @@ function LiveContent() {
               onChange={(event) => setStatusFilter(event.target.value)}
             >
               <option value="">全部状态</option>
-              {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+              {statuses.map((status) => <option key={status} value={status}>{label(ACTIVITY_STATUS_LABELS, status)}</option>)}
             </Select>
           </Toolbar>
           {filteredActivities.length === 0 ? (
@@ -102,7 +110,7 @@ function LiveContent() {
                   <th scope="col">活动</th>
                   <th scope="col">公开码</th>
                   <th scope="col">状态</th>
-                  <th scope="col">已启用 capability</th>
+                  <th scope="col">已启用能力</th>
                 </tr>
               </thead>
               <tbody>
@@ -118,8 +126,8 @@ function LiveContent() {
                       </Link>
                     </td>
                     <td data-label="公开码">{activity.publicCode}</td>
-                    <td data-label="状态">{activity.status}</td>
-                    <td data-label="已启用 capability">{activity.enabledCapabilities.join(", ")}</td>
+                    <td data-label="状态">{label(ACTIVITY_STATUS_LABELS, activity.status)}</td>
+                    <td data-label="已启用能力">{capabilityLabels(activity.enabledCapabilities)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -11,6 +11,7 @@ import {
 } from "../api/studio.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
+import { capabilityLabels } from "../components/format/labels.js";
 import { summarizeDefinition } from "../components/studio/definitionSummary.js";
 import { Button } from "../components/ui/Button.js";
 import { Card } from "../components/ui/Card.js";
@@ -18,6 +19,29 @@ import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
 import { Input } from "../components/ui/Input.js";
 import { Select } from "../components/ui/Select.js";
+
+const PACK_COPY: Readonly<Record<string, { readonly title: string; readonly description: string }>> = {
+  "singer-competition": {
+    title: "歌手比赛",
+    description: "报名、问卷、音频材料、分组、评委评分、结果发布与归档。",
+  },
+  "stage-show": {
+    title: "舞台演出 / 节目征集",
+    description: "节目报名、作品材料、审核、任务与归档，不含比赛排名。",
+  },
+  "review-awards": {
+    title: "作品评审 / 评奖",
+    description: "报名、作品材料、评委评审、奖项候选与结果发布。",
+  },
+  "vote-poll": {
+    title: "人气投票",
+    description: "单个或多个候选的观众投票，结果确认后公开发布。",
+  },
+};
+
+function packCopy(pack: { readonly identity: string; readonly title: string }): { readonly title: string; readonly description: string } {
+  return PACK_COPY[pack.identity] ?? { title: pack.title, description: "" };
+}
 
 function SummarySection({
   title,
@@ -81,7 +105,7 @@ function StudioNewContent() {
     if (pack === undefined) return;
     setError(null);
     try {
-      setPreview(await previewPack(pack.identity, { title: title || pack.title, answers }));
+      setPreview(await previewPack(pack.identity, { title: title || packCopy(pack).title, answers }));
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "预览失败。");
     }
@@ -136,23 +160,26 @@ function StudioNewContent() {
       </header>
       <div className="studio-grid">
         <Card className="studio-main-column">
-          <h2 className="ui-card__title">Guided Mode</h2>
+          <h2 className="ui-card__title">引导模式</h2>
           <Input
             label="活动标题"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
           />
           <Select
-            label="Activity Pack"
+            label="活动模板"
             value={pack?.identity ?? ""}
             onChange={(event) => setPackId(event.target.value)}
           >
             {packs.map((candidate) => (
               <option key={candidate.identity} value={candidate.identity}>
-                {candidate.title}
+                {packCopy(candidate).title}
               </option>
             ))}
           </Select>
+          {pack === undefined ? null : (
+            <p className="ui-card__description">{packCopy(pack).description}</p>
+          )}
           {pack === undefined ? null : (
             <div className="pack-questions">
               {pack.questions.map((question) => (
@@ -165,7 +192,6 @@ function StudioNewContent() {
                     }
                   />
                   <span>{question.prompt}</span>
-                  <small>{question.capability}</small>
                 </label>
               ))}
             </div>
@@ -191,7 +217,7 @@ function StudioNewContent() {
           ) : (
             <>
               <p className="ui-card__description">
-                已启用：{preview.enabledCapabilities.join("、")}
+                已启用：{capabilityLabels(preview.enabledCapabilities)}
               </p>
               <div className="definition-summary">
                 <SummarySection title="报名字段" items={summary.registration} />

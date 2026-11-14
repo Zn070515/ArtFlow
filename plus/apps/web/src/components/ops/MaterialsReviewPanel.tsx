@@ -59,7 +59,8 @@ export function MaterialsReviewPanel({
             <Badge tone={MATERIAL_TONES[material.status] ?? "neutral"}>
               {MATERIAL_LABELS[material.status] ?? material.status}
             </Badge>{" "}
-            {material.originalName} · {material.questionKey}
+            {material.originalName} ·{" "}
+            {detail.questionnaire.questions.find((question) => question.key === material.questionKey)?.label ?? "材料"}
             {material.contentReady ? null : <span className="ui-field__error"> · 字节未保存，不能通过</span>}
             {canManage ? (
               <div className="task-actions">

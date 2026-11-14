@@ -491,11 +491,16 @@ export async function selectPublicResults(
       releasedAt: iso(row.released_at) ?? "",
       decisions: snapshot.decisions.map((decision) => ({
         ...decision,
-        contestantName: names.get(decision.contestantId) ?? decision.contestantId,
+        // Never show a raw participant id on a public page. A missing
+        // registration still gets a human fallback tied to the displayed rank.
+        contestantName:
+          names.get(decision.contestantId) ??
+          // Vote candidates are free-text names stored as ids; keep them.
+          (decision.unit === "percent" ? decision.contestantId : `选手 ${decision.rank}`),
       })),
       awards: snapshot.awards.map((award) => ({
         ...award,
-        contestantName: names.get(award.contestantId) ?? award.contestantId,
+        contestantName: names.get(award.contestantId) ?? "选手",
       })),
     };
   });

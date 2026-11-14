@@ -14,6 +14,14 @@ import {
   type LiveRound,
   type LiveState,
 } from "../../api/live.js";
+import {
+  label,
+  participantLabel,
+  PERFORMANCE_STATE_LABELS,
+  ROUND_STATE_LABELS,
+  SCORING_METHOD_LABELS,
+  SEAT_STATE_LABELS,
+} from "../format/labels.js";
 import { Badge } from "../ui/Badge.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
@@ -50,6 +58,7 @@ export function LiveRoundPanel({
 }) {
   const config = live.config;
   const round = live.round;
+  const sessionRunning = state.session !== null && state.session.status === "running";
   const [judges, setJudges] = useState<readonly JudgeDraft[]>(() =>
     Array.from({ length: config.judgeCount }, (_, index) => ({
       judgeId: `judge-${index + 1}`,
@@ -170,18 +179,22 @@ export function LiveRoundPanel({
   return (
     <Card className="live-round-card" data-testid={`live-round-${config.key}`}>
       <h2 className="ui-card__title">
-        {config.key} · {round?.state ?? "未准备"}
+        {config.key} · {round === null ? "未准备" : label(ROUND_STATE_LABELS, round.state, "未准备")}
       </h2>
       <p className="ui-card__description">
-        评委 {config.judgeCount} 人 · 最少 {config.minimumJudges} 人 · {config.scoringMethod} · 晋级{" "}
-        {config.advanceCount}
-        {round === null ? "" : ` · revision ${round.revision}`}
+        评委 {config.judgeCount} 人 · 最少 {config.minimumJudges} 人 ·{" "}
+        {label(SCORING_METHOD_LABELS, config.scoringMethod)} · 晋级 {config.advanceCount}
       </p>
 
       {round === null && canPrepare ? (
-        <Button variant="primary" disabled={busy} onClick={() => void prepare()}>
-          准备回合
-        </Button>
+        <>
+          <Button variant="primary" disabled={busy || !sessionRunning} onClick={() => void prepare()}>
+            准备回合
+          </Button>
+          {sessionRunning ? null : (
+            <p className="ui-card__description">先启动评分会话，再准备回合。</p>
+          )}
+        </>
       ) : null}
 
       {round !== null && live.panel === null && canManageSetup ? (
@@ -210,17 +223,14 @@ export function LiveRoundPanel({
       {live.panel === null ? null : (
         <div className="panel-summary">
           <p className="ui-card__description">
-            评委组 {live.panel.id.slice(0, 12)} · expected {live.panel.expectedJudges} · context v
-            {live.panel.contextVersion}
+            评委组：{live.panel.expectedJudges} 人 · 最低 {live.panel.minimumJudges} 人
           </p>
           <ul className="seat-list">
-            {live.seats.map((seat) => (
+            {live.seats.map((seat, index) => (
               <li key={seat.id}>
-                <span>
-                  {seat.seatKey || "—"} · {seat.judgeId}
-                </span>
+                <span>评委席 {index + 1}</span>
                 <Badge tone={seat.state === "assigned" ? "success" : "neutral"}>
-                  {seat.state}
+                  {label(SEAT_STATE_LABELS, seat.state)}
                 </Badge>
               </li>
             ))}
@@ -237,7 +247,7 @@ export function LiveRoundPanel({
           >
             {state.participantIds.map((participantId) => (
               <option key={participantId} value={participantId}>
-                {state.participantNames[participantId] ?? participantId}
+                {participantLabel(state.participantNames, participantId)}
               </option>
             ))}
           </Select>
@@ -263,7 +273,7 @@ export function LiveRoundPanel({
               .filter((participantId) => live.performances.every((item) => item.contestantId !== participantId))
               .map((participantId) => (
                 <option key={participantId} value={participantId}>
-                  {state.participantNames[participantId] ?? participantId}
+                  {participantLabel(state.participantNames, participantId)}
                 </option>
               ))}
           </Select>
@@ -292,8 +302,8 @@ export function LiveRoundPanel({
             {live.performances.map((performance) => (
               <tr key={performance.id}>
                 <td data-label="序号">{performance.sequence}</td>
-                <td data-label="选手">{state.participantNames[performance.contestantId] ?? performance.contestantId}</td>
-                <td data-label="状态">{performance.state}</td>
+                <td data-label="选手">{participantLabel(state.participantNames, performance.contestantId)}</td>
+                <td data-label="状态">{label(PERFORMANCE_STATE_LABELS, performance.state)}</td>
                 <td data-label="评分进度" data-testid={`score-count-${performance.contestantId}`}>
                   {performance.scoreCount}/{performance.expectedJudges}
                 </td>
@@ -345,9 +355,20 @@ export function LiveRoundPanel({
         </div>
       ) : null}
 
+      {round !== null && canManageSetup && (round.state !== "scoring" || !allLocked) ? (
+        <p className="ui-card__description">
+          {round.state !== "scoring" ? "回合进入评分后才能锁轮。" : "先锁定所有表演，再锁轮。"}
+        </p>
+      ) : null}
+      {round !== null && canResolve && (live.performances.length === 0 || openPerformanceRow !== undefined) ? (
+        <p className="ui-card__description">
+          {live.performances.length === 0 ? "先开表演。" : "先锁定当前表演，再生成排名。"}
+        </p>
+      ) : null}
+
       {live.ranking === null ? null : (
         <div className="ranking-block">
-          <Table caption={`当前排名（revision ${live.ranking.revision}）`}>
+          <Table caption="当前排名">
             <thead>
               <tr>
                 <th scope="col">名次</th>
@@ -360,7 +381,7 @@ export function LiveRoundPanel({
               {live.ranking.rows.map((row, index) => (
                 <tr key={row.contestantId}>
                   <td data-label="名次">{displayRanks[index] ?? index + 1}</td>
-                  <td data-label="选手">{state.participantNames[row.contestantId] ?? row.contestantId}</td>
+                  <td data-label="选手">{participantLabel(state.participantNames, row.contestantId)}</td>
                   <td data-label="总分">{row.total}</td>
                   <td data-label="评委数">{row.judgeCount}</td>
                 </tr>

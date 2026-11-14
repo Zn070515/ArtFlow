@@ -26,15 +26,17 @@ export function ProgramPage() {
           <h1>{program.activity.title}</h1>
           <p className="state-copy">公开码 {program.activity.publicCode}</p>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="checkbox" checked={hostMode} onChange={(event) => setHostMode(event.target.checked)} />
-            主持大字
-          </label>
-          <button type="button" className="secondary-button" onClick={() => window.print()}>
-            打印
-          </button>
-        </div>
+        {program.entries.length === 0 ? null : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" checked={hostMode} onChange={(event) => setHostMode(event.target.checked)} />
+              主持大字
+            </label>
+            <button type="button" className="secondary-button" onClick={() => window.print()}>
+              打印
+            </button>
+          </div>
+        )}
       </header>
       {program.entries.length === 0 ? (
         <p className="state-copy">还没有已通过审核的节目。</p>

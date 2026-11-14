@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   closeJudgeEntry,
@@ -10,8 +10,10 @@ import {
   type LiveSession,
   type LiveState,
 } from "../../api/live.js";
+import { EXECUTION_MODE_LABELS, EXECUTION_STATUS_LABELS, label } from "../format/labels.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { ConfirmDialog } from "../ui/Dialog.js";
 import { Input } from "../ui/Input.js";
 import { Select } from "../ui/Select.js";
 
@@ -29,12 +31,24 @@ export function LiveSessionPanel({
   const [error, setError] = useState<string | null>(null);
   const [entry, setEntry] = useState<{ readonly version: number; readonly url: string } | null>(null);
   const [closeReason, setCloseReason] = useState("");
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [copied, setCopied] = useState(false);
   const session = state.session;
   const ticketingEnabled = state.activity.enabledCapabilities.includes("ticketing");
   // Entry links are only claimable once a panel has created judge seats. Before
   // that the link resolves to SEAT_UNAVAILABLE with no visible warning, so the
   // control stays disabled and explains the prerequisite.
   const seatsReady = state.rounds.some((round) => round.seats.length > 0);
+
+  useEffect(() => {
+    // A closed session invalidates its judge entry; never leave an old link on
+    // screen for the next (formal) session.
+    if (session === null) {
+      setEntry(null);
+      setCopied(false);
+    }
+  }, [session]);
 
   async function run(action: () => Promise<void>, fallback: string): Promise<void> {
     setBusy(true);
@@ -87,18 +101,18 @@ export function LiveSessionPanel({
 
   return (
     <Card className="live-control-card" data-testid="live-session-panel">
-      <h2 className="ui-card__title">judging 会话</h2>
+      <h2 className="ui-card__title">评分会话</h2>
       {session === null ? (
         <div className="session-controls">
           <Select
-            label="Mode"
+            label="评分模式"
             className="session-control-field"
             value={mode}
             onChange={(event) => setMode(event.target.value as Mode)}
           >
-            <option value="test">test</option>
-            <option value="rehearsal">rehearsal</option>
-            <option value="formal">formal</option>
+            <option value="test">测试</option>
+            <option value="rehearsal">彩排</option>
+            <option value="formal">正式</option>
           </Select>
           <Button variant="primary" disabled={busy} onClick={() => void start()}>
             启动评分会话
@@ -107,9 +121,10 @@ export function LiveSessionPanel({
       ) : (
         <div className="session-controls">
           <p className="ui-card__description" data-testid="live-session-status">
-            judging · {session.mode} · {session.status}
+            评分会话 · {label(EXECUTION_MODE_LABELS, session.mode)} ·{" "}
+            {label(EXECUTION_STATUS_LABELS, session.status)}
           </p>
-          <Button variant="secondary" disabled={busy} onClick={() => void stop()}>
+          <Button variant="secondary" disabled={busy} onClick={() => setConfirmClose(true)}>
             关闭会话
           </Button>
         </div>
@@ -119,7 +134,7 @@ export function LiveSessionPanel({
           <Button
             variant="secondary"
             disabled={busy || !seatsReady}
-            onClick={() => void generateLink()}
+            onClick={() => (entry === null ? void generateLink() : setConfirmRegenerate(true))}
           >
             生成评委入口链接
           </Button>
@@ -149,15 +164,27 @@ export function LiveSessionPanel({
       {entry === null ? null : (
         <div className="judge-entry">
           <Input
-            label={`评委入口链接（v${entry.version}）`}
+            label={`评委入口链接（第 ${entry.version} 版）`}
             readOnly
             value={entry.url}
             aria-label="评委入口链接"
             onFocus={(event) => event.currentTarget.select()}
           />
-          <a className="table-link" href={entry.url} target="_blank" rel="noreferrer">
-            打开评委页
-          </a>
+          <div className="task-actions">
+            <a className="table-link" href={entry.url} target="_blank" rel="noreferrer">
+              打开评委页
+            </a>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                void navigator.clipboard?.writeText(entry.url);
+                setCopied(true);
+              }}
+            >
+              {copied ? "已复制" : "复制链接"}
+            </Button>
+          </div>
         </div>
       )}
       {error === null ? null : (
@@ -165,6 +192,30 @@ export function LiveSessionPanel({
           {error}
         </p>
       )}
+      <ConfirmDialog
+        open={confirmClose}
+        title="确认关闭评分会话？"
+        description="关闭后评委不能再提交评分；正在进行的本轮会停止。"
+        confirmLabel="关闭会话"
+        danger
+        onCancel={() => setConfirmClose(false)}
+        onConfirm={() => {
+          setConfirmClose(false);
+          void stop();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmRegenerate}
+        title="重新生成评委会入口链接？"
+        description="之前发给评委的旧链接会立即失效，需要重新发送新链接。"
+        confirmLabel="重新生成"
+        danger
+        onCancel={() => setConfirmRegenerate(false)}
+        onConfirm={() => {
+          setConfirmRegenerate(false);
+          void generateLink();
+        }}
+      />
     </Card>
   );
 }

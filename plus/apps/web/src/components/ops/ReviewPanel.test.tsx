@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const reviewRegistrationMock = vi.hoisted(() => vi.fn());
 
@@ -39,6 +39,22 @@ function detail(status: string): RegistrationDetail {
   };
 }
 
+beforeAll(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value: function showModal(this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value: function close(this: HTMLDialogElement) {
+      this.removeAttribute("open");
+      this.dispatchEvent(new Event("close"));
+    },
+  });
+});
+
 describe("ReviewPanel", () => {
   beforeEach(() => {
     reviewRegistrationMock.mockReset();
@@ -72,6 +88,7 @@ describe("ReviewPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认拒绝" }));
     expect(reviewRegistrationMock).toHaveBeenLastCalledWith(
       "activity-1",
       "registration-1",

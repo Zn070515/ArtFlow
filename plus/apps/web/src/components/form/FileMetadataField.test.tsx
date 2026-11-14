@@ -30,6 +30,8 @@ describe("FileMetadataField", () => {
       />,
     );
     expect(screen.getByText(/demo\.mp3/)).toBeInTheDocument();
-    expect(screen.getByText(/字节已保存/)).toBeInTheDocument();
+    expect(screen.getByText("重新选择文件")).toBeInTheDocument();
+    expect(screen.getByText(/已上传/)).toBeInTheDocument();
+    expect(screen.queryByText(/字节已保存/)).not.toBeInTheDocument();
   });
 });

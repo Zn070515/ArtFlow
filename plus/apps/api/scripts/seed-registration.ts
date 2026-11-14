@@ -37,6 +37,8 @@ const adminPermissions = [
   "registration.review",
   "registration.manage",
   "registration.roster.finalize",
+  "materials.review",
+  "materials.manage",
   "studio.manage",
   "competition.manage",
   "competition.round.prepare",

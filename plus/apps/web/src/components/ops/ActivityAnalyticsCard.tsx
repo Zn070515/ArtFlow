@@ -1,4 +1,5 @@
 import type { ActivityAnalyticsResponse } from "../../api/analytics.js";
+import { AGGREGATE_STATUS_LABELS, label } from "../format/labels.js";
 import { Card } from "../ui/Card.js";
 
 const ATTENTION_LABELS: Readonly<Record<string, string>> = {
@@ -18,7 +19,9 @@ function attentionLabel(code: string): string {
 
 function statusSummary(values: Readonly<Record<string, number>>): string {
   const entries = Object.entries(values);
-  return entries.length === 0 ? "暂无记录" : entries.map(([status, count]) => `${status} ${count}`).join(" · ");
+  return entries.length === 0
+    ? "暂无记录"
+    : entries.map(([status, count]) => `${label(AGGREGATE_STATUS_LABELS, status)} ${count}`).join(" · ");
 }
 
 export function ActivityAnalyticsCard({
@@ -32,7 +35,7 @@ export function ActivityAnalyticsCard({
         <div>
           <h2 className="ui-card__title">准备度与活动统计</h2>
         </div>
-        <span className="analytics-readonly">只读投影</span>
+        <span className="analytics-readonly">只读汇总</span>
       </div>
       <div className="analytics-stat-grid">
         <div className="analytics-stat"><span>报名总数</span><strong>{analytics.registration.total}</strong><small>{statusSummary(analytics.registration.byStatus)}</small></div>

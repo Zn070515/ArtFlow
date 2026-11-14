@@ -32,7 +32,7 @@
   .ui-button--primary:hover:not(:disabled) { background: var(--color-accent); filter: brightness(1.06); }
   .ui-button:active:not(:disabled) { scale: .97; }
   .ui-button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-  .ui-button:disabled { opacity: .55; cursor: not-allowed; }
+  .ui-button:disabled { opacity: .42; filter: grayscale(.35); cursor: not-allowed; }
 
   .ui-button__spinner {
     width: 14px;

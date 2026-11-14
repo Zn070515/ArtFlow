@@ -276,3 +276,24 @@
     z-index: 30;
   }
 }
+
+/* Judge surface: the same topbar, no sidebar and no organizer navigation. */
+.judge-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: clip;
+  background: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-console);
+  font-variant-numeric: tabular-nums;
+}
+
+.judge-shell .console-main {
+  padding: 24px;
+}
+
+@media (max-width: 767px) {
+  .judge-shell .console-main {
+    padding: 16px;
+  }
+}

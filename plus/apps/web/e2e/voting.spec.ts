@@ -12,11 +12,11 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
 
   // Start the two execution sessions the card needs.
   const sessionRows = page.locator(".voting-session-row");
-  const votingRow = sessionRows.filter({ hasText: "voting 会话" });
+  const votingRow = sessionRows.filter({ hasText: "投票会话" });
   await votingRow.getByLabel("启动模式").selectOption("formal");
   await votingRow.getByRole("button", { name: "启动" }).click();
   await expect(votingRow.getByText("运行中")).toBeVisible();
-  const publishingRow = sessionRows.filter({ hasText: "publishing 会话" });
+  const publishingRow = sessionRows.filter({ hasText: "发布会话" });
   await publishingRow.getByLabel("启动模式").selectOption("formal");
   await publishingRow.getByRole("button", { name: "启动" }).click();
   await expect(publishingRow.getByText("运行中")).toBeVisible();
@@ -53,6 +53,7 @@ test("ops runs a vote and publishes the live result", async ({ page }) => {
   await expect(page.getByText(/alice · 1 票/)).toBeVisible({ timeout: 10_000 });
 
   await page.getByRole("button", { name: "关闭场次" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "关闭场次" }).click();
   await page.getByRole("button", { name: "预览结果" }).click();
   await expect(page.getByText("结果预览")).toBeVisible();
   await page.getByRole("button", { name: "确认赛果" }).click();

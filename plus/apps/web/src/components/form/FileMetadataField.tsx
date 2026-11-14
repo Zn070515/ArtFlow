@@ -25,28 +25,45 @@ export function FileMetadataField({
         {question.label}
         {question.required ? <em className="required-mark"> *</em> : null}
       </span>
-      <input
-        className="ui-input"
-        id={`question-${question.key}`}
-        name={question.key}
-        type="file"
-        accept={question.file?.accepts.join(",")}
-        disabled={disabled || busy}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file !== undefined) onFile(file);
-          event.target.value = "";
-        }}
-      />
-      {material === undefined ? null : (
-        <p className="file-meta">
-          已登记：{material.originalName} · {formatBytes(material.byteLength)}
-        </p>
-      )}
-      {material === undefined ? null : material.contentReady ? (
-        <p className="file-meta">字节已保存，审核时可以播放或下载。</p>
+      {material === undefined ? (
+        <input
+          className="ui-input"
+          id={`question-${question.key}`}
+          name={question.key}
+          type="file"
+          accept={question.file?.accepts.join(",")}
+          disabled={disabled || busy}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file !== undefined) onFile(file);
+            event.target.value = "";
+          }}
+        />
       ) : (
-        <p className="file-warning">字节尚未保存；请重新上传。</p>
+        <input
+          className="sr-only"
+          id={`question-${question.key}`}
+          name={question.key}
+          type="file"
+          accept={question.file?.accepts.join(",")}
+          disabled={disabled || busy}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file !== undefined) onFile(file);
+            event.target.value = "";
+          }}
+        />
+      )}
+      {material === undefined ? null : (
+        <>
+          <span className="ui-button ui-button--secondary ui-button--sm">
+            {busy ? "正在上传…" : "重新选择文件"}
+          </span>
+          <p className={material.contentReady ? "file-meta" : "file-warning"}>
+            {material.contentReady ? "已上传" : "字节尚未保存"}：{material.originalName} ·{" "}
+            {formatBytes(material.byteLength)}
+          </p>
+        </>
       )}
     </label>
   );

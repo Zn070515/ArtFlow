@@ -106,6 +106,15 @@ describe("OpsActivityPage", () => {
     expect(screen.getByRole("table", { name: "报名列表" })).toBeInTheDocument();
   });
 
+  it("does not reuse the activity id as a sibling key", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<OpsActivityPage />);
+    const duplicate = error.mock.calls.some(([message]) => String(message).includes("same key"));
+    error.mockRestore();
+
+    expect(duplicate).toBe(false);
+  });
+
   it("mounts tasks only when the activity enables the capability", () => {
     useQueryMock.mockReset();
     useQueryMock

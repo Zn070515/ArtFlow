@@ -13,8 +13,10 @@ import {
   startExecution,
   unlockStageResult,
 } from "../../api/voting.js";
+import { participantLabel } from "../format/labels.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { ConfirmDialog } from "../ui/Dialog.js";
 import { Input } from "../ui/Input.js";
 import { PublicationEditor } from "./PublicationEditor.js";
 
@@ -46,6 +48,7 @@ export function ResultActions({
   const [note, setNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [confirmedRevision, setConfirmedRevision] = useState<number | undefined>();
+  const [confirmAction, setConfirmAction] = useState<"close" | "archive" | "unarchive" | null>(null);
   const publishing = useQuery({
     queryKey: ["live-publishing", activityId],
     queryFn: () => fetchPublishingState(activityId),
@@ -163,7 +166,7 @@ export function ResultActions({
     <Card className="result-actions-card" data-testid="live-result-actions">
       <h2 className="ui-card__title">排名与公示</h2>
       <p className="ui-card__description">
-        {formal ? "正式评分会话" : "彩排会话只能生成候选前的排名；正式赛果需要 formal 会话。"}
+        {formal ? "正式评分会话" : "彩排会话只能生成候选前的排名；正式赛果需要正式会话。"}
       </p>
       {candidate === null ? (
         <p className="ui-card__description">还没有领奖候选。</p>
@@ -173,7 +176,7 @@ export function ResultActions({
           <ol className="seat-list">
             {candidate.placements.map((placement) => (
               <li key={`${placement.place}-${placement.contestantId}`}>
-                第 {placement.place} 名 · {state.participantNames[placement.contestantId] ?? placement.contestantId} · {placement.total}
+                第 {placement.place} 名 · {participantLabel(state.participantNames, placement.contestantId)} · {placement.total}
               </li>
             ))}
           </ol>
@@ -234,21 +237,55 @@ export function ResultActions({
         placeholder="发布和归档都需要说明"
       />
       <div className="task-actions">
-        <Button variant="secondary" disabled={busy || state.activity.status === "archived"} onClick={() => close.mutate()}>
+        <Button variant="secondary" disabled={busy || state.activity.status === "archived"} onClick={() => setConfirmAction("close")}>
           关闭活动
         </Button>
-        <Button variant="secondary" disabled={busy || state.activity.status !== "closed" || note.trim() === ""} onClick={() => archive.mutate()}>
+        <Button variant="secondary" disabled={busy || state.activity.status !== "closed" || note.trim() === ""} onClick={() => setConfirmAction("archive")}>
           归档活动
         </Button>
         {state.activity.status === "archived" ? (
-          <Button variant="secondary" disabled={busy || note.trim() === ""} onClick={() => unarchive.mutate()}>
+          <Button variant="secondary" disabled={busy || note.trim() === ""} onClick={() => setConfirmAction("unarchive")}>
             取消归档
           </Button>
         ) : null}
       </div>
+      {activeReleases.length > 0 ? (
+        <p className="ui-card__description">已发布；如需修改，先撤销发布。</p>
+      ) : effectiveConfirmedRevision === undefined ? (
+        <p className="ui-card__description">先确认赛果，再填写说明并发布。</p>
+      ) : note.trim() === "" ? (
+        <p className="ui-card__description">填写发布说明后才能发布。</p>
+      ) : null}
       {status === null ? null : <p className="ui-card__description" role="status">{status}</p>}
       {publishing.error === null || publishing.error === undefined ? null : <p className="ui-field__error" role="alert">赛果状态暂时不可用。</p>}
       {error === null || error === undefined ? null : <p className="ui-field__error" role="alert">{errorText(error)}</p>}
+      <ConfirmDialog
+        open={confirmAction !== null}
+        title={
+          confirmAction === "close"
+            ? "确认关闭活动？"
+            : confirmAction === "archive"
+              ? "确认归档活动？"
+              : "确认取消归档？"
+        }
+        description={
+          confirmAction === "close"
+            ? "关闭后活动进入结束状态，不能再进行现场操作；需要说明。"
+            : confirmAction === "archive"
+              ? "归档会生成只读包，之后不能继续修改活动；需要填写说明。"
+              : "取消归档会重新开放活动，已生成的归档包仍保留。"
+        }
+        confirmLabel={confirmAction === "close" ? "关闭活动" : confirmAction === "archive" ? "归档活动" : "取消归档"}
+        danger={confirmAction !== "unarchive"}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={() => {
+          const action = confirmAction;
+          setConfirmAction(null);
+          if (action === "close") close.mutate();
+          if (action === "archive") archive.mutate();
+          if (action === "unarchive") unarchive.mutate();
+        }}
+      />
     </Card>
   );
 }

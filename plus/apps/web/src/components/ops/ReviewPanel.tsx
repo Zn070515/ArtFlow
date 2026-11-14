@@ -4,17 +4,11 @@ import { useState } from "react";
 import type { ReviewStatus } from "../../api/ops.js";
 import { reviewRegistration } from "../../api/ops.js";
 import type { RegistrationDetail } from "../../api/registrations.js";
+import { label, REGISTRATION_STATUS_LABELS } from "../format/labels.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { ConfirmDialog } from "../ui/Dialog.js";
 import { Textarea } from "../ui/Textarea.js";
-
-const STATUS_LABELS: Readonly<Record<string, string>> = {
-  draft: "草稿",
-  submitted: "已提交",
-  approved: "已通过",
-  need_supplement: "需补充",
-  rejected: "未通过",
-};
 
 export function ReviewPanel({
   detail,
@@ -24,6 +18,7 @@ export function ReviewPanel({
   readonly onReviewed: () => void;
 }) {
   const [note, setNote] = useState(detail.registration.reviewNote ?? "");
+  const [rejectOpen, setRejectOpen] = useState(false);
   const mutation = useMutation({
     mutationFn: (status: ReviewStatus) =>
       reviewRegistration(
@@ -69,7 +64,7 @@ export function ReviewPanel({
             <Button
               variant="danger"
               disabled={mutation.isPending}
-              onClick={() => mutation.mutate("rejected")}
+              onClick={() => setRejectOpen(true)}
             >
               拒绝
             </Button>
@@ -77,7 +72,7 @@ export function ReviewPanel({
         </>
       ) : (
         <p className="ui-card__description">
-          当前状态「{STATUS_LABELS[detail.registration.status] ?? detail.registration.status}」不可审核。
+          当前状态「{label(REGISTRATION_STATUS_LABELS, detail.registration.status)}」不可审核。
         </p>
       )}
       {mutation.error === null ? null : (
@@ -85,6 +80,18 @@ export function ReviewPanel({
           {mutation.error instanceof Error ? mutation.error.message : "审核失败，请稍后重试"}
         </p>
       )}
+      <ConfirmDialog
+        open={rejectOpen}
+        title="确认拒绝这份报名？"
+        description="拒绝后参与者不能继续编辑；如需恢复，需要重新打开报名。审核意见会一并记录。"
+        confirmLabel="确认拒绝"
+        danger
+        onCancel={() => setRejectOpen(false)}
+        onConfirm={() => {
+          setRejectOpen(false);
+          mutation.mutate("rejected");
+        }}
+      />
     </Card>
   );
 }

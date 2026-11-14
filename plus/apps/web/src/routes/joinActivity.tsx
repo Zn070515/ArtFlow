@@ -10,6 +10,7 @@ import {
   startRegistration,
 } from "../api/registrations.js";
 import { RequireSession } from "../auth/RequireSession.js";
+import { rememberJoinedActivity } from "../components/form/joinedActivities.js";
 import { RegistrationForm } from "../components/form/RegistrationForm.js";
 
 function RegistrationNotFoundState({ publicCode }: { readonly publicCode: string }) {
@@ -42,6 +43,9 @@ function JoinActivityContent() {
     retry: false,
   });
   const activity = publicQuery.data;
+  useEffect(() => {
+    if (activity !== undefined) rememberJoinedActivity(activity.publicCode, activity.title);
+  }, [activity]);
 
   const mineQuery = useQuery({
     queryKey: ["registration-mine", activity?.id],
@@ -114,7 +118,13 @@ function JoinActivityContent() {
         <div>
           <p className="eyebrow">REGISTRATION · 报名</p>
           <h1 className="console-page-title">{activity.title}</h1>
-          <p className="state-copy">公开码 {activity.publicCode} · 参与者 {detailQuery.data.registration.participantId}</p>
+          <p className="state-copy">
+            公开码 {activity.publicCode} · 参与者{" "}
+            {typeof detailQuery.data.registration.answers.name === "string" &&
+            detailQuery.data.registration.answers.name.trim()
+              ? detailQuery.data.registration.answers.name
+              : "参与者"}
+          </p>
         </div>
       </header>
       <RegistrationForm

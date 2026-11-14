@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { fetchPublicResults, PublicResultsNotFound } from "../api/public-results.js";
+import { fetchPublicProgram, fetchPublicResults, PublicResultsNotFound } from "../api/public-results.js";
 import { EmptyState, ErrorState, LoadingState, NotFoundState } from "../components/results/ResultStates.js";
 import { ResultsView } from "../components/results/ResultsView.js";
 
@@ -11,6 +11,12 @@ export function ResultsRoute() {
   const query = useQuery({
     queryKey: ["public-results", publicCode],
     queryFn: ({ signal }) => fetchPublicResults(publicCode, signal),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const program = useQuery({
+    queryKey: ["public-program", publicCode],
+    queryFn: ({ signal }) => fetchPublicProgram(publicCode, signal),
     retry: false,
     staleTime: 60_000,
   });
@@ -38,11 +44,13 @@ export function ResultsRoute() {
   }
   return (
     <>
-      <p style={{ textAlign: "center" }}>
-        <Link className="table-link" to="/program/$publicCode" params={{ publicCode }}>
-          查看节目单 / 主持手卡
-        </Link>
-      </p>
+      {program.data === undefined || program.data.entries.length === 0 ? null : (
+        <p style={{ textAlign: "center" }}>
+          <Link className="table-link" to="/program/$publicCode" params={{ publicCode }}>
+            查看节目单 / 主持手卡
+          </Link>
+        </p>
+      )}
       <ResultsView data={query.data} />
     </>
   );

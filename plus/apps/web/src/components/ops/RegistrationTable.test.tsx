@@ -23,7 +23,7 @@ describe("RegistrationTable", () => {
             questionnaireVersion: "v1",
             questionnaireHash: "hash-1",
             status: "submitted",
-            answers: {},
+            answers: { name: "alice" },
             revision: 2,
             reviewNote: "",
           },
@@ -34,7 +34,7 @@ describe("RegistrationTable", () => {
             questionnaireVersion: "v1",
             questionnaireHash: "hash-1",
             status: "approved",
-            answers: {},
+            answers: { name: "bob" },
             revision: 1,
             reviewNote: "已确认",
           },
@@ -48,5 +48,8 @@ describe("RegistrationTable", () => {
 
     expect(screen.getByRole("link", { name: "alice" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "bob" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/participant:/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "修订" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "曲目 / 作品" })).toBeInTheDocument();
   });
 });

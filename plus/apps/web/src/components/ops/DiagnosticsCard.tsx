@@ -44,30 +44,39 @@ export function DiagnosticsCard({
   const executionState = execution.data;
   return (
     <Card className="diagnostics-card" data-testid="diagnostics-card">
-      <h2 className="ui-card__title">只读诊断</h2>
-      <div className="tasks-readiness">
-        <span>outbox 头 {outbox.data?.headSequence ?? "—"}</span>
-        <span>已发布 {outbox.data?.publishedHeadSequence ?? "—"}</span>
-        <span>待发布 {outbox.data?.pendingCount ?? "—"}</span>
-        <span>事件头 {events.data?.headCursor ?? "—"}</span>
-      </div>
-      {executionState === undefined ? null : (
+      <h2 className="ui-card__title">系统诊断</h2>
+      {executionState === undefined ? (
+        <p className="ui-card__description">诊断数据加载中…</p>
+      ) : (
         <p className="ui-card__description">
-          <Badge tone={stateTone(executionState)}>{stateLabel(executionState)}</Badge>{" "}
-          sequence {executionState.lastSequence}/{executionState.headSequence}
-          {executionState.blockedReason === undefined ? "" : ` · ${executionState.blockedReason}`}
+          <Badge tone={stateTone(executionState)}>{stateLabel(executionState)}</Badge>
         </p>
       )}
-      {events.data === undefined ? null : (
-        <ul className="seat-list" aria-label="最近事件">
-          {events.data.events.map((event) => (
-            <li key={event.sequence} data-testid="diagnostic-event-row">
-              #{event.sequence} · {event.type} · {event.capability}
-              {event.mode === undefined ? "" : ` · ${event.mode}`}
-            </li>
-          ))}
-        </ul>
-      )}
+      <details className="definition-raw">
+        <summary>高级诊断</summary>
+        <div className="tasks-readiness">
+          <span>outbox 头 {outbox.data?.headSequence ?? "—"}</span>
+          <span>已发布 {outbox.data?.publishedHeadSequence ?? "—"}</span>
+          <span>待发布 {outbox.data?.pendingCount ?? "—"}</span>
+          <span>事件头 {events.data?.headCursor ?? "—"}</span>
+        </div>
+        {executionState === undefined ? null : (
+          <p className="ui-card__description">
+            sequence {executionState.lastSequence}/{executionState.headSequence}
+            {executionState.blockedReason === undefined ? "" : ` · ${executionState.blockedReason}`}
+          </p>
+        )}
+        {events.data === undefined ? null : (
+          <ul className="seat-list" aria-label="最近事件">
+            {events.data.events.map((event) => (
+              <li key={event.sequence} data-testid="diagnostic-event-row">
+                #{event.sequence} · {event.type} · {event.capability}
+                {event.mode === undefined ? "" : ` · ${event.mode}`}
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
       {[events.error, execution.error, outbox.error].some((error) => error !== null && error !== undefined) ? (
         <p className="ui-field__error" role="alert">诊断数据暂时不可用。</p>
       ) : null}

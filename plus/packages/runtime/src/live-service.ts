@@ -18,6 +18,7 @@ import {
   getJudgeSeatGrant,
   getPanel,
   getPanelMember,
+  getRegistrationByParticipant,
   getRelease,
   getRound,
   listApprovedParticipantIds,
@@ -201,16 +202,30 @@ export interface JudgeScoringTarget {
   readonly contextVersion: number;
 }
 
+export interface JudgePerformance extends StoredPerformance {
+  readonly contestantName: string;
+}
+
 export interface JudgeContext {
   readonly activity: { readonly id: string; readonly title: string; readonly publicCode: string };
   readonly seat: JudgeSeatSummary;
   readonly panel: StoredPanelSnapshot | null;
   readonly round: StoredRound | null;
-  readonly performance: StoredPerformance | null;
+  readonly performance: JudgePerformance | null;
   readonly scoring: JudgeScoringTarget | null;
   readonly rubric: CompetitionRubricDefinition | null;
   readonly mode: ExecutionMode;
   readonly existingScore: StoredScoreFact | null;
+}
+
+function participantDisplayName(answers: unknown, fallback: string): string {
+  if (typeof answers !== "object" || answers === null) return fallback;
+  const record = answers as Record<string, unknown>;
+  for (const key of ["name", "displayName", "title", "负责人"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return fallback;
 }
 
 interface ResolvedJudgePanel {
@@ -281,6 +296,15 @@ export async function getJudgeContext(
   }
   const scoringSeat = await getJudgeSeatByPanelAndJudge(db, resolved.panel.id, resolved.judgeId);
   const performance = resolved.performance;
+  const registration = performance === null
+    ? null
+    : await getRegistrationByParticipant(db, session.activityId, performance.contestantId);
+  const performanceView: JudgePerformance | null = performance === null
+    ? null
+    : {
+        ...performance,
+        contestantName: participantDisplayName(registration?.answers, "选手"),
+      };
   const scores = await listCurrentScoreFactsForJudge(db, resolved.round.id, resolved.judgeId, mode);
   const existingScore = performance === null
     ? null
@@ -301,7 +325,7 @@ export async function getJudgeContext(
     ...base,
     panel: resolved.panel,
     round: resolved.round,
-    performance,
+    performance: performanceView,
     scoring,
     existingScore,
   };

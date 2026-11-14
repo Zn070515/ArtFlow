@@ -20,6 +20,7 @@ import type { VoteResultCandidateView } from "../../api/voting.js";
 import { useRealtimeTopic } from "../../realtime/useRealtimeTopic.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { ConfirmDialog } from "../ui/Dialog.js";
 import { Input } from "../ui/Input.js";
 import { Select } from "../ui/Select.js";
 import { Textarea } from "../ui/Textarea.js";
@@ -81,6 +82,8 @@ export function VotingCard(props: {
   const [stageKey, setStageKey] = useState("vote_result");
   const [note, setNote] = useState("");
   const [startMode, setStartMode] = useState<"rehearsal" | "formal">("rehearsal");
+  const [closeExecutionTarget, setCloseExecutionTarget] = useState<{ readonly id: string; readonly revision: number } | null>(null);
+  const [closeSessionTarget, setCloseSessionTarget] = useState<{ readonly id: string; readonly revision: number } | null>(null);
 
   const onRealtimeData = (data: VotingSessionsSnapshot): void => {
     queryClient.setQueryData(["voting-sessions", props.activityId], data);
@@ -203,7 +206,7 @@ export function VotingCard(props: {
           const session = running(scope);
           return (
             <div key={scope} className="voting-session-row">
-              <span>{scope} 会话</span>
+              <span>{scope === "voting" ? "投票会话" : "发布会话"}</span>
               <span>{session === undefined ? "未启动" : `运行中 · ${session.mode === "formal" ? "正式" : session.mode === "test" ? "测试" : "彩排"}`}</span>
               {props.canManageSessions ? (
                 session === undefined ? (
@@ -225,7 +228,7 @@ export function VotingCard(props: {
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => closeExecutionMutation.mutate(session)}
+                    onClick={() => setCloseExecutionTarget(session)}
                   >
                     关闭会话
                   </Button>
@@ -256,10 +259,10 @@ export function VotingCard(props: {
       </div>
 
       <ul className="voting-list">
-        {sessions.map((session) => (
+        {sessions.map((session, index) => (
           <li key={session.id} className="voting-session">
             <div>
-              <strong>{session.id}</strong>
+              <strong>投票场次 {index + 1}</strong>
               <span className="ui-card__description">
                 {session.status === "open" ? "进行中" : "已关闭"} · {session.candidateCount} 个候选
                 {fallback && session.live !== null ? " · 轮询中" : ""}
@@ -276,7 +279,7 @@ export function VotingCard(props: {
             ) : null}
             <div className="voting-actions">
               {session.status === "open" ? (
-                <Button variant="secondary" size="sm" onClick={() => closeSession.mutate(session)}>
+                <Button variant="secondary" size="sm" onClick={() => setCloseSessionTarget(session)}>
                   关闭场次
                 </Button>
               ) : (
@@ -356,6 +359,32 @@ export function VotingCard(props: {
       {error === null || error === undefined ? null : (
         <p className="ui-field__error" role="alert">{humanError(error)}</p>
       )}
+      <ConfirmDialog
+        open={closeExecutionTarget !== null}
+        title="确认关闭这个执行会话？"
+        description="关闭后该能力不能再执行，正在进行的操作会停止。"
+        confirmLabel="关闭会话"
+        danger
+        onCancel={() => setCloseExecutionTarget(null)}
+        onConfirm={() => {
+          const target = closeExecutionTarget;
+          setCloseExecutionTarget(null);
+          if (target !== null) closeExecutionMutation.mutate(target);
+        }}
+      />
+      <ConfirmDialog
+        open={closeSessionTarget !== null}
+        title="确认关闭这个投票场次？"
+        description="关闭后观众不能再投票，结果将按当前有效票计算。"
+        confirmLabel="关闭场次"
+        danger
+        onCancel={() => setCloseSessionTarget(null)}
+        onConfirm={() => {
+          const target = closeSessionTarget;
+          setCloseSessionTarget(null);
+          if (target !== null) closeSession.mutate(target);
+        }}
+      />
     </Card>
   );
 }
