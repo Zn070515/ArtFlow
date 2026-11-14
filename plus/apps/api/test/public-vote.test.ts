@@ -302,4 +302,31 @@ describe.skipIf(!connectionString)("public vote session", () => {
       expect(response.statusCode).toBe(200);
     }
   });
+
+  it("rate limits public activity lookups without blocking the vote read", async () => {
+    const { activityId, sessionId } = await seed();
+    const limited = await buildApp({
+      db,
+      deps,
+      rateLimiter: {
+        allow: ({ key }) => !key.startsWith("public-activity:"),
+      },
+    });
+    await limited.ready();
+    try {
+      const activity = await limited.inject({
+        method: "GET",
+        url: `/api/public/activities/${activityId}`,
+      });
+      expect(activity.statusCode).toBe(429);
+
+      const vote = await limited.inject({
+        method: "GET",
+        url: `/api/public/vote/${sessionId}`,
+      });
+      expect(vote.statusCode).toBe(200);
+    } finally {
+      await limited.close();
+    }
+  });
 });

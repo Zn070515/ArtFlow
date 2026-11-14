@@ -23,6 +23,7 @@ export function registerPublicRoutes(ctx: ApiContext): void {
     { schema: { params: PublicActivityParams }, config: { access: "public" } },
     async (request, reply) => {
       const { publicCode } = request.params as { publicCode: string };
+      await requirePublicRateLimit(request, `public-activity:${publicCode}`, 120);
       const activity = await getPublicActivity(db, publicCode);
       if (activity === null) {
         throw new DomainError("NOT_FOUND", "The activity was not found.");
