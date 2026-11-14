@@ -33,8 +33,8 @@ Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与�
 | 缺口 | v1 证据 | 影响 | 计划 |
 | --- | --- | --- | --- |
 | 公开公告 / 往届风采 / 活动文章 | `public_portal/` 的 `PublicPost` 类型与页面 | Portal 只有活动结果与报名入口 | 新 capability 或扩展 `publishing` 的非结果内容 |
-| 舞台类节目单公开页 / 节目顺序 | `farewell_show/` 的 `Program` 与 order | 观众看不到节目安排 | 新 capability 或 `publishing` 的非比赛 stage |
-| XLSX 导出 | `exports/`、`staff_panel` 导出 | 运营无法导出报名/评分/投票表格 | 独立导出模块，不塞进 capability |
+| 舞台类节目单公开页 / 节目顺序 | `farewell_show/` 的 `Program` 与 order | 已由 M15.4 `schedule` + `/program` 页覆盖 | 已完成 |
+| XLSX 导出 | `exports/`、`staff_panel` 导出 | API 已支持 csv/docx/xlsx；Console 仍只暴露 CSV 入口 | 补 Console 格式选择，不塞进 capability |
 | Word / 微信推文生成 | `exports/` 的 `ArticleTemplate`、`GeneratedDocument` | 无法一键生成推文 | 独立内容生成模块 |
 | bracket / 对阵 / 复合分 | `ruleset/` 的淘汰赛表达 | v2 competition 只表达 round/panel/score | 新 capability |
 | 现场大屏 | v1 结果板/主持手卡视图 | Live 只做失效提示与操作台 | 展示层项目 |

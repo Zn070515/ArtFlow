@@ -42,3 +42,4 @@ export * from "./attendance-service.js";
 export * from "./attendance-read-service.js";
 export * from "./export-service.js";
 export * from "./document-export-client.js";
+export * from "./schedule-service.js";

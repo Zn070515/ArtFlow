@@ -9,6 +9,7 @@ import { archiveCapability } from "./capabilities/archive.js";
 import { groupingCapability } from "./capabilities/grouping.js";
 import { tasksCapability } from "./capabilities/tasks.js";
 import { attendanceCapability } from "./capabilities/attendance.js";
+import { scheduleCapability } from "./capabilities/schedule.js";
 import { createCapabilityRegistry } from "./registry.js";
 import type { CapabilityRegistry } from "./registry.js";
 
@@ -30,6 +31,7 @@ export function createDefaultCapabilityRegistry(): CapabilityRegistry {
     groupingCapability,
     tasksCapability,
     attendanceCapability,
+    scheduleCapability,
   ]);
   if (!result.ok) {
     throw new Error(

@@ -280,3 +280,78 @@ export const PrepareRoundBody = Type.Object(
   { scope: Type.String({ minLength: 1, maxLength: 100 }) },
   { additionalProperties: false },
 );
+
+export const ScheduleModeSchema = Type.Union([
+  Type.Literal("test"),
+  Type.Literal("rehearsal"),
+  Type.Literal("formal"),
+]);
+
+export const ScheduleQuery = Type.Object(
+  { mode: Type.Optional(ScheduleModeSchema) },
+  { additionalProperties: false },
+);
+
+export const ScheduleEntryBody = Type.Object(
+  {
+    mode: ScheduleModeSchema,
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    slotKey: Type.String({ minLength: 1, maxLength: 64 }),
+    participantId: Type.Optional(Type.Union([
+      Type.String({ minLength: 1, maxLength: 100 }),
+      Type.Null(),
+    ])),
+    title: Type.String({ minLength: 1, maxLength: 200 }),
+    note: Type.Optional(Type.String({ maxLength: 500 })),
+    position: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false },
+);
+
+export const ScheduleReorderBody = Type.Object(
+  {
+    mode: ScheduleModeSchema,
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    orderedIds: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), { uniqueItems: true }),
+  },
+  { additionalProperties: false },
+);
+
+export const ScheduleRemoveBody = Type.Object(
+  {
+    mode: ScheduleModeSchema,
+    expectedRevision: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+export const ScheduleReleaseBody = Type.Object(
+  {
+    mode: ScheduleModeSchema,
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    note: Type.Optional(Type.String({ maxLength: 500 })),
+  },
+  { additionalProperties: false },
+);
+
+export const ScheduleRevokeBody = Type.Object(
+  { note: Type.Optional(Type.String({ maxLength: 500 })) },
+  { additionalProperties: false },
+);
+
+export const ScheduleEntryParams = Type.Object(
+  {
+    id: Type.String({ minLength: 1 }),
+    entryId: Type.String({ minLength: 1, maxLength: 100 }),
+  },
+  { additionalProperties: false },
+);
+
+export const ScheduleReleaseParams = Type.Object(
+  {
+    id: Type.String({ minLength: 1 }),
+    releaseId: Type.String({ minLength: 1, maxLength: 100 }),
+  },
+  { additionalProperties: false },
+);

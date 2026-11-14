@@ -12,7 +12,7 @@
 | 形状 | Pack | 能力组合 | 关键旅程 |
 | --- | --- | --- | --- |
 | 现场歌手赛 | `singer-competition` | competition, registration, questionnaire, materials, publishing, archive | 创建/发布 → 报名/审核/名单 → judging session → prepare → panel → 开表演 → 2 位评委录分 → 锁表演/锁轮 → resolve → ranking |
-| 毕晚/节目征集 | `stage-show` | registration, questionnaire, materials, archive | 创建/发布 → 报名 + 问卷 + 作品 metadata → 审核 → 名单 final → close → archive；无 competition/publishing 行 |
+| 毕晚/节目征集 | `stage-show` | registration, questionnaire, materials, archive, schedule | 创建/发布 → 报名 + 问卷 + 作品 metadata → 审核 → 名单 final → close → archive；无 competition/publishing 行 |
 | 作品评审赛 | `review-awards` | competition, publishing, archive, registration, questionnaire, materials | 创建/发布 → 报名/名单 → judging session → review 轮 → panel → 作品作为 performance → 录分 → 锁/排名 → publishing session → podium → confirm → release → 公开赛果 |
 
 ## 只靠配置就能成立的差异
@@ -42,7 +42,7 @@ definition。
 
 | 缺口 | 影响 | 后续 |
 | --- | --- | --- |
-| 舞台类没有“节目单/公开节目页”输出 | 观众看不到节目安排；只有报名/材料/归档 | 新 capability 或扩展 publishing 的非比赛 stage |
+| 舞台类没有“节目单/公开节目页”输出 | 已由 M15.4 `schedule` release 与 `/program` 页关闭 | 已完成 |
 | 纯观众投票活动没有发布路径 | publishing 依赖 competition，投票 tally 不能直接公开 | 已解耦并新增投票赛果确认与 Ops 投票卡片（M10） |
 | bracket / 对阵 / 复合分 | v2 competition 只能表达 round/panel/score | 新 capability，不塞进 competition |
 | podium 首次 recompute 需要预先算出 fingerprint | 没有发布 UI；自动旅程通过 `buildPodiumCandidate` 先算 fingerprint 再调用 | 发布/确认 UI 或让 recompute 返回当前 fingerprint |

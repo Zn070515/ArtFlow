@@ -36,6 +36,7 @@ Journey runner）同样在 `main` 上持续推进；契约工具只用于开发/
 | M15 Operations Analytics | 已完成 | 运营对比分析与审计视图 |
 | M16 Tasks Readiness | 已完成 | 版本化任务项、审计命令与 Ops 控制台 |
 | M15.3 Attendance | 已完成 | 统一签到（participant/ticket/staff）、签到点与 staff roster、Ops/Live 到场视图 |
+| M15.4 Schedule / Program Release | 已完成 | schedule capability、Ops/Live 排期、公开节目单快照、Studio 排期编辑器 |
 | v1 兼容移除 | 已完成 | 删除 legacy import/adoption、参与者认领、v1 媒体桥与 v1 golden adapter |
 
 ### v2 架构速览
@@ -67,7 +68,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 
 ### 仍开放的缺口
 
-- 舞台类节目单公开页、bracket/对阵、XLSX/Word 导出、二维码、现场大屏。
+- bracket/对阵、Console 的 XLSX/Word 导出入口、二维码、现场大屏。
 - SSO provider；当前使用本地会话。
 - 多实例实时广播（Redis）与权限实时撤销。
 - 1.x 源码已删除；功能记录在 `docs/archive/v1/`，源码见 tag `v1.0.2`。

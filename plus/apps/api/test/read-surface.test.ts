@@ -50,6 +50,7 @@ const INTERNAL_READS = [
   "/api/activities/any/attendance/staff",
   "/api/activities/any/publishing/state",
   "/api/activities/any/archive",
+  "/api/activities/any/schedule",
 ] as const;
 
 describe.skipIf(!connectionString)("internal read surface", () => {
@@ -117,6 +118,7 @@ describe.skipIf(!connectionString)("internal read surface", () => {
       "/api/public/activities/UNKNOWN",
       "/api/public/vote/UNKNOWN",
       "/api/public/results/UNKNOWN",
+      "/api/public/schedule/UNKNOWN",
       "/api/activities/any/voting/browser-identity",
     ]) {
       const response = await app.inject({ method: "GET", url });

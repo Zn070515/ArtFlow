@@ -23,6 +23,8 @@ const EXEMPT: Readonly<Record<string, string>> = {
     "Operational checklist with task ownership; no command lifecycle that the shared adapter can express.",
   voting:
     "Follow-up candidate: session open/close and ballot identity. Runtime voting and ticket tests cover the current edges.",
+  schedule:
+    "Ordered entries plus release snapshots, not a single status lifecycle; schedule-service tests cover add/reorder/release/revoke/advance and stale revisions.",
 };
 
 describe("contract adapter coverage", () => {

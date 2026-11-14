@@ -510,6 +510,45 @@ export interface RosterRow {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+export interface ScheduleCurrentRow {
+  activity_id: string;
+  mode: string;
+  entry_id: string | null;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+export interface ScheduleEntryRow {
+  id: string;
+  activity_id: string;
+  mode: string;
+  position: number;
+  slot_key: string;
+  participant_id: string | null;
+  title: string;
+  note: ColumnType<string, string | undefined, string>;
+  revision: ColumnType<number, number | undefined, number>;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+export interface ScheduleReleaseRow {
+  id: string;
+  activity_id: string;
+  mode: string;
+  version: number;
+  snapshot: ColumnType<unknown, string, string>;
+  note: ColumnType<string, string | undefined, string>;
+  released_at: ColumnType<Date, Date | string | undefined, never>;
+  revoked_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+}
+
+export interface ScheduleStateRow {
+  activity_id: string;
+  mode: string;
+  revision: ColumnType<number, number | undefined, number>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface ScoreCorrectionRow {
   id: string;
   score_fact_id: string;
@@ -720,6 +759,10 @@ export interface Database {
   result_publication: ResultPublicationRow;
   result_release: ResultReleaseRow;
   roster: RosterRow;
+  schedule_current: ScheduleCurrentRow;
+  schedule_entry: ScheduleEntryRow;
+  schedule_release: ScheduleReleaseRow;
+  schedule_state: ScheduleStateRow;
   score_correction: ScoreCorrectionRow;
   score_fact: ScoreFactRow;
   score_revision: ScoreRevisionRow;

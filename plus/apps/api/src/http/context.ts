@@ -19,7 +19,8 @@ export type ReadAccess =
   | "attendance"
   | "voting"
   | "result"
-  | "archive";
+  | "archive"
+  | "schedule";
 
 /**
  * Everything a route module may use. `app.ts` owns construction, the fail-closed

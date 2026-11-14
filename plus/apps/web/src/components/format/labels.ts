@@ -20,6 +20,7 @@ export const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   tasks: "任务",
   attendance: "签到",
   ticketing: "票据",
+  schedule: "排期",
   analytics: "运营分析",
 };
 

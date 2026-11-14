@@ -24,6 +24,7 @@ import { registerGroupingRoutes } from "./routes/grouping.js";
 import { registerPublicRoutes } from "./routes/public.js";
 import { registerPublishingRoutes } from "./routes/publishing.js";
 import { registerRegistrationRoutes } from "./routes/registration.js";
+import { registerScheduleRoutes } from "./routes/schedule.js";
 import { registerSystemRoutes } from "./routes/system.js";
 import { registerTasksRoutes } from "./routes/tasks.js";
 import { registerVotingRoutes } from "./routes/voting.js";
@@ -159,6 +160,9 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   RESULT_CANDIDATE_HOLD: 409,
   AWARD_INVALID: 422,
   FORMAL_MODE_REQUIRED: 409,
+  SCHEDULE_NOT_ENABLED: 409,
+  SLOT_UNKNOWN: 422,
+  SCHEDULE_EMPTY: 409,
   CSRF_INVALID: 403,
   USERNAME_TAKEN: 409,
   ACTIVITY_ARCHIVED: 409,
@@ -283,7 +287,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   // an undeclared route fails at boot, so a new endpoint cannot quietly become
   // an anonymous internal read. `ReadAccess` lives in the route context so the
   // registration hook and the route modules cannot drift apart.
-  const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "tasks" | "attendance" | "voting" | "result" | "archive", readonly string[]>> = {
+  const READ_ACCESS_PERMISSIONS: Readonly<Record<"analytics" | "tasks" | "attendance" | "voting" | "result" | "archive" | "schedule", readonly string[]>> = {
     analytics: ACTIVITY_ANALYTICS_READ_PERMISSIONS,
     tasks: [
       "tasks.manage",
@@ -318,6 +322,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     voting: ["voting.manage", "result.manage"],
     result: ["result.manage"],
     archive: ["archive.manage"],
+    schedule: ["schedule.manage"],
   };
 
   async function requireReadAccess(request: FastifyRequest, access: ReadAccess): Promise<void> {
@@ -361,7 +366,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (route.url === "/api/realtime") return;
     const access = (route.config as { access?: ReadAccess } | undefined)?.access;
     if (access === undefined) {
-      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, competition, analytics, studio, tasks, attendance, voting, result, archive).`);
+      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, competition, analytics, studio, tasks, attendance, voting, result, archive, schedule).`);
     }
     const guard = async (request: FastifyRequest): Promise<void> => {
       await requireReadAccess(request, access);
@@ -471,6 +476,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerTasksRoutes(routeContext);
   registerAttendanceRoutes(routeContext);
   registerRegistrationRoutes(routeContext);
+  registerScheduleRoutes(routeContext);
   registerGroupingRoutes(routeContext);
   registerCompetitionRoutes(routeContext);
   registerVotingRoutes(routeContext);

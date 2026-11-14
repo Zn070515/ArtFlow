@@ -1,0 +1,248 @@
+import { randomUUID } from "node:crypto";
+
+import { closeDb, createDb, insertRelease, insertSession, migrate } from "@artflow-plus/db";
+import type { Database } from "@artflow-plus/db";
+import type { ActorContext } from "@artflow-plus/domain";
+import { Client } from "pg";
+import type { Kysely } from "kysely";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import {
+  advanceSchedule,
+  getPublicSchedule,
+  getScheduleState,
+  releaseSchedule,
+  removeScheduleEntry,
+  reorderSchedule,
+  revokeScheduleReleaseCommand,
+  upsertScheduleEntry,
+} from "../src/index.js";
+import type { RuntimeDeps } from "../src/index.js";
+
+const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
+if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
+  throw new Error("REQUIRE_DB=1 but ARTFLOW_PLUS_DATABASE_URL is unset.");
+}
+const schema = `artflow_schedule_${Date.now()}_${process.pid}`;
+let db: Kysely<Database>;
+let admin: Client;
+
+const actor: ActorContext = {
+  actorId: "schedule-staff",
+  actorType: "user",
+  roles: ["staff"],
+  permissions: ["schedule.manage"],
+};
+let tick = 0;
+const deps: RuntimeDeps = {
+  actor,
+  now: () => new Date(Date.UTC(2026, 10, 14, 10, 0, tick++)).toISOString(),
+  newEventId: () => `schedule-${randomUUID()}`,
+};
+
+async function seed(): Promise<string> {
+  const activityId = `activity-${randomUUID()}`;
+  await db.insertInto("activity").values({
+    id: activityId,
+    public_code: `SCH-${activityId.slice(-8)}`,
+    title: "毕业晚会",
+    status: "active",
+    revision: 1,
+    enabled_capabilities: JSON.stringify(["schedule"]),
+    active_definition_version: 1,
+  }).execute();
+  await insertRelease(db, {
+    activityId,
+    version: 1,
+    contentHash: "schedule-release",
+    capabilities: {
+      schedule: {
+        ok: true,
+        capabilityKey: "schedule",
+        contentHash: "schedule-content",
+        artifact: {
+          version: 1,
+          schemaVersion: 1,
+          slots: [
+            { key: "opening", label: "开场", durationMinutes: 10, kind: "ceremony" },
+            { key: "programs", label: "节目", durationMinutes: 6, kind: "program" },
+          ],
+        },
+      },
+    },
+    executionPolicy: {
+      declaredScopes: ["schedule"],
+      conflicts: {},
+      runtimeContractVersion: 2,
+      commandScopes: { "schedule.current.advance": ["schedule"] },
+    },
+    capabilityVersions: { schedule: "1" },
+    bindings: [],
+    releasedAt: "2026-11-14T09:00:00Z",
+    sourceDraftRevision: 1,
+  });
+  return activityId;
+}
+
+describe.skipIf(!connectionString)("schedule service", () => {
+  beforeAll(async () => {
+    if (!connectionString) return;
+    admin = new Client({ connectionString });
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA "${schema}"`);
+    db = createDb({ connectionString, schema });
+    await migrate(db);
+  });
+
+  afterAll(async () => {
+    if (!connectionString) return;
+    await closeDb(db);
+    await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
+    await admin.end();
+  });
+
+  it("adds, reorders, releases, and exposes a public snapshot", async () => {
+    const activityId = await seed();
+    const add = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 0,
+      slotKey: "opening",
+      participantId: "p1",
+      title: "开场舞",
+    });
+    expect(add.body.revision).toBe(1);
+    expect(add.body.entry.title).toBe("开场舞");
+
+    const reordered = await reorderSchedule(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 1,
+      orderedIds: [add.body.entry.id],
+    });
+    expect(reordered.body.revision).toBe(2);
+    expect(reordered.body.entries).toHaveLength(1);
+
+    const release = await releaseSchedule(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 2,
+      note: "首版节目单",
+    });
+    expect(release.body.version).toBe(1);
+    expect(release.body.snapshot.entries[0]).toMatchObject({
+      order: 1,
+      slotKey: "opening",
+      slotLabel: "开场",
+      title: "开场舞",
+    });
+
+    const activity = await db.selectFrom("activity").select("public_code")
+      .where("id", "=", activityId).executeTakeFirstOrThrow();
+    const publicView = await getPublicSchedule(db, activity.public_code);
+    expect(publicView?.entries[0]?.title).toBe("开场舞");
+    expect(publicView?.entries[0]?.slotLabel).toBe("开场");
+  });
+
+  it("advances the current entry inside a running schedule session", async () => {
+    const activityId = await seed();
+    const first = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 0,
+      slotKey: "opening",
+      title: "开场舞",
+    });
+    const second = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 1,
+      slotKey: "programs",
+      title: "合唱",
+    });
+    await insertSession(db, {
+      id: `session-${activityId}`,
+      activityId,
+      definitionVersion: 1,
+      contentHash: "schedule-release",
+      scope: "schedule",
+      mode: "formal",
+      status: "running",
+      revision: 0,
+    }, "2026-11-14T09:30:00Z");
+
+    const advanced = await advanceSchedule(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+    });
+    expect(advanced.body.mode).toBe("formal");
+    expect([first.body.entry.id, second.body.entry.id]).toContain(advanced.body.currentEntryId);
+
+    const view = await getScheduleState(db, activityId, "formal");
+    expect(view.currentEntryId).toBe(advanced.body.currentEntryId);
+  });
+
+  it("rejects a stale schedule revision and removes an entry", async () => {
+    const activityId = await seed();
+    const entry = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 0,
+      slotKey: "opening",
+      title: "开场舞",
+    });
+
+    await expect(
+      upsertScheduleEntry(db, deps, {
+        commandId: randomUUID(),
+        activityId,
+        mode: "formal",
+        expectedRevision: 0,
+        slotKey: "opening",
+        title: "重复",
+      }),
+    ).rejects.toMatchObject({ code: "STALE_REVISION" });
+
+    const removed = await removeScheduleEntry(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 1,
+      entryId: entry.body.entry.id,
+    });
+    expect(removed.body.revision).toBe(2);
+    expect((await getScheduleState(db, activityId, "formal")).entries).toHaveLength(0);
+  });
+
+  it("revokes a released snapshot", async () => {
+    const activityId = await seed();
+    const entry = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 0,
+      slotKey: "opening",
+      title: "开场舞",
+    });
+    const release = await releaseSchedule(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      mode: "formal",
+      expectedRevision: 1,
+    });
+    const revoked = await revokeScheduleReleaseCommand(db, deps, {
+      commandId: randomUUID(),
+      activityId,
+      releaseId: release.body.id,
+      note: "节目调整",
+    });
+    expect(revoked.body.revokedAt).not.toBeNull();
+    expect(entry.body.entry.id).toBeDefined();
+  });
+});
