@@ -123,4 +123,19 @@ describe.skipIf(!connectionString)("internal read surface", () => {
       expect([401, 403], `${url} must stay public`).not.toContain(response.statusCode);
     }
   });
+
+  it("sets the security headers on public and protected responses", async () => {
+    for (const [url, expected] of [
+      ["/healthz", 200],
+      ["/api/activities", 401],
+      ["/api/public/activities/UNKNOWN", 404],
+    ] as const) {
+      const response = await app.inject({ method: "GET", url });
+      expect(response.statusCode).toBe(expected);
+      expect(response.headers["x-content-type-options"]).toBe("nosniff");
+      expect(response.headers["x-frame-options"]).toBe("DENY");
+      expect(response.headers["referrer-policy"]).toBe("no-referrer");
+      expect(String(response.headers["content-security-policy"])).toContain("frame-ancestors 'none'");
+    }
+  });
 });
