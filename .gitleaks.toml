@@ -7,8 +7,17 @@ useDefault = true
 
 # The registration blocklist intentionally contains common passwords. This is
 # data, not a credential; keep the exception narrow to that file and value.
-[allowlist]
+[[allowlists]]
 description = "Common-password blocklist entry in the registration policy."
 condition = "AND"
 paths = ['''^plus/packages/runtime/src/auth-service\.ts$''']
 regexes = ['''password1234''']
+
+# The archived k8s verification plan uses the RFC 6455 sample WebSocket nonce.
+# It is a public protocol constant, not a credential; keep the exception to the
+# archived file and that exact value.
+[[allowlists]]
+description = "RFC 6455 sample WebSocket nonce in an archived verification plan."
+condition = "AND"
+paths = ['''^docs/archive/v2/superpowers/plans/2026-11-10-k8s-deployment-verification\.md$''']
+regexes = ['''dGhlIHNhbXBsZSBub25jZQ==''']
