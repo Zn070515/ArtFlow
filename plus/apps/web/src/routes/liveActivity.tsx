@@ -19,6 +19,7 @@ import { LiveTieAdvancementPanel } from "../components/live/LiveTieAdvancementPa
 import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
 import { ScheduleSummary } from "../components/live/ScheduleSummary.js";
+import { IncidentSummary } from "../components/live/IncidentSummary.js";
 import { LiveStaffScorePanel } from "../components/live/LiveStaffScorePanel.js";
 import { ResultActions } from "../components/live/ResultActions.js";
 import { participantLabel } from "../components/format/labels.js";
@@ -143,6 +144,9 @@ function LiveActivityContent() {
         </div>
         <aside className="live-control-rail">
           {canManageSession ? <LiveSessionPanel state={state} onChanged={refresh} /> : null}
+          {state.activity.enabledCapabilities.includes("incident") ? (
+            <IncidentSummary activityId={activityId} mode={state.session?.mode} />
+          ) : null}
           {state.activity.enabledCapabilities.includes("schedule") ? (
             <ScheduleSummary activityId={activityId} mode={state.session?.mode} />
           ) : null}
