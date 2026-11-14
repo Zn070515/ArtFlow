@@ -17,6 +17,14 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   await expect(page).toHaveURL(/\/studio\/act/);
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
 
+  // Professional Mode: edit a capability structurally, then confirm the JSON
+  // view still carries the change and the rest of the package.
+  await expect(page.getByRole("tab", { name: "结构化" })).toBeVisible();
+  await page.getByLabel("报名生命周期").selectOption("review");
+  await page.getByRole("tab", { name: "高级 JSON" }).click();
+  await expect(page.getByLabel("Definition Package JSON")).toHaveValue(/"lifecycle": "review"/);
+  await page.getByRole("tab", { name: "结构化" }).click();
+
   await page.getByRole("button", { name: "激活活动" }).click();
   // Activation removes the draft-only control instead of rendering a status line.
   await expect(page.getByRole("button", { name: "激活活动" })).toHaveCount(0);
