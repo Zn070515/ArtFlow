@@ -142,11 +142,10 @@ function OpsActivityContent() {
         ) : null}
         {activity?.enabledCapabilities.includes("grouping") &&
         (session?.actor.permissions.includes("grouping.manage") ?? false) ? (
-          <GroupingCard key={activityId} activityId={activityId} />
+          <GroupingCard activityId={activityId} />
         ) : null}
         {activity?.enabledCapabilities.includes("voting") ? (
           <VotingCard
-            key={activityId}
             activityId={activityId}
             canManageVotes={can(session?.actor.permissions, "voting.manage")}
             canManageResults={can(session?.actor.permissions, "result.manage")}
@@ -158,18 +157,15 @@ function OpsActivityContent() {
         ) : null}
         {activity?.enabledCapabilities.includes("tasks") ? (
           <TasksCard
-            key={activityId}
             activityId={activityId}
             canManage={can(session?.actor.permissions, "tasks.manage")}
           />
         ) : null}
         <ArchiveCard
-          key={activityId}
           activityId={activityId}
           canManage={can(session?.actor.permissions, "archive.manage")}
         />
         <DiagnosticsCard
-          key={activityId}
           activityId={activityId}
           canManage={
             can(session?.actor.permissions, "studio.manage") ||
@@ -183,14 +179,12 @@ function OpsActivityContent() {
         />
         {activity?.enabledCapabilities.includes("ticketing") ? (
           <TicketsCard
-            key={activityId}
             activityId={activityId}
             canManage={can(session?.actor.permissions, "ticket.manage")}
           />
         ) : null}
         {activity?.enabledCapabilities.includes("attendance") ? (
           <AttendanceCard
-            key={activityId}
             activityId={activityId}
             canManage={can(session?.actor.permissions, "attendance.manage")}
             canManageSession={

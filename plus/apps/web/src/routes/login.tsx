@@ -65,9 +65,11 @@ export function LoginPage() {
         <p className="eyebrow">ARTFLOW · ACCOUNT</p>
         <h1 className="auth-title">{mode === "login" ? "登录" : "创建参与者账号"}</h1>
         <p className="auth-copy">
-          {mode === "login" ? "登录后报名、查看审核状态。" : "账号只用于本次活动报名；姓名等信息在报名表中填写。"}
+          {mode === "login"
+            ? "登录后可以报名、查看审核状态，或进入主办方工作台。"
+            : "账号只用于本次活动报名；姓名等信息在报名表中填写。"}
         </p>
-        <p className="auth-copy">工作人员账号不在这里注册，由部署人员用 create-account 预先创建。</p>
+        <p className="auth-copy">工作人员账号由主办方提供，请使用收到的账号登录。</p>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <Input
             label="用户名"
@@ -84,10 +86,13 @@ export function LoginPage() {
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            minLength={8}
+            minLength={mode === "register" ? 12 : 1}
             maxLength={128}
             required
           />
+          {mode === "register" ? (
+            <p className="ui-card__description">密码至少 12 位，避免使用常见口令。</p>
+          ) : null}
           {mode === "register" ? (
             <Input
               label="确认密码"
@@ -95,7 +100,7 @@ export function LoginPage() {
               autoComplete="new-password"
               value={confirm}
               onChange={(event) => setConfirm(event.target.value)}
-              minLength={8}
+              minLength={12}
               maxLength={128}
               required
             />

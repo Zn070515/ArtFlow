@@ -7,6 +7,7 @@ import type { RegistrationDetail } from "../../api/registrations.js";
 import { apiErrorText } from "../ui/apiError.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { ConfirmDialog } from "../ui/Dialog.js";
 
 export function SupplementPanel({
   detail,
@@ -20,6 +21,7 @@ export function SupplementPanel({
   const slots = detail.questionnaire.fileSlots;
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [issued, setIssued] = useState<IssuedSupplementView | undefined>();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const mutation = useMutation({
     mutationFn: () =>
       issueSupplement(detail.activity.id, detail.registration.id, selected, crypto.randomUUID()),
@@ -58,7 +60,7 @@ export function SupplementPanel({
                   );
                 }}
               />
-              <span>{slot.purpose || slot.slot} · {slot.key}</span>
+              <span>{slot.purpose || "材料"}</span>
             </label>
           );
         })}
@@ -67,7 +69,7 @@ export function SupplementPanel({
         <Button
           variant="secondary"
           disabled={mutation.isPending || selected.length === 0}
-          onClick={() => mutation.mutate()}
+          onClick={() => (detail.registration.status === "approved" ? setConfirmOpen(true) : mutation.mutate())}
         >
           发出补交授权
         </Button>
@@ -81,6 +83,18 @@ export function SupplementPanel({
       {mutation.error === null || mutation.error === undefined ? null : (
         <p className="ui-field__error" role="alert">{apiErrorText(mutation.error, "补交授权失败，请稍后重试。", "报名已被更新，请刷新后重试。")}</p>
       )}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="这会重新打开已通过的报名"
+        description="发出补交授权后，报名状态会从「已通过」变为「需补充」，参与者需要重新提交指定材料。"
+        confirmLabel="仍然发出授权"
+        danger
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          mutation.mutate();
+        }}
+      />
     </Card>
   );
 }

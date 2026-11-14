@@ -82,8 +82,8 @@ describe("OpsRegistrationPage", () => {
   it("uses a Console page header instead of a Portal display title", () => {
     render(<OpsRegistrationPage />);
 
-    expect(screen.getByRole("heading", { name: "春季现场" })).toHaveClass("console-page-title");
-    expect(screen.getByRole("heading", { name: "春季现场" })).not.toHaveClass("results-title");
+    expect(screen.getByRole("heading", { name: "报名详情" })).toHaveClass("console-page-title");
+    expect(screen.getByText(/春季现场 · 选手一/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "报名信息" })).toHaveClass("console-card-title");
     expect(document.querySelector(".review-note")).toBeNull();
   });

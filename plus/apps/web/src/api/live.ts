@@ -525,7 +525,17 @@ export function judgeEntryUrl(publicCode: string, capability: string): string {
 }
 
 export function describeLiveError(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message !== "") return error.message;
+  if (error instanceof ApiError) {
+    if (error.message.includes("no running execution session")) {
+      return "请先启动评分会话，再准备回合。";
+    }
+    return error.message;
+  }
+  if (error instanceof Error && error.message !== "") {
+    if (error.message.includes("no running execution session")) {
+      return "请先启动评分会话，再准备回合。";
+    }
+    return error.message;
+  }
   return fallback;
 }

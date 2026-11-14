@@ -128,6 +128,27 @@ describe("LiveRoundPanel", () => {
     expect(screen.getByRole("button", { name: "生成排名" })).toBeVisible();
   });
 
+  it("blocks preparing a round until a judging session is running", () => {
+    const unprepared: LiveRound = {
+      ...live,
+      round: null,
+      panel: null,
+      seats: [],
+      performances: [],
+      ranking: null,
+    };
+    render(<LiveRoundPanel state={state} live={unprepared} onChanged={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "准备回合" })).toBeDisabled();
+    expect(screen.getByText("先启动评分会话，再准备回合。")).toBeInTheDocument();
+  });
+
+  it("shows the scoring method in Chinese", () => {
+    render(<LiveRoundPanel state={state} live={live} sessionMode="formal" onChanged={vi.fn()} />);
+
+    expect(screen.getAllByText(/总分/).length).toBeGreaterThan(0);
+  });
+
   it("advances from the open performance to the next contestant", async () => {
     advancePerformanceMock.mockResolvedValue(live.performances[1]);
     const twoParticipants = {

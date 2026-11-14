@@ -6,6 +6,7 @@ import { fetchOpsActivities } from "../api/ops.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { ConsolePagination } from "../components/console/ConsolePagination.js";
+import { ACTIVITY_STATUS_LABELS, capabilityLabels, label } from "../components/format/labels.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
 import { Input } from "../components/ui/Input.js";
@@ -89,7 +90,7 @@ function OpsContent() {
               onChange={(event) => setStatusFilter(event.target.value)}
             >
               <option value="">全部状态</option>
-              {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+              {statuses.map((status) => <option key={status} value={status}>{label(ACTIVITY_STATUS_LABELS, status)}</option>)}
             </Select>
           </Toolbar>
           {filteredActivities.length === 0 ? (
@@ -116,7 +117,7 @@ function OpsContent() {
                       </Link>
                     </td>
                     <td data-label="公开码">{activity.publicCode}</td>
-                    <td data-label="状态">{activity.status}</td>
+                    <td data-label="状态">{label(ACTIVITY_STATUS_LABELS, activity.status)}</td>
                   </tr>
                 ))}
               </tbody>

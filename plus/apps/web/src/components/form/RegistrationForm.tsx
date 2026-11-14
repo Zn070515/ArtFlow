@@ -8,17 +8,15 @@ import {
   uploadMaterialMetadata,
   type RegistrationDetail,
 } from "../../api/registrations.js";
+import { label, REGISTRATION_STATUS_LABELS } from "../format/labels.js";
 import { Button } from "../ui/Button.js";
 import { FileMetadataField } from "./FileMetadataField.js";
 import { QuestionField } from "./QuestionField.js";
 
-const STATUS_LABELS: Readonly<Record<string, string>> = {
-  draft: "草稿",
-  submitted: "已提交",
-  approved: "已通过",
-  need_supplement: "需补充",
-  rejected: "未通过",
-};
+function registrationName(detail: RegistrationDetail): string {
+  const name = detail.registration.answers.name;
+  return typeof name === "string" && name.trim() !== "" ? name.trim() : "参与者";
+}
 
 function initialAnswers(detail: RegistrationDetail): Record<string, string> {
   const values: Record<string, string> = {};
@@ -153,7 +151,7 @@ export function RegistrationForm({
         crypto.randomUUID(),
         current,
       );
-      setMessage("报名已提交");
+      setMessage("报名已提交，等待主办方审核；审核结果会显示在本页。");
       onChanged();
     } catch (caught) {
       setError(messageFor(caught));
@@ -200,17 +198,17 @@ export function RegistrationForm({
         <header className="registration-header">
           <div>
             <h1 className="ui-page-title">{detail.activity.title}</h1>
-            <p className="ui-page-meta">参与者 {detail.registration.participantId}</p>
+            <p className="ui-page-meta">参与者 {registrationName(detail)}</p>
           </div>
           <span className={`status-badge status-${detail.registration.status}`}>
-            {STATUS_LABELS[detail.registration.status] ?? detail.registration.status}
+            {label(REGISTRATION_STATUS_LABELS, detail.registration.status)}
           </span>
         </header>
       ) : null}
       {showHeader ? null : (
         <div className="registration-header registration-header-compact">
           <span className={`status-badge status-${detail.registration.status}`}>
-            {STATUS_LABELS[detail.registration.status] ?? detail.registration.status}
+            {label(REGISTRATION_STATUS_LABELS, detail.registration.status)}
           </span>
         </div>
       )}
@@ -260,7 +258,7 @@ export function RegistrationForm({
           </Button>
         </div>
       ) : (
-        <p className="auth-loading">报名已锁定，不能继续编辑。</p>
+        <p className="auth-loading">报名已锁定，不能继续编辑；审核结果会显示在本页。</p>
       )}
     </section>
   );

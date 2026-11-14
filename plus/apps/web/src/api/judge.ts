@@ -41,6 +41,7 @@ export interface JudgeContext {
   readonly performance: {
     readonly id: string;
     readonly contestantId: string;
+    readonly contestantName: string;
     readonly sequence: number;
     readonly state: "not_opened" | "open" | "locked";
     readonly contextVersion: number;

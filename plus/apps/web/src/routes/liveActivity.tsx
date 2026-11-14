@@ -20,6 +20,7 @@ import { LiveSessionPanel } from "../components/live/LiveSessionPanel.js";
 import { AttendanceSummary } from "../components/live/AttendanceSummary.js";
 import { LiveStaffScorePanel } from "../components/live/LiveStaffScorePanel.js";
 import { ResultActions } from "../components/live/ResultActions.js";
+import { participantLabel } from "../components/format/labels.js";
 import { Card } from "../components/ui/Card.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
@@ -96,8 +97,7 @@ function LiveActivityContent() {
           </Link>
           <h1 className="ui-page-title">{state.activity.title}</h1>
           <p className="ui-page-meta">
-            公开码 {state.activity.publicCode} · release v{state.activity.activeDefinitionVersion} ·
-            {fallback ? " 5s 轮询" : " 实时推送"}
+            公开码 {state.activity.publicCode} · {fallback ? "5 秒轮询" : "实时推送"}
           </p>
           {hasTicketing || !canManageSession ? null : (
             <p className="ui-field__error" role="alert">
@@ -162,7 +162,7 @@ function LiveActivityContent() {
             ) : (
               <ul className="seat-list">
                 {state.participantIds.map((participantId) => (
-                  <li key={participantId}>{state.participantNames[participantId] ?? participantId}</li>
+                  <li key={participantId}>{participantLabel(state.participantNames, participantId)}</li>
                 ))}
               </ul>
             )}

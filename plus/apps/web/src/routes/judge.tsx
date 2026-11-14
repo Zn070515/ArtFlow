@@ -101,6 +101,10 @@ export function JudgePage() {
   );
 }
 
+function criteriaMaximum(criteria: readonly { readonly maximum: number }[]): number {
+  return criteria.reduce((total, criterion) => total + criterion.maximum, 0);
+}
+
 function JudgeContent({
   context,
   onScored,
@@ -112,10 +116,13 @@ function JudgeContent({
     <section className="judge-page">
       <header>
         <div>
-          <h1 className="ui-page-title">{context.activity.title}</h1>
+          <p className="eyebrow">评委评分 · {context.activity.title}</p>
+          <h1 className="ui-page-title">
+            {context.performance?.contestantName ?? "等待选手"}
+          </h1>
           <p className="ui-page-meta">
-            公开码 {context.activity.publicCode} · 座位 {context.seat.seatKey}
-            {context.seat.judgeId === null ? "" : ` · 评委 ${context.seat.judgeId}`}
+            评委席位已认领
+            {context.performance === null ? "" : ` · 第 ${context.performance.sequence} 位`}
           </p>
         </div>
       </header>
@@ -126,12 +133,7 @@ function JudgeContent({
         <Card className="judge-status-panel">
           <h2 className="ui-card__title">本轮</h2>
           <p className="ui-card__description">
-            回合 {context.round?.roundKey ?? "—"} · 评委组 {context.panel?.id.slice(0, 12) ?? "—"}
-          </p>
-          <p className="ui-card__description">
-            {context.performance === null
-              ? "等待下一位选手…"
-              : `当前选手 ${context.performance.contestantId} · 第 ${context.performance.sequence} 位`}
+            {context.performance === null ? "等待下一位选手…" : `当前第 ${context.performance.sequence} 位`}
           </p>
         </Card>
       </div>
@@ -216,20 +218,17 @@ function ScoreCard({
       </Card>
     );
   }
-  if (target === null) {
-    return (
-      <Card className="judge-score-card" data-testid="judge-score-card">
-        <h2 className="ui-card__title">席位未就绪</h2>
-        <p className="ui-card__description">本轮评委组尚未就绪，请等待工作人员处理。</p>
-      </Card>
-    );
-  }
   if (context.existingScore !== null) {
     return (
       <Card className="judge-score-card" data-testid="judge-score-card">
-        <h2 className="ui-card__title">已提交 · {context.existingScore.total}</h2>
+        <h2 className="ui-card__title">
+          已提交 · {context.existingScore.total} / {criteriaMaximum(criteria)}
+            {criteria.length === 0
+              ? ""
+              : `（平均 ${(Number(context.existingScore.total) / criteria.length).toFixed(2)}）`}
+        </h2>
         <p className="ui-card__description" data-testid="judge-submitted">
-          {context.performance.contestantId} 已评分，等待下一位选手。
+          {context.performance.contestantName} 已评分，等待下一位选手。
         </p>
         <ul className="seat-list">
           {criteria.map((criterion) => (
@@ -243,10 +242,21 @@ function ScoreCard({
     );
   }
 
+  if (target === null) {
+    return (
+      <Card className="judge-score-card" data-testid="judge-score-card">
+        <h2 className="ui-card__title">席位未就绪</h2>
+        <p className="ui-card__description">本轮评委组尚未就绪，请等待工作人员处理。</p>
+      </Card>
+    );
+  }
+
   return (
     <Card className="judge-score-card" data-testid="judge-score-card">
-      <h2 className="ui-card__title">{context.performance.contestantId}</h2>
-      <p className="ui-card__description">第 {context.performance.sequence} 位 · 三项满分制</p>
+      <h2 className="ui-card__title">评分表</h2>
+      <p className="ui-card__description">
+        第 {context.performance.sequence} 位 · 每项满分制
+      </p>
       <form
         className="auth-form"
         onSubmit={(event) => {

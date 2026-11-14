@@ -40,7 +40,7 @@ describe("LivePage", () => {
         publicCode: "SUMMER-2",
         status: "draft",
         revision: 1,
-        enabledCapabilities: [],
+        enabledCapabilities: ["competition"],
         activeDefinitionVersion: null,
       }],
       error: null,

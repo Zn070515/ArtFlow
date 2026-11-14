@@ -34,6 +34,7 @@ vi.mock("../../hooks/useReducedMotion.js", () => ({
 }));
 
 import { ConsoleShell } from "./ConsoleShell.js";
+import { JudgeShell } from "./JudgeShell.js";
 import { PortalShell } from "./PortalShell.js";
 
 describe("PortalShell and ConsoleShell", () => {
@@ -92,7 +93,6 @@ describe("PortalShell and ConsoleShell", () => {
   });
 
   it.each([
-    ["/judge/public-code", "Judge · 评分"],
     ["/join", "报名 · 参与者"],
     ["/login", "登录"],
     ["/workspace/activity-1", "工作台 · 活动"],

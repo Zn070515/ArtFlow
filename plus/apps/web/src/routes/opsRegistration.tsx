@@ -7,6 +7,12 @@ import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { MaterialsReviewPanel } from "../components/ops/MaterialsReviewPanel.js";
 import { ReviewPanel } from "../components/ops/ReviewPanel.js";
 import { SupplementPanel } from "../components/ops/SupplementPanel.js";
+import { label, REGISTRATION_STATUS_LABELS } from "../components/format/labels.js";
+
+function registrationName(detail: RegistrationDetail): string {
+  const name = detail.registration.answers.name;
+  return typeof name === "string" && name.trim() !== "" ? name.trim() : "未填写姓名";
+}
 
 export function OpsRegistrationPage() {
   return (
@@ -22,12 +28,8 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
       <p className="eyebrow">REGISTRATION · 报名</p>
       <h2 className="console-card-title">报名信息</h2>
       <p className="state-copy">
-        参与者{" "}
-        {typeof detail.registration.answers.name === "string" && detail.registration.answers.name.trim()
-          ? detail.registration.answers.name
-          : detail.registration.participantId}{" "}
-        · {detail.registration.participantId} · 状态 {detail.registration.status} · 修订{" "}
-        {detail.registration.revision}
+        参与者 {registrationName(detail)} · 状态{" "}
+        {label(REGISTRATION_STATUS_LABELS, detail.registration.status)}
       </p>
       {detail.registration.reviewNote?.trim() ? (
         <p className="review-note">审核意见：{detail.registration.reviewNote}</p>
@@ -116,9 +118,10 @@ function OpsRegistrationContent() {
             ← 返回活动
           </Link>
           <p className="eyebrow">OPS · REGISTRATION</p>
-          <h1 className="console-page-title">{query.data.activity.title}</h1>
+          <h1 className="console-page-title">报名详情</h1>
           <p className="state-copy">
-            {query.data.registration.participantId} · 状态 {query.data.registration.status}
+            {query.data.activity.title} · {registrationName(query.data)} · 状态{" "}
+            {label(REGISTRATION_STATUS_LABELS, query.data.registration.status)}
           </p>
         </div>
       </header>

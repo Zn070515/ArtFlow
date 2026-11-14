@@ -909,3 +909,11 @@
   color: var(--color-text-subtle);
   font-size: var(--text-1);
 }
+
+/* The advanced diagnostics disclosure is a real touch target. */
+.diagnostics-card summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+}

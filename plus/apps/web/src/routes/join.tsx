@@ -1,6 +1,7 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 
+import { readJoinedActivities } from "../components/form/joinedActivities.js";
 import { Button } from "../components/ui/Button.js";
 import { Card } from "../components/ui/Card.js";
 import { Input } from "../components/ui/Input.js";
@@ -9,6 +10,7 @@ export function JoinPage() {
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const joined = readJoinedActivities();
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -51,6 +53,26 @@ export function JoinPage() {
           </Button>
         </form>
       </Card>
+      {joined.length === 0 ? null : (
+        <Card className="join-code-card" data-testid="joined-activities">
+          <h2 className="ui-card__title">最近报名</h2>
+          <p className="ui-card__description">这台设备打开过的活动，点一下即可回到报名状态。</p>
+          <ul className="seat-list">
+            {joined.map((activity) => (
+              <li key={activity.publicCode}>
+                <Link
+                  className="table-link"
+                  to="/join/$publicCode"
+                  params={{ publicCode: activity.publicCode }}
+                >
+                  {activity.title}
+                </Link>
+                <span className="state-copy"> {activity.publicCode}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
     </section>
   );
 }

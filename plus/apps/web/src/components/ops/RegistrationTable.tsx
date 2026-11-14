@@ -9,16 +9,9 @@ import { Select } from "../ui/Select.js";
 import { Table } from "../ui/Table.js";
 import { Toolbar } from "../ui/Toolbar.js";
 import { ConsolePagination } from "../console/ConsolePagination.js";
+import { label, REGISTRATION_STATUS_LABELS } from "../format/labels.js";
 
 const PAGE_SIZE = 25;
-
-const STATUS_LABELS: Readonly<Record<string, string>> = {
-  draft: "草稿",
-  submitted: "已提交",
-  approved: "已通过",
-  need_supplement: "需补充",
-  rejected: "未通过",
-};
 
 const STATUS_TONES: Readonly<Record<string, BadgeTone>> = {
   draft: "neutral",
@@ -37,7 +30,7 @@ function answerText(registration: OpsRegistration, keys: readonly string[]): str
 }
 
 function registrationName(registration: OpsRegistration): string {
-  return answerText(registration, ["name", "displayName", "title", "负责人"]) ?? registration.participantId;
+  return answerText(registration, ["name", "displayName", "title", "负责人"]) ?? "未填写姓名";
 }
 
 function registrationSubtitle(registration: OpsRegistration): string {
@@ -95,7 +88,7 @@ export function RegistrationTable({
           onChange={(event) => setStatusFilter(event.target.value)}
         >
           <option value="">全部状态</option>
-          {statuses.map((status) => <option key={status} value={status}>{STATUS_LABELS[status] ?? status}</option>)}
+          {statuses.map((status) => <option key={status} value={status}>{label(REGISTRATION_STATUS_LABELS, status)}</option>)}
         </Select>
       </Toolbar>
       {filteredRegistrations.length === 0 ? (
@@ -106,9 +99,8 @@ export function RegistrationTable({
             <thead>
               <tr>
                 <th scope="col">参与者</th>
-                <th scope="col">学号 / 曲目</th>
+                <th scope="col">曲目 / 作品</th>
                 <th scope="col">状态</th>
-                <th scope="col">修订</th>
                 <th scope="col">审核意见</th>
               </tr>
             </thead>
@@ -123,15 +115,13 @@ export function RegistrationTable({
                     >
                       {registrationName(registration)}
                     </Link>
-                    <span className="state-copy"> {registration.participantId}</span>
                   </td>
-                  <td data-label="学号 / 曲目">{registrationSubtitle(registration) || "—"}</td>
+                  <td data-label="曲目 / 作品">{registrationSubtitle(registration) || "—"}</td>
                   <td data-label="状态">
                     <Badge tone={STATUS_TONES[registration.status] ?? "neutral"}>
-                      {STATUS_LABELS[registration.status] ?? registration.status}
+                      {label(REGISTRATION_STATUS_LABELS, registration.status)}
                     </Badge>
                   </td>
-                  <td data-label="修订">{registration.revision}</td>
                   <td data-label="审核意见">{registration.reviewNote ?? "—"}</td>
                 </tr>
               ))}
