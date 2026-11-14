@@ -240,6 +240,87 @@ describe.skipIf(!connectionString)("cookie auth and CSRF", () => {
     expect(second.json().csrfToken).not.toBe(first.json().csrfToken);
   });
 
+  it("authorizes each request with the account's live permissions", async () => {
+    const username = `live-staff-${randomUUID().slice(0, 8)}`;
+    await insertLocalAccount(db, {
+      username,
+      passwordDigest: hashPassword("staff-password"),
+      actor: {
+        actorId: `live-staff-actor-${username}`,
+        actorType: "user",
+        roles: ["staff"],
+        permissions: ["studio.manage"],
+      },
+      active: true,
+    });
+    const activityId = await seedActivity();
+    const loggedIn = await login(username, "staff-password");
+    expect(loggedIn.statusCode).toBe(200);
+    const cookies = setCookies(loggedIn);
+
+    const before = await app.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/studio`,
+      headers: { cookie: cookies },
+    });
+    expect(before.statusCode).toBe(200);
+
+    await db.updateTable("local_account")
+      .set({ permissions: JSON.stringify([]) })
+      .where("username", "=", username)
+      .execute();
+
+    const downgraded = await app.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/studio`,
+      headers: { cookie: cookies },
+    });
+    expect(downgraded.statusCode).toBe(403);
+    expect(downgraded.json().code).toBe("FORBIDDEN");
+
+    await db.updateTable("local_account")
+      .set({ permissions: JSON.stringify(["studio.manage"]) })
+      .where("username", "=", username)
+      .execute();
+
+    const regranted = await app.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/studio`,
+      headers: { cookie: cookies },
+    });
+    expect(regranted.statusCode).toBe(200);
+  });
+
+  it("rejects a session whose account has been deactivated", async () => {
+    const username = `deactivated-${randomUUID().slice(0, 8)}`;
+    await insertLocalAccount(db, {
+      username,
+      passwordDigest: hashPassword("staff-password"),
+      actor: {
+        actorId: `deactivated-actor-${username}`,
+        actorType: "user",
+        roles: ["staff"],
+        permissions: ["studio.manage"],
+      },
+      active: true,
+    });
+    const loggedIn = await login(username, "staff-password");
+    expect(loggedIn.statusCode).toBe(200);
+    const cookies = setCookies(loggedIn);
+
+    await db.updateTable("local_account")
+      .set({ active: false })
+      .where("username", "=", username)
+      .execute();
+
+    const me = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: cookies },
+    });
+    expect(me.statusCode).toBe(401);
+  });
+
   it("requires a lifecycle permission to close an activity", async () => {
     const username = `closer-${randomUUID().slice(0, 8)}`;
     const registered = await app.inject({

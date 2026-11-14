@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomUUID, scrypt, scryptSync, timingSafeEqua
 
 import {
   getLocalAccount,
-  getLocalSession,
+  getLocalSessionWithAccount,
   insertLocalAccount,
   insertLocalSession,
 } from "@artflow-plus/db";
@@ -75,7 +75,9 @@ export async function resolveActorFromBearer(
   now = new Date(),
 ): Promise<ActorContext | null> {
   if (!token?.trim()) return null;
-  const session = await getLocalSession(db, token.trim(), now.toISOString());
+  // Resolve the account on every request: the session snapshot must never
+  // outlive an account change made by an administrator.
+  const session = await getLocalSessionWithAccount(db, token.trim(), now.toISOString());
   return session?.actor ?? null;
 }
 
@@ -88,7 +90,7 @@ export async function resolveLocalSession(
   token: string,
   now: string,
 ) {
-  return getLocalSession(db, token, now);
+  return getLocalSessionWithAccount(db, token, now);
 }
 
 /**
