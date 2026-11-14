@@ -11,6 +11,7 @@ import { ActivityAnalyticsCard } from "../components/ops/ActivityAnalyticsCard.j
 import { RegistrationTable } from "../components/ops/RegistrationTable.js";
 import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
+import { ScheduleCard } from "../components/ops/ScheduleCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
 import { ArchiveCard } from "../components/ops/ArchiveCard.js";
@@ -153,6 +154,12 @@ function OpsActivityContent() {
               can(session?.actor.permissions, "studio.manage") ||
               can(session?.actor.permissions, "competition.manage")
             }
+          />
+        ) : null}
+        {activity?.enabledCapabilities.includes("schedule") ? (
+          <ScheduleCard
+            activityId={activityId}
+            canManage={can(session?.actor.permissions, "schedule.manage")}
           />
         ) : null}
         {activity?.enabledCapabilities.includes("tasks") ? (
