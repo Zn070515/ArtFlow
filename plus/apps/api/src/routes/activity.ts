@@ -3,8 +3,8 @@ import { ActivityAnalyticsParamsSchema, ActivityAnalyticsResponseSchema, CloseAc
 import { getOutboxRelayHealth } from "@artflow-plus/db";
 import { DomainError, instantiateActivityPack } from "@artflow-plus/domain";
 import type { ActivityDefinitionPackage, ExecutionMode } from "@artflow-plus/domain";
-import { activateActivity, appendRuntimeFact, closeActivity, closeExecution, compileDefinition, createActivity, getActivity, getActivityAnalytics, getExecutionState, getStudioState, listActivitiesForReview, listEvents, listExecutions, releaseDefinitionCommand, renameActivity, startExecution } from "@artflow-plus/runtime";
-import { ActivateBody, ActivityParams, CompileBody, CreateActivityBody, EventsQuery, ReleaseBody, RuntimeFactBody, SessionParams, StateQuery } from "../http/schemas.js";
+import { activateActivity, appendRuntimeFact, closeActivity, closeExecution, compileDefinition, createActivity, duplicateActivity, getActivity, getActivityAnalytics, getExecutionState, getStudioState, listActivitiesForReview, listEvents, listExecutions, releaseDefinitionCommand, renameActivity, startExecution } from "@artflow-plus/runtime";
+import { ActivateBody, ActivityParams, CompileBody, CreateActivityBody, DuplicateActivityBody, EventsQuery, ReleaseBody, RuntimeFactBody, SessionParams, StateQuery } from "../http/schemas.js";
 import { asPackage, requireIdempotency } from "../http/helpers.js";
 
 export function registerActivityRoutes(ctx: ApiContext): void {
@@ -62,6 +62,21 @@ export function registerActivityRoutes(ctx: ApiContext): void {
         title: body.title,
         ...(capabilities === undefined ? {} : { capabilities }),
         ...(initialDefinition === undefined ? {} : { initialDefinition }),
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/duplicate",
+    { schema: { params: ActivityParams, body: DuplicateActivityBody } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as { title?: string };
+      const outcome = await duplicateActivity(db, registry, await requireStudio(request), {
+        commandId: requireIdempotency(request),
+        sourceActivityId: id,
+        ...(body.title === undefined ? {} : { title: body.title }),
       });
       return reply.status(outcome.status).send(outcome.body);
     },

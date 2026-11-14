@@ -4,6 +4,7 @@ import type { Database } from "@artflow-plus/db";
 import {
   getActivity as readActivity,
   getActivityForUpdate,
+  getDraft,
   insertActivity,
   insertDraft,
   listSessionRecords,
@@ -105,6 +106,85 @@ export async function createActivity(
           activityId: activity.id,
           title: activity.title,
           enabledCapabilities: activity.enabledCapabilities,
+        },
+      });
+      return { body: activity, status: 201 };
+    },
+  );
+}
+
+export interface DuplicateActivityInput {
+  readonly commandId: string;
+  readonly sourceActivityId: string;
+  readonly title?: string;
+}
+
+/**
+ * Copy an activity as a new draft. Only the capability composition and the
+ * current draft definition move: releases, facts, sessions, audit entries and
+ * public codes stay with the source. A duplicated activity is therefore never
+ * a copy of its results.
+ */
+export async function duplicateActivity(
+  db: Kysely<Database>,
+  registry: CapabilityRegistry,
+  deps: RuntimeDeps,
+  input: DuplicateActivityInput,
+): Promise<CommandOutcome<Activity>> {
+  const activityId = idFromCommand("act", input.commandId);
+  const publicCode = publicCodeFromCommand(input.commandId);
+
+  return executeCommand(
+    db,
+    {
+      commandId: input.commandId,
+      activityId,
+      capability: "engine",
+      commandType: "activity.duplicate",
+      actor: runtimeActor(deps),
+      payload: {
+        sourceActivityId: input.sourceActivityId,
+        title: input.title ?? null,
+      },
+    },
+    async (trx) => {
+      requirePermission(runtimeActor(deps), "studio.manage");
+      const source = await readActivity(trx, input.sourceActivityId);
+      if (source === null) {
+        throw new DomainError("NOT_FOUND", `Activity ${input.sourceActivityId} was not found.`);
+      }
+      const composition = registry.validateComposition({
+        enable: source.enabledCapabilities,
+      });
+      if (!composition.ok) {
+        throw new CompositionError(composition.issues);
+      }
+      const title = (input.title?.trim() || `${source.title}（副本）`).slice(0, 200);
+      const activity = createActivityDomain({
+        id: activityId,
+        title,
+        capabilities: composition.plan.enabledCapabilities,
+      });
+      await insertActivity(trx, activity, publicCode);
+      const sourceDraft = await getDraft(trx, input.sourceActivityId);
+      if (sourceDraft !== null) {
+        await insertDraft(trx, {
+          activityId: activity.id,
+          revision: 0,
+          package: sourceDraft.package,
+        });
+      }
+      await appendEngineEvent(trx, deps, {
+        type: "ActivityCreated",
+        activityId: activity.id,
+        aggregateType: "activity",
+        aggregateId: activity.id,
+        revision: activity.revision,
+        payload: {
+          activityId: activity.id,
+          title: activity.title,
+          enabledCapabilities: activity.enabledCapabilities,
+          duplicatedFrom: source.id,
         },
       });
       return { body: activity, status: 201 };
