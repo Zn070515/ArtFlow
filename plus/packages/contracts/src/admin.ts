@@ -34,6 +34,7 @@ export const UpdateAccountBodySchema = Type.Object(
     permissions: Type.Optional(AccountPermissionsSchema),
     active: Type.Optional(Type.Boolean()),
     password: Type.Optional(Type.String({ minLength: 8, maxLength: 128 })),
+    expectedRevision: Type.Integer({ minimum: 0 }),
   },
   { additionalProperties: false },
 );
@@ -45,13 +46,36 @@ export const AccountSummarySchema = Type.Object(
     roles: Type.Array(Type.String()),
     permissions: Type.Array(Type.String()),
     active: Type.Boolean(),
+    accessRevision: Type.Integer({ minimum: 0 }),
     createdAt: Type.String(),
   },
   { additionalProperties: false },
 );
 
 export const AccountListResponseSchema = Type.Object(
-  { accounts: Type.Array(AccountSummarySchema) },
+  {
+    accounts: Type.Array(AccountSummarySchema),
+    total: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+export const AccountResponseSchema = Type.Object(
+  { account: AccountSummarySchema },
+  { additionalProperties: false },
+);
+
+export const RevokeSessionsResponseSchema = Type.Object(
+  { revoked: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+
+export const AccountListQuerySchema = Type.Object(
+  {
+    includeParticipants: Type.Optional(Type.Boolean()),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+    offset: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
   { additionalProperties: false },
 );
 
@@ -59,3 +83,4 @@ export type CreateAccountBody = Static<typeof CreateAccountBodySchema>;
 export type UpdateAccountBody = Static<typeof UpdateAccountBodySchema>;
 export type AccountParams = Static<typeof AccountParamsSchema>;
 export type AccountSummary = Static<typeof AccountSummarySchema>;
+export type AccountListQuery = Static<typeof AccountListQuerySchema>;

@@ -42,9 +42,10 @@ function splitList(value: string): readonly string[] {
 function AccountsContent() {
   const { session } = useSession();
   const allowed = canManageAccounts(session);
+  const [showParticipants, setShowParticipants] = useState(false);
   const query = useQuery({
-    queryKey: ["admin-accounts"],
-    queryFn: fetchAccounts,
+    queryKey: ["admin-accounts", showParticipants],
+    queryFn: () => fetchAccounts(showParticipants),
     enabled: allowed,
     retry: false,
   });
@@ -62,11 +63,11 @@ function AccountsContent() {
     permissions: "",
     active: true,
     password: "",
+    accessRevision: 0,
   });
   const [revoking, setRevoking] = useState<AccountSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showParticipants, setShowParticipants] = useState(false);
 
   if (!allowed) {
     return (
@@ -113,6 +114,7 @@ function AccountsContent() {
       permissions: account.permissions.join(", "),
       active: account.active,
       password: "",
+      accessRevision: account.accessRevision,
     });
   }
 
@@ -126,6 +128,7 @@ function AccountsContent() {
         permissions: splitList(editForm.permissions),
         active: editForm.active,
         ...(editForm.password === "" ? {} : { password: editForm.password }),
+        expectedRevision: editForm.accessRevision,
       });
       setEditing(null);
       await query.refetch();
@@ -237,7 +240,10 @@ function AccountsContent() {
         description="新账号创建后即可登录；权限可随时调整。"
         confirmLabel="创建"
         onCancel={() => setCreateOpen(false)}
-        onConfirm={() => { void submitCreate(); }}
+        onConfirm={() => {
+          setCreateOpen(false);
+          void submitCreate();
+        }}
         validate={() => {
           if (!USERNAME_PATTERN.test(createForm.username.trim())) {
             return "用户名需为 3-64 位字母、数字、点、横线或下划线。";
@@ -279,7 +285,10 @@ function AccountsContent() {
         description="修改会立即影响该账号已登录的会话；停用或重置密码会强制所有设备退出。"
         confirmLabel="保存"
         onCancel={() => setEditing(null)}
-        onConfirm={() => { void submitEdit(); }}
+        onConfirm={() => {
+          setEditing(null);
+          void submitEdit();
+        }}
         validate={() => (editForm.password !== "" && editForm.password.length < 8 ? "密码至少 8 位。" : null)}
       >
         <Input
@@ -322,7 +331,10 @@ function AccountsContent() {
         confirmLabel="撤销"
         danger
         onCancel={() => setRevoking(null)}
-        onConfirm={() => { void submitRevoke(); }}
+        onConfirm={() => {
+          setRevoking(null);
+          void submitRevoke();
+        }}
       />
     </section>
   );

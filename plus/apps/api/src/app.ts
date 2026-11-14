@@ -1,5 +1,5 @@
 import { errorResponse } from "@artflow-plus/contracts";
-import { getRoundByKey, type Database } from "@artflow-plus/db";
+import { getLocalAccountSummaryByActorId, getRoundByKey, type Database } from "@artflow-plus/db";
 import { defaultCapabilityRegistry, DomainError, hasPermission, requirePermission, REVIEW_AWARDS_PACK, SINGER_COMPETITION_PACK, STAGE_SHOW_PACK, SYSTEM_ACTOR, VOTE_POLL_PACK } from "@artflow-plus/domain";
 import type { ActivityPack, ActorContext, CapabilityRegistry } from "@artflow-plus/domain";
 import { defaultRuntimeDeps, resolveActorFromBearer, csrfTokenFor, resolveLocalSession, ACTIVITY_ANALYTICS_READ_PERMISSIONS, createDocumentExporterFromEnv } from "@artflow-plus/runtime";
@@ -552,6 +552,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       } catch {
         return null;
       }
+    },
+    revalidate: async (actorId) => {
+      const account = await getLocalAccountSummaryByActorId(db, actorId);
+      if (account === null || !account.active) return null;
+      return {
+        actorId: account.actorId,
+        roles: account.roles,
+        permissions: account.permissions,
+      };
     },
     topics: [createVotingRealtimeTopic(db), createActivityRealtimeTopic(db)],
   });

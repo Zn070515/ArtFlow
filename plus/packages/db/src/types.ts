@@ -322,6 +322,7 @@ export interface LocalAccountRow {
   auth_context: string | null;
   active: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: ColumnType<Date, Date | string | undefined, never>;
+  access_revision: ColumnType<number, number | undefined, number>;
 }
 
 export interface LocalSessionRow {

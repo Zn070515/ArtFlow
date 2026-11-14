@@ -1,5 +1,5 @@
 import type { ActorContext, ActorType } from "@artflow-plus/domain";
-import type { Kysely, Selectable } from "kysely";
+import { sql, type Kysely, type Selectable } from "kysely";
 
 import type { Database, LocalAccountRow } from "./types.js";
 
@@ -146,6 +146,7 @@ export interface StoredLocalAccountSummary {
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
   readonly active: boolean;
+  readonly accessRevision: number;
   readonly createdAt: string;
 }
 
@@ -156,19 +157,48 @@ function summary(row: Selectable<LocalAccountRow>): StoredLocalAccountSummary {
     roles: jsonArray(row.roles),
     permissions: jsonArray(row.permissions),
     active: row.active,
+    accessRevision: row.access_revision,
     createdAt: iso(row.created_at),
   };
 }
 
+export interface ListLocalAccountsOptions {
+  readonly includeParticipants?: boolean;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export interface LocalAccountPage {
+  readonly accounts: readonly StoredLocalAccountSummary[];
+  readonly total: number;
+}
+
+/**
+ * Participant accounts share this table with the organizing team. The default
+ * page excludes them so the team list stays bounded on a large deployment.
+ */
 export async function listLocalAccounts(
   db: Kysely<Database>,
-): Promise<readonly StoredLocalAccountSummary[]> {
-  const rows = await db
-    .selectFrom("local_account")
+  options: ListLocalAccountsOptions = {},
+): Promise<LocalAccountPage> {
+  const participants = sql<boolean>`roles = '["participant"]'::jsonb and permissions = '[]'::jsonb`;
+  const base = db.selectFrom("local_account");
+  const filtered = options.includeParticipants === true
+    ? base
+    : base.where(sql<boolean>`not (${participants})`);
+  const totalRow = await filtered
+    .select(sql<number>`count(*)::int`.as("count"))
+    .executeTakeFirst();
+  const rows = await filtered
     .selectAll()
     .orderBy("username")
+    .limit(options.limit ?? 200)
+    .offset(options.offset ?? 0)
     .execute();
-  return rows.map(summary);
+  return {
+    accounts: rows.map(summary),
+    total: Number(totalRow?.count ?? 0),
+  };
 }
 
 export async function getLocalAccountSummary(
@@ -190,36 +220,69 @@ export interface LocalAccountAccessPatch {
   readonly passwordDigest?: string;
 }
 
+export type LocalAccountUpdateResult =
+  | { readonly ok: true; readonly account: StoredLocalAccountSummary }
+  | { readonly ok: false; readonly reason: "not_found" | "stale" };
+
 export async function updateLocalAccountAccess(
   db: Kysely<Database>,
   username: string,
   patch: LocalAccountAccessPatch,
-): Promise<StoredLocalAccountSummary | null> {
-  const set: {
-    roles?: string;
-    permissions?: string;
-    active?: boolean;
-    password_digest?: string;
-  } = {};
-  if (patch.roles !== undefined) set.roles = JSON.stringify(patch.roles);
-  if (patch.permissions !== undefined) set.permissions = JSON.stringify(patch.permissions);
-  if (patch.active !== undefined) set.active = patch.active;
-  if (patch.passwordDigest !== undefined) set.password_digest = patch.passwordDigest;
+  expectedRevision: number,
+): Promise<LocalAccountUpdateResult> {
+  const current = await getLocalAccountSummary(db, username);
+  if (current === null) return { ok: false, reason: "not_found" };
+  if (current.accessRevision !== expectedRevision) return { ok: false, reason: "stale" };
 
-  if (Object.keys(set).length === 0) {
-    const row = await db
-      .selectFrom("local_account")
-      .selectAll()
-      .where("username", "=", username)
-      .executeTakeFirst();
-    return row === undefined ? null : summary(row);
-  }
+  const hasPatch = patch.roles !== undefined ||
+    patch.permissions !== undefined ||
+    patch.active !== undefined ||
+    patch.passwordDigest !== undefined;
+  if (!hasPatch) return { ok: true, account: current };
 
   const row = await db
     .updateTable("local_account")
-    .set(set)
+    .set({
+      ...(patch.roles === undefined ? {} : { roles: JSON.stringify(patch.roles) }),
+      ...(patch.permissions === undefined ? {} : { permissions: JSON.stringify(patch.permissions) }),
+      ...(patch.active === undefined ? {} : { active: patch.active }),
+      ...(patch.passwordDigest === undefined ? {} : { password_digest: patch.passwordDigest }),
+      access_revision: sql<number>`access_revision + 1`,
+    })
     .where("username", "=", username)
+    .where("access_revision", "=", expectedRevision)
     .returningAll()
+    .executeTakeFirst();
+  if (row !== undefined) return { ok: true, account: summary(row) };
+  const after = await getLocalAccountSummary(db, username);
+  return after === null
+    ? { ok: false, reason: "not_found" }
+    : { ok: false, reason: "stale" };
+}
+
+/** Counts other active administrators, treating `*` as every permission. */
+export async function countActiveAccountManagers(
+  db: Kysely<Database>,
+  excludeUsername: string,
+): Promise<number> {
+  const row = await db
+    .selectFrom("local_account")
+    .select(sql<number>`count(*)::int`.as("count"))
+    .where("active", "=", true)
+    .where("username", "!=", excludeUsername)
+    .where(sql<boolean>`(permissions @> '["account.manage"]'::jsonb or permissions @> '["*"]'::jsonb)`)
+    .executeTakeFirst();
+  return Number(row?.count ?? 0);
+}
+
+export async function getLocalAccountSummaryByActorId(
+  db: Kysely<Database>,
+  actorId: string,
+): Promise<StoredLocalAccountSummary | null> {
+  const row = await db
+    .selectFrom("local_account")
+    .selectAll()
+    .where("actor_id", "=", actorId)
     .executeTakeFirst();
   return row === undefined ? null : summary(row);
 }

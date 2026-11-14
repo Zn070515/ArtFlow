@@ -128,6 +128,37 @@ describe.skipIf(!connectionString)("account administration", () => {
     );
   });
 
+  it("keeps participant accounts out of the default list", async () => {
+    const session = await sessionFor("account-admin", "admin-password");
+    const username = `hidden-${randomUUID().slice(0, 8)}`;
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      headers: headers(),
+      payload: { username, password: "participant-password" },
+    });
+    expect(registered.statusCode).toBe(201);
+
+    const defaultList = await app.inject({
+      method: "GET",
+      url: "/api/admin/accounts",
+      headers: { cookie: session.cookies },
+    });
+    expect(defaultList.statusCode).toBe(200);
+    expect(defaultList.json().total).toBeGreaterThanOrEqual(1);
+    expect(defaultList.json().accounts.map((account: { username: string }) => account.username))
+      .not.toContain(username);
+
+    const withParticipants = await app.inject({
+      method: "GET",
+      url: "/api/admin/accounts?includeParticipants=true",
+      headers: { cookie: session.cookies },
+    });
+    expect(withParticipants.statusCode).toBe(200);
+    expect(withParticipants.json().accounts.map((account: { username: string }) => account.username))
+      .toContain(username);
+  });
+
   it("creates a staff account that can sign in, and rejects a duplicate", async () => {
     const session = await sessionFor("account-admin", "admin-password");
     const username = `staff-${randomUUID().slice(0, 8)}`;
@@ -189,7 +220,7 @@ describe.skipIf(!connectionString)("account administration", () => {
       method: "PUT",
       url: `/api/admin/accounts/${username}`,
       headers: headers({ cookie: adminSession.cookies, "x-csrf-token": adminSession.csrf }),
-      payload: { permissions: [] },
+      payload: { permissions: [], expectedRevision: 0 },
     });
     expect(updated.statusCode).toBe(200);
 
@@ -222,7 +253,7 @@ describe.skipIf(!connectionString)("account administration", () => {
       method: "PUT",
       url: `/api/admin/accounts/${username}`,
       headers: headers({ cookie: adminSession.cookies, "x-csrf-token": adminSession.csrf }),
-      payload: { active: false },
+      payload: { active: false, expectedRevision: 0 },
     });
     expect(deactivated.statusCode).toBe(200);
     expect(deactivated.json().account.active).toBe(false);
@@ -274,15 +305,86 @@ describe.skipIf(!connectionString)("account administration", () => {
     expect(relogin.statusCode).toBe(200);
   });
 
+  it("rejects an edit made against a stale account revision", async () => {
+    const session = await sessionFor("account-admin", "admin-password");
+    const username = `stale-${randomUUID().slice(0, 8)}`;
+    await app.inject({
+      method: "POST",
+      url: "/api/admin/accounts",
+      headers: headers({ cookie: session.cookies, "x-csrf-token": session.csrf }),
+      payload: {
+        username,
+        password: "staff-password",
+        roles: ["staff"],
+        permissions: [],
+      },
+    });
+
+    const first = await app.inject({
+      method: "PUT",
+      url: `/api/admin/accounts/${username}`,
+      headers: headers({ cookie: session.cookies, "x-csrf-token": session.csrf }),
+      payload: { roles: ["staff", "judge"], expectedRevision: 0 },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().account.accessRevision).toBe(1);
+
+    const stale = await app.inject({
+      method: "PUT",
+      url: `/api/admin/accounts/${username}`,
+      headers: headers({ cookie: session.cookies, "x-csrf-token": session.csrf }),
+      payload: { roles: ["staff"], expectedRevision: 0 },
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().code).toBe("STALE_REVISION");
+  });
+
   it("refuses to remove the last administrator", async () => {
     const adminSession = await sessionFor("account-admin", "admin-password");
     const response = await app.inject({
       method: "PUT",
       url: "/api/admin/accounts/account-admin",
       headers: headers({ cookie: adminSession.cookies, "x-csrf-token": adminSession.csrf }),
-      payload: { permissions: [] },
+      payload: { permissions: [], expectedRevision: 0 },
     });
     expect(response.statusCode).toBe(409);
     expect(response.json().code).toBe("LAST_ADMIN");
+  });
+
+  it("treats the * wildcard as account administration", async () => {
+    const adminSession = await sessionFor("account-admin", "admin-password");
+    const username = `wildcard-${randomUUID().slice(0, 8)}`;
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/admin/accounts",
+      headers: headers({ cookie: adminSession.cookies, "x-csrf-token": adminSession.csrf }),
+      payload: {
+        username,
+        password: "staff-password",
+        roles: ["admin"],
+        permissions: ["*"],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const wildcard = await sessionFor(username, "staff-password");
+
+    // The wildcard account can administer, and after removing the other admin
+    // it is the last administrator. Stripping its own wildcard must fail.
+    const deactivated = await app.inject({
+      method: "PUT",
+      url: "/api/admin/accounts/account-admin",
+      headers: headers({ cookie: wildcard.cookies, "x-csrf-token": wildcard.csrf }),
+      payload: { active: false, expectedRevision: 0 },
+    });
+    expect(deactivated.statusCode).toBe(200);
+
+    const stripped = await app.inject({
+      method: "PUT",
+      url: `/api/admin/accounts/${username}`,
+      headers: headers({ cookie: wildcard.cookies, "x-csrf-token": wildcard.csrf }),
+      payload: { permissions: [], expectedRevision: 0 },
+    });
+    expect(stripped.statusCode).toBe(409);
+    expect(stripped.json().code).toBe("LAST_ADMIN");
   });
 });
