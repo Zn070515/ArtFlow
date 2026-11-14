@@ -1,7 +1,7 @@
 # Build from the service directory:
 #   docker build -t artflow-plus-export plus/services/document-export
-ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:9.0
-ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:9.0
+ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:11.0
+ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:11.0
 
 FROM ${DOTNET_SDK_IMAGE} AS build
 WORKDIR /src
