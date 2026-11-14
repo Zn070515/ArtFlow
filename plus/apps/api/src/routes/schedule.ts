@@ -118,11 +118,12 @@ export function registerScheduleRoutes(ctx: ApiContext): void {
     async (request, reply) => {
       const commandId = requireIdempotency(request);
       const { id, releaseId } = request.params as { id: string; releaseId: string };
-      const body = request.body as { note?: string };
+      const body = request.body as { expectedRevision: number; note?: string };
       const outcome = await revokeScheduleReleaseCommand(db, await requestDeps(request), {
         commandId,
         activityId: id,
         releaseId,
+        expectedRevision: body.expectedRevision,
         note: body.note,
       });
       return reply.status(outcome.status).send(outcome.body);

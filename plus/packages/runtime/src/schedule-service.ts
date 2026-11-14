@@ -198,7 +198,8 @@ export async function upsertScheduleEntry(
       if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
       requireActive(activity);
       const artifact = await requireScheduleArtifact(trx, activity);
-      requireSlot(artifact, input.slotKey);
+      const slotKey = requireText(input.slotKey, "slotKey", 64);
+      requireSlot(artifact, slotKey);
       await ensureScheduleState(trx, activity.id, mode);
       const entries = await listScheduleEntries(trx, activity.id, mode);
       const title = requireText(input.title, "title", 200);
@@ -210,8 +211,8 @@ export async function upsertScheduleEntry(
           id: idFromCommand("schedule-entry", `${activity.id}:${mode}:${input.commandId}`),
           activityId: activity.id,
           mode,
-          position: input.position ?? entries.length,
-          slotKey: input.slotKey,
+          position: input.position ?? entries.reduce((max, entry) => Math.max(max, entry.position + 1), 0),
+          slotKey,
           participantId: input.participantId ?? null,
           title,
           note,
@@ -228,7 +229,7 @@ export async function upsertScheduleEntry(
         current = await updateScheduleEntry(trx, {
           ...existing,
           position: input.position ?? existing.position,
-          slotKey: input.slotKey,
+          slotKey,
           participantId: input.participantId ?? null,
           title,
           note,
@@ -347,6 +348,8 @@ export async function removeScheduleEntry(
       const revision = await staleSafe(() => bumpScheduleState(trx, activity.id, mode, input.expectedRevision));
       const deleted = await deleteScheduleEntry(trx, entry.id, entry.revision);
       if (!deleted) throw new DomainError("STALE_REVISION", "The schedule entry changed; refresh and retry.");
+      const remaining = await listScheduleEntries(trx, activity.id, mode);
+      await reorderScheduleEntries(trx, activity.id, mode, remaining.map((item) => item.id));
       await appendEngineEvent(trx, deps, {
         type: "ScheduleEntryChanged",
         activityId: activity.id,
@@ -442,6 +445,7 @@ export interface RevokeScheduleReleaseInput {
   readonly commandId: string;
   readonly activityId: string;
   readonly releaseId: string;
+  readonly expectedRevision: number;
   readonly note?: string;
 }
 
@@ -466,14 +470,25 @@ export async function revokeScheduleReleaseCommand(
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
       requireActive(activity);
-      const revoked = await revokeScheduleRelease(trx, input.releaseId, input.note?.slice(0, 500) ?? "");
+      const revoked = await revokeScheduleRelease(
+        trx,
+        activity.id,
+        input.releaseId,
+        input.note?.slice(0, 500) ?? "",
+      );
       if (revoked === null) throw new DomainError("NOT_FOUND", "The active schedule release was not found.");
+      const revision = await staleSafe(() => bumpScheduleState(
+        trx,
+        activity.id,
+        revoked.mode,
+        input.expectedRevision,
+      ));
       await appendEngineEvent(trx, deps, {
         type: "ScheduleRevoked",
         activityId: activity.id,
         aggregateType: "schedule_release",
         aggregateId: revoked.id,
-        revision: revoked.version,
+        revision,
         mode: revoked.mode,
         scope: "schedule",
         capability: "schedule",
@@ -507,6 +522,7 @@ export async function advanceSchedule(
       payload: {},
     },
     async (trx) => {
+      requireManager(actor);
       const activity = await getActivityForUpdate(trx, input.activityId);
       if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
       requireActive(activity);
@@ -519,12 +535,19 @@ export async function advanceSchedule(
       const next = entries[index + 1] ?? entries[0];
       if (next === undefined) throw new DomainError("SCHEDULE_EMPTY", "The schedule has no entries.");
       await setScheduleCurrent(trx, activity.id, mode, next.id);
+      const currentRevision = await getScheduleStateRevision(trx, activity.id, mode);
+      const revision = await staleSafe(() => bumpScheduleState(
+        trx,
+        activity.id,
+        mode,
+        currentRevision,
+      ));
       await appendEngineEvent(trx, deps, {
         type: "ScheduleAdvanced",
         activityId: activity.id,
         aggregateType: "schedule",
         aggregateId: `${activity.id}:${mode}`,
-        revision: index + 1,
+        revision,
         mode,
         scope: "schedule",
         capability: "schedule",

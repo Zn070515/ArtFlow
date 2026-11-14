@@ -310,13 +310,22 @@ export async function insertScheduleRelease(
 
 export async function revokeScheduleRelease(
   db: Kysely<Database>,
+  activityId: string,
   releaseId: string,
   note: string,
 ): Promise<StoredScheduleRelease | null> {
   const row = await db
     .updateTable("schedule_release")
-    .set({ revoked_at: new Date(), note })
+    .set({
+      revoked_at: new Date(),
+      // Keep the release note; append the revoke reason instead of overwriting it.
+      note: note === ""
+        ? sql`note`
+        : sql`case when note = '' then ${note} else note || E'
+[撤销] ' || ${note} end`,
+    })
     .where("id", "=", releaseId)
+    .where("activity_id", "=", activityId)
     .where("revoked_at", "is", null)
     .returningAll()
     .executeTakeFirst();
@@ -370,11 +379,13 @@ export async function selectActiveScheduleRelease(
     .selectAll("schedule_release")
     .select(["activity.public_code", "activity.title"])
     .where("activity.public_code", "=", publicCode)
+    .where("activity.status", "!=", "archived")
     .where("schedule_release.mode", "=", "formal")
-    .where("schedule_release.revoked_at", "is", null)
     .orderBy("schedule_release.version", "desc")
     .executeTakeFirst();
-  if (row === undefined) return null;
+  // Fail closed on the newest version: revoking it takes the public page
+  // offline instead of silently falling back to an older lineup.
+  if (row === undefined || row.revoked_at !== null) return null;
   return {
     activityId: row.activity_id,
     publicCode: row.public_code,

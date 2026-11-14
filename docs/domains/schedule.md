@@ -29,9 +29,9 @@ release:    released ──revoke──▶ revoked（快照保留，公开不可
 current:    entry[n] ──advance──▶ entry[n+1]（必须来自运行中的 schedule session）
 ```
 
-- 条目编辑、重排、删除、发布使用 `schedule_state.revision` 做 OCC，过期返回
-  `STALE_REVISION`；这些命令会递增该 revision。
-- 重排要求 `orderedIds` 是当前条目的精确排列。
+- 条目编辑、重排、删除、发布、撤销、advance 都使用 `schedule_state.revision`
+  做 OCC，过期返回 `STALE_REVISION`；命令会递增该 revision。
+- 重排要求 `orderedIds` 是当前条目的精确排列；删除后剩余条目重新归一化 position。
 - 发布要求排期非空，且引用的槽位都存在于已发布定义中；每次发布 version 自增。
 - 撤销只写 `revoked_at`，不改写旧快照；公开读取最新未撤销版本。
 - `advance` 必须来自运行中的 `schedule` execution session，mode 由 session
@@ -40,9 +40,12 @@ current:    entry[n] ──advance──▶ entry[n+1]（必须来自运行中�
 ## 不变量
 
 - 公开只读 **formal**、未撤销的最新 release；test/rehearsal 永远不可见。
-- release 是 append-only 版本；已发布快照不可编辑。
+- 撤销最新版后公开读 fail closed，不回退到更旧版本；已归档活动不返回公开节目单。
+- release 是 append-only 版本；已发布快照不可编辑；撤销保留原发布备注并追加撤销原因。
+- 所有写命令要求 `schedule.manage`，包括 `schedule.current.advance`。
 - 未启用 `schedule` 的 release 拒绝所有 schedule 命令（`SCHEDULE_NOT_ENABLED`）。
-- 空排期不能发布（`SCHEDULE_EMPTY`）；未知槽位拒绝（`SLOT_UNKNOWN`）。
+- 空排期不能发布（`SCHEDULE_EMPTY`）；未知或超长槽位拒绝（`SLOT_UNKNOWN` /
+  `INVALID_INPUT`）。
 - 所有写命令走 `executeCommand`：receipt + audit + fact + outbox 同一事务。
 
 ## 领域事件

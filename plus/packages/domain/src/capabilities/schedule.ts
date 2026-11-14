@@ -64,6 +64,8 @@ export function compileScheduleDefinition(
       const value = slot as Partial<ScheduleSlotDefinition>;
       if (typeof value.key !== "string" || !value.key.trim()) {
         issues.push(issue("SLOT_KEY_REQUIRED", "A slot key is required.", `${path}.key`));
+      } else if (value.key.length > 64) {
+        issues.push(issue("SLOT_KEY_TOO_LONG", "A slot key must be at most 64 characters.", `${path}.key`));
       } else if (keys.has(value.key)) {
         issues.push(issue("SLOT_KEY_DUPLICATE", "Slot keys must be unique.", `${path}.key`));
       } else {

@@ -96,7 +96,8 @@ export function ScheduleCard({
     onSuccess: refresh,
   });
   const revoke = useMutation({
-    mutationFn: (releaseId: string) => revokeScheduleRelease(activityId, releaseId, note),
+    mutationFn: (releaseId: string) =>
+      revokeScheduleRelease(activityId, releaseId, data?.revision ?? 0, note),
     onSuccess: refresh,
   });
   const advance = useMutation({ mutationFn: () => advanceSchedule(activityId), onSuccess: refresh });

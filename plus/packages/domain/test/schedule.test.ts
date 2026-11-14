@@ -50,6 +50,17 @@ describe("schedule capability", () => {
     expect(codes).toContain("SLOT_KIND_INVALID");
   });
 
+  it("rejects slot keys longer than the persisted column", () => {
+    const result = compileScheduleDefinition(
+      createScheduleDefinition([
+        { key: "k".repeat(65), label: "过长", durationMinutes: 5, kind: "program" },
+      ]),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.map((issue) => issue.code)).toContain("SLOT_KEY_TOO_LONG");
+  });
+
   it("is registered and included in the stage-show pack", () => {
     expect(defaultCapabilityRegistry.get("schedule")).toBeDefined();
     const result = instantiateActivityPack(STAGE_SHOW_PACK, defaultCapabilityRegistry, {

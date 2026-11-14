@@ -336,7 +336,10 @@ export const ScheduleReleaseBody = Type.Object(
 );
 
 export const ScheduleRevokeBody = Type.Object(
-  { note: Type.Optional(Type.String({ maxLength: 500 })) },
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    note: Type.Optional(Type.String({ maxLength: 500 })),
+  },
   { additionalProperties: false },
 );
 
