@@ -37,6 +37,7 @@ Journey runner）同样在 `main` 上持续推进；契约工具只用于开发/
 | M16 Tasks Readiness | 已完成 | 版本化任务项、审计命令与 Ops 控制台 |
 | M15.3 Attendance | 已完成 | 统一签到（participant/ticket/staff）、签到点与 staff roster、Ops/Live 到场视图 |
 | M15.4 Schedule / Program Release | 已完成 | schedule capability、Ops/Live 排期、公开节目单快照、Studio 排期编辑器 |
+| M15.5 Incident / Recovery | 已完成 | incident capability、Ops 事故卡、Live 未解决事故摘要、reopen 审计 |
 | v1 兼容移除 | 已完成 | 删除 legacy import/adoption、参与者认领、v1 媒体桥与 v1 golden adapter |
 
 ### v2 架构速览

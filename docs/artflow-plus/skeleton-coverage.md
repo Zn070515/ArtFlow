@@ -38,7 +38,7 @@ Plus 是否已经覆盖了 v1 的真实功能？** 结论用于外部审核与�
 | Word / 微信推文生成 | `exports/` 的 `ArticleTemplate`、`GeneratedDocument` | 无法一键生成推文 | 独立内容生成模块 |
 | bracket / 对阵 / 复合分 | `ruleset/` 的淘汰赛表达 | v2 competition 只表达 round/panel/score | 新 capability |
 | 现场大屏 | v1 结果板/主持手卡视图 | Live 只做失效提示与操作台 | 展示层项目 |
-| 事故记录 | `incidents/` | v2 用 audit/任务承接，无独立事故对象 | 可评估为"有意放弃" |
+| 事故记录 | `incidents/` | 已由 M15.5 `incident` 覆盖（open/acknowledge/resolve/reopen） | 已完成 |
 | 活动克隆 | `staff_panel` clone | v2 只能新建 definition | 可评估为"有意放弃" |
 | SSO provider | 无（v1 本地账号） | 当前使用本地会话 | 待 RFC |
 | 多实例实时广播 | v1 Channels + Redis | 单实例实时；HTTP 恢复仍可靠 | 待规模需要 |
