@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   createAccount,
@@ -12,6 +12,7 @@ import {
 } from "../api/accounts.js";
 import { RequireSession } from "../auth/RequireSession.js";
 import { canManageAccounts, useSession } from "../auth/SessionProvider.js";
+import { ConsolePagination } from "../components/console/ConsolePagination.js";
 import { Button } from "../components/ui/Button.js";
 import { ConfirmDialog, FormDialog } from "../components/ui/Dialog.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
@@ -29,6 +30,7 @@ export function AccountsPage() {
 }
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,64}$/;
+const PAGE_SIZE = 25;
 
 function splitList(value: string): readonly string[] {
   return [
@@ -45,9 +47,15 @@ function AccountsContent() {
   const { session } = useSession();
   const allowed = canManageAccounts(session);
   const [showParticipants, setShowParticipants] = useState(false);
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [showParticipants]);
   const query = useQuery({
-    queryKey: ["admin-accounts", showParticipants],
-    queryFn: () => fetchAccounts(showParticipants),
+    queryKey: ["admin-accounts", showParticipants, page],
+    queryFn: () => fetchAccounts({
+      includeParticipants: showParticipants,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    }),
     enabled: allowed,
     retry: false,
   });
@@ -108,6 +116,7 @@ function AccountsContent() {
       });
       setCreateOpen(false);
       setCreateForm({ username: "", password: "", roles: "staff", permissions: "" });
+      setPage(1);
       await query.refetch();
     } catch (cause) {
       setError(apiErrorText(cause, "创建账号失败。", "账号已存在或状态冲突。"));
@@ -128,6 +137,7 @@ function AccountsContent() {
       setInviteLink(`${window.location.origin}/claim#${created.token}`);
       setInviteOpen(false);
       setInviteForm({ username: "", roles: "staff", permissions: "" });
+      setPage(1);
       await query.refetch();
     } catch (cause) {
       setError(apiErrorText(
@@ -202,19 +212,21 @@ function AccountsContent() {
 
   // Participants share the account table but are not part of the organizing
   // team; showing every registrant here would bury the staff list.
-  const visibleAccounts = query.data.filter(
+  const visibleAccounts = query.data.accounts.filter(
     (account) =>
       showParticipants ||
       account.permissions.length > 0 ||
       account.roles.some((role) => role !== "participant"),
   );
+  const totalPages = Math.max(1, Math.ceil(query.data.total / PAGE_SIZE));
 
   return (
     <section className="ops-page">
       <header className="ops-header">
         <h1 className="ui-page-title">账号与权限</h1>
         <p className="ui-page-meta">
-          {visibleAccounts.length} / {query.data.length} 个账号 · 权限变更对已登录会话立即生效
+          共 {query.data.total} 个账号 · 第 {page} / {totalPages} 页 ·
+          权限变更对已登录会话立即生效
         </p>
       </header>
 
@@ -244,8 +256,13 @@ function AccountsContent() {
 
       {error === null ? null : <p className="ui-field__error" role="alert">{error}</p>}
 
-      {query.data.length === 0 ? (
-        <EmptyState title="还没有账号" description="创建第一个团队账号。" />
+      {query.data.accounts.length === 0 ? (
+        <EmptyState
+          title={query.data.total === 0 ? "还没有账号" : "这一页没有账号"}
+          description={query.data.total === 0
+            ? "创建第一个团队账号。"
+            : "返回上一页，或调整参与者账号筛选。"}
+        />
       ) : visibleAccounts.length === 0 ? (
         <EmptyState
           title="没有团队账号"
@@ -302,6 +319,7 @@ function AccountsContent() {
           </tbody>
         </Table>
       )}
+      <ConsolePagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
       <FormDialog
         open={createOpen}

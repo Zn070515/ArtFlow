@@ -63,7 +63,7 @@ describe("AccountsPage", () => {
       session: { actor: { permissions: ["account.manage"], roles: ["admin"] } },
     });
     useQueryMock.mockReturnValue({
-      data: accounts,
+      data: { accounts, total: accounts.length },
       error: null,
       isPending: false,
       refetch: refetchMock,
@@ -82,17 +82,20 @@ describe("AccountsPage", () => {
 
   it("hides participant accounts until asked", () => {
     useQueryMock.mockReturnValue({
-      data: [
-        ...accounts,
-        {
-          username: "participant-one",
-          actorId: "participant-one-1",
-          roles: ["participant"],
-          permissions: [],
-          active: true,
-          createdAt: "2026-11-14T00:00:00.000Z",
-        },
-      ],
+      data: {
+        accounts: [
+          ...accounts,
+          {
+            username: "participant-one",
+            actorId: "participant-one-1",
+            roles: ["participant"],
+            permissions: [],
+            active: true,
+            createdAt: "2026-11-14T00:00:00.000Z",
+          },
+        ],
+        total: 3,
+      },
       error: null,
       isPending: false,
       refetch: refetchMock,
@@ -102,6 +105,21 @@ describe("AccountsPage", () => {
     expect(screen.queryByText("participant-one")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("显示参与者账号"));
     expect(screen.getByText("participant-one")).toBeInTheDocument();
+  });
+
+  it("pages through the server result instead of rendering everything at once", () => {
+    useQueryMock.mockReturnValue({
+      data: { accounts, total: 60 },
+      error: null,
+      isPending: false,
+      refetch: refetchMock,
+    });
+    render(<AccountsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+
+    const lastCall = useQueryMock.mock.calls.at(-1)?.[0] as { queryKey: readonly unknown[] };
+    expect(lastCall.queryKey).toEqual(["admin-accounts", false, 2]);
   });
 
   it("does not offer account management without account.manage", () => {

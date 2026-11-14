@@ -17,7 +17,11 @@ export function csrfFromCookie(): string | undefined {
   return match?.slice(prefix.length);
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(
+  path: string,
+  init: RequestInit = {},
+  query?: Readonly<Record<string, string | number | boolean | undefined>>,
+): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
   if (method !== "GET" && method !== "HEAD") {
@@ -27,7 +31,16 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (init.body !== undefined && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
-  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  let target = path;
+  if (query !== undefined) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    const encoded = params.toString();
+    if (encoded !== "") target += `?${encoded}`;
+  }
+  const response = await fetch(target, { ...init, headers, credentials: "same-origin" });
   if (!response.ok) {
     let body: { code?: string; message?: string; details?: unknown } = {};
     try {
