@@ -96,6 +96,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 | 契约测试实施计划（归档） | [plans/2026-11-11-contract-testing-plan.md](../archive/v2/plans/2026-11-11-contract-testing-plan.md) |
 | 外部审核驱动的测试体系加固（归档） | [analysis/2026-11-11-external-review-test-hardening.md](../archive/v2/analysis/2026-11-11-external-review-test-hardening.md) |
 | 自审计测试体系设计 | [specs/2026-11-11-self-auditing-test-system-design.md](specs/2026-11-11-self-auditing-test-system-design.md) |
+| 现场降级设计（沿用 v1） | [specs/2026-11-14-onsite-degradation-design.md](specs/2026-11-14-onsite-degradation-design.md) |
 | 变异审计结果（归档） | [analysis/2026-11-11-mutation-audit-findings.md](../archive/v2/analysis/2026-11-11-mutation-audit-findings.md) |
 | 工程加固（拆分、L3/L4、DB 生成链、文档口径，归档） | [plans/2026-11-12-engineering-hardening.md](../archive/v2/plans/2026-11-12-engineering-hardening.md) |
 | 文档口径审计（归档） | [analysis/2026-11-12-documentation-consistency.md](../archive/v2/analysis/2026-11-12-documentation-consistency.md) |
