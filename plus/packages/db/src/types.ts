@@ -80,6 +80,8 @@ export interface AttendanceFactRow {
   actor_id: string;
   command_id: string;
   occurred_at: ColumnType<Date, Date | string, Date | string>;
+  source: ColumnType<string, string | undefined, string>;
+  source_reference: string | null;
 }
 
 export interface AttendancePointRow {

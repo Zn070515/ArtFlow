@@ -58,6 +58,8 @@ export interface AttendanceFactInput {
   readonly subjectId: string;
   readonly action: "checkin" | "undo";
   readonly note: string | null;
+  readonly source: "direct" | "manual_paper";
+  readonly sourceReference: string | null;
   readonly actorId: string;
   readonly commandId: string;
   readonly occurredAt: string;
@@ -301,6 +303,8 @@ export async function insertAttendanceFact(
     subject_id: fact.subjectId,
     action: fact.action,
     note: fact.note,
+    source: fact.source,
+    source_reference: fact.sourceReference,
     actor_id: fact.actorId,
     command_id: fact.commandId,
     occurred_at: fact.occurredAt,

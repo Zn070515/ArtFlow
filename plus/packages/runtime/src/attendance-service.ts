@@ -397,6 +397,32 @@ export interface AttendanceCheckinInput {
   readonly subjectType: AttendanceSubjectType;
   readonly subjectId: string;
   readonly note?: string;
+  readonly source?: "direct" | "manual_paper";
+  readonly sourceReference?: string;
+}
+
+function normalizeCheckinSource(
+  source: "direct" | "manual_paper" | undefined,
+  sourceReference: string | undefined,
+): { readonly source: "direct" | "manual_paper"; readonly sourceReference: string | null } {
+  const kind = source ?? "direct";
+  const reference = sourceReference?.trim() ?? "";
+  if (kind === "manual_paper") {
+    if (reference === "" || reference.length > 200) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "A paper reference of 1-200 characters is required for manual paper check-in.",
+      );
+    }
+    return { source: kind, sourceReference: reference };
+  }
+  if (reference !== "") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "A source reference is only allowed for manual paper check-in.",
+    );
+  }
+  return { source: "direct", sourceReference: null };
 }
 
 export async function checkIn(
@@ -408,6 +434,7 @@ export async function checkIn(
   const eventDeps = withActor(deps, actor);
   const note = normalizeNote(input.note);
   const subjectType = requireSubjectType(input.subjectType);
+  const checkinSource = normalizeCheckinSource(input.source, input.sourceReference);
   return executeCommand(db, {
     commandId: input.commandId,
     activityId: input.activityId,
@@ -415,7 +442,14 @@ export async function checkIn(
     commandType: "attendance.checkin",
     scope: "checkin",
     actor,
-    payload: { pointKey: input.pointKey, subjectType, subjectId: input.subjectId, note },
+    payload: {
+      pointKey: input.pointKey,
+      subjectType,
+      subjectId: input.subjectId,
+      note,
+      source: checkinSource.source,
+      sourceReference: checkinSource.sourceReference,
+    },
   }, async (trx) => {
     requirePermission(actor, "attendance.manage");
     const activity = await getActivityForUpdate(trx, input.activityId);
@@ -441,7 +475,12 @@ export async function checkIn(
       subjectId: input.subjectId,
     });
     if (current !== null && current.status === "present") {
-      throw new DomainError("ALREADY_CHECKED_IN", "The subject is already checked in at this point.");
+      throw new DomainError("ALREADY_CHECKED_IN", "The subject is already checked in at this point.", {
+        checkedInAt: current.updatedAt,
+        pointKey: input.pointKey,
+        subjectType,
+        subjectId: input.subjectId,
+      });
     }
     const now = deps.now();
     await insertAttendanceFact(trx, {
@@ -453,6 +492,8 @@ export async function checkIn(
       subjectId: input.subjectId,
       action: "checkin",
       note,
+      source: checkinSource.source,
+      sourceReference: checkinSource.sourceReference,
       actorId: actor.actorId,
       commandId: input.commandId,
       occurredAt: now,
@@ -538,6 +579,8 @@ export async function undoCheckIn(
       subjectId: input.subjectId,
       action: "undo",
       note,
+      source: "direct",
+      sourceReference: null,
       actorId: actor.actorId,
       commandId: input.commandId,
       occurredAt: now,

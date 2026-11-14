@@ -156,6 +156,10 @@ export const AttendanceStaffUpdateBodySchema = Type.Object(
 const CheckinBase = {
   pointKey: PointKeySchema,
   note: Type.Optional(NoteSchema),
+  source: Type.Optional(
+    Type.Union([Type.Literal("direct"), Type.Literal("manual_paper")]),
+  ),
+  sourceReference: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 };
 
 export const AttendanceCheckinBodySchema = Type.Union([

@@ -38,6 +38,14 @@ const STATUS_TONES: Readonly<Record<AttendanceRow["status"], BadgeTone>> = {
 };
 
 function humanError(error: unknown): string {
+  if (error instanceof ApiError && error.code === "ALREADY_CHECKED_IN") {
+    const details = error.details as { checkedInAt?: unknown } | undefined;
+    if (typeof details?.checkedInAt === "string") {
+      const at = new Date(details.checkedInAt);
+      if (!Number.isNaN(at.getTime())) return `该主体已于 ${at.toLocaleString()} 签到。`;
+    }
+    return "该主体已签到。";
+  }
   if (error instanceof ApiError && error.status === 409) {
     return "该主体已被其他操作员更新，请刷新后重试。";
   }
@@ -71,6 +79,8 @@ export function AttendanceCard({
   }
   const [search, setSearch] = useState("");
   const [note, setNote] = useState("");
+  const [paperCheckin, setPaperCheckin] = useState(false);
+  const [paperReference, setPaperReference] = useState("");
   // Rehearsal has no attendance partition; default to the test partition so a
   // casual click cannot write formal attendance. The organizer must choose
   // formal explicitly.
@@ -111,6 +121,13 @@ export function AttendanceCard({
     void queryClient.invalidateQueries({ queryKey: ["attendance-executions", activityId] });
   };
 
+  function paperFields(): { source?: "manual_paper"; sourceReference?: string } {
+    if (!paperCheckin) return {};
+    const reference = paperReference.trim();
+    if (reference === "") throw new Error("纸面补录必须填写纸面编号。");
+    return { source: "manual_paper", sourceReference: reference };
+  }
+
   const mutation = useMutation({
     mutationFn: ({ row, action }: { readonly row: AttendanceRow; readonly action: "checkin" | "undo" }) =>
       action === "checkin"
@@ -120,12 +137,14 @@ export function AttendanceCard({
                 subjectType: "ticket",
                 ticketId: row.subjectId,
                 ...(note.trim() === "" ? {} : { note: note.trim() }),
+                ...paperFields(),
               }
             : {
                 pointKey: row.pointKey,
                 subjectType: row.subjectType,
                 subjectId: row.subjectId,
                 ...(note.trim() === "" ? {} : { note: note.trim() }),
+                ...paperFields(),
               })
         : undoAttendance(activityId, {
             pointKey: row.pointKey,
@@ -135,6 +154,7 @@ export function AttendanceCard({
           }),
     onSuccess: () => {
       setNote("");
+      setPaperReference("");
       refresh();
     },
   });
@@ -203,10 +223,12 @@ export function AttendanceCard({
       subjectType: "ticket",
       credential: ticketCredential.trim(),
       ...(note.trim() === "" ? {} : { note: note.trim() }),
+      ...paperFields(),
     }),
     onSuccess: () => {
       setTicketCredential("");
       setNote("");
+      setPaperReference("");
       refresh();
     },
   });
@@ -363,6 +385,23 @@ export function AttendanceCard({
         </Select>
         <Input label="搜索" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索姓名 / 票据码" />
         <Input label="备注" value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" maxLength={500} />
+        <label className="ui-field__label">
+          <input
+            type="checkbox"
+            checked={paperCheckin}
+            onChange={(event) => setPaperCheckin(event.target.checked)}
+          />{" "}
+          纸面补录
+        </label>
+        {paperCheckin ? (
+          <Input
+            label="纸面编号"
+            value={paperReference}
+            onChange={(event) => setPaperReference(event.target.value)}
+            placeholder="纸面名单编号/批次"
+            maxLength={200}
+          />
+        ) : null}
       </div>
 
       {summary !== undefined ? (
@@ -418,6 +457,7 @@ export function AttendanceCard({
         <p className="auth-loading">当前筛选下没有主体。</p>
       ) : null}
       {mutation.error !== null && mutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(mutation.error)}</p> : null}
+      {ticketMutation.error !== null && ticketMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(ticketMutation.error)}</p> : null}
       {sessionMutation.error !== null && sessionMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(sessionMutation.error)}</p> : null}
       {pointUpdateMutation.error !== null && pointUpdateMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(pointUpdateMutation.error)}</p> : null}
       {staffUpdateMutation.error !== null && staffUpdateMutation.error !== undefined ? <p className="ui-field__error" role="alert">{humanError(staffUpdateMutation.error)}</p> : null}

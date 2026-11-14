@@ -63,8 +63,8 @@ v2 已具备对应基础：`competition` 的 `ScoreSourceSchema` 已包含 `pape
    必须显示首次签到时间，而不是笼统报错。
 3. **纸面评分入口**：确认 Live 的 `paper_dr` 表单强制要求 `sourceReference` 与原因，
    并在读面显示来源徽标。
-4. **恢复检查单**：在 `docs/artflow-plus/rehearsal-runbook.md` 增加“故障后恢复”章节，
-   列出计数比对、审计抽样、放行人。
+4. **恢复检查单**：`rehearsal-runbook.md` 已退役，因此在 `docs/development-baseline.md`
+   增加“现场恢复”章节，列出计数比对、审计抽样与放行人，并链接本文。
 5. **不做**：离线队列、浏览器本地事实、自动冲突合并、客户端时钟作为权威。
 
 ## 6. 恢复授权与证据

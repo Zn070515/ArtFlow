@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AttendanceListResponse } from "@artflow-plus/contracts";
 
+import { ApiError } from "../../api/client.js";
+
 const fetchAttendanceMock = vi.hoisted(() => vi.fn());
 const checkInAttendanceMock = vi.hoisted(() => vi.fn());
 const undoAttendanceMock = vi.hoisted(() => vi.fn());
@@ -113,6 +115,36 @@ describe("AttendanceCard", () => {
       subjectType: "participant",
       subjectId: "registration-1",
     }));
+  });
+
+  it("marks a paper re-entry with its paper reference", async () => {
+    renderCard();
+    await screen.findByTestId("attendance-card");
+    fireEvent.click(screen.getByLabelText("纸面补录"));
+    fireEvent.change(screen.getByLabelText("纸面编号"), { target: { value: "PAPER-17" } });
+    fireEvent.click(screen.getByRole("button", { name: "签到" }));
+
+    await waitFor(() => expect(checkInAttendanceMock).toHaveBeenCalledWith("activity-1", {
+      pointKey: "gate",
+      subjectType: "participant",
+      subjectId: "registration-1",
+      source: "manual_paper",
+      sourceReference: "PAPER-17",
+    }));
+  });
+
+  it("shows the first check-in time for an already-checked-in subject", async () => {
+    renderCard();
+    await screen.findByTestId("attendance-card");
+    checkInAttendanceMock.mockRejectedValueOnce(new ApiError(
+      409,
+      "ALREADY_CHECKED_IN",
+      "already",
+      { checkedInAt: "2026-11-10T10:00:00.000Z" },
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "签到" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/已于 .* 签到/);
   });
 
   it("hides write controls without attendance.manage", async () => {

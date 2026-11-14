@@ -214,6 +214,8 @@ export function registerAttendanceRoutes(ctx: ApiContext): void {
         ticketId?: string;
         credential?: string;
         note?: string;
+        source?: "direct" | "manual_paper";
+        sourceReference?: string;
       };
       const context = await requestDeps(request);
       const actor = requireActor(context);
@@ -240,6 +242,8 @@ export function registerAttendanceRoutes(ctx: ApiContext): void {
         subjectType: body.subjectType,
         subjectId,
         ...(body.note === undefined ? {} : { note: body.note }),
+        ...(body.source === undefined ? {} : { source: body.source }),
+        ...(body.sourceReference === undefined ? {} : { sourceReference: body.sourceReference }),
       });
       return reply.code(200).send(outcome.body);
     },

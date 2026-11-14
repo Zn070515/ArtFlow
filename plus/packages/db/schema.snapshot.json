@@ -435,6 +435,20 @@
           "nullable": false,
           "default": null,
           "identity": false
+        },
+        {
+          "name": "source",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'direct'::character varying",
+          "identity": false
+        },
+        {
+          "name": "source_reference",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
         }
       ]
     },

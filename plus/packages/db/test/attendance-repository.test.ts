@@ -76,8 +76,8 @@ describe.skipIf(!connectionString)("attendance repository on PostgreSQL", () => 
       await insertAttendanceFact(trx, {
         id: "fact-1", activityId, mode: "formal", pointKey: "gate",
         subjectType: "participant", subjectId: "registration-1",
-        action: "checkin", note: null, actorId: "staff-1",
-        commandId: "cmd-1", occurredAt: now,
+        action: "checkin", note: null, source: "direct", sourceReference: null,
+        actorId: "staff-1", commandId: "cmd-1", occurredAt: now,
       });
       await upsertAttendanceCurrent(trx, {
         activityId, mode: "formal", pointKey: "gate",
