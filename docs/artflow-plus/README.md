@@ -57,6 +57,8 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 ### 已验证的边界
 
 - 单写路径：receipt + audit + fact + outbox 同事务；replay 先于校验。
+- 授权以账号当前状态为准：会话只证明认证；降权、停用、删除在下一次请求生效；
+  `account.manage` 收口账号管理（ADR-0042）。
 - Release 不可变：冻结 capability 版本、scopes 与冲突策略。
 - 模式隔离：事实/选票/排名/事件/投影按 mode 分区。
 - 实时通道只做失效提示；HTTP 是恢复权威；只有 `packages/realtime` 拥有传输。

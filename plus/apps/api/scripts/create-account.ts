@@ -12,6 +12,7 @@ if (username === undefined || username.trim() === "" || password === undefined |
   throw new Error("Usage: create-account --username <name> [--permissions a,b] [--roles admin] [--password <8+ chars>]");
 }
 const permissions = (argument("--permissions") ?? [
+  "account.manage",
   "competition.manage",
   "competition.round.prepare",
   "competition.score.write",
@@ -26,7 +27,12 @@ const permissions = (argument("--permissions") ?? [
   "archive.manage",
   "materials.manage",
   "materials.read",
+  "materials.review",
   "attendance.manage",
+  "grouping.manage",
+  "schedule.manage",
+  "incident.manage",
+  "tasks.manage",
 ].join(",")).split(",").map((permission) => permission.trim()).filter(Boolean);
 const roles = (argument("--roles") ?? "admin").split(",").map((role) => role.trim()).filter(Boolean);
 

@@ -4,6 +4,7 @@ export * from "./archive-service.js";
 export * from "./archive-storage.js";
 export * from "./material-storage.js";
 export * from "./auth-service.js";
+export * from "./account-admin-service.js";
 export * from "./competition-service.js";
 export * from "./competition-read-service.js";
 export * from "./command.js";

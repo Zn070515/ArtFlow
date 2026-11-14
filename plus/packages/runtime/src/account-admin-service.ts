@@ -1,0 +1,185 @@
+import { randomUUID } from "node:crypto";
+
+import {
+  getLocalAccountSummary,
+  insertAudit,
+  insertLocalAccount,
+  listLocalAccounts,
+  revokeLocalSessionsForActor,
+  updateLocalAccountAccess,
+} from "@artflow-plus/db";
+import type { Database, StoredLocalAccountSummary } from "@artflow-plus/db";
+import { DomainError, requirePermission } from "@artflow-plus/domain";
+import type { ActorContext } from "@artflow-plus/domain";
+import type { Kysely } from "kysely";
+
+import { hashPassword } from "./auth-service.js";
+
+/** Only this permission may read or mutate the account registry. */
+export const ACCOUNT_MANAGE_PERMISSION = "account.manage";
+
+export interface CreateAccountInput {
+  readonly username: string;
+  readonly password: string;
+  readonly roles: readonly string[];
+  readonly permissions: readonly string[];
+}
+
+export interface UpdateAccountInput {
+  readonly roles?: readonly string[];
+  readonly permissions?: readonly string[];
+  readonly active?: boolean;
+  readonly password?: string;
+}
+
+function requireAccountManager(actor: ActorContext): void {
+  requirePermission(actor, ACCOUNT_MANAGE_PERMISSION);
+}
+
+function normalize(values: readonly string[]): readonly string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
+}
+
+async function writeAccountAudit(
+  trx: Kysely<Database>,
+  actor: ActorContext,
+  commandType: string,
+  detail: unknown,
+): Promise<void> {
+  await insertAudit(trx, {
+    commandId: `admin:${randomUUID()}`,
+    activityId: null,
+    capability: "account",
+    commandType,
+    actor,
+    detail,
+  });
+}
+
+export async function listAccounts(
+  db: Kysely<Database>,
+  actor: ActorContext,
+): Promise<readonly StoredLocalAccountSummary[]> {
+  requireAccountManager(actor);
+  return listLocalAccounts(db);
+}
+
+export async function createAccount(
+  db: Kysely<Database>,
+  actor: ActorContext,
+  input: CreateAccountInput,
+): Promise<StoredLocalAccountSummary> {
+  requireAccountManager(actor);
+  const username = input.username.trim();
+  if (!/^[A-Za-z0-9_.-]{3,64}$/.test(username)) {
+    throw new DomainError("INVALID_INPUT", "Username must be 3-64 letters, numbers, dots, dashes, or underscores.");
+  }
+  if (input.password.length < 8) {
+    throw new DomainError("INVALID_INPUT", "Password must be at least 8 characters.");
+  }
+  const roles = normalize(input.roles);
+  const permissions = normalize(input.permissions);
+  const actorId = `user:${username}`;
+
+  try {
+    return await db.transaction().execute(async (trx) => {
+      await insertLocalAccount(trx, {
+        username,
+        passwordDigest: hashPassword(input.password),
+        actor: { actorId, actorType: "user", roles, permissions },
+        active: true,
+      });
+      const created = await getLocalAccountSummary(trx, username);
+      if (created === null) throw new Error("The account insert did not produce a row.");
+      await writeAccountAudit(trx, actor, "account.create", { username, roles, permissions });
+      return created;
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "23505") {
+      throw new DomainError("USERNAME_TAKEN", "This username is already registered.");
+    }
+    throw error;
+  }
+}
+
+export async function updateAccount(
+  db: Kysely<Database>,
+  actor: ActorContext,
+  username: string,
+  input: UpdateAccountInput,
+): Promise<StoredLocalAccountSummary> {
+  requireAccountManager(actor);
+  const trimmed = username.trim();
+
+  return db.transaction().execute(async (trx) => {
+    const current = await getLocalAccountSummary(trx, trimmed);
+    if (current === null) throw new DomainError("NOT_FOUND", `Account ${trimmed} was not found.`);
+
+    const nextRoles = input.roles === undefined ? current.roles : normalize(input.roles);
+    const nextPermissions = input.permissions === undefined ? current.permissions : normalize(input.permissions);
+    const nextActive = input.active ?? current.active;
+
+    // Losing the last administrator would make the registry unmanageable.
+    if (current.active && current.permissions.includes(ACCOUNT_MANAGE_PERMISSION)) {
+      const losesAdministration = !nextActive || !nextPermissions.includes(ACCOUNT_MANAGE_PERMISSION);
+      if (losesAdministration) {
+        // Serialize administrator removals: two concurrent downgrades must not
+        // both observe a surviving admin and leave the registry unmanageable.
+        await trx.selectFrom("local_account").select("username").forUpdate().execute();
+        const accounts = await listLocalAccounts(trx);
+        const remaining = accounts.filter(
+          (candidate) => candidate.username !== trimmed &&
+            candidate.active &&
+            candidate.permissions.includes(ACCOUNT_MANAGE_PERMISSION),
+        );
+        if (remaining.length === 0) {
+          throw new DomainError(
+            "LAST_ADMIN",
+            "At least one active account must keep account.manage.",
+          );
+        }
+      }
+    }
+
+    const updated = await updateLocalAccountAccess(trx, trimmed, {
+      roles: nextRoles,
+      permissions: nextPermissions,
+      active: nextActive,
+      ...(input.password === undefined ? {} : { passwordDigest: hashPassword(input.password) }),
+    });
+    if (updated === null) throw new DomainError("NOT_FOUND", `Account ${trimmed} was not found.`);
+
+    // Deactivation and password resets invalidate every device immediately.
+    // Permission edits do not need this: authorization reads the account.
+    const sessionsRevoked = !nextActive || input.password !== undefined;
+    if (sessionsRevoked) {
+      await revokeLocalSessionsForActor(trx, current.actorId, new Date().toISOString());
+    }
+
+    await writeAccountAudit(trx, actor, "account.update", {
+      username: trimmed,
+      before: { roles: current.roles, permissions: current.permissions, active: current.active },
+      after: { roles: updated.roles, permissions: updated.permissions, active: updated.active },
+      passwordChanged: input.password !== undefined,
+      sessionsRevoked,
+    });
+    return updated;
+  });
+}
+
+export async function revokeAccountSessions(
+  db: Kysely<Database>,
+  actor: ActorContext,
+  username: string,
+): Promise<{ readonly revoked: number }> {
+  requireAccountManager(actor);
+  const trimmed = username.trim();
+
+  return db.transaction().execute(async (trx) => {
+    const account = await getLocalAccountSummary(trx, trimmed);
+    if (account === null) throw new DomainError("NOT_FOUND", `Account ${trimmed} was not found.`);
+    const revoked = await revokeLocalSessionsForActor(trx, account.actorId, new Date().toISOString());
+    await writeAccountAudit(trx, actor, "account.revoke_sessions", { username: trimmed, revoked });
+    return { revoked };
+  });
+}

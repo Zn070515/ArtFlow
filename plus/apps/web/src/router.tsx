@@ -51,6 +51,12 @@ const opsRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/ops.js"), "OpsPage"),
 });
 
+const accountsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/accounts",
+  component: lazyRouteComponent(() => import("./routes/accounts.js"), "AccountsPage"),
+});
+
 const opsActivityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/ops/$activityId",
@@ -143,6 +149,7 @@ const routeTree = rootRoute.addChildren([
   joinRoute,
   joinActivityRoute,
   opsRoute,
+  accountsRoute,
   opsActivityRoute,
   opsRegistrationRoute,
   studioRoute,

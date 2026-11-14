@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type SubmitEvent, type ReactNode } 
 import { Button } from "./Button.js";
 import { Input } from "./Input.js";
 
-interface DialogShellProps {
+export interface DialogShellProps {
   readonly open: boolean;
   readonly title: string;
   readonly description?: ReactNode;
@@ -98,7 +98,8 @@ function DialogShell({
     }
     confirmed.current = true;
     onConfirm();
-    dialogRef.current?.close();
+    const dialog = dialogRef.current;
+    if (dialog !== null && typeof dialog.close === "function") dialog.close();
   }
 
   return (
@@ -186,6 +187,11 @@ interface ConfirmDialogProps {
   readonly danger?: boolean;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
+}
+
+/** A dialog whose fields are supplied by the caller instead of a plain reason. */
+export function FormDialog(props: DialogShellProps) {
+  return <DialogShell {...props} />;
 }
 
 export function ConfirmDialog({
