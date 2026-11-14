@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-import { ApiError } from "../../api/client.js";
 import {
   closeStudioSession,
   startStudioSession,
@@ -9,6 +8,7 @@ import {
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
 import { Select } from "../ui/Select.js";
+import { apiErrorText } from "../ui/apiError.js";
 
 type Mode = "test" | "rehearsal" | "formal";
 
@@ -42,7 +42,7 @@ export function SessionPanel({
       setConfirming(false);
       onChanged();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "启动会话失败。");
+      setError(apiErrorText(caught, "启动会话失败。", "活动或会话状态已变化，请刷新后重试。"));
     } finally {
       setBusy(false);
     }
@@ -55,7 +55,7 @@ export function SessionPanel({
       await closeStudioSession(state.activity.id, sessionId, crypto.randomUUID(), revision);
       onChanged();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "关闭会话失败。");
+      setError(apiErrorText(caught, "关闭会话失败。", "会话状态已变化，请刷新后重试。"));
     } finally {
       setBusy(false);
     }

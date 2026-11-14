@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
-import { ApiError } from "../api/client.js";
 import {
   createStudioActivity,
   fetchPacks,
@@ -14,6 +13,7 @@ import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { capabilityLabels } from "../components/format/labels.js";
 import { summarizeDefinition } from "../components/studio/definitionSummary.js";
 import { Button } from "../components/ui/Button.js";
+import { apiErrorText } from "../components/ui/apiError.js";
 import { Card } from "../components/ui/Card.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
@@ -107,7 +107,7 @@ function StudioNewContent() {
     try {
       setPreview(await previewPack(pack.identity, { title: title || packCopy(pack).title, answers }));
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "预览失败。");
+      setError(apiErrorText(caught, "预览失败。", "Pack 状态已变化，请刷新后重试。"));
     }
   }
 
@@ -127,7 +127,7 @@ function StudioNewContent() {
       });
       await navigate({ to: "/studio/$activityId", params: { activityId: activity.id } });
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "创建失败，请稍后重试。");
+      setError(apiErrorText(caught, "创建失败，请稍后重试。", "标题或能力组合与现有活动冲突，请调整后重试。"));
     } finally {
       setBusy(false);
     }

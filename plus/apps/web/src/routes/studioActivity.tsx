@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { ApiError } from "../api/client.js";
 import {
   activateStudioActivity,
   duplicateStudioActivity,
@@ -18,6 +17,7 @@ import { ReleasePanel } from "../components/studio/ReleasePanel.js";
 import { SessionPanel } from "../components/studio/SessionPanel.js";
 import { Button } from "../components/ui/Button.js";
 import { Card } from "../components/ui/Card.js";
+import { apiErrorText } from "../components/ui/apiError.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
 import { Input } from "../components/ui/Input.js";
@@ -92,7 +92,7 @@ function StudioActivityContent() {
       setRenameOpen(false);
       refresh();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "重命名失败，请稍后重试。");
+      setError(apiErrorText(caught, "重命名失败，请稍后重试。", "活动已被其他操作更新，请刷新后重试。"));
     } finally {
       setRenaming(false);
     }
@@ -113,7 +113,7 @@ function StudioActivityContent() {
         params: { activityId: created.id },
       });
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "复制活动失败，请稍后重试。");
+      setError(apiErrorText(caught, "复制活动失败，请稍后重试。", "源活动状态已变化，请刷新后重试。"));
     } finally {
       setDuplicating(false);
     }
@@ -131,7 +131,7 @@ function StudioActivityContent() {
       );
       refresh();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "激活失败，请稍后重试。");
+      setError(apiErrorText(caught, "激活失败，请稍后重试。", "活动状态已变化，请刷新后重试。"));
     } finally {
       setActivating(false);
     }

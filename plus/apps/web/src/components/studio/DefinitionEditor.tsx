@@ -4,6 +4,7 @@ import { ApiError } from "../../api/client.js";
 import { compileStudioDefinition, type StudioState } from "../../api/studio.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { apiErrorText } from "../ui/apiError.js";
 import { CapabilityEditor } from "./editors/CapabilityEditor.js";
 import { patchCapabilityPayload, readCapabilityPayload } from "./definitionPackage.js";
 
@@ -84,12 +85,8 @@ export function DefinitionEditor({
       setMessage(`编译成功 · ${result.contentHash.slice(0, 12)}…`);
       onChanged();
     } catch (caught) {
-      if (caught instanceof ApiError) {
-        setError(caught.message);
-        setDetails(caught.details ?? null);
-      } else {
-        setError("编译失败，请稍后重试。");
-      }
+      setError(apiErrorText(caught, "编译失败，请稍后重试。", "草稿已被更新，请刷新后重新编译。"));
+      setDetails(caught instanceof ApiError ? caught.details ?? null : null);
     } finally {
       setBusy(false);
     }

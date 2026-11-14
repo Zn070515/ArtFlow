@@ -1,10 +1,10 @@
 import { useState } from "react";
 
-import { ApiError } from "../../api/client.js";
 import { releaseStudioDefinition, type StudioState } from "../../api/studio.js";
 import { Badge } from "../ui/Badge.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
+import { apiErrorText } from "../ui/apiError.js";
 
 export function ReleasePanel({
   state,
@@ -30,7 +30,7 @@ export function ReleasePanel({
       );
       onChanged();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "发布失败，请稍后重试。");
+      setError(apiErrorText(caught, "发布失败，请稍后重试。", "草稿已被更新，请刷新后重新发布。"));
     } finally {
       setBusy(false);
     }
