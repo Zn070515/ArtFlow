@@ -323,8 +323,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     voting: ["voting.manage", "result.manage"],
     result: ["result.manage"],
     archive: ["archive.manage"],
-    schedule: ["schedule.manage"],
-    incident: ["incident.manage"],
+    schedule: ["schedule.manage", "studio.manage", "competition.manage", "judge.manage"],
+    incident: ["incident.manage", "studio.manage", "competition.manage", "judge.manage"],
   };
 
   async function requireReadAccess(request: FastifyRequest, access: ReadAccess): Promise<void> {

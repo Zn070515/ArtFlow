@@ -136,6 +136,7 @@ export function releaseSchedule(
 export function revokeScheduleRelease(
   activityId: string,
   releaseId: string,
+  expectedRevision: number,
   note: string,
 ): Promise<ScheduleReleaseView> {
   return apiFetch(
@@ -143,7 +144,7 @@ export function revokeScheduleRelease(
     {
       method: "POST",
       headers: commandHeaders(),
-      body: JSON.stringify({ note }),
+      body: JSON.stringify({ expectedRevision, note }),
     },
   );
 }

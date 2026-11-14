@@ -220,6 +220,112 @@ describe.skipIf(!connectionString)("schedule service", () => {
     expect((await getScheduleState(db, activityId, "formal")).entries).toHaveLength(0);
   });
 
+  it("normalizes positions after removing a middle entry", async () => {
+    const activityId = await seed();
+    const first = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 0,
+      slotKey: "opening", title: "开场",
+    });
+    const second = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 1,
+      slotKey: "programs", title: "节目一",
+    });
+    const third = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 2,
+      slotKey: "programs", title: "节目二",
+    });
+    expect(third.body.entry.position).toBe(2);
+    await removeScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 3,
+      entryId: second.body.entry.id,
+    });
+    const view = await getScheduleState(db, activityId, "formal");
+    expect(view.entries.map((item) => item.id)).toEqual([first.body.entry.id, third.body.entry.id]);
+    expect(view.entries.map((item) => item.position)).toEqual([0, 1]);
+  });
+
+  it("requires schedule.manage to advance and bumps the state revision", async () => {
+    const activityId = await seed();
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 0,
+      slotKey: "opening", title: "开场",
+    });
+    await insertSession(db, {
+      id: `session-${activityId}`, activityId, definitionVersion: 1,
+      contentHash: "schedule-release", scope: "schedule", mode: "formal",
+      status: "running", revision: 0,
+    }, "2026-11-14T09:30:00Z");
+    const outsider: RuntimeDeps = {
+      ...deps,
+      actor: { actorId: "outsider", actorType: "user", roles: ["participant"], permissions: [] },
+    };
+    await expect(advanceSchedule(db, outsider, {
+      commandId: randomUUID(), activityId,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await advanceSchedule(db, deps, { commandId: randomUUID(), activityId });
+    expect((await getScheduleState(db, activityId, "formal")).revision).toBe(2);
+  });
+
+  it("rejects revoking another activity's release", async () => {
+    const owner = await seed();
+    const other = await seed();
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId: owner, mode: "formal", expectedRevision: 0,
+      slotKey: "opening", title: "开场",
+    });
+    const release = await releaseSchedule(db, deps, {
+      commandId: randomUUID(), activityId: owner, mode: "formal", expectedRevision: 1,
+    });
+    await expect(revokeScheduleReleaseCommand(db, deps, {
+      commandId: randomUUID(), activityId: other, releaseId: release.body.id,
+      expectedRevision: 0,
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("fails closed when the newest public release is revoked and hides archived activities", async () => {
+    const activityId = await seed();
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 0,
+      slotKey: "opening", title: "第一版",
+    });
+    const first = await releaseSchedule(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 1,
+    });
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 2,
+      slotKey: "programs", title: "第二版新增",
+    });
+    const second = await releaseSchedule(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 3,
+    });
+    const activity = await db.selectFrom("activity").select("public_code")
+      .where("id", "=", activityId).executeTakeFirstOrThrow();
+    expect((await getPublicSchedule(db, activity.public_code))?.entries.length).toBe(2);
+
+    await revokeScheduleReleaseCommand(db, deps, {
+      commandId: randomUUID(), activityId, releaseId: second.body.id,
+      expectedRevision: 4,
+    });
+    expect(await getPublicSchedule(db, activity.public_code)).toBeNull();
+    expect(first.body.version).toBe(1);
+
+    const archived = await seed();
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId: archived, mode: "formal", expectedRevision: 0,
+      slotKey: "opening", title: "归档节目",
+    });
+    await releaseSchedule(db, deps, {
+      commandId: randomUUID(), activityId: archived, mode: "formal", expectedRevision: 1,
+    });
+    const archivedRow = await db.selectFrom("activity").select("public_code")
+      .where("id", "=", archived).executeTakeFirstOrThrow();
+    expect(await getPublicSchedule(db, archivedRow.public_code)).not.toBeNull();
+    await db.updateTable("activity").set({ status: "archived" })
+      .where("id", "=", archived).execute();
+    expect(await getPublicSchedule(db, archivedRow.public_code)).toBeNull();
+  });
+
   it("revokes a released snapshot", async () => {
     const activityId = await seed();
     const entry = await upsertScheduleEntry(db, deps, {
@@ -235,14 +341,19 @@ describe.skipIf(!connectionString)("schedule service", () => {
       activityId,
       mode: "formal",
       expectedRevision: 1,
+      note: "首版节目单",
     });
     const revoked = await revokeScheduleReleaseCommand(db, deps, {
       commandId: randomUUID(),
       activityId,
       releaseId: release.body.id,
+      expectedRevision: 2,
       note: "节目调整",
     });
     expect(revoked.body.revokedAt).not.toBeNull();
+    expect(revoked.body.note).toContain("首版节目单");
+    expect(revoked.body.note).toContain("节目调整");
     expect(entry.body.entry.id).toBeDefined();
+    expect((await getScheduleState(db, activityId, "formal")).revision).toBe(3);
   });
 });

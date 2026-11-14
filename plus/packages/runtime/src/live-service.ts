@@ -77,17 +77,40 @@ export interface LiveState {
   readonly participantNames: Readonly<Record<string, string>>;
 }
 
-function requireLiveAccess(actor: Parameters<typeof hasPermission>[0]): void {
-  if (
-    !hasPermission(actor, "competition.manage") &&
-    !hasPermission(actor, "judge.manage") &&
-    !hasPermission(actor, "competition.score.write")
-  ) {
+const EMPTY_COMPETITION: CompiledCompetitionArtifact = {
+  order: [],
+  nodes: [],
+  edges: [],
+  rounds: [],
+  rubric: { criteria: [] },
+  tiePolicy: "review",
+};
+
+function requireLiveAccess(
+  actor: Parameters<typeof hasPermission>[0],
+  enabledCapabilities: readonly string[],
+): void {
+  if (enabledCapabilities.includes("competition")) {
+    if (
+      hasPermission(actor, "competition.manage") ||
+      hasPermission(actor, "judge.manage") ||
+      hasPermission(actor, "competition.score.write")
+    ) return;
     throw new DomainError(
       "FORBIDDEN",
       "One of competition.manage, judge.manage, or competition.score.write is required.",
     );
   }
+  if (
+    hasPermission(actor, "schedule.manage") ||
+    hasPermission(actor, "incident.manage") ||
+    hasPermission(actor, "attendance.manage") ||
+    hasPermission(actor, "tasks.manage")
+  ) return;
+  throw new DomainError(
+    "FORBIDDEN",
+    "One of schedule.manage, incident.manage, attendance.manage, or tasks.manage is required.",
+  );
 }
 
 export async function getLiveState(
@@ -96,16 +119,20 @@ export async function getLiveState(
   activityId: string,
 ): Promise<LiveState> {
   const actor = runtimeActor(deps);
-  requireLiveAccess(actor);
   const activity = await getActivitySummary(db, activityId);
   if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+  requireLiveAccess(actor, activity.enabledCapabilities);
   const release = await getRelease(db, activityId, activity.activeDefinitionVersion);
   if (release === null) throw new DomainError("VERSION_NOT_RELEASED", "The activity has no released definition.");
   const plan = release.capabilities.competition;
   if (plan === undefined || plan.ok !== true) {
-    throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The release has no competition snapshot.");
+    if (activity.enabledCapabilities.includes("competition")) {
+      throw new DomainError("RELEASE_SNAPSHOT_INCOMPLETE", "The release has no competition snapshot.");
+    }
   }
-  const config = plan.artifact as CompiledCompetitionArtifact;
+  const config = plan !== undefined && plan.ok === true
+    ? (plan.artifact as CompiledCompetitionArtifact)
+    : EMPTY_COMPETITION;
   const session = await findRunningSessionByScope(db, activityId, "judging");
   const mode = session?.mode ?? "formal";
   const roundRows = await listRoundsForActivity(db, activityId);
