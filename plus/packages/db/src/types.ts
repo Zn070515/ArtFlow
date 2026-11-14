@@ -247,6 +247,26 @@ export interface GroupingStageRow {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+export interface IncidentRow {
+  id: string;
+  activity_id: string;
+  mode: string;
+  severity: string;
+  category: string;
+  status: string;
+  title: string;
+  detail: ColumnType<string, string | undefined, string>;
+  location: ColumnType<string, string | undefined, string>;
+  related_type: string | null;
+  related_id: string | null;
+  assignee_id: string | null;
+  resolution: ColumnType<string, string | undefined, string>;
+  opened_by: string;
+  revision: ColumnType<number, number | undefined, number>;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface JudgeSeatRow {
   id: string;
   panel_id: string;
@@ -739,6 +759,7 @@ export interface Database {
   grouping_group: GroupingGroupRow;
   grouping_membership: GroupingMembershipRow;
   grouping_stage: GroupingStageRow;
+  incident: IncidentRow;
   judge_seat: JudgeSeatRow;
   judge_seat_grant: JudgeSeatGrantRow;
   judge_session: JudgeSessionRow;

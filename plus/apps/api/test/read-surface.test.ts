@@ -51,6 +51,7 @@ const INTERNAL_READS = [
   "/api/activities/any/publishing/state",
   "/api/activities/any/archive",
   "/api/activities/any/schedule",
+  "/api/activities/any/incidents",
 ] as const;
 
 describe.skipIf(!connectionString)("internal read surface", () => {

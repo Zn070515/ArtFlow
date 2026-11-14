@@ -25,6 +25,8 @@ const EXEMPT: Readonly<Record<string, string>> = {
     "Follow-up candidate: session open/close and ballot identity. Runtime voting and ticket tests cover the current edges.",
   schedule:
     "Ordered entries plus release snapshots, not a single status lifecycle; schedule-service tests cover add/reorder/release/revoke/advance and stale revisions.",
+  incident:
+    "Single-object state machine (open/acknowledge/resolve/reopen); incident-service tests cover OCC, terminal guards, permissions, and reopen with real PostgreSQL.",
 };
 
 describe("contract adapter coverage", () => {

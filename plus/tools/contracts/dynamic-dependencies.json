@@ -55,6 +55,26 @@
       "eventType": "ScheduleAdvanced",
       "consumer": "packages/runtime/src/schedule-service.ts#getScheduleState",
       "reason": "The Ops schedule read model reads the entry and release rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "IncidentOpened",
+      "consumer": "packages/runtime/src/incident-service.ts#getIncidents",
+      "reason": "The Ops incident read model reads the rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "IncidentAcknowledged",
+      "consumer": "packages/runtime/src/incident-service.ts#getIncidents",
+      "reason": "The Ops incident read model reads the rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "IncidentResolved",
+      "consumer": "packages/runtime/src/incident-service.ts#getIncidents",
+      "reason": "The Ops incident read model reads the rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "IncidentReopened",
+      "consumer": "packages/runtime/src/incident-service.ts#getIncidents",
+      "reason": "The Ops incident read model reads the rows written by these facts; the static graph cannot see the table-level relationship."
     }
   ],
   "commands": [

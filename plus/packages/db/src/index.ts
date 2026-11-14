@@ -23,3 +23,4 @@ export * from "./archive-repository.js";
 export * from "./grouping-repository.js";
 export * from "./analytics-repository.js";
 export * from "./schedule-repository.js";
+export * from "./incident-repository.js";
