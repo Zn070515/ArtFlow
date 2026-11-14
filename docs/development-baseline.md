@@ -180,3 +180,8 @@ Work on a short-lived branch from the clean, updated `main`; verify and commit t
 scoped change on that branch. The integration owner performs the non-fast-forward merge
 into `main` after verification. See [repository instructions](../AGENTS.md) for the
 repository-wide workflow rules.
+
+`main` is protected by branch protection: force pushes and branch deletion are blocked.
+Status checks run on every push but are not required by the server, so wait for the
+Gates, Security and Workflow lint runs to finish green before treating a push as
+verified.
