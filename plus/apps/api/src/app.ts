@@ -17,6 +17,7 @@ import { bearerToken, cookieValue, errorCode, errorDetails, publicErrorMessage }
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
+import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCompetitionRoutes } from "./routes/competition.js";
 import { registerExportRoutes } from "./routes/exports.js";
@@ -166,6 +167,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   SCHEDULE_EMPTY: 409,
   CSRF_INVALID: 403,
   USERNAME_TAKEN: 409,
+  LAST_ADMIN: 409,
   ACTIVITY_ARCHIVED: 409,
   ARCHIVE_RESULT_NOT_RELEASED: 409,
   ARCHIVE_ROUND_NOT_LOCKED: 409,
@@ -341,6 +343,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       await requireStudio(request);
       return;
     }
+    // Account administration is deliberately narrower than "operations": it
+    // admits only account.manage, never the studio/judge read set.
+    if (access === "admin") {
+      const actor = await requestActor(request);
+      requirePermission(actor, "account.manage");
+      return;
+    }
     // Deliberately not "operations": that level also admits judge-only readers,
     // and the round scores projection returns other judges' criteria and notes.
     if (access === "competition") {
@@ -368,7 +377,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (route.url === "/api/realtime") return;
     const access = (route.config as { access?: ReadAccess } | undefined)?.access;
     if (access === undefined) {
-      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, competition, analytics, studio, tasks, attendance, voting, result, archive, schedule, incident).`);
+      throw new Error(`GET ${route.url} must declare config.access (public, session, operations, competition, analytics, studio, tasks, attendance, voting, result, archive, schedule, incident, admin).`);
     }
     const guard = async (request: FastifyRequest): Promise<void> => {
       await requireReadAccess(request, access);
@@ -474,6 +483,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   };
   registerSystemRoutes(routeContext);
   registerAuthRoutes(routeContext);
+  registerAdminRoutes(routeContext);
   registerActivityRoutes(routeContext);
   registerTasksRoutes(routeContext);
   registerAttendanceRoutes(routeContext);

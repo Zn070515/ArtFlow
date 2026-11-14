@@ -1,4 +1,4 @@
-const consolePrefixes = ["/ops", "/studio", "/live", "/join", "/login", "/workspace"] as const;
+const consolePrefixes = ["/ops", "/studio", "/live", "/join", "/login", "/workspace", "/accounts"] as const;
 const judgePrefixes = ["/judge"] as const;
 
 export type ShellSurface = "portal" | "console" | "judge";

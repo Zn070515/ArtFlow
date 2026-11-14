@@ -92,6 +92,7 @@ export type DomainErrorCode =
   | "ARCHIVE_NOT_FOUND"
   | "CSRF_INVALID"
   | "USERNAME_TAKEN"
+  | "LAST_ADMIN"
   | "RATE_LIMITED"
   | "GROUPING_STAGE_EXISTS"
   | "GROUPING_NOT_DRAFT"

@@ -140,6 +140,104 @@ export async function getLocalSessionWithAccount(
   };
 }
 
+export interface StoredLocalAccountSummary {
+  readonly username: string;
+  readonly actorId: string;
+  readonly roles: readonly string[];
+  readonly permissions: readonly string[];
+  readonly active: boolean;
+  readonly createdAt: string;
+}
+
+function summary(row: Selectable<LocalAccountRow>): StoredLocalAccountSummary {
+  return {
+    username: row.username,
+    actorId: row.actor_id,
+    roles: jsonArray(row.roles),
+    permissions: jsonArray(row.permissions),
+    active: row.active,
+    createdAt: iso(row.created_at),
+  };
+}
+
+export async function listLocalAccounts(
+  db: Kysely<Database>,
+): Promise<readonly StoredLocalAccountSummary[]> {
+  const rows = await db
+    .selectFrom("local_account")
+    .selectAll()
+    .orderBy("username")
+    .execute();
+  return rows.map(summary);
+}
+
+export async function getLocalAccountSummary(
+  db: Kysely<Database>,
+  username: string,
+): Promise<StoredLocalAccountSummary | null> {
+  const row = await db
+    .selectFrom("local_account")
+    .selectAll()
+    .where("username", "=", username)
+    .executeTakeFirst();
+  return row === undefined ? null : summary(row);
+}
+
+export interface LocalAccountAccessPatch {
+  readonly roles?: readonly string[];
+  readonly permissions?: readonly string[];
+  readonly active?: boolean;
+  readonly passwordDigest?: string;
+}
+
+export async function updateLocalAccountAccess(
+  db: Kysely<Database>,
+  username: string,
+  patch: LocalAccountAccessPatch,
+): Promise<StoredLocalAccountSummary | null> {
+  const set: {
+    roles?: string;
+    permissions?: string;
+    active?: boolean;
+    password_digest?: string;
+  } = {};
+  if (patch.roles !== undefined) set.roles = JSON.stringify(patch.roles);
+  if (patch.permissions !== undefined) set.permissions = JSON.stringify(patch.permissions);
+  if (patch.active !== undefined) set.active = patch.active;
+  if (patch.passwordDigest !== undefined) set.password_digest = patch.passwordDigest;
+
+  if (Object.keys(set).length === 0) {
+    const row = await db
+      .selectFrom("local_account")
+      .selectAll()
+      .where("username", "=", username)
+      .executeTakeFirst();
+    return row === undefined ? null : summary(row);
+  }
+
+  const row = await db
+    .updateTable("local_account")
+    .set(set)
+    .where("username", "=", username)
+    .returningAll()
+    .executeTakeFirst();
+  return row === undefined ? null : summary(row);
+}
+
+export async function revokeLocalSessionsForActor(
+  db: Kysely<Database>,
+  actorId: string,
+  now: string,
+): Promise<number> {
+  const result = await db
+    .updateTable("local_session")
+    .set({ revoked_at: now })
+    .where("actor_id", "=", actorId)
+    .where("revoked_at", "is", null)
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows);
+}
+
 export async function revokeLocalSession(
   db: Kysely<Database>,
   token: string,

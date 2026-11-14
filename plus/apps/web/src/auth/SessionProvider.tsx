@@ -108,6 +108,12 @@ export function hasOpsAccess(session: SessionResponse | null): boolean {
   );
 }
 
+export function canManageAccounts(session: SessionResponse | null): boolean {
+  if (session === null) return false;
+  const { permissions } = session.actor;
+  return permissions.includes("*") || permissions.includes("account.manage");
+}
+
 export function hasStudioAccess(session: SessionResponse | null): boolean {
   if (session === null) return false;
   const { permissions } = session.actor;

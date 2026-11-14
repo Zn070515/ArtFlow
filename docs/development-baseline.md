@@ -89,14 +89,16 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
 
   The password is read from `ARTFLOW_PLUS_ACCOUNT_PASSWORD` so it does not have
   to appear in the command line. Running the command again updates that
-  username. The default permission set covers Studio, registration review,
-  roster finalization, competition, judge entry, ticketing, voting, results,
-  archive, materials, and attendance. Tasks, schedule, and incident are not in
-  the default set; add `--permissions ...,tasks.manage,schedule.manage,incident.manage`
-  when those capabilities are enabled. Pass `--permissions a,b` to replace the
-  set, or `--roles` to replace the default `admin` role. Production runs the
-  same command against the production database URL with a secret-managed
-  password. Do not reuse the development password.
+  username. The default permission set covers account administration, Studio,
+  registration review, roster finalization, competition, judge entry, ticketing,
+  voting, results, archive, materials, attendance, grouping, tasks, schedule,
+  and incident. Pass `--permissions a,b` to replace the set, or `--roles` to
+  replace the default `admin` role. Once an `account.manage` account exists,
+  organizers manage staff from the Console `/accounts` page: permission changes
+  apply to existing sessions on their next request, while deactivation or a
+  password reset revokes every session. Production runs the same command
+  against the production database URL with a secret-managed password. Do not
+  reuse the development password.
 - **Production proxy boundary**: `ARTFLOW_PLUS_TRUST_PROXY` is an explicit,
   comma-separated list of internal proxy IPs/CIDRs. It defaults to empty, so
   public `X-Forwarded-For` headers cannot change rate-limit identity. The Plus

@@ -16,6 +16,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 vi.mock("../../auth/SessionProvider.js", () => ({
+  canManageAccounts: () => true,
   hasLiveAccess: () => true,
   hasOpsAccess: () => true,
   hasStudioAccess: () => true,

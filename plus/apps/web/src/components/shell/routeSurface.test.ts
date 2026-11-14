@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getShellSurface } from "./routeSurface.js";
 
 describe("getShellSurface", () => {
-  it.each(["/ops", "/ops/activity-1", "/studio", "/live/act-1", "/join", "/login", "/workspace", "/workspace/activity-1"])(
+  it.each(["/ops", "/ops/activity-1", "/studio", "/live/act-1", "/join", "/login", "/workspace", "/workspace/activity-1", "/accounts"])(
     "assigns %s to the Console shell",
     (pathname) => {
       expect(getShellSurface(pathname)).toBe("console");

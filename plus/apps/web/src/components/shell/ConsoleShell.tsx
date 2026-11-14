@@ -1,13 +1,13 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { hasLiveAccess, hasOpsAccess, hasStudioAccess, hasWorkspaceAccess, useSession } from "../../auth/SessionProvider.js";
+import { canManageAccounts, hasLiveAccess, hasOpsAccess, hasStudioAccess, hasWorkspaceAccess, useSession } from "../../auth/SessionProvider.js";
 import { ThemeToggle } from "../../theme/ThemeToggle.js";
 import { useTheme } from "../../theme/ThemeProvider.js";
 
 interface ConsoleNavItem {
   readonly label: string;
-  readonly to: "/ops" | "/studio" | "/live" | "/join" | "/workspace";
+  readonly to: "/ops" | "/studio" | "/live" | "/join" | "/workspace" | "/accounts";
   readonly prefix: string;
   readonly visible: boolean;
 }
@@ -26,6 +26,7 @@ export function ConsoleShell({ children }: { readonly children: ReactNode }) {
     { label: "Ops", to: "/ops", prefix: "/ops", visible: hasOpsAccess(session) },
     { label: "Studio", to: "/studio", prefix: "/studio", visible: hasStudioAccess(session) },
     { label: "Live", to: "/live", prefix: "/live", visible: hasLiveAccess(session) },
+    { label: "账号", to: "/accounts", prefix: "/accounts", visible: canManageAccounts(session) },
     { label: "报名", to: "/join", prefix: "/join", visible: true },
   ];
 

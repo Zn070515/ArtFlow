@@ -14,4 +14,5 @@ export * from "./packs.js";
 export * from "./journeys.js";
 export * from "./tasks.js";
 export * from "./attendance.js";
+export * from "./admin.js";
 export * from "./contracts/index.js";

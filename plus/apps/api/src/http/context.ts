@@ -21,7 +21,8 @@ export type ReadAccess =
   | "result"
   | "archive"
   | "schedule"
-  | "incident";
+  | "incident"
+  | "admin";
 
 /**
  * Everything a route module may use. `app.ts` owns construction, the fail-closed
