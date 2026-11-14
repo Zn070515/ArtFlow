@@ -6,8 +6,21 @@ export interface AccountSummary {
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
   readonly active: boolean;
+  readonly invited: boolean;
   readonly accessRevision: number;
   readonly createdAt: string;
+}
+
+export interface InviteAccountInput {
+  readonly username: string;
+  readonly roles: readonly string[];
+  readonly permissions: readonly string[];
+}
+
+export interface InviteCreated {
+  readonly account: AccountSummary;
+  readonly token: string;
+  readonly expiresAt: string;
 }
 
 export interface CreateAccountInput {
@@ -55,6 +68,21 @@ export async function updateAccount(
     { method: "PUT", body: jsonBody(input) },
   );
   return response.account;
+}
+
+export function inviteAccount(input: InviteAccountInput): Promise<InviteCreated> {
+  return apiFetch<InviteCreated>("/api/admin/accounts/invites", {
+    method: "POST",
+    body: jsonBody(input),
+  });
+}
+
+export async function revokeAccountInvite(username: string): Promise<number> {
+  const response = await apiFetch<{ revoked: number }>(
+    `/api/admin/accounts/${encodeURIComponent(username)}/invite`,
+    { method: "DELETE" },
+  );
+  return response.revoked;
 }
 
 export async function revokeAccountSessions(username: string): Promise<number> {

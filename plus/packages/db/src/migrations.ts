@@ -28,6 +28,7 @@ import { migration as m0024_attendance } from "./migrations/0024_attendance.js";
 import { migration as m0025_schedule } from "./migrations/0025_schedule.js";
 import { migration as m0026_incident } from "./migrations/0026_incident.js";
 import { migration as m0027_account_access_integrity } from "./migrations/0027_account_access_integrity.js";
+import { migration as m0028_account_invites } from "./migrations/0028_account_invites.js";
 
 import type { Database } from "./types.js";
 
@@ -59,6 +60,7 @@ const migrations: Record<string, Migration> = {
   "0025_schedule": m0025_schedule,
   "0026_incident": m0026_incident,
   "0027_account_access_integrity": m0027_account_access_integrity,
+  "0028_account_invites": m0028_account_invites,
 };
 
 class StaticMigrationProvider implements MigrationProvider {

@@ -18,6 +18,8 @@ vi.mock("../api/accounts.js", () => ({
   createAccount: createAccountMock,
   updateAccount: updateAccountMock,
   revokeAccountSessions: revokeSessionsMock,
+  inviteAccount: vi.fn(),
+  revokeAccountInvite: vi.fn(),
 }));
 
 vi.mock("../auth/RequireSession.js", () => ({

@@ -33,6 +33,12 @@ const loginRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/login.js"), "LoginPage"),
 });
 
+const claimRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/claim",
+  component: lazyRouteComponent(() => import("./routes/claim.js"), "ClaimPage"),
+});
+
 const joinRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/join",
@@ -146,6 +152,7 @@ const routeTree = rootRoute.addChildren([
   resultsRoute,
   programRoute,
   loginRoute,
+  claimRoute,
   joinRoute,
   joinActivityRoute,
   opsRoute,

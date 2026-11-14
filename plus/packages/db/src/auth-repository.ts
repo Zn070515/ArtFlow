@@ -1,6 +1,7 @@
 import type { ActorContext, ActorType } from "@artflow-plus/domain";
 import { sql, type Kysely, type Selectable } from "kysely";
 
+import { listOpenInviteUsernames } from "./account-invite-repository.js";
 import type { Database, LocalAccountRow } from "./types.js";
 
 export interface StoredLocalAccount {
@@ -146,17 +147,22 @@ export interface StoredLocalAccountSummary {
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
   readonly active: boolean;
+  readonly invited: boolean;
   readonly accessRevision: number;
   readonly createdAt: string;
 }
 
-function summary(row: Selectable<LocalAccountRow>): StoredLocalAccountSummary {
+function summary(
+  row: Selectable<LocalAccountRow>,
+  invited = false,
+): StoredLocalAccountSummary {
   return {
     username: row.username,
     actorId: row.actor_id,
     roles: jsonArray(row.roles),
     permissions: jsonArray(row.permissions),
     active: row.active,
+    invited,
     accessRevision: row.access_revision,
     createdAt: iso(row.created_at),
   };
@@ -195,8 +201,13 @@ export async function listLocalAccounts(
     .limit(options.limit ?? 200)
     .offset(options.offset ?? 0)
     .execute();
+  const invited = await listOpenInviteUsernames(
+    db,
+    rows.map((row) => row.username),
+    new Date().toISOString(),
+  );
   return {
-    accounts: rows.map(summary),
+    accounts: rows.map((row) => summary(row, invited.has(row.username))),
     total: Number(totalRow?.count ?? 0),
   };
 }

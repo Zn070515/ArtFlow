@@ -3,6 +3,60 @@
   "source": "packages/db/src/migrations",
   "tables": [
     {
+      "name": "account_invite",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "username",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "token_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "claimed_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "issued_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "activity",
       "columns": [
         {

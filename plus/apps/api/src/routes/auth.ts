@@ -4,10 +4,10 @@ function positiveLimit(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
-import { RegisterParticipantBodySchema } from "@artflow-plus/contracts";
+import { ClaimInviteBodySchema, InvitePreviewBodySchema, RegisterParticipantBodySchema } from "@artflow-plus/contracts";
 import { revokeLocalSession } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
-import { authenticateLocalAccount, csrfTokenFor, registerParticipantAccount } from "@artflow-plus/runtime";
+import { authenticateLocalAccount, claimInvite, csrfTokenFor, previewInvite, registerParticipantAccount } from "@artflow-plus/runtime";
 import { LoginBody } from "../http/schemas.js";
 import { bearerToken, cookieValue } from "../http/helpers.js";
 
@@ -71,6 +71,33 @@ export function registerAuthRoutes(ctx: ApiContext): void {
       // enumeration cost more than the shared per-IP budget alone.
       await requireRateLimit(`auth-register-user:${body.username.trim().toLowerCase()}`, 3);
       const result = await registerParticipantAccount(db, body);
+      const csrf = csrfTokenFor(result.token, sessionSecret);
+      setSessionCookies(reply, result.token, csrf);
+      return reply.status(201).send({
+        actor: publicActor(result.actor),
+        csrfToken: csrf,
+        expiresAt: result.expiresAt,
+      });
+    },
+  );
+
+  app.post(
+    "/api/auth/invite-preview",
+    { schema: { body: InvitePreviewBodySchema } },
+    async (request) => {
+      await requirePublicRateLimit(request, "invite-preview", 20);
+      const body = request.body as { token: string };
+      return previewInvite(db, body.token);
+    },
+  );
+
+  app.post(
+    "/api/auth/claim-invite",
+    { schema: { body: ClaimInviteBodySchema } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "invite-claim", 5);
+      const body = request.body as { token: string; password: string };
+      const result = await claimInvite(db, body);
       const csrf = csrfTokenFor(result.token, sessionSecret);
       setSessionCookies(reply, result.token, csrf);
       return reply.status(201).send({
