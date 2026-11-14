@@ -30,6 +30,31 @@
       "eventType": "RosterReopened",
       "consumer": "packages/runtime/src/registration-projection.ts#applyRegistrationEvent",
       "reason": "The registration projection reducer is the declared consumer seam for roster events; it must return a reopened roster to unknown."
+    },
+    {
+      "eventType": "ScheduleEntryChanged",
+      "consumer": "packages/runtime/src/schedule-service.ts#getScheduleState",
+      "reason": "The Ops schedule read model reads the entry and release rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "ScheduleReordered",
+      "consumer": "packages/runtime/src/schedule-service.ts#getScheduleState",
+      "reason": "The Ops schedule read model reads the entry and release rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "ScheduleReleased",
+      "consumer": "packages/runtime/src/schedule-service.ts#getScheduleState",
+      "reason": "The Ops schedule read model reads the entry and release rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "ScheduleRevoked",
+      "consumer": "packages/runtime/src/schedule-service.ts#getScheduleState",
+      "reason": "The Ops schedule read model reads the entry and release rows written by these facts; the static graph cannot see the table-level relationship."
+    },
+    {
+      "eventType": "ScheduleAdvanced",
+      "consumer": "packages/runtime/src/schedule-service.ts#getScheduleState",
+      "reason": "The Ops schedule read model reads the entry and release rows written by these facts; the static graph cannot see the table-level relationship."
     }
   ],
   "commands": [

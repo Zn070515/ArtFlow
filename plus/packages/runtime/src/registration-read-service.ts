@@ -16,6 +16,7 @@ import {
   listActivities,
   listMaterials,
   listRegistrations,
+  selectActiveScheduleRelease,
 } from "@artflow-plus/db";
 import { canActFor, DomainError, hasPermission } from "@artflow-plus/domain";
 import type {
@@ -247,6 +248,19 @@ export async function getPublicProgram(
 ): Promise<PublicProgram | null> {
   const activity = await getActivityByPublicCode(db, publicCode);
   if (activity === null || activity.status === "archived") return null;
+  const schedule = await selectActiveScheduleRelease(db, publicCode);
+  if (schedule !== null) {
+    return {
+      activity: { publicCode: schedule.publicCode, title: schedule.activityTitle },
+      entries: schedule.release.snapshot.entries.map((entry) => ({
+        order: entry.order,
+        participantId: entry.participantId ?? `schedule-${entry.order}`,
+        name: entry.title,
+        song: entry.slotLabel,
+        note: entry.note,
+      })),
+    };
+  }
   const registrations = (await listRegistrations(db, activity.id))
     .filter((registration) => registration.status === "approved");
   return {

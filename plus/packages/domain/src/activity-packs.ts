@@ -5,6 +5,7 @@ import { createPublishingDefinition } from "./capabilities/publishing.js";
 import { createQuestionnaireDefinition } from "./capabilities/questionnaire.js";
 import { createVotingDefinition } from "./capabilities/voting.js";
 import { createTasksDefinition } from "./capabilities/tasks.js";
+import { createScheduleDefinition } from "./capabilities/schedule.js";
 import { deepFreeze } from "./model.js";
 import type { ActivityPack } from "./packs.js";
 
@@ -147,7 +148,7 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
   identity: "stage-show",
   version: "1",
   title: "Stage Show",
-  baselineCapabilities: ["registration", "questionnaire", "materials", "archive"],
+  baselineCapabilities: ["registration", "questionnaire", "materials", "archive", "schedule"],
   questions: [
     {
       id: "audience-voting",
@@ -199,6 +200,11 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       { key: "materials.work", title: "确认作品材料", sourceCapability: "materials", sourceKey: "work", required: true },
       { key: "archive.package", title: "完成归档包", sourceCapability: "archive", sourceKey: "package", required: false },
     ]),
+    schedule: createScheduleDefinition([
+      { key: "opening", label: "开场", durationMinutes: 10, kind: "ceremony" },
+      { key: "programs", label: "节目", durationMinutes: 6, kind: "program" },
+      { key: "closing", label: "谢幕", durationMinutes: 10, kind: "ceremony" },
+    ], "stage-v1"),
   },
 });
 
