@@ -1,6 +1,6 @@
 # ArtFlow Document Export sidecar
 
-A renderer-only .NET 11 service behind the Node API. It turns an authorized
+A renderer-only .NET 10 service behind the Node API. It turns an authorized
 `TableExport` into DOCX or XLSX. It has no database credentials, no file
 storage, and no public port.
 
