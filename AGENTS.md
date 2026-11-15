@@ -18,7 +18,7 @@ v2 is a pnpm 12 workspace with Node 24, Fastify 5, Kysely/PostgreSQL 18, and Rea
 - `plus/packages/contracts/`: shared TypeBox schemas.
 - `plus/packages/realtime/`: the protected WebSocket core (`/protocol`, `/server`, `/client`); read `CORE.md` before touching it. Feature code registers `RealtimeTopic` definitions and must not open sockets directly (`GATE-REALTIME-CORE-01`).
 - `plus/tools/contracts/`: development/CI-only Consumer Graph, contract schemas and adapters, journey specs, audit and mutation tooling. It must not enter the runtime image dependency closure.
-- `plus/services/document-export/`: renderer-only .NET 11 sidecar for controlled DOCX/XLSX exports. It receives authorized JSON rows from the API, never reads PostgreSQL, and has no published port.
+- `plus/services/document-export/`: renderer-only .NET 10 sidecar for controlled DOCX/XLSX exports. It receives authorized JSON rows from the API, never reads PostgreSQL, and has no published port.
 
 Commands (from the repository root):
 

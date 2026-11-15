@@ -57,7 +57,7 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   The contract suite includes the fast-check lifecycle model and the data-driven
   journey specs under `plus/tools/contracts/journeys/`.
 
-- **Document export sidecar** (optional, DOCX/XLSX only): `.NET 11` renders the
+- **Document export sidecar** (optional, DOCX/XLSX only): `.NET 10` renders the
   four controlled exports from authorized JSON rows. It has no database
   credentials and no public port.
 
