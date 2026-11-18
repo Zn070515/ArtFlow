@@ -96,7 +96,8 @@ Ops/Studio/Admin 活动列表与归档包读取保持不变；工作人员仍可
 `selectActiveScheduleRelease` 在它之上做 revoked 检查；`getPublicProgram` 用前者区分两种情况。
 
 **归档可见性修正（现有缺陷）**：`selectPublicResults` 当前不检查活动状态，归档活动的 active release
-仍会通过 `/api/public/results` 暴露。新设计给三个公开读统一加 `active|closed` 过滤。
+仍会通过 `/api/public/results` 暴露。新设计给 `selectPublicResults`、`getPublicProgram`、
+`getPublicSchedule` 三个公开读模型统一加 `active|closed` 过滤；聚合读 `/e` 同样 404。
 
 ### 3.4 日程条目增加 `starts_at`
 
@@ -105,7 +106,7 @@ Ops/Studio/Admin 活动列表与归档包读取保持不变；工作人员仍可
 
 - snapshot 的 `version` / `schemaVersion` 保持 1；
 - 读取旧快照时把缺失的 `startsAt` 规范化为 `null`，不重写历史快照；
-- 写入时校验 ISO 时间可解析；`endsAt`/`startsAt` 的跨条目先后不作为硬约束；
+- 写入时校验 ISO 时间可解析；条目之间的 `startsAt` 先后不作为硬约束；
 - 条目之间是否时间重叠不作为硬约束。
 
 时间表示沿用仓库现有约定：后端存 `timestamptz`，API 返回 ISO，前端按浏览器本地时区格式化
@@ -241,13 +242,16 @@ interface PublicEventSite {
 }
 ```
 
-- `activity.registrationEnabled` 表示报名/问卷/材料能力是否配置齐全；`registrationOpen` 在此基础上再叠加
-  活动状态、报名生命周期与名单是否已定稿；
+- `activity.registrationEnabled` 的精确定义：`enabledCapabilities` 同时包含
+  `registration`、`questionnaire`、`materials`；`registrationOpen` 在此基础上再叠加
+  活动 `active`、release 存在、报名生命周期为 `open`、名单未定稿，以及 questionnaire/materials
+  的 release artifact 有效；
 - `schedule` 与 `program` 同时存在时，页面只渲染节目单区（以 schedule 为准）；
   `program` 是有效的公开节目单：有 active release 时来自快照；从未发布时来自已审核报名；
   最新 release 已撤销时为 `null`；
 - `results` 只包含 `active` 且来源已确认、未 stale 的 release，且活动必须是 `active|closed`；
   没有发布结果时为 `null`；页面展示“最新”阶段时按 `releasedAt` 降序、同刻按 `stageKey` 升序；
+  `stageKey` 是发布定义的分组键（非数据库 ID），保留用于分组；不暴露 `releaseId` 与 `participantId`；
 - 聚合读是投影，不是权威：所有字段来自现有公开读与公开资料，页面不得据此反推或改写业务事实；
 - 限流 `public-event:<publicCode>` 120/min；`cache-control: no-store`。
 
@@ -283,9 +287,10 @@ Hero：状态徽章 · 标题 · 标语 · 时间/地点/主办方 · [立即报
 
 规则：
 
-- 空内容不渲染空壳；全空时显示“活动内容正在准备中”与报名入口；
-- CTA 优先级：活动 `closed` → “活动已结束”，主 CTA 改为查看赛果；`registrationOpen` → “立即报名”；
-  启用报名但未开放 → “报名已截止”；未启用报名 → “本活动无需报名”，不显示报名按钮；
+- 空内容不渲染空壳；全空时显示“活动内容正在准备中”与报名入口（若启用报名）；
+- CTA 优先级：活动 `closed` → “活动已结束”，主 CTA 改为查看赛果（无赛果时不显示该 CTA）；
+  `registrationOpen` → “立即报名”；启用报名但未开放 → “报名已截止”；
+  未启用报名 → “本活动无需报名”，不显示报名按钮；
 - 时间用与 `ResultsView.formatReleasedAt` 同一套 `Intl.DateTimeFormat("zh-CN", { dateStyle, timeStyle })`
   浏览器本地时区显示；节目单条目按 `startsAt` 升序，无时间的条目按 `position` 排在最后；
   多天时按本地日期分组；只有 program（无 schedule）时不显示时间列；
@@ -305,6 +310,7 @@ Console 壳，权限 `studio.manage`：
 
 - 左列表单：标语、介绍、地点、起止时间、主办方、联系方式、公告；
 - 右列 sticky：预览卡（复用 `EventHero`/`EventAbout`）、保存、查看公开页；
+  草稿活动提示“活动激活后公开页才可见”；
 - 保存带 `expectedRevision`；成功后用响应 `revision` 更新本地状态；`STALE_REVISION` 提示刷新，不覆盖；
 - `archived` 活动只读；
 - Studio 活动页头部与 Workspace 活动卡增加“公开主页”入口。
@@ -330,6 +336,7 @@ Console 壳，权限 `studio.manage`：
 
 - 最新节目单已撤销或从未发布时，不再显示笼统的“加载失败”，而是“节目单未发布或已撤回”；
 - 活动归档时返回未找到；
+- 有 `startsAt` 时显示开始时间（浏览器本地时区，格式化规则同活动站）；
 - 增加“返回活动主页”链接。
 
 ## 8. 错误与可见性
@@ -365,7 +372,8 @@ Console 壳，权限 `studio.manage`：
 - 新增命令 `activity.public_profile.update`（engine 前缀）；
 - 新增事件 `ActivityPublicProfileUpdated`（`Activity` 前缀）；
 - 新增表 `activity_public_profile`；
-- 扩展 `PublicActivity`（`registrationEnabled`）、`StudioState`（`publicProfile`）、
+- 扩展 runtime `PublicActivity` 与 web `api/registrations.ts` 的 `PublicActivity`
+  （`registrationEnabled`）、`StudioState`（`publicProfile`）、
   `ScheduleView`、`ScheduleSnapshotEntry`、`PublicProgramEntry`；
 - 归档包新增 `public-profile.json` artifact；
 - 新增 Web 路由 `/e/$publicCode`、`/studio/$activityId/public`；
@@ -387,6 +395,7 @@ Console 壳，权限 `studio.manage`：
 `plus/packages/runtime/test/public-profile-service.test.ts`、
 `plus/packages/runtime/test/public-event-service.test.ts`；扩展
 `plus/packages/runtime/test/schedule-service.test.ts`、
+`plus/packages/runtime/test/archive-package.test.ts`（精确 artifact 列表断言）、
 `plus/packages/runtime/test/archive-service.test.ts`、
 `plus/packages/runtime/test/golden-archive-identity.test.ts`。
 
@@ -399,7 +408,7 @@ Console 壳，权限 `studio.manage`：
 | 重复命令 | 同一 `commandId` 重放 | 只写一次，返回 replay 标记，版本不二次递增 |
 | 最新节目单撤销 | 发布 v1、发布 v2、撤销 v2 | `getPublicSchedule` 与 `getPublicProgram` 都为 `null`，不回退 v1 或 approved registrations |
 | 从未发布节目单 | 只有 approved registrations | `getPublicProgram` 回退 approved；`getPublicSchedule` 为 `null` |
-| 归档公开下线 | 归档带 active result release 的活动 | 三个公开读都返回 `null`/404；内部 `getPublishingState`/`getScheduleState` 仍返回数据；unarchive 后恢复 |
+| 归档公开下线 | 归档带 active result release 的活动 | `/e`、`/results`、`/program`、`/schedule` 四个公开面都返回 `null`/404；内部 `getPublishingState`/`getScheduleState` 仍返回数据；unarchive 后恢复 |
 | 公开读依赖缺失 | 无 profile / 无结果 | 聚合读返回默认 profile、`null` 区段，不抛 500 |
 | 旧快照无 `startsAt` | 插入 v1 快照 | 读取规范化为 `null`，不重写快照 |
 | mode 隔离 | 创建 rehearsal schedule release 与 formal release | 公开读只返回 formal；rehearsal 永不出现 |
@@ -412,6 +421,7 @@ Console 壳，权限 `studio.manage`：
 - `schedule-service.test.ts` 覆盖条目与发布，但不覆盖 `startsAt`、旧快照兼容、公开节目时间、
   最新 release 撤销后的 `getPublicProgram`；
 - `activity-service.test.ts` 覆盖 rename/close/archive，不覆盖公开资料命令与 duplicate 不复制；
+- `archive-package.test.ts` 的精确 artifact 列表会因新增 `public-profile.json` 失败；
 - `archive-service.test.ts` / `golden-archive-identity.test.ts` 不覆盖公开资料 artifact；
 - Studio E2E 覆盖定义/发布，不覆盖公开资料编辑；
 - 现有 API 测试没有 `/api/public/events`。
@@ -423,7 +433,7 @@ Console 壳，权限 `studio.manage`：
   与行内编辑，不复制现有 E2E 模板；
 - 公开页新增一个 `public-event.spec.ts` E2E，因为它是一条独立用户旅程，不能塞进赛果用例；
 - 命令测试独立成 `public-profile-service.test.ts`，因为它是新的 engine 命令面，但只覆盖一条命令；
-- 归档测试扩展现有 archive/golden 用例，不新建归档套件；
+- 归档测试扩展现有 `archive-package.test.ts`、archive/golden 用例，不新建归档套件；
 - 不引入通用“页面配置”框架、不做 per-field 抽象、不新增第二个 UI 设计系统。
 
 ### 9.8 聚焦门禁
@@ -470,6 +480,8 @@ pwsh -NoProfile -File scripts/check_docs.ps1
 ```
 
 - 无 profile 行时写入 `null`；
+- `ArchivePackageInput.publicProfile` 设为可选；缺失时按 `null` 处理，避免破坏直接调用
+  `buildArchivePackage` 的现有测试；
 - `README.txt` 的“包含”行增加“活动公开资料快照（如有）”；
 - 不改变 `ArchiveManifest.counts`；artifact 列表增加一项；
 - 归档包的公开资料是冻结快照，归档后编辑公开资料不会改写已封包内容。
@@ -481,7 +493,8 @@ pwsh -NoProfile -File scripts/check_docs.ps1
 - `ScheduleSnapshot.entries[*].startsAt` 为附加字段，旧快照读取时补 `null`；
 - 旧活动没有 profile 行时返回默认空资料，公开页仍按标题/节目/赛果渲染；
 - 公开聚合读不替代现有 `/api/public/activities|programs|schedule|results`，旧链接继续可用；
-- 归档包新增 artifact 是加法变更，`schemaVersion` 保持 1；golden archive identity 用例同步更新。
+- 归档包新增 artifact 是加法变更，`schemaVersion` 保持 1；`archive-package.test.ts` 的精确 artifact
+  列表与 golden archive identity 用例同步更新。
 
 ## 12. 实施顺序
 
