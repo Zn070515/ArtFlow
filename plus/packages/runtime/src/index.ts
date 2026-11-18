@@ -12,6 +12,7 @@ export * from "./auth-service.js";
 export * from "./totp.js";
 export * from "./mail-service.js";
 export * from "./email-notification-service.js";
+export * from "./wechat-article-service.js";
 export * from "./oidc-service.js";
 export * from "./s3-storage.js";
 export * from "./account-admin-service.js";

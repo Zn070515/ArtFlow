@@ -37,8 +37,9 @@ export function ExportCard({
       enabled: can("result.manage") || can("voting.manage"),
     },
   ].filter((link) => link.enabled);
+  const canWechat = can("result.manage") || can("publishing.manage") || can("studio.manage") || can("archive.manage");
 
-  if (links.length === 0) return null;
+  if (links.length === 0 && !canWechat) return null;
   return (
     <Card data-testid="ops-export-card">
       <h2 className="ui-card__title">受控导出</h2>
@@ -61,6 +62,20 @@ export function ExportCard({
           </li>
         ))}
       </ul>
+      {canWechat ? (
+        <p className="ui-card__description">
+          <a
+            className="table-link"
+            data-testid="export-wechat-article"
+            href={`/api/activities/${encodeURIComponent(activityId)}/exports/wechat-article`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            微信推文 HTML
+          </a>{" "}
+          使用正式赛果与节目单生成，可直接粘贴到公众号编辑器。
+        </p>
+      ) : null}
     </Card>
   );
 }

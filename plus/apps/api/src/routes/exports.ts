@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 
 import { DomainError } from "@artflow-plus/domain";
 import {
+  buildWechatArticle,
   exportActivityTable,
   recordExportAudit,
   serializeCsv,
@@ -43,6 +44,25 @@ export function registerExportRoutes(ctx: ApiContext): void {
         ? (["csv"] as const)
         : (["csv", "docx", "xlsx"] as const),
     }),
+  );
+
+  app.get(
+    "/api/activities/:id/exports/wechat-article",
+    { schema: { params: Type.Object({ id: Type.String({ minLength: 1 }) }, { additionalProperties: false }) }, config: { access: "session" } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const article = await buildWechatArticle(
+        db,
+        await requestDeps(request),
+        id,
+        process.env.ARTFLOW_PLUS_APP_BASE_URL ?? "http://127.0.0.1:4173",
+      );
+      reply
+        .type("text/html; charset=utf-8")
+        .header("content-disposition", `inline; filename="${article.filename}"`)
+        .header("cache-control", "no-store");
+      return reply.send(article.html);
+    },
   );
 
   app.get(

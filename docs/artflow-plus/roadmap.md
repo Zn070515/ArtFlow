@@ -560,3 +560,11 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - 仅使用账号已登记邮箱；无 SMTP 或 `ARTFLOW_PLUS_EMAIL_NOTIFICATIONS=1` 未设置
   时不发信。
 - 决策见 [ADR-0045](../architecture/adr/0045-outbox-email-notifications.md)。
+
+
+## 2026-11-18 — 微信推文 HTML（已完成）
+
+- 新增受权导出 `GET /api/activities/:id/exports/wechat-article`：用正式赛果快照与
+  公开节目单/报名节目生成内联样式 HTML，可直接粘贴到公众号编辑器。
+- 只读取公开面数据；无结果且无节目单时返回 `WECHAT_ARTICLE_EMPTY`；生成写审计。
+- Ops 受控导出卡片增加「微信推文 HTML」入口。

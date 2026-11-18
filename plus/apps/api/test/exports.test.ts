@@ -85,7 +85,7 @@ describe.skipIf(!connectionString)("controlled document exports", () => {
         actorId: "export-organizer",
         actorType: "user",
         roles: ["staff"],
-        permissions: ["registration.review"],
+        permissions: ["registration.review", "studio.manage"],
       },
       active: true,
     });
@@ -164,6 +164,25 @@ describe.skipIf(!connectionString)("controlled document exports", () => {
     } finally {
       await scoped.close();
     }
+  });
+
+  it("gates the WeChat article and renders the public program", async () => {
+    const forbidden = await app.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/exports/wechat-article`,
+      headers: headers(outsiderToken),
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const article = await app.inject({
+      method: "GET",
+      url: `/api/activities/${activityId}/exports/wechat-article`,
+      headers: headers(organizerToken),
+    });
+    expect(article.statusCode).toBe(200);
+    expect(article.headers["content-type"]).toContain("text/html");
+    expect(article.body).toContain("Export Activity");
+    expect(article.body).toContain("Alice");
   });
 
   it("keeps the CSV export and writes one audit entry", async () => {
