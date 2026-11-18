@@ -205,7 +205,9 @@
 @media (max-width: 767px) {
   .event-button,
   .event-now__refresh,
-  .event-announcement__close {
+  .event-announcement__close,
+  .event-feedback .ui-select,
+  .event-feedback .ui-textarea {
     min-height: 44px;
   }
 
@@ -382,6 +384,29 @@
     align-items: center;
     min-height: 44px;
   }
+}
+
+.event-section__copy {
+  margin: 0 0 16px;
+  color: var(--bone-subtle);
+}
+
+.event-feedback {
+  display: grid;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.event-feedback__honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.event-feedback__done {
+  color: var(--gold);
 }
 
 .event-program {

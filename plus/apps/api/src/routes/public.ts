@@ -3,10 +3,19 @@ import { sessionCookie } from "../cookies.js";
 import { JudgeEntryBodySchema, PublicResultsParamsSchema, PublicResultsQuerySchema, TicketCredentialBodySchema } from "@artflow-plus/contracts";
 import { selectPublicResults } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
-import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicCurrentProgram, getPublicEventList, getPublicEventSite, getPublicProgram, getPublicSchedule, getPublicTicketLookup, getPublicVoteEntry, getSupplementContext, readPublicVoteSession, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
+import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicCurrentProgram, getPublicEventList, getPublicEventSite, getPublicProgram, getPublicSchedule, getPublicTicketLookup, getPublicVoteEntry, getSupplementContext, readPublicVoteSession, submitActivityFeedback, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
 import { Type } from "@sinclair/typebox";
 import { ActivityParams, PublicActivityParams, PublicVoteParams } from "../http/schemas.js";
 import { cookieValue, requireIdempotency, sessionTokenValue, setSessionCookie } from "../http/helpers.js";
+
+const FeedbackBodySchema = Type.Object(
+  {
+    rating: Type.Integer({ minimum: 1, maximum: 5 }),
+    comment: Type.String({ maxLength: 1000 }),
+    website: Type.Optional(Type.String({ maxLength: 200 })),
+  },
+  { additionalProperties: false },
+);
 
 export function registerPublicRoutes(ctx: ApiContext): void {
   const {
@@ -55,6 +64,26 @@ export function registerPublicRoutes(ctx: ApiContext): void {
         return reply.status(404).send({ code: "NOT_FOUND", message: "The public event was not found." });
       }
       return site;
+    },
+  );
+
+  app.post(
+    "/api/public/activities/:publicCode/feedback",
+    { schema: { params: PublicActivityParams, body: FeedbackBodySchema }, config: { access: "public" } },
+    async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
+      const { publicCode } = request.params as { publicCode: string };
+      await requirePublicRateLimit(request, `feedback:${publicCode}`, 10);
+      const body = request.body as { rating: number; comment: string; website?: string };
+      if (body.website !== undefined && body.website.trim() !== "") {
+        return reply.status(201).send({ status: "submitted" });
+      }
+      const outcome = await submitActivityFeedback(db, publicDeps(), {
+        commandId: requireIdempotency(request),
+        publicCode,
+        rating: body.rating,
+        comment: body.comment,
+      });
+      return reply.status(outcome.status).send(outcome.body);
     },
   );
 

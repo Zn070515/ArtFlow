@@ -47,6 +47,10 @@ test("key surfaces have no serious or critical accessibility violations", async 
   await expect(page.locator(".event-now")).toBeVisible();
   await assertNoBlockingViolations(page, "/e/E2E-ONSITE");
 
+  await page.goto("/e/E2E-ONSITE-CLOSED");
+  await expect(page.getByRole("heading", { name: "活动反馈" })).toBeVisible();
+  await assertNoBlockingViolations(page, "/e/E2E-ONSITE-CLOSED");
+
   await page.goto("/events");
   await expect(page.locator(".events-page")).toBeVisible();
   await assertNoBlockingViolations(page, "/events");

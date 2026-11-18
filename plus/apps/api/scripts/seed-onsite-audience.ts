@@ -44,6 +44,7 @@ async function clearActivity(activityId: string): Promise<void> {
   await db.deleteFrom("ballot").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("vote_option").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("vote_session").where("activity_id", "=", activityId).execute();
+  await db.deleteFrom("activity_feedback").where("activity_id", "=", activityId).execute();
   await db.deleteFrom("registration").where("activity_id", "=", activityId).execute();
 }
 

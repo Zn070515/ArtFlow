@@ -17,6 +17,7 @@ import {
 import { EventHero } from "../components/portal/EventHero.js";
 import { EventProgram } from "../components/portal/EventProgram.js";
 import { EventResults } from "../components/portal/EventResults.js";
+import { FeedbackForm } from "../components/portal/FeedbackForm.js";
 import { NowNextCard } from "../components/portal/NowNextCard.js";
 import { OnsiteActions } from "../components/portal/OnsiteActionPanel.js";
 import { deriveOnsiteActions, matchCurrentProgramOrder } from "../components/portal/onsiteActions.js";
@@ -216,6 +217,7 @@ export function PublicEventPage() {
         {hasResults ? <a href="#results">赛果</a> : null}
         {faq.length > 0 ? <a href="#faq">常见问题</a> : null}
         {links.length > 0 ? <a href="#links">链接</a> : null}
+        {site.activity.status === "closed" ? <a href="#feedback">反馈</a> : null}
       </nav>
       <OnsiteActions
         primary={actions.primary}
@@ -231,6 +233,13 @@ export function PublicEventPage() {
       <EventResults site={site} />
       <EventFaq items={faq} />
       <EventLinks items={links} />
+      {site.activity.status === "closed" ? (
+        <section className="event-section" id="feedback" aria-labelledby="event-feedback-title">
+          <h2 className="event-section__title" id="event-feedback-title">活动反馈</h2>
+          <p className="event-section__copy">活动已结束，欢迎留下你的评分与建议。</p>
+          <FeedbackForm publicCode={site.activity.publicCode} />
+        </section>
+      ) : null}
       <footer className="event-footer">
         <span>{site.profile.organizer || "主办方"}</span>
         {site.profile.contact === "" ? null : <span>{site.profile.contact}</span>}
