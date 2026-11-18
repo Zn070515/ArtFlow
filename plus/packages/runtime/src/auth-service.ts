@@ -239,13 +239,6 @@ export async function disableMfa(
   await setLocalAccountMfa(db, account.username, null, false);
 }
 
-export async function resetAccountMfa(
-  db: Kysely<Database>,
-  username: string,
-): Promise<void> {
-  await setLocalAccountMfa(db, username, null, false);
-}
-
 export async function resolveActorFromBearer(
   db: Kysely<Database>,
   token: string | undefined,

@@ -180,7 +180,6 @@ export async function updateAccount(
       }
       throw new DomainError("STALE_REVISION", "The account changed since it was read.");
     }
-    const updated = result.account;
     if (email !== undefined) {
       try {
         await trx
@@ -198,6 +197,9 @@ export async function updateAccount(
     if (input.resetMfa === true) {
       await setLocalAccountMfa(trx, trimmed, null, false);
     }
+    // The access update above ran before the email and MFA writes; re-read so the
+    // returned summary and the audit "after" reflect what is actually stored.
+    const updated = (await getLocalAccountSummary(trx, trimmed)) ?? result.account;
 
     // Deactivation and password resets invalidate every device immediately.
     // Permission edits do not need this: authorization reads the account.
