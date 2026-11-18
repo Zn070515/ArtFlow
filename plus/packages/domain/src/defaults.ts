@@ -8,6 +8,7 @@ import { publishingCapability } from "./capabilities/publishing.js";
 import { archiveCapability } from "./capabilities/archive.js";
 import { groupingCapability } from "./capabilities/grouping.js";
 import { tasksCapability } from "./capabilities/tasks.js";
+import { resourcesCapability } from "./capabilities/resources.js";
 import { attendanceCapability } from "./capabilities/attendance.js";
 import { scheduleCapability } from "./capabilities/schedule.js";
 import { incidentCapability } from "./capabilities/incident.js";
@@ -31,6 +32,7 @@ export function createDefaultCapabilityRegistry(): CapabilityRegistry {
     archiveCapability,
     groupingCapability,
     tasksCapability,
+    resourcesCapability,
     attendanceCapability,
     scheduleCapability,
     incidentCapability,

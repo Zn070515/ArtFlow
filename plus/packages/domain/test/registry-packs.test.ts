@@ -295,6 +295,7 @@ it("the default registry exposes only implemented capabilities", () => {
     "publishing",
     "questionnaire",
     "registration",
+    "resources",
     "schedule",
     "tasks",
     "ticketing",

@@ -1,6 +1,7 @@
 import { createCompetitionDefinition } from "./capabilities/competition.js";
 import { createGroupingDefinition } from "./capabilities/grouping.js";
 import { createMaterialsDefinition, MAX_MATERIAL_UPLOAD_BYTES } from "./capabilities/materials.js";
+import { createResourcesDefinition } from "./capabilities/resources.js";
 import { createPublishingDefinition } from "./capabilities/publishing.js";
 import { createQuestionnaireDefinition } from "./capabilities/questionnaire.js";
 import { createVotingDefinition } from "./capabilities/voting.js";
@@ -154,7 +155,7 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
   identity: "stage-show",
   version: "1",
   title: "Stage Show",
-  baselineCapabilities: ["registration", "questionnaire", "materials", "archive", "schedule"],
+  baselineCapabilities: ["registration", "questionnaire", "materials", "archive", "schedule", "resources"],
   questions: [
     {
       id: "incident",
@@ -217,6 +218,11 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
       { key: "programs", label: "节目", durationMinutes: 6, kind: "program" },
       { key: "closing", label: "谢幕", durationMinutes: 10, kind: "ceremony" },
     ], "stage-v1"),
+    resources: createResourcesDefinition([
+      { key: "main-hall", name: "主礼堂", kind: "venue", capacity: 800, notes: "" },
+      { key: "projector", name: "投影与音响", kind: "equipment", notes: "" },
+      { key: "stage-crew", name: "舞台组", kind: "staff", capacity: 12, notes: "" },
+    ]),
   },
 });
 
