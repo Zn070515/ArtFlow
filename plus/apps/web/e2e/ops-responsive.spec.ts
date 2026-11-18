@@ -9,7 +9,7 @@ test("Ops list keeps a table at 1440 and card rows without horizontal scroll at 
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/ops");
-  await expect(page.getByRole("heading", { name: "活动" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运营风险" })).toBeVisible();
   await expect(page.getByRole("table", { name: "活动列表" })).toBeVisible();
   const desktopHeadDisplay = await page.locator(".ui-table thead").evaluate((element) => getComputedStyle(element).display);
   expect(desktopHeadDisplay).not.toBe("none");

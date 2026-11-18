@@ -21,6 +21,7 @@
   display: inline-flex;
   gap: 6px;
   align-items: center;
+  min-height: 44px;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
