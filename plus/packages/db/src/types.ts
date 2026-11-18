@@ -364,6 +364,11 @@ export interface LocalAccountRow {
   active: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: ColumnType<Date, Date | string | undefined, never>;
   access_revision: ColumnType<number, number | undefined, number>;
+  email: string | null;
+  mfa_secret: string | null;
+  mfa_enabled: ColumnType<boolean, boolean | undefined, boolean>;
+  oidc_issuer: string | null;
+  oidc_subject: string | null;
 }
 
 export interface LocalSessionRow {
@@ -463,6 +468,14 @@ export interface ParticipantNotificationReadRow {
   actor_id: string;
   notification_key: string;
   read_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+export interface PasswordResetTokenRow {
+  token_digest: string;
+  actor_id: string;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  used_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
 }
 
 export interface PerformanceRow {
@@ -824,6 +837,7 @@ export interface Database {
   panel_member: PanelMemberRow;
   panel_snapshot: PanelSnapshotRow;
   participant_notification_read: ParticipantNotificationReadRow;
+  password_reset_token: PasswordResetTokenRow;
   performance: PerformanceRow;
   performance_score_state: PerformanceScoreStateRow;
   podium_candidate: PodiumCandidateRow;

@@ -150,6 +150,7 @@ export const LoginBody = Type.Object(
   {
     username: Type.String({ minLength: 1, maxLength: 100 }),
     password: Type.String({ minLength: 1, maxLength: 200 }),
+    mfaCode: Type.Optional(Type.String({ minLength: 6, maxLength: 6 })),
   },
   { additionalProperties: false },
 );

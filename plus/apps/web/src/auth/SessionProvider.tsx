@@ -6,14 +6,17 @@ import {
   login as loginRequest,
   logout as logoutRequest,
   registerParticipant,
+  verifyMfa,
+  type LoginResult,
   type SessionResponse,
 } from "../api/auth.js";
 
 interface SessionContextValue {
   readonly session: SessionResponse | null;
   readonly isLoading: boolean;
-  readonly login: (username: string, password: string) => Promise<SessionResponse>;
-  readonly register: (username: string, password: string) => Promise<SessionResponse>;
+  readonly login: (username: string, password: string) => Promise<LoginResult>;
+  readonly verifyMfa: (challenge: string, code: string) => Promise<SessionResponse>;
+  readonly register: (username: string, password: string, email?: string) => Promise<SessionResponse>;
   readonly logout: () => Promise<void>;
 }
 
@@ -35,8 +38,20 @@ export function SessionProvider({ children }: { readonly children: ReactNode }) 
   }, [queryClient]);
 
   const login = useCallback(
-    async (username: string, password: string): Promise<SessionResponse> => {
-      const session = await loginRequest(username, password);
+    async (username: string, password: string): Promise<LoginResult> => {
+      const result = await loginRequest(username, password);
+      if ("mfaRequired" in result) return result;
+      await queryClient.cancelQueries({ queryKey: ["me"] });
+      queryClient.setQueryData(["me"], result);
+      clearOtherQueries();
+      return result;
+    },
+    [queryClient, clearOtherQueries],
+  );
+
+  const verifyMfaCode = useCallback(
+    async (challenge: string, code: string): Promise<SessionResponse> => {
+      const session = await verifyMfa(challenge, code);
       await queryClient.cancelQueries({ queryKey: ["me"] });
       queryClient.setQueryData(["me"], session);
       clearOtherQueries();
@@ -46,8 +61,8 @@ export function SessionProvider({ children }: { readonly children: ReactNode }) 
   );
 
   const register = useCallback(
-    async (username: string, password: string): Promise<SessionResponse> => {
-      const session = await registerParticipant(username, password);
+    async (username: string, password: string, email?: string): Promise<SessionResponse> => {
+      const session = await registerParticipant(username, password, email);
       await queryClient.cancelQueries({ queryKey: ["me"] });
       queryClient.setQueryData(["me"], session);
       clearOtherQueries();
@@ -71,10 +86,11 @@ export function SessionProvider({ children }: { readonly children: ReactNode }) 
       session: query.data ?? null,
       isLoading: query.isPending,
       login,
+      verifyMfa: verifyMfaCode,
       register,
       logout,
     }),
-    [query.data, query.isPending, login, register, logout],
+    [query.data, query.isPending, login, verifyMfaCode, register, logout],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

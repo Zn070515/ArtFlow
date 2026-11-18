@@ -24,6 +24,21 @@ vi.mock("../api/me.js", () => ({
 vi.mock("../auth/RequireSession.js", () => ({
   RequireSession: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
 }));
+vi.mock("../auth/SessionProvider.js", () => ({
+  useSession: () => ({
+    session: {
+      actor: { actorId: "participant-1", actorType: "user", roles: ["participant"], permissions: [] },
+      csrfToken: "csrf",
+      expiresAt: "2026-11-19T00:00:00.000Z",
+      mfaEnabled: false,
+    },
+    isLoading: false,
+    login: vi.fn(),
+    verifyMfa: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
 
 import { MePage } from "./me.js";
 

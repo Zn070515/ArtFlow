@@ -7,6 +7,7 @@ import {
   insertLocalAccount,
   listLocalAccounts,
   revokeLocalSessionsForActor,
+  setLocalAccountMfa,
   updateLocalAccountAccess,
 } from "@artflow-plus/db";
 import type {
@@ -19,7 +20,7 @@ import { DomainError, requirePermission } from "@artflow-plus/domain";
 import type { ActorContext } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
-import { hashPasswordAsync } from "./auth-service.js";
+import { hashPasswordAsync, normalizeEmail } from "./auth-service.js";
 
 /** Only this permission may read or mutate the account registry. */
 export const ACCOUNT_MANAGE_PERMISSION = "account.manage";
@@ -29,6 +30,7 @@ export interface CreateAccountInput {
   readonly password: string;
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
+  readonly email?: string;
 }
 
 export interface UpdateAccountInput {
@@ -36,6 +38,8 @@ export interface UpdateAccountInput {
   readonly permissions?: readonly string[];
   readonly active?: boolean;
   readonly password?: string;
+  readonly email?: string;
+  readonly resetMfa?: boolean;
   readonly expectedRevision: number;
 }
 
@@ -96,6 +100,7 @@ export async function createAccount(
   // Hash before the transaction: scrypt is CPU work and must not hold a
   // database connection or row locks.
   const passwordDigest = await hashPasswordAsync(input.password);
+  const email = input.email === undefined ? undefined : normalizeEmail(input.email) ?? undefined;
 
   try {
     return await db.transaction().execute(async (trx) => {
@@ -104,10 +109,11 @@ export async function createAccount(
         passwordDigest,
         actor: { actorId, actorType: "user", roles, permissions },
         active: true,
+        ...(email === undefined ? {} : { email }),
       });
       const created = await getLocalAccountSummary(trx, username);
       if (created === null) throw new Error("The account insert did not produce a row.");
-      await writeAccountAudit(trx, actor, "account.create", { username, roles, permissions });
+      await writeAccountAudit(trx, actor, "account.create", { username, roles, permissions, ...(email === undefined ? {} : { email }) });
       return created;
     });
   } catch (error) {
@@ -132,6 +138,7 @@ export async function updateAccount(
   const passwordDigest = input.password === undefined
     ? undefined
     : await hashPasswordAsync(input.password);
+  const email = input.email === undefined ? undefined : normalizeEmail(input.email) ?? undefined;
 
   return db.transaction().execute(async (trx) => {
     const current = await getLocalAccountSummary(trx, trimmed);
@@ -174,6 +181,23 @@ export async function updateAccount(
       throw new DomainError("STALE_REVISION", "The account changed since it was read.");
     }
     const updated = result.account;
+    if (email !== undefined) {
+      try {
+        await trx
+          .updateTable("local_account")
+          .set({ email })
+          .where("username", "=", trimmed)
+          .execute();
+      } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "23505") {
+          throw new DomainError("EMAIL_TAKEN", "This email is already registered.");
+        }
+        throw error;
+      }
+    }
+    if (input.resetMfa === true) {
+      await setLocalAccountMfa(trx, trimmed, null, false);
+    }
 
     // Deactivation and password resets invalidate every device immediately.
     // Permission edits do not need this: authorization reads the account.
@@ -197,6 +221,8 @@ export async function updateAccount(
         accessRevision: updated.accessRevision,
       },
       passwordChanged: passwordDigest !== undefined,
+      ...(email === undefined ? {} : { email }),
+      ...(input.resetMfa === true ? { mfaReset: true } : {}),
       sessionsRevoked,
     });
     return updated;
