@@ -10,12 +10,18 @@ test("organizer records and recovers a live incident", async ({ page }) => {
   await expect(page).toHaveURL(/\/workspace$/);
 
   await page.goto("/studio/new");
+  await page.getByRole("button", { name: /舞台演出/ }).click();
+  await page.getByRole("button", { name: "下一步" }).click();
   await page.getByLabel("活动标题").fill(title);
-  await page.getByLabel("活动模板").selectOption({ label: "舞台演出 / 节目征集" });
+  await page.getByRole("button", { name: "下一步" }).click();
+  await page.getByRole("button", { name: "下一步" }).click();
+  await page.getByRole("button", { name: "下一步" }).click();
   await page.getByRole("checkbox", { name: /是否需要现场事故记录/ }).check();
+  await page.getByRole("button", { name: "下一步" }).click();
+  await expect(page.getByRole("heading", { name: "检查与创建" })).toBeVisible();
   await page.getByRole("button", { name: "创建活动" }).click();
   await expect(page).toHaveURL(/\/studio\/act/);
-  await page.getByRole("button", { name: "激活活动" }).click();
+  await page.getByRole("button", { name: "激活活动" }).first().click();
   await page.getByRole("button", { name: "编译定义" }).click();
   await expect(page.getByText(/编译成功/)).toBeVisible();
   await page.getByRole("button", { name: "发布当前编译" }).click();
