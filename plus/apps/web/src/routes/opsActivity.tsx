@@ -13,6 +13,7 @@ import { RosterCard } from "../components/ops/RosterCard.js";
 import { VotingCard } from "../components/ops/VotingCard.js";
 import { ScheduleCard } from "../components/ops/ScheduleCard.js";
 import { ResourcesCard } from "../components/ops/ResourcesCard.js";
+import { TeamsCard } from "../components/ops/TeamsCard.js";
 import { IncidentCard } from "../components/ops/IncidentCard.js";
 import { TasksCard } from "../components/ops/TasksCard.js";
 import { AttendanceCard } from "../components/ops/AttendanceCard.js";
@@ -179,6 +180,12 @@ function OpsActivityContent() {
         ) : null}
         {activity?.enabledCapabilities.includes("resources") ? (
           <ResourcesCard
+            activityId={activityId}
+            permissions={session?.actor.permissions ?? []}
+          />
+        ) : null}
+        {activity?.enabledCapabilities.includes("teams") ? (
+          <TeamsCard
             activityId={activityId}
             permissions={session?.actor.permissions ?? []}
           />

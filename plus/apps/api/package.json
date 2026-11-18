@@ -9,7 +9,7 @@
     "build:admin": "esbuild scripts/create-account.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/create-account.mjs --external:pg-native",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/main.ts",
-    "seed:e2e": "tsx scripts/seed-public-result.ts && tsx scripts/seed-registration.ts && tsx scripts/seed-live.ts && tsx scripts/seed-recovery.ts && tsx scripts/seed-grouping.ts && tsx scripts/seed-voting.ts && tsx scripts/seed-attendance.ts && tsx scripts/seed-onsite-audience.ts && tsx scripts/seed-resources.ts",
+    "seed:e2e": "tsx scripts/seed-public-result.ts && tsx scripts/seed-registration.ts && tsx scripts/seed-live.ts && tsx scripts/seed-recovery.ts && tsx scripts/seed-grouping.ts && tsx scripts/seed-voting.ts && tsx scripts/seed-attendance.ts && tsx scripts/seed-onsite-audience.ts && tsx scripts/seed-resources.ts && tsx scripts/seed-teams.ts",
     "create-account": "tsx scripts/create-account.ts",
     "test": "vitest run"
   },

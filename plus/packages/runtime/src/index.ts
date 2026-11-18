@@ -15,6 +15,7 @@ export * from "./email-notification-service.js";
 export * from "./wechat-article-service.js";
 export * from "./public-article-service.js";
 export * from "./resources-service.js";
+export * from "./teams-service.js";
 export * from "./oidc-service.js";
 export * from "./s3-storage.js";
 export * from "./account-admin-service.js";

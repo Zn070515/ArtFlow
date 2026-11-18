@@ -21,6 +21,7 @@ const KNOWN_CAPABILITIES = [
   "resources",
   "schedule",
   "tasks",
+  "teams",
   "ticketing",
   "voting",
 ];

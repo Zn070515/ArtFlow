@@ -298,6 +298,7 @@ it("the default registry exposes only implemented capabilities", () => {
     "resources",
     "schedule",
     "tasks",
+    "teams",
     "ticketing",
     "voting",
   ]);

@@ -1,6 +1,6 @@
 # Tournament：对阵、复合分与 Teams 设计
 
-状态：设计待评审（2026-11-18）
+状态：已接受（2026-11-18）；Slice 1（Teams）已实现
 
 ## 1. 目标
 
@@ -440,11 +440,13 @@ composite(side) = Σ round(score_round_i(side), 2) × weight_i / 10000
 - 权限：`teams.manage`
 - 命令：`teams.team.create`、`teams.team.update`、
   `teams.team.member.add`、`teams.team.member.remove`、
-  `teams.team.withdraw`、`teams.roster.freeze`、`teams.roster.correct`
+  `teams.team.withdraw`、`teams.roster.freeze`、`teams.roster.correct`、
+  `teams.roster.import_grouping`
 - 查询：`teams.read`
 - surfaces：`studio`、`ops`；scopes：空（活动级规划事实）
 - 事件：`TeamCreated`、`TeamUpdated`、`TeamMemberAdded`、`TeamMemberRemoved`、
-  `TeamWithdrawn`、`TeamRosterFrozen`、`TeamRosterCorrected`
+  `TeamWithdrawn`、`TeamRosterFrozen`、`TeamRosterCorrected`、
+  `TeamRosterImportedFromGrouping`
 
 ### 10.2 Tournament
 

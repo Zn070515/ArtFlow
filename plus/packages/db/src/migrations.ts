@@ -40,6 +40,7 @@ import { migration as m0036_account_identity_recovery } from "./migrations/0036_
 import { migration as m0037_email_notifications } from "./migrations/0037_email_notifications.js";
 import { migration as m0038_public_articles } from "./migrations/0038_public_articles.js";
 import { migration as m0039_resource_bookings } from "./migrations/0039_resource_bookings.js";
+import { migration as m0040_teams } from "./migrations/0040_teams.js";
 
 import type { Database } from "./types.js";
 
@@ -83,6 +84,7 @@ const migrations: Record<string, Migration> = {
   "0037_email_notifications": m0037_email_notifications,
   "0038_public_articles": m0038_public_articles,
   "0039_resource_bookings": m0039_resource_bookings,
+  "0040_teams": m0040_teams,
 };
 
 class StaticMigrationProvider implements MigrationProvider {
