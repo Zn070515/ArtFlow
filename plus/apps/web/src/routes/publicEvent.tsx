@@ -116,7 +116,7 @@ export function PublicEventPage() {
         <span>{site.profile.organizer || "主办方"}</span>
         {site.profile.contact === "" ? null : <span>{site.profile.contact}</span>}
         <span>公开码 {site.activity.publicCode}</span>
-        <EventShare title={site.activity.title} />
+        <EventShare title={site.activity.title} publicCode={site.activity.publicCode} />
       </footer>
     </article>
   );

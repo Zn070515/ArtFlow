@@ -42,7 +42,7 @@ export function OnsiteActions(props: OnsiteActionsProps) {
       {props.hasProgram ? (
         <a className="event-button event-button--ghost" href="#program">节目单</a>
       ) : null}
-      <EventShare title={props.eventTitle} />
+      <EventShare title={props.eventTitle} publicCode={props.publicCode} />
     </section>
   );
 }
