@@ -20,6 +20,7 @@ export interface EventHeroProps {
   readonly registrationOpen: boolean;
   readonly resultsAvailable: boolean;
   readonly preview?: boolean;
+  readonly compact?: boolean;
 }
 
 export function EventHero(props: EventHeroProps) {
@@ -27,6 +28,15 @@ export function EventHero(props: EventHeroProps) {
     .filter(Boolean)
     .join(" – ");
   const meta = [time, props.venue, props.organizer].filter(Boolean);
+  if (props.compact === true) {
+    return (
+      <header className="event-hero event-hero--compact">
+        <p className="eyebrow">LIVE · 进行中</p>
+        <h1 className="event-hero__title">{props.title}</h1>
+        {meta.length === 0 ? null : <p className="event-hero__meta">{meta.join(" · ")}</p>}
+      </header>
+    );
+  }
   const showResults = props.status === "closed" && props.resultsAvailable && props.preview !== true;
   const showJoin = props.status !== "closed" && props.registrationOpen && props.preview !== true;
   const mutedLabel = props.status === "closed"

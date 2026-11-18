@@ -11,6 +11,24 @@
   border-bottom: 1px solid var(--line);
 }
 
+.event-hero--compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  padding: 20px 0 16px;
+}
+
+.event-hero--compact .event-hero__title {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  letter-spacing: -0.01em;
+}
+
+.event-hero--compact .event-hero__meta {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
 .event-hero__title {
   margin: 0;
   font-family: var(--display);
