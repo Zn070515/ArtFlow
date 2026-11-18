@@ -7,8 +7,16 @@ export interface PasswordResetMessage {
   readonly expiresAt: string;
 }
 
+export interface NotificationMessage {
+  readonly to: string;
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
+}
+
 export interface Mailer {
   sendPasswordReset(message: PasswordResetMessage): Promise<void>;
+  sendNotification?(message: NotificationMessage): Promise<void>;
 }
 
 /**
@@ -45,6 +53,15 @@ export function createSmtpMailerFromEnv(env: NodeJS.ProcessEnv = process.env): M
 <p><a href="${escapeHtml(message.resetUrl)}">设置新密码</a></p>
 <p>链接在 ${escapeHtml(message.expiresAt)} 前有效，且只能使用一次。</p>
 <p>如果不是你发起的，请忽略这封邮件。</p>`,
+      });
+    },
+    async sendNotification(message) {
+      await transporter.sendMail({
+        from,
+        to: message.to,
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
       });
     },
   };

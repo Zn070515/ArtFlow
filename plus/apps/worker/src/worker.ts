@@ -4,6 +4,10 @@ import { dirname } from "node:path";
 import { closeDb, createDb, migrate } from "@artflow-plus/db";
 import {
   assertReleaseProvenance,
+  createSmtpMailerFromEnv,
+  deliverPendingEmailNotifications,
+  emailNotificationsEnabled,
+  enqueueEmailNotifications,
   relayOutboxOnce,
   startRelayLoop,
   type RelayLoopStop,
@@ -167,6 +171,19 @@ export async function startWorker(config: WorkerConfig): Promise<WorkerHandle> {
       },
     });
 
+    const mailer = emailNotificationsEnabled() ? createSmtpMailerFromEnv() : null;
+    const stopNotifications = mailer === null
+      ? null
+      : startRelayLoop(async () => {
+          await enqueueEmailNotifications(db);
+          await deliverPendingEmailNotifications(db, mailer);
+        }, {
+          intervalMs: 60_000,
+          onError: (error) => {
+            console.error(JSON.stringify({ event: "worker.notificationError", error: String(error) }));
+          },
+        });
+
     await mkdir(dirname(config.readyFile), { recursive: true });
     await writeFile(config.readyFile, `${process.pid}\n`, "utf8");
 
@@ -175,6 +192,9 @@ export async function startWorker(config: WorkerConfig): Promise<WorkerHandle> {
       stopping ??= (async () => {
         await rm(config.readyFile, { force: true });
         await stopRelay(stopLoop, config.shutdownTimeoutMs);
+        if (stopNotifications !== null) {
+          await stopRelay(stopNotifications, config.shutdownTimeoutMs);
+        }
         const stopped = await drainWithTimeout(
           boss.stop({ graceful: true, timeout: Math.ceil(config.shutdownTimeoutMs / 1000) }),
           config.shutdownTimeoutMs + 1_000,

@@ -2405,6 +2405,128 @@
       ]
     },
     {
+      "name": "notification_cursor",
+      "columns": [
+        {
+          "name": "channel",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "last_outbox_id",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "notification_delivery",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "event_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "channel",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "recipient",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "kind",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "subject",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "body",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "link",
+          "dataType": "text",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'pending'::character varying",
+          "identity": false
+        },
+        {
+          "name": "attempts",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "last_error",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "sent_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "outbox",
       "columns": [
         {

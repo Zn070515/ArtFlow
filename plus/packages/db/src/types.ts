@@ -420,6 +420,28 @@ export interface MaterialCheckRow {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+export interface NotificationCursorRow {
+  channel: string;
+  last_outbox_id: ColumnType<number, number | undefined, number>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+export interface NotificationDeliveryRow {
+  id: string;
+  event_id: string;
+  channel: string;
+  recipient: string;
+  kind: string;
+  subject: string;
+  body: string;
+  link: string;
+  status: ColumnType<string, string | undefined, string>;
+  attempts: ColumnType<number, number | undefined, number>;
+  last_error: string | null;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  sent_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+}
+
 export interface OutboxRow {
   id: Generated<string>;
   event_type: string;
@@ -833,6 +855,8 @@ export interface Database {
   local_session: LocalSessionRow;
   material: MaterialRow;
   material_check: MaterialCheckRow;
+  notification_cursor: NotificationCursorRow;
+  notification_delivery: NotificationDeliveryRow;
   outbox: OutboxRow;
   panel_member: PanelMemberRow;
   panel_snapshot: PanelSnapshotRow;

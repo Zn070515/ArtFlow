@@ -549,3 +549,14 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   `<audio>/<video>`（Range 可拖动）、文档回退为受权下载链接。
 - 接入参与者「我的」材料、Ops 报名详情与 Ops 材料审核面板。
 - 不新增后端接口、不生成缩略图/转码；600 MiB 原文件仍由浏览器按需 Range 读取。
+
+
+## 2026-11-18 — 站外邮件通知（已完成）
+
+- worker 新增 email 通知消费者：扫描 outbox，覆盖报名提交、审核结果、节目单发布、
+  赛果发布；cursor 首次启用跳到 head，避免补发历史。
+- `notification_delivery` 以 `(event_id, channel, recipient)` 去重，失败 3 次置
+  failed；`notification_cursor` 记录消费位置。
+- 仅使用账号已登记邮箱；无 SMTP 或 `ARTFLOW_PLUS_EMAIL_NOTIFICATIONS=1` 未设置
+  时不发信。
+- 决策见 [ADR-0045](../architecture/adr/0045-outbox-email-notifications.md)。
