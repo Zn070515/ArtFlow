@@ -94,6 +94,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 - 交付与身份：S3 共享存储、2 副本 HA overlay、CloudNativePG/PITR 参考；
   TOTP + 通用 OIDC；SMTP 密码找回；手动 release readiness。详见
   [ADR-0044](../architecture/adr/0044-ha-identity-and-recovery.md)。
+- 资源与排练：`resources` capability + Ops 预约卡片 + Studio 资源编辑器。
 - 现场展示：`/screen/<publicCode>` 大屏、`/host-card/<publicCode>` 主持手卡、
   `/print/<publicCode>` 二维码打印包；Ops 增加「现场展示」卡片。
 - 材料预览：图片/音频/视频通过受控内容路由内联展示，文档回退下载；参与者、

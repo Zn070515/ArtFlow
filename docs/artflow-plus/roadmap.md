@@ -580,3 +580,13 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   `studio.manage`；slug 唯一、封面仅 http(s)、每次变更写审计。
 - Web：公开 `/articles` 列表与 `/articles/:slug` 详情；Ops `/ops/articles` 编辑页，
   Ops 风险页增加入口。
+
+
+## 2026-11-18 — Resources / 排练排期（已完成）
+
+- 新 `resources` capability：场地/设备/人员定义随 release 冻结；`resource_booking`
+  以活动为范围，`draft → confirmed → cancelled`。
+- 确认在 `(activity, resource)` advisory xact lock 内检查时间重叠；draft 可重叠；
+  confirmed 更新重查；cancel 必须带原因；全部走 command receipt/audit/outbox。
+- Ops 资源卡片：资源列表、创建预约、确认、取消；Studio 资源编辑器。
+- 决策见 [ADR-0046](../architecture/adr/0046-resources-booking-authority.md)。

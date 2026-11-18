@@ -2,7 +2,7 @@ import { defaultCapabilityRegistry } from "@artflow-plus/domain";
 import { describe, expect, it } from "vitest";
 
 /** Capabilities with an executable contract adapter under harness/adapters. */
-const COVERED = new Set<string>(["competition", "publishing", "registration", "ticketing"]);
+const COVERED = new Set<string>(["competition", "publishing", "registration", "resources", "ticketing"]);
 
 /**
  * A capability with commands but no adapter must say why. Keep the reason

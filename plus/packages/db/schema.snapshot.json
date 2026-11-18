@@ -3350,6 +3350,116 @@
       ]
     },
     {
+      "name": "resource_booking",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "resource_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "resource_name",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "title",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "note",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "starts_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ends_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'draft'::character varying",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "created_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "cancelled_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "cancel_reason",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "result_publication",
       "columns": [
         {

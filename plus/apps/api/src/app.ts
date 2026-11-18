@@ -19,6 +19,7 @@ import { registerActivityRoutes } from "./routes/activity.js";
 import { registerOperationsRoutes } from "./routes/operations.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
 import { registerArticleRoutes } from "./routes/articles.js";
+import { registerResourcesRoutes } from "./routes/resources.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -213,6 +214,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   EXPORT_INVALID: 422,
   EXPORT_TOO_LARGE: 413,
   PAYLOAD_TOO_LARGE: 413,
+  RESOURCE_CONFLICT: 409,
 };
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
@@ -563,6 +565,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerVotingRoutes(routeContext);
   registerArchiveRoutes(routeContext);
   registerArticleRoutes(routeContext);
+  registerResourcesRoutes(routeContext);
   registerPublishingRoutes(routeContext);
   registerExportRoutes(routeContext);
   registerPublicRoutes(routeContext);

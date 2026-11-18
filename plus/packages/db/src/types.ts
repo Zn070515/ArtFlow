@@ -587,6 +587,24 @@ export interface RegistrationRow {
   supplement_keys: ColumnType<unknown, string | undefined, string>;
 }
 
+export interface ResourceBookingRow {
+  id: string;
+  activity_id: string;
+  resource_key: string;
+  resource_name: string;
+  title: string;
+  note: ColumnType<string, string | undefined, string>;
+  starts_at: ColumnType<Date, Date | string, Date | string>;
+  ends_at: ColumnType<Date, Date | string, Date | string>;
+  status: ColumnType<string, string | undefined, string>;
+  revision: ColumnType<number, number | undefined, number>;
+  created_by: string;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  cancelled_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancel_reason: string | null;
+}
+
 export interface ResultPublicationRow {
   id: string;
   activity_id: string;
@@ -884,6 +902,7 @@ export interface Database {
   ranking_snapshot: RankingSnapshotRow;
   rate_limit_bucket: RateLimitBucketRow;
   registration: RegistrationRow;
+  resource_booking: ResourceBookingRow;
   result_publication: ResultPublicationRow;
   result_release: ResultReleaseRow;
   roster: RosterRow;

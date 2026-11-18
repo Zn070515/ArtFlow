@@ -18,6 +18,7 @@ const KNOWN_CAPABILITIES = [
   "publishing",
   "questionnaire",
   "registration",
+  "resources",
   "schedule",
   "tasks",
   "ticketing",

@@ -8,6 +8,7 @@ import { PublishingEditor } from "./PublishingEditor.js";
 import { QuestionnaireEditor } from "./QuestionnaireEditor.js";
 import { ScheduleEditor } from "./ScheduleEditor.js";
 import { RegistrationEditor } from "./RegistrationEditor.js";
+import { ResourcesEditor } from "./ResourcesEditor.js";
 import { TasksEditor } from "./TasksEditor.js";
 import type { CapabilityEditorProps } from "./types.js";
 import { VotingEditor } from "./VotingEditor.js";
@@ -22,6 +23,7 @@ const EDITORS: Readonly<Record<string, ComponentType<CapabilityEditorProps>>> = 
   schedule: ScheduleEditor,
   grouping: GroupingEditor,
   tasks: TasksEditor,
+  resources: ResourcesEditor,
 };
 
 /**

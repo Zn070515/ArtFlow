@@ -50,6 +50,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0043](0043-runtime-blocker-hardening.md) | 公共限流按 visitor、600 MiB 流式材料、ballot 锁顺序、归档异步 ZIP、投影恢复入口、日志/指标 | accepted |
 | [0044](0044-ha-identity-and-recovery.md) | 多副本 + S3 存储 + CNPG/PITR、TOTP/OIDC、SMTP 密码找回、手动 release readiness | accepted |
 | [0045](0045-outbox-email-notifications.md) | worker 扫描 outbox 发送报名/审核/日程/赛果邮件；cursor + 去重 + 重试 | accepted |
+| [0046](0046-resources-booking-authority.md) | resources 定义随 release 冻结；预约 draft/confirmed/cancelled；advisory lock 裁决冲突 | accepted |
 
 新增 ADR 的规则：
 

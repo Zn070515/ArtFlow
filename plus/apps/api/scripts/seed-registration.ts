@@ -40,6 +40,7 @@ const adminPermissions = [
   "materials.review",
   "materials.manage",
   "schedule.manage",
+  "resources.manage",
   "incident.manage",
   "studio.manage",
   "competition.manage",

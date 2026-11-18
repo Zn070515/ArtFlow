@@ -3,6 +3,7 @@ export * from "./activity-public-profile-repository.js";
 export * from "./participant-notification-repository.js";
 export * from "./notification-repository.js";
 export * from "./public-article-repository.js";
+export * from "./resource-booking-repository.js";
 export * from "./auth-repository.js";
 export * from "./account-invite-repository.js";
 export * from "./competition-repository.js";
