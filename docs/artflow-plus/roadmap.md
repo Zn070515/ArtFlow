@@ -531,3 +531,13 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - **发布**：新增手动 `release-readiness.yml`（只跑 gate/build，不打 tag）和
   `release-process.md`；正式发布仍由签名 tag 触发 `publish.yml`。
 - 决策与边界见 [ADR-0044](../architecture/adr/0044-ha-identity-and-recovery.md)。
+
+
+## 2026-11-18 — 现场展示闭环（已完成）
+
+- `/screen/<publicCode>`：深色大屏，当前/后续节目、最新正式赛果、公告、活动二维码，
+  10s/60s 轮询与全屏。
+- `/host-card/<publicCode>`：可打印的主持手卡，当前节目、流程/节目单、正式赛果与公告。
+- `/print/<publicCode>`：活动、报名、节目单、赛果、大屏、主持手卡六个公开二维码的
+  打印页；只从正式 HTTPS 域名打印。
+- Ops 活动页新增「现场展示」卡片；三个页面不带 PortalShell，只读取公开面数据。

@@ -78,7 +78,7 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 
 ### 仍开放的缺口
 
-- bracket/对阵、活动报名/结果的通用二维码、现场大屏。
+- bracket/对阵/复合分、Teams/Tournament Pack。
 - 具体 IdP 的端到端验证；通用 OIDC 适配器已实现，但仍需要真实 issuer 与账号
   映射策略。
 - 具体 S3 供应商与 bucket 的生命周期/跨区复制证据；应用侧 S3 驱动已实现。
@@ -94,6 +94,8 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 - 交付与身份：S3 共享存储、2 副本 HA overlay、CloudNativePG/PITR 参考；
   TOTP + 通用 OIDC；SMTP 密码找回；手动 release readiness。详见
   [ADR-0044](../architecture/adr/0044-ha-identity-and-recovery.md)。
+- 现场展示：`/screen/<publicCode>` 大屏、`/host-card/<publicCode>` 主持手卡、
+  `/print/<publicCode>` 二维码打印包；Ops 增加「现场展示」卡片。
 
 ## 文档与规划基线
 

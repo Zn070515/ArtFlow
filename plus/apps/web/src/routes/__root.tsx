@@ -9,9 +9,16 @@ export function RootLayout() {
   const { pathname } = useLocation();
   const content = <Outlet />;
 
-  // Embeddable widgets render without the portal chrome so they can sit in an
-  // iframe on a host page.
-  if (pathname.startsWith("/embed/")) return content;
+  // Embeddable widgets and on-site presentation surfaces render without the
+  // portal chrome: a projector, a printed host card and a QR sheet.
+  if (
+    pathname.startsWith("/embed/") ||
+    pathname.startsWith("/screen/") ||
+    pathname.startsWith("/host-card/") ||
+    pathname.startsWith("/print/")
+  ) {
+    return content;
+  }
 
   const surface = getShellSurface(pathname);
   if (surface === "console") return <ConsoleShell>{content}</ConsoleShell>;

@@ -42,6 +42,24 @@ const publicEventRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/publicEvent.js"), "PublicEventPage"),
 });
 
+const screenRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/screen/$publicCode",
+  component: lazyRouteComponent(() => import("./routes/screen.js"), "ScreenPage"),
+});
+
+const hostCardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/host-card/$publicCode",
+  component: lazyRouteComponent(() => import("./routes/hostCard.js"), "HostCardPage"),
+});
+
+const printPackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/print/$publicCode",
+  component: lazyRouteComponent(() => import("./routes/print.js"), "PrintPackPage"),
+});
+
 const meRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/me",
@@ -196,6 +214,9 @@ const routeTree = rootRoute.addChildren([
   resultsRoute,
   programRoute,
   publicEventRoute,
+  screenRoute,
+  hostCardRoute,
+  printPackRoute,
   meRoute,
   meEventRoute,
   ticketRoute,

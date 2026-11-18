@@ -5,6 +5,7 @@ import "@fontsource-variable/noto-sans-sc";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles/tokens.css";
 import "./styles/global.css";
+import "./styles/screen.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
