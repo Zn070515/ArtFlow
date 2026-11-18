@@ -66,7 +66,7 @@ v2 把 v1 的「按 app 与页面切分」重写成 **薄 Activity + capability 
 | Contracts | [`plus/packages/contracts`](plus/packages/contracts) | 服务端与浏览器共享的 TypeBox schema |
 | Realtime | [`plus/packages/realtime`](plus/packages/realtime) | 受保护的 WebSocket 核心（`/protocol`、`/server`、`/client`），契约见 [CORE.md](plus/packages/realtime/CORE.md) |
 
-**capability**：`registration`、`questionnaire`、`materials`、`competition`、`voting`、`ticketing`、`publishing`、`archive`、`grouping`、`tasks`、`attendance`、`schedule`、`incident`。**Pack**：`singer-competition`、`stage-show`、`review-awards`、`vote-poll`。三种结构的活动加纯投票活动已在同一内核上验证；新增形状只改组合与默认 definition。
+**capability**：`registration`、`questionnaire`、`materials`、`competition`、`voting`、`ticketing`、`publishing`、`archive`、`grouping`、`tasks`、`attendance`、`schedule`、`incident`、`resources`。**Pack**：`singer-competition`、`stage-show`、`review-awards`、`vote-poll`。三种结构的活动加纯投票活动已在同一内核上验证；新增形状只改组合与默认 definition。
 
 **里程碑**：M0 Legacy Extraction → M1 Engine Kernel → M2 Capability Composition → M3 Execution Runtime → M4 Registration → M5 Competition/Evaluation → M6 Voting/Ticketing → M7 Publishing/Archive → M8 Product Surfaces → M9 Grouping → M10 投票结果发布 → M11 实时核心与投票 UI → M12 参与者投票页 → M13 Live 迁移到实时核心 → M13.1–M13.3 运营、语义与材料收口 → M14 票据投票 → M15 运营分析/Tasks/签到/排期/事故恢复。逐项出口见 [roadmap](docs/artflow-plus/roadmap.md)。
 
