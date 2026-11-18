@@ -62,7 +62,7 @@ export function SessionPanel({
   }
 
   return (
-    <Card>
+    <Card id="session-panel">
       <h2 className="ui-card__title">执行会话</h2>
       {active === undefined ? (
         <p className="ui-card__description">先发布一个定义，才能启动会话。</p>

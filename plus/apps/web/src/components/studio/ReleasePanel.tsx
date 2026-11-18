@@ -37,7 +37,7 @@ export function ReleasePanel({
   }
 
   return (
-    <Card>
+    <Card id="release-panel">
       <h2 className="ui-card__title">定义发布</h2>
       {state.releases.length === 0 ? (
         <p className="ui-card__description">还没有发布版本。</p>
