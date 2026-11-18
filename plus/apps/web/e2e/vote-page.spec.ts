@@ -69,14 +69,26 @@ test("a ticket holder redeems a ticket and votes through the public page", async
     data: {},
   });
   expect(issued.ok(), await issued.text()).toBe(true);
-  const issuedBody = await issued.json() as { credential?: string };
+  const issuedBody = await issued.json() as {
+    credential?: string;
+    ticket?: { publicCode: string };
+  };
   if (issuedBody.credential === undefined) throw new Error("The E2E ticket credential was not returned.");
+
+  await page.goto("/e/E2E-TICKET-VOTE");
+  await expect(page.getByRole("link", { name: /去投票/ })).toBeVisible();
 
   const voterContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const voter = await voterContext.newPage();
-  await voter.goto("/vote/" + encodeURIComponent(session.id) + "#ticket=" + encodeURIComponent(issuedBody.credential));
+  await voter.goto("/t#ticket=" + encodeURIComponent(issuedBody.credential));
   expect(await voter.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
   await expect(voter.getByRole("heading", { name: "E2E 票据投票页" })).toBeVisible();
+  await expect(voter.getByAltText("入场二维码")).toBeVisible();
+  if (issuedBody.ticket !== undefined) {
+    await expect(voter.getByText(`票号 ${issuedBody.ticket.publicCode}`)).toBeVisible();
+  }
+  await voter.getByRole("link", { name: /去投票/ }).click();
+  await expect(voter).toHaveURL(new RegExp(`/vote/${session.id}`));
   await expect(voter.getByRole("radio", { name: "alice" })).toBeVisible();
   expect(voter.url()).not.toContain("ticket=");
   await voter.getByRole("radio", { name: "alice" }).check();
