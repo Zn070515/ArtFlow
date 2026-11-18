@@ -116,7 +116,7 @@ function OpsActivityContent() {
         )}
         {canSeeRegistrations ? (
           <>
-            <Card>
+            <Card id="registration">
               <h2 className="ui-card__title">报名</h2>
               {registrations.isPending ? (
                 <p className="auth-loading">正在加载报名…</p>
@@ -138,7 +138,9 @@ function OpsActivityContent() {
                 <p className="form-error" role="alert">名单状态暂时无法加载。</p>
               </Card>
             ) : (
-              <RosterCard activityId={activityId} roster={roster.data!} summary={rosterSummary} />
+              <div id="roster">
+                <RosterCard activityId={activityId} roster={roster.data!} summary={rosterSummary} />
+              </div>
             )}
           </>
         ) : null}
@@ -147,6 +149,7 @@ function OpsActivityContent() {
           <GroupingCard activityId={activityId} />
         ) : null}
         {activity?.enabledCapabilities.includes("voting") ? (
+          <div id="voting">
           <VotingCard
             activityId={activityId}
             canManageVotes={can(session?.actor.permissions, "voting.manage")}
@@ -156,6 +159,7 @@ function OpsActivityContent() {
               can(session?.actor.permissions, "competition.manage")
             }
           />
+          </div>
         ) : null}
         {activity?.enabledCapabilities.includes("incident") ? (
           <IncidentCard
@@ -175,10 +179,12 @@ function OpsActivityContent() {
             canManage={can(session?.actor.permissions, "tasks.manage")}
           />
         ) : null}
-        <ArchiveCard
-          activityId={activityId}
-          canManage={can(session?.actor.permissions, "archive.manage")}
-        />
+        <div id="archive">
+          <ArchiveCard
+            activityId={activityId}
+            canManage={can(session?.actor.permissions, "archive.manage")}
+          />
+        </div>
         <DiagnosticsCard
           activityId={activityId}
           canManage={

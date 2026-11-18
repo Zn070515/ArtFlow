@@ -364,6 +364,19 @@
   white-space: pre-wrap;
 }
 
+#registration,
+#roster,
+#voting,
+#archive {
+  scroll-margin-top: 24px;
+}
+
+.analytics-attention-reason {
+  margin: 4px 0 0;
+  color: var(--bone-subtle);
+  font-size: 0.75rem;
+}
+
 .risk-summary {
   margin-bottom: 16px;
 }
