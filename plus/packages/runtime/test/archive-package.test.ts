@@ -176,11 +176,13 @@ describe("archive package", () => {
       "awards.csv",
       "events-summary.csv",
       "manifest.json",
+      "public-profile.json",
       "releases.json",
       "results.csv",
       "sessions.json",
       "stage-results.json",
     ]);
+    expect(JSON.parse(strFromU8(entries["public-profile.json"] ?? new Uint8Array()))).toBeNull();
 
     const manifest = JSON.parse(strFromU8(entries["manifest.json"] ?? new Uint8Array())) as ArchiveManifest;
     expect(manifest.format).toBe("zip-json-csv");
@@ -229,6 +231,45 @@ describe("archive package", () => {
       .join("\n");
     expect(allText).not.toContain("fp-1");
     expect(allText).not.toContain("fp-legacy");
+  });
+
+  it("freezes the public profile when supplied", () => {
+    const output = buildArchivePackage({
+      packageId: "archive-profile",
+      version: 1,
+      activity: {
+        id: "act-1",
+        publicCode: "ABC123",
+        title: "2026 院十佳",
+        enabledCapabilities: ["publishing", "archive"],
+        activeDefinitionVersion: 1,
+      },
+      releases,
+      stageResults,
+      sessions,
+      events,
+      publicProfile: {
+        activityId: "act-1",
+        tagline: "春日",
+        description: "介绍",
+        venue: "剧场",
+        startsAt: "2026-04-18T11:00:00.000Z",
+        endsAt: "2026-04-18T13:30:00.000Z",
+        organizer: "学生会",
+        contact: "联系",
+        announcement: "公告",
+        revision: 3,
+        updatedBy: "staff",
+        updatedAt: "2026-04-01T10:00:00.000Z",
+      },
+      archivedAt: "2026-10-21T00:00:00.000Z",
+      archivedBy: "staff",
+    });
+    const entries = unzipSync(output.bytes);
+    expect(JSON.parse(strFromU8(entries["public-profile.json"] ?? new Uint8Array()))).toMatchObject({
+      tagline: "春日",
+      revision: 3,
+    });
   });
 
   it("neutralizes spreadsheet formulas in CSV exports", () => {

@@ -9,6 +9,7 @@ import type {
 } from "@artflow-plus/db";
 import {
   demoteCurrentArchivePackages,
+  findActivityPublicProfile,
   getActivityForUpdate,
   getArchivePackage,
   getCurrentArchivePackage,
@@ -184,9 +185,11 @@ export async function archiveActivity(
           groupingStages.map((stage) => listCurrentGroupingMemberships(trx, stage.id)),
         )
       ).flat();
+      const publicProfile = await findActivityPublicProfile(trx, activity.id);
       const built = buildArchivePackage({
         packageId,
         version,
+        publicProfile,
         activity: {
           id: activity.id,
           publicCode: publicCodeRow?.public_code ?? activity.id,

@@ -309,6 +309,35 @@ describe.skipIf(!connectionString)("archive service", () => {
     expect(audits.map((row) => row.command_id)).toContain("archive-once");
   });
 
+  it("freezes the public profile into the archive package", async () => {
+    const activityId = await seed({ sessions: true });
+    await db.insertInto("activity_public_profile").values({
+      activity_id: activityId,
+      tagline: "春日",
+      description: "介绍",
+      venue: "剧场",
+      starts_at: new Date("2026-04-18T11:00:00.000Z"),
+      ends_at: new Date("2026-04-18T13:30:00.000Z"),
+      organizer: "学生会",
+      contact: "联系",
+      announcement: "公告",
+      revision: 1,
+      updated_by: "staff",
+      updated_at: new Date("2026-04-01T10:00:00.000Z"),
+    }).execute();
+    await archiveActivity(db, deps(), {
+      commandId: "archive-profile",
+      activityId,
+      expectedRevision: 1,
+      note: "活动结束归档",
+    });
+    const file = await readArchiveFile(db, deps(), { activityId });
+    const profile = JSON.parse(
+      strFromU8(unzipSync(file.bytes)["public-profile.json"] ?? new Uint8Array()),
+    ) as { tagline: string; revision: number };
+    expect(profile).toMatchObject({ tagline: "春日", revision: 1 });
+  });
+
   it("packages every formal event beyond the legacy page size", async () => {
     const activityId = await seed();
     const eventCount = 100_001;
