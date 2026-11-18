@@ -450,6 +450,9 @@
 }
 
 .risk-items summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   cursor: pointer;
   color: var(--gold);
   font-size: 0.8rem;
