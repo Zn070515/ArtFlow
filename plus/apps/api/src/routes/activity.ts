@@ -321,6 +321,7 @@ export function registerActivityRoutes(ctx: ApiContext): void {
         faq: { question: string; answer: string }[];
         links: { label: string; url: string }[];
         participantsVisible: boolean;
+        listedPublicly: boolean;
       };
       const outcome = await updateActivityPublicProfile(db, await requestDeps(request), {
         commandId,

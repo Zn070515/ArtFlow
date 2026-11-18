@@ -78,6 +78,7 @@ describe.skipIf(!connectionString)("activity public profile repository", () => {
       faq: [],
       links: [],
       participantsVisible: false,
+      listedPublicly: false,
       updatedBy: "staff",
       updatedAt: "2026-04-01T10:00:00.000Z",
     }, 0);
@@ -96,6 +97,7 @@ describe.skipIf(!connectionString)("activity public profile repository", () => {
       faq: [],
       links: [],
       participantsVisible: false,
+      listedPublicly: false,
       updatedBy: "staff",
       updatedAt: "2026-04-01T10:01:00.000Z",
     }, 0)).rejects.toMatchObject({ code: "STALE_REVISION" });
@@ -125,6 +127,7 @@ describe.skipIf(!connectionString)("activity public profile repository", () => {
         { label: "坏链接", url: "javascript:alert(1)" },
       ],
       participantsVisible: true,
+      listedPublicly: true,
       updatedBy: "staff",
       updatedAt: "2026-04-01T10:00:00.000Z",
     }, 0);
@@ -134,6 +137,7 @@ describe.skipIf(!connectionString)("activity public profile repository", () => {
       announcements: [{ id: "a1", title: "公告", body: "内容" }],
       faq: [{ question: "问", answer: "答" }],
       participantsVisible: true,
+      listedPublicly: true,
     });
     expect(found?.links).toEqual([{ label: "官网", url: "https://example.com/info" }]);
   });

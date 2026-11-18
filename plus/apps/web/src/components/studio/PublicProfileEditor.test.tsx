@@ -17,6 +17,7 @@ const base: PublicProfileDraft = {
   faq: [],
   links: [],
   participantsVisible: false,
+  listedPublicly: false,
 };
 
 function Harness() {
@@ -47,6 +48,14 @@ describe("PublicProfileEditor", () => {
   it("toggles the participant directory", () => {
     render(<Harness />);
     const checkbox = screen.getByLabelText("公开参与者目录");
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+  });
+
+  it("toggles the public directory listing", () => {
+    render(<Harness />);
+    const checkbox = screen.getByLabelText("列入公开活动目录");
     expect(checkbox).not.toBeChecked();
     fireEvent.click(checkbox);
     expect(checkbox).toBeChecked();

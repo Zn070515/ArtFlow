@@ -1,3 +1,24 @@
+import { apiFetch } from "./client.js";
+
+export interface PublicEventSummary {
+  readonly publicCode: string;
+  readonly title: string;
+  readonly status: "active" | "closed";
+  readonly tagline: string;
+  readonly venue: string;
+  readonly startsAt: string | null;
+  readonly endsAt: string | null;
+  readonly organizer: string;
+}
+
+export async function fetchPublicEvents(signal?: AbortSignal): Promise<readonly PublicEventSummary[]> {
+  const response = await apiFetch<{ events: readonly PublicEventSummary[] }>(
+    "/api/public/events",
+    { signal },
+  );
+  return response.events;
+}
+
 export interface PublicEventSite {
   readonly activity: {
     readonly publicCode: string;

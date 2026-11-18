@@ -60,6 +60,7 @@ const state: StudioState = {
     faq: [],
     links: [],
     participantsVisible: false,
+    listedPublicly: false,
     revision: 0,
     updatedBy: "",
     updatedAt: "",

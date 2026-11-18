@@ -70,6 +70,7 @@ function StudioPublicProfileContent() {
         faq: draft.faq,
         links: draft.links,
         participantsVisible: draft.participantsVisible,
+        listedPublicly: draft.listedPublicly,
       });
       setRevision(saved.revision);
       setMessage("已保存");

@@ -12,6 +12,12 @@ const indexRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/index.js"), "Landing"),
 });
 
+const eventsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/events",
+  component: lazyRouteComponent(() => import("./routes/events.js"), "EventsPage"),
+});
+
 const resultsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/results/$publicCode",
@@ -179,6 +185,7 @@ const tokensRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  eventsRoute,
   resultsRoute,
   programRoute,
   publicEventRoute,

@@ -34,6 +34,7 @@ export interface StoredActivityPublicProfile {
   readonly faq: readonly PublicFaqItem[];
   readonly links: readonly PublicLink[];
   readonly participantsVisible: boolean;
+  readonly listedPublicly: boolean;
   readonly revision: number;
   readonly updatedBy: string;
   readonly updatedAt: string;
@@ -53,6 +54,7 @@ export interface ActivityPublicProfileInput {
   readonly faq: readonly PublicFaqItem[];
   readonly links: readonly PublicLink[];
   readonly participantsVisible: boolean;
+  readonly listedPublicly: boolean;
   readonly updatedBy: string;
   readonly updatedAt: string;
 }
@@ -145,6 +147,7 @@ function rowToProfile(row: Selectable<ActivityPublicProfileRow>): StoredActivity
     faq: parseFaq(row.faq),
     links: parseLinks(row.links),
     participantsVisible: row.participants_visible === true,
+    listedPublicly: row.listed_publicly === true,
     revision: row.revision,
     updatedBy: row.updated_by,
     updatedAt: iso(row.updated_at) ?? "",
@@ -181,6 +184,7 @@ export async function getActivityPublicProfile(
     faq: [],
     links: [],
     participantsVisible: false,
+    listedPublicly: false,
     revision: 0,
     updatedBy: "",
     updatedAt: "",
@@ -228,6 +232,7 @@ export async function upsertActivityPublicProfile(
         faq: JSON.stringify(input.faq),
         links: JSON.stringify(input.links),
         participants_visible: input.participantsVisible,
+        listed_publicly: input.listedPublicly,
         revision: 1,
         updated_by: input.updatedBy,
         updated_at: new Date(input.updatedAt),
@@ -252,6 +257,7 @@ export async function upsertActivityPublicProfile(
       faq: JSON.stringify(input.faq),
       links: JSON.stringify(input.links),
       participants_visible: input.participantsVisible,
+      listed_publicly: input.listedPublicly,
       revision: sql`revision + 1`,
       updated_by: input.updatedBy,
       updated_at: new Date(input.updatedAt),
@@ -262,4 +268,49 @@ export async function upsertActivityPublicProfile(
     .executeTakeFirst();
   if (row === undefined) throw new StaleRevisionError(input.activityId);
   return rowToProfile(row);
+}
+
+export interface PublicEventSummary {
+  readonly publicCode: string;
+  readonly title: string;
+  readonly status: "active" | "closed";
+  readonly tagline: string;
+  readonly venue: string;
+  readonly startsAt: string | null;
+  readonly endsAt: string | null;
+  readonly organizer: string;
+}
+
+export async function listListedPublicEvents(
+  db: Kysely<Database>,
+): Promise<readonly PublicEventSummary[]> {
+  const rows = await db
+    .selectFrom("activity")
+    .innerJoin("activity_public_profile", "activity_public_profile.activity_id", "activity.id")
+    .select([
+      "activity.public_code",
+      "activity.title",
+      "activity.status",
+      "activity_public_profile.tagline",
+      "activity_public_profile.venue",
+      "activity_public_profile.starts_at",
+      "activity_public_profile.ends_at",
+      "activity_public_profile.organizer",
+    ])
+    .where("activity.status", "in", ["active", "closed"])
+    .where("activity_public_profile.listed_publicly", "=", true)
+    .orderBy(sql`activity_public_profile.starts_at desc nulls last`)
+    .orderBy("activity.id", "asc")
+    .limit(100)
+    .execute();
+  return rows.map((row) => ({
+    publicCode: row.public_code,
+    title: row.title,
+    status: row.status === "closed" ? "closed" : "active",
+    tagline: row.tagline,
+    venue: row.venue,
+    startsAt: iso(row.starts_at),
+    endsAt: iso(row.ends_at),
+    organizer: row.organizer,
+  }));
 }

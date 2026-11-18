@@ -9,7 +9,7 @@ import type { Database } from "@artflow-plus/db";
 import type { ActorContext } from "@artflow-plus/domain";
 
 import type { RuntimeDeps } from "../src/deps.js";
-import { getPublicEventSite } from "../src/public-event-service.js";
+import { getPublicEventList, getPublicEventSite } from "../src/public-event-service.js";
 import { updateActivityPublicProfile } from "../src/public-profile-service.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
@@ -69,6 +69,7 @@ function input(activityId: string, overrides: Record<string, unknown> = {}) {
     faq: [],
     links: [],
     participantsVisible: false,
+    listedPublicly: false,
     ...overrides,
   };
 }
@@ -147,6 +148,22 @@ describe.skipIf(!connectionString)("public event site read model", () => {
     expect(site?.profile.faq).toEqual([{ question: "问", answer: "答" }]);
     expect(site?.profile.links).toEqual([{ label: "官网", url: "https://example.com" }]);
     expect(site?.participants).toEqual([{ name: "林晓", program: "《后来》" }]);
+  });
+
+  it("lists only opted-in active and closed events", async () => {
+    const active = await seed("active");
+    await updateActivityPublicProfile(db, deps(), input(active.id, { listedPublicly: true }));
+    const closed = await seed("closed");
+    await updateActivityPublicProfile(db, deps(), input(closed.id, { listedPublicly: true }));
+    const draft = await seed("draft");
+    await updateActivityPublicProfile(db, deps(), input(draft.id, { listedPublicly: true }));
+    const hidden = await seed("active");
+    await updateActivityPublicProfile(db, deps(), input(hidden.id, { listedPublicly: false }));
+
+    const codes = (await getPublicEventList(db)).map((event) => event.publicCode);
+    expect(codes).toEqual(expect.arrayContaining([active.publicCode, closed.publicCode]));
+    expect(codes).not.toContain(draft.publicCode);
+    expect(codes).not.toContain(hidden.publicCode);
   });
 
   it("returns default profile and null sections when nothing is published", async () => {

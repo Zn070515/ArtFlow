@@ -27,6 +27,7 @@ export interface PublicProfileDraft {
     readonly url: string;
   }[];
   readonly participantsVisible: boolean;
+  readonly listedPublicly: boolean;
 }
 
 function toLocalInput(value: string): string {
@@ -60,6 +61,7 @@ export function toDraft(profile: StudioPublicProfile): PublicProfileDraft {
     faq: profile.faq ?? [],
     links: profile.links ?? [],
     participantsVisible: profile.participantsVisible === true,
+    listedPublicly: profile.listedPublicly === true,
   };
 }
 
@@ -135,6 +137,15 @@ export function PublicProfileEditor({
           onChange={(event) => onChange({ ...draft, participantsVisible: event.target.checked })}
         />
         公开参与者目录
+      </label>
+      <label className="inline-check">
+        <input
+          type="checkbox"
+          checked={draft.listedPublicly}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...draft, listedPublicly: event.target.checked })}
+        />
+        列入公开活动目录
       </label>
 
       <section className="editor-list" aria-labelledby="profile-announcements-title">

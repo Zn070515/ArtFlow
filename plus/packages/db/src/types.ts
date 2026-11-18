@@ -45,6 +45,7 @@ export interface ActivityPublicProfileRow {
   faq: ColumnType<unknown, string, string>;
   links: ColumnType<unknown, string, string>;
   participants_visible: ColumnType<boolean, boolean | undefined, boolean>;
+  listed_publicly: ColumnType<boolean, boolean | undefined, boolean>;
 }
 
 export interface AdvancementDecisionRow {

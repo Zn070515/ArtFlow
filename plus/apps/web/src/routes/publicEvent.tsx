@@ -8,6 +8,7 @@ import { fetchPublicCurrent, fetchPublicVoteEntry } from "../api/tickets-public.
 import { AnnouncementBanner } from "../components/portal/AnnouncementBanner.js";
 import { EventAbout } from "../components/portal/EventAbout.js";
 import {
+  CalendarButton,
   EventAnnouncements,
   EventFaq,
   EventLinks,
@@ -20,6 +21,28 @@ import { NowNextCard } from "../components/portal/NowNextCard.js";
 import { OnsiteActions } from "../components/portal/OnsiteActionPanel.js";
 import { deriveOnsiteActions, matchCurrentProgramOrder } from "../components/portal/onsiteActions.js";
 import { useOnlineStatus } from "../hooks/useOnlineStatus.js";
+
+function setHeadMeta(key: string, content: string): void {
+  const isProperty = key.startsWith("og:");
+  const selector = isProperty ? `meta[property="${key}"]` : `meta[name="${key}"]`;
+  let element = document.head.querySelector<HTMLMetaElement>(selector);
+  if (element === null) {
+    element = document.createElement("meta");
+    element.setAttribute(isProperty ? "property" : "name", key);
+    document.head.appendChild(element);
+  }
+  element.setAttribute("content", content);
+}
+
+function setCanonical(url: string): void {
+  let link = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+  if (link === null) {
+    link = document.createElement("link");
+    link.setAttribute("rel", "canonical");
+    document.head.appendChild(link);
+  }
+  link.setAttribute("href", url);
+}
 
 export function PublicEventPage() {
   const { publicCode } = useParams({ from: "/e/$publicCode" });
@@ -57,14 +80,19 @@ export function PublicEventPage() {
     document.title =
       siteQuery.data === undefined ? `活动 · ${publicCode}` : `${siteQuery.data.activity.title} · 活动主页`;
     if (siteQuery.data === undefined) return;
-    const meta = document.querySelector('meta[name="description"]')
-      ?? (() => {
-        const element = document.createElement("meta");
-        element.setAttribute("name", "description");
-        document.head.appendChild(element);
-        return element;
-      })();
-    meta.setAttribute("content", siteQuery.data.profile.description.slice(0, 160));
+    const site = siteQuery.data;
+    const description = site.profile.description.slice(0, 160) || site.profile.tagline;
+    setHeadMeta("description", description);
+    const url = new URL(
+      `/e/${encodeURIComponent(site.activity.publicCode)}`,
+      window.location.origin,
+    ).toString();
+    setHeadMeta("og:title", `${site.activity.title} · ArtFlow`);
+    setHeadMeta("og:description", description);
+    setHeadMeta("og:type", "website");
+    setHeadMeta("og:url", url);
+    setHeadMeta("twitter:card", "summary");
+    setCanonical(url);
   }, [publicCode, siteQuery.data]);
 
   if (siteQuery.isPending) return <p className="event-state">正在加载活动…</p>;
@@ -207,6 +235,7 @@ export function PublicEventPage() {
         <span>{site.profile.organizer || "主办方"}</span>
         {site.profile.contact === "" ? null : <span>{site.profile.contact}</span>}
         <span>公开码 {site.activity.publicCode}</span>
+        <CalendarButton site={site} />
       </footer>
     </article>
   );

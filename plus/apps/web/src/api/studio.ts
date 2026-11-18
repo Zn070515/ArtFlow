@@ -69,6 +69,7 @@ export interface StudioPublicProfile {
     readonly url: string;
   }[];
   readonly participantsVisible: boolean;
+  readonly listedPublicly: boolean;
   readonly revision: number;
   readonly updatedBy: string;
   readonly updatedAt: string;
@@ -258,6 +259,7 @@ export function savePublicProfile(
       readonly url: string;
     }[];
     readonly participantsVisible: boolean;
+    readonly listedPublicly: boolean;
   },
 ): Promise<StudioPublicProfile> {
   return apiFetch<StudioPublicProfile>(`/api/activities/${activityId}/public-profile`, {

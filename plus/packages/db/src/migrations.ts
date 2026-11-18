@@ -34,6 +34,7 @@ import { migration as m0030_activity_public_profile } from "./migrations/0030_ac
 import { migration as m0031_schedule_entry_starts_at } from "./migrations/0031_schedule_entry_starts_at.js";
 import { migration as m0032_participant_notification_read } from "./migrations/0032_participant_notification_read.js";
 import { migration as m0033_public_profile_content } from "./migrations/0033_public_profile_content.js";
+import { migration as m0034_public_event_listing } from "./migrations/0034_public_event_listing.js";
 
 import type { Database } from "./types.js";
 
@@ -71,6 +72,7 @@ const migrations: Record<string, Migration> = {
   "0031_schedule_entry_starts_at": m0031_schedule_entry_starts_at,
   "0032_participant_notification_read": m0032_participant_notification_read,
   "0033_public_profile_content": m0033_public_profile_content,
+  "0034_public_event_listing": m0034_public_event_listing,
 };
 
 class StaticMigrationProvider implements MigrationProvider {
