@@ -15,6 +15,7 @@ import { createActivityRealtimeTopic, createVotingRealtimeTopic } from "./realti
 import type { ApiContext, ReadAccess } from "./http/context.js";
 import { bearerToken, cookieValue, errorCode, errorDetails, publicErrorMessage } from "./http/helpers.js";
 import { registerActivityRoutes } from "./routes/activity.js";
+import { registerOperationsRoutes } from "./routes/operations.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAdminRoutes } from "./routes/admin.js";
@@ -493,6 +494,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerAuthRoutes(routeContext);
   registerAdminRoutes(routeContext);
   registerActivityRoutes(routeContext);
+  registerOperationsRoutes(routeContext);
   registerTasksRoutes(routeContext);
   registerAttendanceRoutes(routeContext);
   registerRegistrationRoutes(routeContext);

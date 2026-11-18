@@ -10,6 +10,7 @@ export * from "./publishing.js";
 export * from "./archive.js";
 export * from "./registration.js";
 export * from "./analytics.js";
+export * from "./operations-risk.js";
 export * from "./packs.js";
 export * from "./journeys.js";
 export * from "./tasks.js";
