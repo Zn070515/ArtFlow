@@ -484,6 +484,32 @@
   font-size: 0.8rem;
 }
 
+.ops-feedback-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-feedback-list li {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.ops-feedback-list__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--bone-subtle);
+  font-size: 0.8rem;
+}
+
+.ops-feedback-list p {
+  margin: 6px 0 0;
+  white-space: pre-line;
+}
+
 @media (max-width: 900px) {
   .ops-grid {
     grid-template-columns: 1fr;

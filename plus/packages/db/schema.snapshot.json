@@ -125,6 +125,53 @@
       ]
     },
     {
+      "name": "activity_feedback",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "rating",
+          "dataType": "integer",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "comment",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "source",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'public'::character varying",
+          "identity": false
+        },
+        {
+          "name": "submitted_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "activity_public_profile",
       "columns": [
         {

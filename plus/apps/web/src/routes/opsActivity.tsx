@@ -19,6 +19,7 @@ import { ArchiveCard } from "../components/ops/ArchiveCard.js";
 import { DiagnosticsCard } from "../components/ops/DiagnosticsCard.js";
 import { ExportCard } from "../components/ops/ExportCard.js";
 import { TicketsCard } from "../components/ops/TicketsCard.js";
+import { FeedbackCard } from "../components/ops/FeedbackCard.js";
 import { Card } from "../components/ui/Card.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
@@ -179,6 +180,7 @@ function OpsActivityContent() {
             canManage={can(session?.actor.permissions, "tasks.manage")}
           />
         ) : null}
+        <FeedbackCard activityId={activityId} />
         <div id="archive">
           <ArchiveCard
             activityId={activityId}

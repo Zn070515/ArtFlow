@@ -28,6 +28,15 @@ export interface ActivityRow {
   judge_entry_version: ColumnType<number, number | undefined, number | undefined>;
 }
 
+export interface ActivityFeedbackRow {
+  id: string;
+  activity_id: string;
+  rating: number;
+  comment: ColumnType<string, string | undefined, string>;
+  source: ColumnType<string, string | undefined, string>;
+  submitted_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface ActivityPublicProfileRow {
   activity_id: string;
   tagline: ColumnType<string, string | undefined, string>;
@@ -782,6 +791,7 @@ export interface VoteSessionRow {
 export interface Database {
   account_invite: AccountInviteRow;
   activity: ActivityRow;
+  activity_feedback: ActivityFeedbackRow;
   activity_public_profile: ActivityPublicProfileRow;
   advancement_decision: AdvancementDecisionRow;
   archive_package: ArchivePackageRow;

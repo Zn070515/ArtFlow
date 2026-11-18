@@ -44,6 +44,7 @@ vi.mock("../components/ops/RegistrationTable.js", () => ({
 }));
 vi.mock("../components/ops/RosterCard.js", () => ({ RosterCard: () => <section>名单</section> }));
 vi.mock("../components/ops/VotingCard.js", () => ({ VotingCard: () => null }));
+vi.mock("../components/ops/FeedbackCard.js", () => ({ FeedbackCard: () => null }));
 vi.mock("../components/ops/ActivityAnalyticsCard.js", () => ({ ActivityAnalyticsCard: () => <section>运营分析</section> }));
 vi.mock("../components/ops/TasksCard.js", () => ({
   TasksCard: ({ canManage }: { readonly canManage: boolean }) => (
