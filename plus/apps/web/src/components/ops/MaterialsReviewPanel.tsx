@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import type { RegistrationDetail, RegistrationMaterial } from "../../api/registrations.js";
 import { reviewMaterial } from "../../api/registrations.js";
+import { MaterialPreview } from "../materials/MaterialPreview.js";
 import { Badge, type BadgeTone } from "../ui/Badge.js";
 import { apiErrorText } from "../ui/apiError.js";
 import { Button } from "../ui/Button.js";
@@ -62,6 +63,14 @@ export function MaterialsReviewPanel({
             {material.originalName} ·{" "}
             {detail.questionnaire.questions.find((question) => question.key === material.questionKey)?.label ?? "材料"}
             {material.contentReady ? null : <span className="ui-field__error"> · 字节未保存，不能通过</span>}
+            {material.contentReady ? (
+              <MaterialPreview
+                src={`/api/activities/${encodeURIComponent(detail.activity.id)}/materials/${encodeURIComponent(material.id)}/content`}
+                contentType={material.contentType}
+                name={material.originalName}
+                compact
+              />
+            ) : null}
             {canManage ? (
               <div className="task-actions">
                 <Button

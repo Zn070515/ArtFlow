@@ -1,4 +1,5 @@
 import type { MyEvent } from "../../api/me.js";
+import { MaterialPreview } from "../materials/MaterialPreview.js";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -32,9 +33,17 @@ export function MeMaterialList({ event }: { readonly event: MyEvent }) {
               {material.contentPath === null ? (
                 <span className="ui-card__description">由主办方上传</span>
               ) : (
-                <a className="ui-button ui-button--secondary ui-button--sm" href={material.contentPath}>
-                  下载
-                </a>
+                <div className="material-preview-actions">
+                  <MaterialPreview
+                    src={material.contentPath}
+                    contentType={material.contentType}
+                    name={material.originalName}
+                    compact
+                  />
+                  <a className="ui-button ui-button--secondary ui-button--sm" href={material.contentPath}>
+                    下载
+                  </a>
+                </div>
               )}
             </li>
           ))}

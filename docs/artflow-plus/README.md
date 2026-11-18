@@ -96,6 +96,8 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
   [ADR-0044](../architecture/adr/0044-ha-identity-and-recovery.md)。
 - 现场展示：`/screen/<publicCode>` 大屏、`/host-card/<publicCode>` 主持手卡、
   `/print/<publicCode>` 二维码打印包；Ops 增加「现场展示」卡片。
+- 材料预览：图片/音频/视频通过受控内容路由内联展示，文档回退下载；参与者、
+  Ops 报名详情与审核面板均已接入。
 
 ## 文档与规划基线
 
