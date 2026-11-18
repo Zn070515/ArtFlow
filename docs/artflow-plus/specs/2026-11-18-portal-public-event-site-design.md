@@ -426,7 +426,7 @@ Console 壳，权限 `studio.manage`：
 - Studio E2E 覆盖定义/发布，不覆盖公开资料编辑；
 - 现有 API 测试没有 `/api/public/events`。
 
-### 9.7 防膨胀决定
+### 9.7 防膨胀 / anti-bloat 决定
 
 - 扩展 `schedule-service.test.ts`，不新建 schedule 测试套件；
 - 新增一个聚焦的 `ScheduleCard.test.tsx`（当前只有 `schedule.spec.ts` E2E 覆盖），只覆盖 `startsAt`

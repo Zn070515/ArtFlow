@@ -60,7 +60,14 @@ pnpm run test
 
 ## Test architecture
 
-按 spec §9 执行，不在计划里重复整段。映射：
+本节按 spec §9 的同一套要求执行：**契约**（engine command `activity.public_profile.update` 与
+`schedule.entry.upsert` 的可选字段，不新增 capability）；**消费者**（Studio 编辑器、Ops 排期、
+Portal 活动站、公开 results/program/schedule 读模型）；**生命周期**（`draft → active → closed →
+archived`，公开读只接受 `active|closed`，`unarchive` 回到 `closed` 后恢复，测试/彩排不公开）；
+**适配器**（不新增 capability adapter，使用真实 PostgreSQL 与真实命令路径，扩展既有 runtime 测试）；
+**故障**（事件写入失败回滚、并发首次保存、重复命令、最新节目单撤销 fail-closed、归档后内部可见）；
+**防膨胀 / anti-bloat**（扩展既有 schedule/archive 测试，不复制模板；只新增一条公开页 E2E 旅程）；
+**门禁**（下列命令）。映射：
 
 | Spec 要求 | 覆盖任务 |
 | --- | --- |
