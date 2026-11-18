@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { Fragment } from "react";
 
 import { fetchLiveState } from "../api/live.js";
 import { RequireSession } from "../auth/RequireSession.js";
@@ -13,6 +12,7 @@ import {
   hasLiveAccess,
   useSession,
 } from "../auth/SessionProvider.js";
+import { LiveCommandBar } from "../components/live/LiveCommandBar.js";
 import { LiveExceptionPanel } from "../components/live/LiveExceptionPanel.js";
 import { LiveRoundPanel } from "../components/live/LiveRoundPanel.js";
 import { LiveTieAdvancementPanel } from "../components/live/LiveTieAdvancementPanel.js";
@@ -88,6 +88,10 @@ function LiveActivityContent() {
   const canManageSetup = canManageCompetitionSetup(session);
   const canResolve = canResolveCompetition(session);
   const canManageSession = canManageLiveSession(session);
+  const canManageResults = session !== null &&
+    (session.actor.permissions.includes("*") ||
+      session.actor.permissions.includes("result.manage") ||
+      session.actor.roles.includes("admin"));
   const hasTicketing = state.activity.enabledCapabilities.includes("ticketing");
 
   return (
@@ -108,10 +112,19 @@ function LiveActivityContent() {
           )}
         </div>
       </header>
+      {state.config.rounds.length > 0 ? (
+        <LiveCommandBar
+          state={state}
+          canManageSession={canManageSession}
+          canManageSetup={canManageSetup}
+          canManageCompetition={canManageCompetition(session)}
+          canManageResults={canManageResults}
+        />
+      ) : null}
       <div className="live-workspace">
         <div className="live-main-column live-rounds">
           {state.rounds.map((live) => (
-            <Fragment key={live.config.key}>
+            <div id={`round-${live.config.key}`} key={live.config.key}>
               <LiveRoundPanel
                 state={state}
                 live={live}
@@ -123,23 +136,27 @@ function LiveActivityContent() {
               />
               {canManageCompetition(session) ? (
                 <>
-                  <LiveExceptionPanel
-                    activityId={activityId}
-                    live={live}
-                    state={state}
-                    canManageSetup={canManageSetup}
-                    onChanged={refresh}
-                  />
-                  <LiveTieAdvancementPanel
-                    activityId={activityId}
-                    live={live}
-                    state={state}
-                    onChanged={refresh}
-                  />
+                  <div id={`live-exception-${live.config.key}`}>
+                    <LiveExceptionPanel
+                      activityId={activityId}
+                      live={live}
+                      state={state}
+                      canManageSetup={canManageSetup}
+                      onChanged={refresh}
+                    />
+                  </div>
+                  <div id={`live-tie-${live.config.key}`}>
+                    <LiveTieAdvancementPanel
+                      activityId={activityId}
+                      live={live}
+                      state={state}
+                      onChanged={refresh}
+                    />
+                  </div>
                   <LiveStaffScorePanel state={state} live={live} onChanged={refresh} />
                 </>
               ) : null}
-            </Fragment>
+            </div>
           ))}
         </div>
         <aside className="live-control-rail">
@@ -157,11 +174,10 @@ function LiveActivityContent() {
               rehearsal={state.session?.mode === "rehearsal"}
             />
           ) : null}
-          {session !== null &&
-          (session.actor.permissions.includes("*") ||
-            session.actor.permissions.includes("result.manage") ||
-            session.actor.roles.includes("admin")) ? (
-            <ResultActions activityId={activityId} state={state} onChanged={refresh} />
+          {canManageResults ? (
+            <div id="live-result">
+              <ResultActions activityId={activityId} state={state} onChanged={refresh} />
+            </div>
           ) : null}
           <Card className="live-roster-card">
             <h2 className="ui-card__title">最终名单</h2>

@@ -100,7 +100,7 @@ export function LiveSessionPanel({
   }
 
   return (
-    <Card className="live-control-card" data-testid="live-session-panel">
+    <Card className="live-control-card" data-testid="live-session-panel" id="live-session">
       <h2 className="ui-card__title">评分会话</h2>
       {session === null ? (
         <div className="session-controls">

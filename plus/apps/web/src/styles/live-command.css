@@ -1,0 +1,111 @@
+.live-command {
+  margin-bottom: 20px;
+}
+
+.live-command__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.live-command__badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.live-command__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.live-command__block {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.live-command__label {
+  color: var(--bone-subtle);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.live-command__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--bone-dim);
+  font-size: 0.85rem;
+}
+
+.live-command__progress progress {
+  width: 120px;
+  height: 8px;
+}
+
+.live-command__detail {
+  color: var(--bone-subtle);
+  font-size: 0.8rem;
+}
+
+.live-command__rounds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.live-command__round {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--bone-dim);
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.live-command__round.is-focus {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.live-command__round.is-hold {
+  border-color: var(--ember);
+  color: var(--ember);
+}
+
+.live-command__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.live-command a.ui-button {
+  min-height: 44px;
+}
+
+#live-session,
+#live-result,
+[id^="live-tie-"],
+[id^="live-exception-"],
+[id^="round-"] {
+  scroll-margin-top: 24px;
+}
+
+@media (max-width: 900px) {
+  .live-command__grid {
+    grid-template-columns: 1fr;
+  }
+}
