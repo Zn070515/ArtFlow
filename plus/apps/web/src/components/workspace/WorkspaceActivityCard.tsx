@@ -124,6 +124,13 @@ export function WorkspaceActivityCard({
             </Link>
           )}
           <Link
+            className="ui-button ui-button--ghost ui-button--sm"
+            to="/studio/$activityId/public"
+            params={{ activityId: activity.id }}
+          >
+            公开主页
+          </Link>
+          <Link
             className="ui-button ui-button--secondary ui-button--md"
             to="/workspace/$activityId"
             params={{ activityId: activity.id }}

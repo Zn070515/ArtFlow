@@ -14,8 +14,10 @@ export function PortalShell({ children }: { readonly children: ReactNode }) {
   useEffect(() => {
     void loadPortalFonts();
   }, []);
+  const isEventPage = pathname.startsWith("/e/");
+  const subtitle = isEventPage ? "活动主页" : "赛果公示";
   const showAurora = pathname === "/" || pathname === "/results" || pathname.startsWith("/results/");
-  const showStaticBackdrop = pathname.startsWith("/vote/");
+  const showStaticBackdrop = pathname.startsWith("/vote/") || isEventPage;
 
   return (
     <div className="app-shell" data-shell="portal" data-theme="afterglow">
@@ -23,13 +25,13 @@ export function PortalShell({ children }: { readonly children: ReactNode }) {
         <AuroraScene reducedMotion={reducedMotion || showStaticBackdrop} />
       ) : null}
       <header className="site-header">
-        <Link to="/" className="brand" aria-label="ArtFlow 赛果公示首页">
+        <Link to="/" className="brand" aria-label="ArtFlow 首页">
           <span className="brand-mark" aria-hidden="true">
             AF
           </span>
           <span className="brand-text">
             ARTFLOW
-            <small>赛果公示</small>
+            <small>{subtitle}</small>
           </span>
         </Link>
         <nav className="nav-links" aria-label="主导航">

@@ -46,6 +46,20 @@ const state: StudioState = {
   compiled: null,
   releases: [],
   sessions: [],
+  publicProfile: {
+    activityId: "activity-1",
+    tagline: "",
+    description: "",
+    venue: "",
+    startsAt: null,
+    endsAt: null,
+    organizer: "",
+    contact: "",
+    announcement: "",
+    revision: 0,
+    updatedBy: "",
+    updatedAt: "",
+  },
 };
 
 describe("DefinitionEditor Professional Mode", () => {
