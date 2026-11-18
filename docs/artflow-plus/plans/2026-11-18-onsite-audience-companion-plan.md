@@ -25,7 +25,7 @@
 - `plus/apps/web/src/components/portal/onsiteActions.test.ts`：纯函数矩阵测试。
 - `plus/apps/web/src/components/portal/NowNextCard.tsx`：现在/下一个卡片。
 - `plus/apps/web/src/components/portal/NowNextCard.test.tsx`。
-- `plus/apps/web/src/components/portal/OnsiteActions.tsx`：主行动与次级入口。
+- `plus/apps/web/src/components/portal/OnsiteActionPanel.tsx`：主行动与次级入口。
 - `plus/apps/web/src/components/portal/AnnouncementBanner.tsx`：可关闭公告。
 - `plus/apps/web/src/components/portal/AnnouncementBanner.test.tsx`。
 - `plus/apps/web/src/components/portal/EventProgram.test.tsx`。
@@ -573,7 +573,7 @@ git commit -m "feat(portal): show vote candidate names"
 **Files:**
 - Create: `plus/apps/web/src/components/portal/NowNextCard.tsx`
 - Create: `plus/apps/web/src/components/portal/NowNextCard.test.tsx`
-- Create: `plus/apps/web/src/components/portal/OnsiteActions.tsx`
+- Create: `plus/apps/web/src/components/portal/OnsiteActionPanel.tsx`
 - Create: `plus/apps/web/src/components/portal/AnnouncementBanner.tsx`
 - Create: `plus/apps/web/src/components/portal/AnnouncementBanner.test.tsx`
 - Modify: `plus/apps/web/src/styles/portal-event.css`
@@ -803,7 +803,7 @@ export function AnnouncementBanner({ publicCode, announcement }: AnnouncementBan
 
 - [ ] **Step 8: 实现行动卡**
 
-创建 `plus/apps/web/src/components/portal/OnsiteActions.tsx`：
+创建 `plus/apps/web/src/components/portal/OnsiteActionPanel.tsx`：
 
 ```tsx
 import { Link } from "@tanstack/react-router";
@@ -992,7 +992,7 @@ Expected: PASS。
 - [ ] **Step 11: 提交**
 
 ```bash
-git add plus/apps/web/src/components/portal/NowNextCard.tsx plus/apps/web/src/components/portal/NowNextCard.test.tsx plus/apps/web/src/components/portal/OnsiteActions.tsx plus/apps/web/src/components/portal/AnnouncementBanner.tsx plus/apps/web/src/components/portal/AnnouncementBanner.test.tsx plus/apps/web/src/styles/portal-event.css
+git add plus/apps/web/src/components/portal/NowNextCard.tsx plus/apps/web/src/components/portal/NowNextCard.test.tsx plus/apps/web/src/components/portal/OnsiteActionPanel.tsx plus/apps/web/src/components/portal/AnnouncementBanner.tsx plus/apps/web/src/components/portal/AnnouncementBanner.test.tsx plus/apps/web/src/styles/portal-event.css
 git commit -m "feat(portal): add the on-site now card, actions and announcement"
 ```
 
@@ -1540,7 +1540,7 @@ import { EventHero } from "../components/portal/EventHero.js";
 import { EventProgram } from "../components/portal/EventProgram.js";
 import { EventResults } from "../components/portal/EventResults.js";
 import { NowNextCard } from "../components/portal/NowNextCard.js";
-import { OnsiteActions } from "../components/portal/OnsiteActions.js";
+import { OnsiteActions } from "../components/portal/OnsiteActionPanel.js";
 import { deriveOnsiteActions, matchCurrentProgramOrder } from "../components/portal/onsiteActions.js";
 import { useOnlineStatus } from "../hooks/useOnlineStatus.js";
 

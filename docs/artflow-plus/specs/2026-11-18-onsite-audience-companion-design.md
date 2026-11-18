@@ -113,7 +113,8 @@ active + confirmed + source 非空 + 非 stale 快照。现场状态不能替代
 
 - `NowNextCard.tsx`：`NOW 03 / 12`、姓名、曲目、下一个 1–2 位、最近更新时间、
   手动刷新；`aria-live="polite"` 只在当前节目变化时播报。
-- `OnsiteActions.tsx`：主按钮（投票/赛果/报名）与次级链接（节目单/分享/二维码）。
+- `OnsiteActionPanel.tsx`：主按钮（投票/赛果/报名）与次级链接（节目单/分享/二维码）。
+  文件名不能叫 `OnsiteActions.tsx`：在 Windows 上会与纯函数 `onsiteActions.ts` 大小写撞名。
 - `AnnouncementBanner.tsx`：可关闭，`role="note"`。
 - `onsiteActions.ts`：纯函数 `deriveOnsiteActions()`、`matchCurrentProgram()`、
   `displayCandidateName()`、`looksOpaqueId()`。
