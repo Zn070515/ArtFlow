@@ -83,8 +83,8 @@ jobs:
               # not recognize the project's custom limiter.
               "js/missing-rate-limiting:plus/apps/api/src/routes/auth.ts:27",
               "js/missing-rate-limiting:plus/apps/api/src/routes/auth.ts:48",
-              "js/missing-rate-limiting:plus/apps/api/src/routes/public.ts:39",
-              "js/missing-rate-limiting:plus/apps/api/src/routes/public.ts:172",
+              "js/missing-rate-limiting:plus/apps/api/src/routes/public.ts:54",
+              "js/missing-rate-limiting:plus/apps/api/src/routes/public.ts:187",
               # boundedTimer clamps every heartbeat value to 1s-120s.
               "js/resource-exhaustion:plus/packages/realtime/src/client/client.ts:100",
               "js/resource-exhaustion:plus/packages/realtime/src/client/client.ts:101",
