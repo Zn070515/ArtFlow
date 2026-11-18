@@ -135,6 +135,7 @@ describe.skipIf(!connectionString)("schedule service", () => {
     });
     expect(release.body.version).toBe(1);
     expect(release.body.snapshot.entries[0]).toMatchObject({
+      entryId: add.body.entry.id,
       order: 1,
       slotKey: "opening",
       slotLabel: "开场",
@@ -397,6 +398,7 @@ describe.skipIf(!connectionString)("schedule service", () => {
     const activity = await db.selectFrom("activity").select("public_code")
       .where("id", "=", activityId).executeTakeFirstOrThrow();
     expect((await getPublicSchedule(db, activity.public_code))?.entries[0]?.startsAt).toBeNull();
+    expect((await getPublicSchedule(db, activity.public_code))?.entries[0]?.entryId).toBeNull();
   });
 
   it("fails the public program closed when the newest release is revoked", async () => {
