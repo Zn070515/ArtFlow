@@ -2548,6 +2548,32 @@
       ]
     },
     {
+      "name": "participant_notification_read",
+      "columns": [
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "notification_key",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "read_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "performance",
       "columns": [
         {
