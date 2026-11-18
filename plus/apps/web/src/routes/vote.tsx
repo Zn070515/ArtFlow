@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/client.js";
 import { ensureBrowserIdentity, fetchPublicVote, redeemTicket, submitVote } from "../api/vote.js";
+import { displayCandidateName } from "../components/portal/onsiteActions.js";
 import { Button } from "../components/ui/Button.js";
 import { Input } from "../components/ui/Input.js";
 
@@ -181,7 +182,7 @@ export function VotePage() {
             <div className="vote-workspace">
               <div className="vote-selection">
                 <ul className="vote-candidates">
-                  {session.candidates.map((candidate) => (
+                  {session.candidates.map((candidate, index) => (
                     <li key={candidate.optionId}>
                       <label className="vote-candidate">
                         <input
@@ -190,7 +191,7 @@ export function VotePage() {
                           checked={selected.includes(candidate.optionId)}
                           onChange={() => toggle(candidate.optionId)}
                         />
-                        <span>{candidate.candidateId}</span>
+                        <span>{displayCandidateName(candidate, index + 1)}</span>
                       </label>
                     </li>
                   ))}
