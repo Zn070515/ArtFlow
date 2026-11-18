@@ -1,4 +1,9 @@
-import type { Database } from "@artflow-plus/db";
+import type {
+  Database,
+  PublicAnnouncement,
+  PublicFaqItem,
+  PublicLink,
+} from "@artflow-plus/db";
 import {
   getActivityPublicProfile,
   selectPublicResults,
@@ -7,7 +12,9 @@ import type { Kysely } from "kysely";
 
 import {
   getPublicActivity,
+  getPublicParticipants,
   getPublicProgram,
+  type PublicParticipant,
 } from "./registration-read-service.js";
 import { getPublicSchedule } from "./schedule-service.js";
 
@@ -28,7 +35,11 @@ export interface PublicEventSite {
     readonly organizer: string;
     readonly contact: string;
     readonly announcement: string;
+    readonly announcements: readonly PublicAnnouncement[];
+    readonly faq: readonly PublicFaqItem[];
+    readonly links: readonly PublicLink[];
   };
+  readonly participants: readonly PublicParticipant[] | null;
   readonly schedule: {
     readonly entries: readonly {
       readonly order: number;
@@ -83,6 +94,9 @@ export async function getPublicEventSite(
     getPublicProgram(db, publicCode),
     selectPublicResults(db, publicCode),
   ]);
+  const participants = profile.participantsVisible
+    ? await getPublicParticipants(db, publicCode)
+    : null;
   return {
     activity: {
       publicCode: activity.publicCode,
@@ -100,7 +114,11 @@ export async function getPublicEventSite(
       organizer: profile.organizer,
       contact: profile.contact,
       announcement: profile.announcement,
+      announcements: profile.announcements,
+      faq: profile.faq,
+      links: profile.links,
     },
+    participants,
     schedule: schedule === null
       ? null
       : {

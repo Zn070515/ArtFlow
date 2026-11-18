@@ -6,6 +6,10 @@ test("on-site audience sees now/next, the announcement and named vote candidates
   await expect(page.getByText("周然").first()).toBeVisible();
   await expect(page.getByText("下一个：陈默")).toBeVisible();
   await expect(page.getByText("第 8 位选手请到后台候场")).toBeVisible();
+  await expect(page.getByText("开场提醒")).toBeVisible();
+  await expect(page.getByText("在哪里入场？")).toBeVisible();
+  await expect(page.getByRole("link", { name: "节目册" })).toBeVisible();
+  await expect(page.locator(".event-participants")).toContainText("林晓");
   await expect(page.getByRole("link", { name: /投票进行中/ })).toBeVisible();
 
   await page.getByRole("link", { name: /投票进行中/ }).click();

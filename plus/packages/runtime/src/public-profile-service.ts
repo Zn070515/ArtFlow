@@ -2,6 +2,9 @@ import type { Database } from "@artflow-plus/db";
 import {
   getActivityForUpdate,
   upsertActivityPublicProfile,
+  type PublicAnnouncement,
+  type PublicFaqItem,
+  type PublicLink,
   type StoredActivityPublicProfile,
 } from "@artflow-plus/db";
 import { DomainError, requirePermission } from "@artflow-plus/domain";
@@ -23,6 +26,10 @@ export interface UpdatePublicProfileInput {
   readonly organizer: string;
   readonly contact: string;
   readonly announcement: string;
+  readonly announcements: readonly PublicAnnouncement[];
+  readonly faq: readonly PublicFaqItem[];
+  readonly links: readonly PublicLink[];
+  readonly participantsVisible: boolean;
 }
 
 function requireText(value: string, field: string, max: number): string {
@@ -40,6 +47,83 @@ function requireInstant(value: string | null, field: string): string | null {
     throw new DomainError("INVALID_INPUT", `${field} must be an ISO timestamp.`);
   }
   return new Date(parsed).toISOString();
+}
+
+function requireRequired(value: string, field: string, max: number): string {
+  const trimmed = requireText(value, field, max);
+  if (trimmed === "") {
+    throw new DomainError("INVALID_INPUT", `${field} is required.`);
+  }
+  return trimmed;
+}
+
+function requireAnnouncements(
+  items: readonly PublicAnnouncement[],
+): readonly PublicAnnouncement[] {
+  if (items.length > 20) {
+    throw new DomainError("INVALID_INPUT", "announcements must have at most 20 items.");
+  }
+  const seen = new Set<string>();
+  const result: PublicAnnouncement[] = [];
+  for (const [index, item] of items.entries()) {
+    const title = requireText(item.title, `announcements[${index}].title`, 120);
+    const body = requireText(item.body, `announcements[${index}].body`, 1000);
+    if (title === "" && body === "") continue;
+    const id = requireRequired(item.id, `announcements[${index}].id`, 100);
+    if (seen.has(id)) {
+      throw new DomainError("INVALID_INPUT", "Announcement ids must be unique.");
+    }
+    seen.add(id);
+    const publishedAt = requireInstant(item.publishedAt, `announcements[${index}].publishedAt`);
+    if (publishedAt === null) {
+      throw new DomainError("INVALID_INPUT", `announcements[${index}].publishedAt is required.`);
+    }
+    result.push({ id, title, body, publishedAt });
+  }
+  return result;
+}
+
+function requireFaq(items: readonly PublicFaqItem[]): readonly PublicFaqItem[] {
+  if (items.length > 20) {
+    throw new DomainError("INVALID_INPUT", "faq must have at most 20 items.");
+  }
+  const result: PublicFaqItem[] = [];
+  for (const [index, item] of items.entries()) {
+    const question = requireText(item.question, `faq[${index}].question`, 200);
+    const answer = requireText(item.answer, `faq[${index}].answer`, 1000);
+    if (question === "" && answer === "") continue;
+    if (question === "" || answer === "") {
+      throw new DomainError("INVALID_INPUT", `faq[${index}] needs both question and answer.`);
+    }
+    result.push({ question, answer });
+  }
+  return result;
+}
+
+function requireLinks(items: readonly PublicLink[]): readonly PublicLink[] {
+  if (items.length > 10) {
+    throw new DomainError("INVALID_INPUT", "links must have at most 10 items.");
+  }
+  const result: PublicLink[] = [];
+  for (const [index, item] of items.entries()) {
+    const label = requireText(item.label, `links[${index}].label`, 80);
+    const url = requireText(item.url, `links[${index}].url`, 500);
+    if (label === "" && url === "") continue;
+    if (label === "" || url === "") {
+      throw new DomainError("INVALID_INPUT", `links[${index}] needs both label and url.`);
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new DomainError("INVALID_INPUT", `links[${index}].url must be an absolute URL.`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new DomainError("INVALID_INPUT", `links[${index}].url must use http or https.`);
+    }
+    result.push({ label, url });
+  }
+  return result;
 }
 
 export async function updateActivityPublicProfile(
@@ -66,6 +150,10 @@ export async function updateActivityPublicProfile(
         organizer: input.organizer,
         contact: input.contact,
         announcement: input.announcement,
+        announcements: input.announcements,
+        faq: input.faq,
+        links: input.links,
+        participantsVisible: input.participantsVisible,
       },
     },
     async (trx) => {
@@ -94,6 +182,10 @@ export async function updateActivityPublicProfile(
         organizer: requireText(input.organizer, "organizer", 200),
         contact: requireText(input.contact, "contact", 200),
         announcement: requireText(input.announcement, "announcement", 2000),
+        announcements: requireAnnouncements(input.announcements),
+        faq: requireFaq(input.faq),
+        links: requireLinks(input.links),
+        participantsVisible: input.participantsVisible,
         updatedBy: actor.actorId,
         updatedAt: deps.now(),
       }, input.expectedRevision);

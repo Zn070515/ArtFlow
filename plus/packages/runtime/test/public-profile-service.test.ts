@@ -71,6 +71,10 @@ function input(activityId: string, overrides: Record<string, unknown> = {}) {
     organizer: "学生会",
     contact: "联系",
     announcement: "公告",
+    announcements: [],
+    faq: [],
+    links: [],
+    participantsVisible: false,
     ...overrides,
   };
 }
@@ -98,6 +102,47 @@ describe.skipIf(!connectionString)("activity.public_profile.update", () => {
     expect(outcome.body).toMatchObject({ activityId, tagline: "春日声场", revision: 1 });
     expect((await readEventsSince(db, { activityId, after: 0, limit: 20 })).map((event) => event.type))
       .toContain("ActivityPublicProfileUpdated");
+  });
+
+  it("saves content blocks and rejects invalid shapes", async () => {
+    const activityId = await seed();
+    const saved = await updateActivityPublicProfile(db, deps(), input(activityId, {
+      announcements: [{
+        id: "a1",
+        title: "公告",
+        body: "内容",
+        publishedAt: "2026-04-01T10:00:00.000Z",
+      }],
+      faq: [{ question: "问", answer: "答" }],
+      links: [{ label: "官网", url: "https://example.com" }],
+      participantsVisible: true,
+    }));
+    expect(saved.body).toMatchObject({
+      participantsVisible: true,
+      faq: [{ question: "问", answer: "答" }],
+    });
+
+    const invalid = await seed();
+    await expect(updateActivityPublicProfile(db, deps(), input(invalid, {
+      links: [{ label: "坏", url: "javascript:alert(1)" }],
+    }))).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(updateActivityPublicProfile(db, deps(), input(invalid, {
+      faq: [{ question: "问", answer: "" }],
+    }))).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(updateActivityPublicProfile(db, deps(), input(invalid, {
+      announcements: [
+        { id: "a", title: "t", body: "b", publishedAt: "2026-04-01T10:00:00.000Z" },
+        { id: "a", title: "t", body: "b", publishedAt: "2026-04-01T10:00:00.000Z" },
+      ],
+    }))).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(updateActivityPublicProfile(db, deps(), input(invalid, {
+      announcements: Array.from({ length: 21 }, (_, index) => ({
+        id: `a${index}`,
+        title: "t",
+        body: "b",
+        publishedAt: "2026-04-01T10:00:00.000Z",
+      })),
+    }))).rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
 
   it("rejects stale revisions, invalid order, archived activities and participants", async () => {

@@ -15,7 +15,25 @@ export interface PublicEventSite {
     readonly organizer: string;
     readonly contact: string;
     readonly announcement: string;
+    readonly announcements: readonly {
+      readonly id: string;
+      readonly title: string;
+      readonly body: string;
+      readonly publishedAt: string;
+    }[];
+    readonly faq: readonly {
+      readonly question: string;
+      readonly answer: string;
+    }[];
+    readonly links: readonly {
+      readonly label: string;
+      readonly url: string;
+    }[];
   };
+  readonly participants: readonly {
+    readonly name: string;
+    readonly program: string;
+  }[] | null;
   readonly schedule: {
     readonly entries: readonly {
       readonly order: number;

@@ -74,6 +74,10 @@ describe.skipIf(!connectionString)("activity public profile repository", () => {
       organizer: "",
       contact: "",
       announcement: "",
+      announcements: [],
+      faq: [],
+      links: [],
+      participantsVisible: false,
       updatedBy: "staff",
       updatedAt: "2026-04-01T10:00:00.000Z",
     }, 0);
@@ -88,8 +92,49 @@ describe.skipIf(!connectionString)("activity public profile repository", () => {
       organizer: "",
       contact: "",
       announcement: "",
+      announcements: [],
+      faq: [],
+      links: [],
+      participantsVisible: false,
       updatedBy: "staff",
       updatedAt: "2026-04-01T10:01:00.000Z",
     }, 0)).rejects.toMatchObject({ code: "STALE_REVISION" });
+  });
+
+  it("round-trips content blocks and drops unsafe links on read", async () => {
+    const activityId = await seedActivity();
+    await upsertActivityPublicProfile(db, {
+      activityId,
+      tagline: "",
+      description: "",
+      venue: "",
+      startsAt: null,
+      endsAt: null,
+      organizer: "",
+      contact: "",
+      announcement: "",
+      announcements: [{
+        id: "a1",
+        title: "公告",
+        body: "内容",
+        publishedAt: "2026-04-01T10:00:00.000Z",
+      }],
+      faq: [{ question: "问", answer: "答" }],
+      links: [
+        { label: "官网", url: "https://example.com/info" },
+        { label: "坏链接", url: "javascript:alert(1)" },
+      ],
+      participantsVisible: true,
+      updatedBy: "staff",
+      updatedAt: "2026-04-01T10:00:00.000Z",
+    }, 0);
+
+    const found = await findActivityPublicProfile(db, activityId);
+    expect(found).toMatchObject({
+      announcements: [{ id: "a1", title: "公告", body: "内容" }],
+      faq: [{ question: "问", answer: "答" }],
+      participantsVisible: true,
+    });
+    expect(found?.links).toEqual([{ label: "官网", url: "https://example.com/info" }]);
   });
 });

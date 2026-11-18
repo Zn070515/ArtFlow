@@ -3,6 +3,23 @@ import { sql, type Kysely, type Selectable } from "kysely";
 import { StaleRevisionError } from "./activity-repository.js";
 import type { ActivityPublicProfileRow, Database } from "./types.js";
 
+export interface PublicAnnouncement {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly publishedAt: string;
+}
+
+export interface PublicFaqItem {
+  readonly question: string;
+  readonly answer: string;
+}
+
+export interface PublicLink {
+  readonly label: string;
+  readonly url: string;
+}
+
 export interface StoredActivityPublicProfile {
   readonly activityId: string;
   readonly tagline: string;
@@ -13,6 +30,10 @@ export interface StoredActivityPublicProfile {
   readonly organizer: string;
   readonly contact: string;
   readonly announcement: string;
+  readonly announcements: readonly PublicAnnouncement[];
+  readonly faq: readonly PublicFaqItem[];
+  readonly links: readonly PublicLink[];
+  readonly participantsVisible: boolean;
   readonly revision: number;
   readonly updatedBy: string;
   readonly updatedAt: string;
@@ -28,6 +49,10 @@ export interface ActivityPublicProfileInput {
   readonly organizer: string;
   readonly contact: string;
   readonly announcement: string;
+  readonly announcements: readonly PublicAnnouncement[];
+  readonly faq: readonly PublicFaqItem[];
+  readonly links: readonly PublicLink[];
+  readonly participantsVisible: boolean;
   readonly updatedBy: string;
   readonly updatedAt: string;
 }
@@ -35,6 +60,74 @@ export interface ActivityPublicProfileInput {
 function iso(value: Date | string | null): string | null {
   if (value === null) return null;
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function json(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function array(value: unknown): readonly unknown[] {
+  const parsed = json(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function parseAnnouncements(value: unknown): PublicAnnouncement[] {
+  return array(value).flatMap((item) => {
+    if (item === null || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const { id, title, body, publishedAt } = record;
+    if (
+      typeof id !== "string" || id === "" ||
+      typeof title !== "string" || title === "" ||
+      typeof body !== "string" || body === "" ||
+      typeof publishedAt !== "string" || publishedAt === ""
+    ) {
+      return [];
+    }
+    return [{ id, title, body, publishedAt }];
+  });
+}
+
+function parseFaq(value: unknown): PublicFaqItem[] {
+  return array(value).flatMap((item) => {
+    if (item === null || typeof item !== "object") return [];
+    const { question, answer } = item as Record<string, unknown>;
+    if (
+      typeof question !== "string" || question === "" ||
+      typeof answer !== "string" || answer === ""
+    ) {
+      return [];
+    }
+    return [{ question, answer }];
+  });
+}
+
+function parseLinks(value: unknown): PublicLink[] {
+  return array(value).flatMap((item) => {
+    if (item === null || typeof item !== "object") return [];
+    const { label, url } = item as Record<string, unknown>;
+    if (
+      typeof label !== "string" || label === "" ||
+      typeof url !== "string" || !isHttpUrl(url)
+    ) {
+      return [];
+    }
+    return [{ label, url }];
+  });
 }
 
 function rowToProfile(row: Selectable<ActivityPublicProfileRow>): StoredActivityPublicProfile {
@@ -48,6 +141,10 @@ function rowToProfile(row: Selectable<ActivityPublicProfileRow>): StoredActivity
     organizer: row.organizer,
     contact: row.contact,
     announcement: row.announcement,
+    announcements: parseAnnouncements(row.announcements),
+    faq: parseFaq(row.faq),
+    links: parseLinks(row.links),
+    participantsVisible: row.participants_visible === true,
     revision: row.revision,
     updatedBy: row.updated_by,
     updatedAt: iso(row.updated_at) ?? "",
@@ -80,6 +177,10 @@ export async function getActivityPublicProfile(
     organizer: "",
     contact: "",
     announcement: "",
+    announcements: [],
+    faq: [],
+    links: [],
+    participantsVisible: false,
     revision: 0,
     updatedBy: "",
     updatedAt: "",
@@ -123,6 +224,10 @@ export async function upsertActivityPublicProfile(
         organizer: input.organizer,
         contact: input.contact,
         announcement: input.announcement,
+        announcements: JSON.stringify(input.announcements),
+        faq: JSON.stringify(input.faq),
+        links: JSON.stringify(input.links),
+        participants_visible: input.participantsVisible,
         revision: 1,
         updated_by: input.updatedBy,
         updated_at: new Date(input.updatedAt),
@@ -143,6 +248,10 @@ export async function upsertActivityPublicProfile(
       organizer: input.organizer,
       contact: input.contact,
       announcement: input.announcement,
+      announcements: JSON.stringify(input.announcements),
+      faq: JSON.stringify(input.faq),
+      links: JSON.stringify(input.links),
+      participants_visible: input.participantsVisible,
       revision: sql`revision + 1`,
       updated_by: input.updatedBy,
       updated_at: new Date(input.updatedAt),

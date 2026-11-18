@@ -286,6 +286,28 @@ export async function getPublicProgram(
   };
 }
 
+export interface PublicParticipant {
+  readonly name: string;
+  readonly program: string;
+}
+
+/** Public participant directory; approved registrations only, no contact data. */
+export async function getPublicParticipants(
+  db: Kysely<Database>,
+  publicCode: string,
+): Promise<readonly PublicParticipant[] | null> {
+  const activity = await getActivityByPublicCode(db, publicCode);
+  if (activity === null || (activity.status !== "active" && activity.status !== "closed")) {
+    return null;
+  }
+  const registrations = (await listRegistrations(db, activity.id))
+    .filter((registration) => registration.status === "approved");
+  return registrations.map((registration) => ({
+    name: programAnswer(registration.answers, ["name", "displayName", "title"]) || "选手",
+    program: programAnswer(registration.answers, ["song", "program", "program_name"]),
+  }));
+}
+
 export async function getRosterForReview(
   db: Kysely<Database>,
   deps: RuntimeDeps,

@@ -194,6 +194,10 @@ describe.skipIf(!connectionString)("Studio API", () => {
         organizer: "学生会",
         contact: "联系",
         announcement: "公告",
+        announcements: [],
+        faq: [],
+        links: [],
+        participantsVisible: false,
       },
     });
     expect(updated.statusCode).toBe(200);
@@ -213,6 +217,10 @@ describe.skipIf(!connectionString)("Studio API", () => {
         organizer: "",
         contact: "",
         announcement: "",
+        announcements: [],
+        faq: [],
+        links: [],
+        participantsVisible: false,
       },
     });
     expect(forbidden.statusCode).toBe(403);

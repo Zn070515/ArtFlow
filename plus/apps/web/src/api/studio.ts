@@ -54,6 +54,21 @@ export interface StudioPublicProfile {
   readonly organizer: string;
   readonly contact: string;
   readonly announcement: string;
+  readonly announcements: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly body: string;
+    readonly publishedAt: string;
+  }[];
+  readonly faq: readonly {
+    readonly question: string;
+    readonly answer: string;
+  }[];
+  readonly links: readonly {
+    readonly label: string;
+    readonly url: string;
+  }[];
+  readonly participantsVisible: boolean;
   readonly revision: number;
   readonly updatedBy: string;
   readonly updatedAt: string;
@@ -228,6 +243,21 @@ export function savePublicProfile(
     readonly organizer: string;
     readonly contact: string;
     readonly announcement: string;
+    readonly announcements: readonly {
+      readonly id: string;
+      readonly title: string;
+      readonly body: string;
+      readonly publishedAt: string;
+    }[];
+    readonly faq: readonly {
+      readonly question: string;
+      readonly answer: string;
+    }[];
+    readonly links: readonly {
+      readonly label: string;
+      readonly url: string;
+    }[];
+    readonly participantsVisible: boolean;
   },
 ): Promise<StudioPublicProfile> {
   return apiFetch<StudioPublicProfile>(`/api/activities/${activityId}/public-profile`, {

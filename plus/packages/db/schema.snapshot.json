@@ -210,6 +210,34 @@
           "nullable": false,
           "default": "now()",
           "identity": false
+        },
+        {
+          "name": "announcements",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "faq",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "links",
+          "dataType": "jsonb",
+          "nullable": false,
+          "default": "'[]'::jsonb",
+          "identity": false
+        },
+        {
+          "name": "participants_visible",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "false",
+          "identity": false
         }
       ]
     },

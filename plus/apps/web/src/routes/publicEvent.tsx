@@ -7,6 +7,12 @@ import { fetchPublicEvent, PublicEventNotFound } from "../api/publicEvent.js";
 import { fetchPublicCurrent, fetchPublicVoteEntry } from "../api/tickets-public.js";
 import { AnnouncementBanner } from "../components/portal/AnnouncementBanner.js";
 import { EventAbout } from "../components/portal/EventAbout.js";
+import {
+  EventAnnouncements,
+  EventFaq,
+  EventLinks,
+  EventParticipants,
+} from "../components/portal/EventContentBlocks.js";
 import { EventHero } from "../components/portal/EventHero.js";
 import { EventProgram } from "../components/portal/EventProgram.js";
 import { EventResults } from "../components/portal/EventResults.js";
@@ -88,6 +94,10 @@ export function PublicEventPage() {
   const site = siteQuery.data;
   if (site === undefined) return null;
 
+  const announcements = site.profile.announcements ?? [];
+  const faq = site.profile.faq ?? [];
+  const links = site.profile.links ?? [];
+  const participants = site.participants ?? null;
   const hasAbout = site.profile.description.trim() !== "";
   const hasProgram = site.schedule !== null
     || (site.program !== null && site.program.entries.length > 0);
@@ -171,9 +181,13 @@ export function PublicEventPage() {
       />
       <nav className="event-anchor-nav" aria-label="活动导航">
         {hasAbout ? <a href="#about">概览</a> : null}
+        {announcements.length > 0 ? <a href="#announcements">公告</a> : null}
         {current !== null ? <a href="#live">现场</a> : null}
         {hasProgram ? <a href="#program">节目单</a> : null}
+        {(participants?.length ?? 0) > 0 ? <a href="#participants">参与者</a> : null}
         {hasResults ? <a href="#results">赛果</a> : null}
+        {faq.length > 0 ? <a href="#faq">常见问题</a> : null}
+        {links.length > 0 ? <a href="#links">链接</a> : null}
       </nav>
       <OnsiteActions
         primary={actions.primary}
@@ -183,8 +197,12 @@ export function PublicEventPage() {
         hasProgram={hasProgram}
       />
       <EventAbout description={site.profile.description} />
+      <EventAnnouncements items={announcements} />
       <EventProgram site={site} currentOrder={currentOrder} />
+      <EventParticipants items={participants} />
       <EventResults site={site} />
+      <EventFaq items={faq} />
+      <EventLinks items={links} />
       <footer className="event-footer">
         <span>{site.profile.organizer || "主办方"}</span>
         {site.profile.contact === "" ? null : <span>{site.profile.contact}</span>}

@@ -41,6 +41,10 @@ export interface ActivityPublicProfileRow {
   revision: ColumnType<number, number | undefined, number>;
   updated_by: ColumnType<string, string | undefined, string>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  announcements: ColumnType<unknown, string, string>;
+  faq: ColumnType<unknown, string, string>;
+  links: ColumnType<unknown, string, string>;
+  participants_visible: ColumnType<boolean, boolean | undefined, boolean>;
 }
 
 export interface AdvancementDecisionRow {
