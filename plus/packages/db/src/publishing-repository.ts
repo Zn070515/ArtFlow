@@ -426,10 +426,13 @@ export async function selectPublicResults(
   stageKey?: string,
 ): Promise<PublicResults | null> {
   const activity = await db.selectFrom("activity")
-    .select(["id", "public_code"])
+    .select(["id", "public_code", "status"])
     .where("public_code", "=", publicCode)
     .executeTakeFirst();
   if (activity === undefined) return null;
+  // Archived and draft activities are not public, even when an active result
+  // release still exists for internal archive and recovery reads.
+  if (activity.status !== "active" && activity.status !== "closed") return null;
   const rows = await db.selectFrom("result_release")
     .innerJoin("stage_result", (join) =>
       join

@@ -263,5 +263,10 @@ describe.skipIf(!connectionString)("result-release-lifecycle golden", () => {
         "StageResultUnlocked",
       ]),
     );
+
+    await db.updateTable("activity").set({ status: "archived" }).where("id", "=", activityId).execute();
+    expect(await selectPublicResults(db, "ABC123")).toBeNull();
+    await db.updateTable("activity").set({ status: "closed" }).where("id", "=", activityId).execute();
+    expect(await selectPublicResults(db, "ABC123")).not.toBeNull();
   });
 });

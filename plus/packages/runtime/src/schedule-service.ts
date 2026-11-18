@@ -159,7 +159,17 @@ export interface UpsertScheduleEntryInput {
   readonly participantId?: string | null;
   readonly title: string;
   readonly note?: string;
+  readonly startsAt?: string | null;
   readonly position?: number;
+}
+
+function normalizeInstant(value: string | null): string | null {
+  if (value === null) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new DomainError("INVALID_INPUT", "startsAt must be an ISO timestamp.");
+  }
+  return new Date(parsed).toISOString();
 }
 
 export interface UpsertScheduleEntryBody {
@@ -189,6 +199,7 @@ export async function upsertScheduleEntry(
         participantId: input.participantId ?? null,
         title: input.title,
         note: input.note ?? "",
+        startsAt: input.startsAt ?? null,
         position: input.position ?? null,
       },
     },
@@ -216,6 +227,7 @@ export async function upsertScheduleEntry(
           participantId: input.participantId ?? null,
           title,
           note,
+          startsAt: input.startsAt === undefined ? null : normalizeInstant(input.startsAt),
           revision: 0,
           createdAt: deps.now(),
           updatedAt: deps.now(),
@@ -233,6 +245,9 @@ export async function upsertScheduleEntry(
           participantId: input.participantId ?? null,
           title,
           note,
+          startsAt: input.startsAt === undefined
+            ? existing.startsAt
+            : normalizeInstant(input.startsAt),
         }, existing.revision);
       }
       const revision = await staleSafe(() => bumpScheduleState(trx, activity.id, mode, input.expectedRevision));
@@ -421,6 +436,7 @@ export async function releaseSchedule(
             participantId: entry.participantId,
             title: entry.title,
             note: entry.note,
+            startsAt: entry.startsAt,
           })),
           releasedAt,
         },

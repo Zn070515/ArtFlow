@@ -48,6 +48,7 @@ export function registerScheduleRoutes(ctx: ApiContext): void {
         participantId?: string | null;
         title: string;
         note?: string;
+        startsAt?: string | null;
         position?: number;
       };
       const outcome = await upsertScheduleEntry(db, await requestDeps(request), {

@@ -3,8 +3,8 @@ import { ActivityAnalyticsParamsSchema, ActivityAnalyticsResponseSchema, CloseAc
 import { getOutboxRelayHealth } from "@artflow-plus/db";
 import { DomainError, instantiateActivityPack } from "@artflow-plus/domain";
 import type { ActivityDefinitionPackage, ExecutionMode } from "@artflow-plus/domain";
-import { activateActivity, appendRuntimeFact, closeActivity, closeExecution, compileDefinition, createActivity, duplicateActivity, getActivity, getActivityAnalytics, getExecutionState, getStudioState, listActivitiesForReview, listEvents, listExecutions, releaseDefinitionCommand, renameActivity, startExecution } from "@artflow-plus/runtime";
-import { ActivateBody, ActivityParams, CompileBody, CreateActivityBody, DuplicateActivityBody, EventsQuery, ReleaseBody, RuntimeFactBody, SessionParams, StateQuery } from "../http/schemas.js";
+import { activateActivity, appendRuntimeFact, closeActivity, closeExecution, compileDefinition, createActivity, duplicateActivity, getActivity, getActivityAnalytics, getExecutionState, getStudioState, listActivitiesForReview, listEvents, listExecutions, releaseDefinitionCommand, renameActivity, startExecution, updateActivityPublicProfile } from "@artflow-plus/runtime";
+import { ActivateBody, ActivityParams, CompileBody, CreateActivityBody, DuplicateActivityBody, EventsQuery, ReleaseBody, RuntimeFactBody, SessionParams, StateQuery, UpdatePublicProfileBody } from "../http/schemas.js";
 import { asPackage, requireIdempotency } from "../http/helpers.js";
 
 export function registerActivityRoutes(ctx: ApiContext): void {
@@ -296,6 +296,32 @@ export function registerActivityRoutes(ctx: ApiContext): void {
         activityId: id,
         title: body.title,
         expectedRevision: body.expectedRevision,
+      });
+      return reply.status(outcome.status).send(outcome.body);
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/public-profile",
+    { schema: { params: ActivityParams, body: UpdatePublicProfileBody } },
+    async (request, reply) => {
+      const commandId = requireIdempotency(request);
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        expectedRevision: number;
+        tagline: string;
+        description: string;
+        venue: string;
+        startsAt: string | null;
+        endsAt: string | null;
+        organizer: string;
+        contact: string;
+        announcement: string;
+      };
+      const outcome = await updateActivityPublicProfile(db, await requestDeps(request), {
+        commandId,
+        activityId: id,
+        ...body,
       });
       return reply.status(outcome.status).send(outcome.body);
     },

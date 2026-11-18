@@ -24,6 +24,12 @@ const programRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/program.js"), "ProgramPage"),
 });
 
+const publicEventRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$publicCode",
+  component: lazyRouteComponent(() => import("./routes/publicEvent.js"), "PublicEventPage"),
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -93,6 +99,12 @@ const studioActivityRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/studioActivity.js"), "StudioActivityPage"),
 });
 
+const studioPublicProfileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/studio/$activityId/public",
+  component: lazyRouteComponent(() => import("./routes/studioPublicProfile.js"), "StudioPublicProfilePage"),
+});
+
 const liveRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/live",
@@ -151,6 +163,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   resultsRoute,
   programRoute,
+  publicEventRoute,
   loginRoute,
   claimRoute,
   joinRoute,
@@ -162,6 +175,7 @@ const routeTree = rootRoute.addChildren([
   studioRoute,
   studioNewRoute,
   studioActivityRoute,
+  studioPublicProfileRoute,
   liveRoute,
   liveActivityRoute,
   voteRoute,

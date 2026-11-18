@@ -12,7 +12,10 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
   useQueryClient: useQueryClientMock,
 }));
-vi.mock("@tanstack/react-router", () => ({ useParams: useParamsMock }));
+vi.mock("@tanstack/react-router", () => ({
+  useParams: useParamsMock,
+  Link: ({ children }: { readonly children: ReactNode }) => <>{children}</>,
+}));
 vi.mock("../api/client.js", () => ({ ApiError: class ApiError extends Error { readonly status = 500; } }));
 vi.mock("../api/registrations.js", () => ({
   fetchMyRegistration: vi.fn(),

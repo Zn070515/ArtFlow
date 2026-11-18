@@ -170,6 +170,13 @@ function StudioActivityContent() {
           </p>
         </div>
         <div className="task-actions">
+          <Link
+            className="ui-button ui-button--secondary ui-button--md"
+            to="/studio/$activityId/public"
+            params={{ activityId }}
+          >
+            公开主页
+          </Link>
           <Button
             variant="secondary"
             disabled={duplicating}

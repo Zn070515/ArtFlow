@@ -12,6 +12,7 @@ export interface ScheduleEntryView {
   readonly participantId: string | null;
   readonly title: string;
   readonly note: string;
+  readonly startsAt: string | null;
   readonly revision: number;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -33,6 +34,7 @@ export interface ScheduleReleaseView {
       readonly participantId: string | null;
       readonly title: string;
       readonly note: string;
+      readonly startsAt: string | null;
     }[];
   };
 }
@@ -75,6 +77,7 @@ export function upsertScheduleEntry(
     readonly participantId?: string | null;
     readonly title: string;
     readonly note?: string;
+    readonly startsAt?: string | null;
     readonly position?: number;
   },
 ): Promise<unknown> {

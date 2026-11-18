@@ -125,6 +125,95 @@
       ]
     },
     {
+      "name": "activity_public_profile",
+      "columns": [
+        {
+          "name": "activity_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "tagline",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "description",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "venue",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "starts_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "ends_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "organizer",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "contact",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "announcement",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "updated_by",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "''::character varying",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "advancement_decision",
       "columns": [
         {
@@ -3216,6 +3305,13 @@
           "dataType": "timestamp with time zone",
           "nullable": false,
           "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "starts_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
           "identity": false
         }
       ]

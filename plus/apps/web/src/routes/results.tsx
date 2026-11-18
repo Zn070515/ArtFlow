@@ -44,13 +44,17 @@ export function ResultsRoute() {
   }
   return (
     <>
-      {program.data === undefined || program.data.entries.length === 0 ? null : (
-        <p style={{ textAlign: "center" }}>
+      <p style={{ textAlign: "center" }}>
+        {program.data === undefined || program.data.entries.length === 0 ? null : (
           <Link className="table-link" to="/program/$publicCode" params={{ publicCode }}>
             查看节目单 / 主持手卡
           </Link>
-        </p>
-      )}
+        )}
+        {program.data === undefined || program.data.entries.length === 0 ? null : " · "}
+        <Link className="table-link" to="/e/$publicCode" params={{ publicCode }}>
+          返回活动主页
+        </Link>
+      </p>
       <ResultsView data={query.data} />
     </>
   );

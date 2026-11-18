@@ -27,6 +27,10 @@ test("key surfaces have no serious or critical accessibility violations", async 
   await expect(page.locator(".landing")).toBeVisible();
   await assertNoBlockingViolations(page, "/");
 
+  await page.goto("/e/E2E-DEMO");
+  await expect(page.locator(".event-page")).toBeVisible();
+  await assertNoBlockingViolations(page, "/e/E2E-DEMO");
+
   await page.goto("/login");
   await expect(page.locator(".auth-card")).toBeVisible();
   await assertNoBlockingViolations(page, "/login");

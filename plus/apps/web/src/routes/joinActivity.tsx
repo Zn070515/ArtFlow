@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { ApiError } from "../api/client.js";
@@ -135,6 +135,11 @@ function JoinActivityContent() {
           void queryClient.invalidateQueries({ queryKey: ["registration-mine", activity.id] });
         }}
       />
+      <p className="state-copy">
+        <Link className="table-link" to="/e/$publicCode" params={{ publicCode }}>
+          返回活动主页
+        </Link>
+      </p>
     </section>
   );
 }

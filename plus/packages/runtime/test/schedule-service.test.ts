@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   advanceSchedule,
+  getPublicProgram,
   getPublicSchedule,
   getScheduleState,
   releaseSchedule,
@@ -355,5 +356,87 @@ describe.skipIf(!connectionString)("schedule service", () => {
     expect(revoked.body.note).toContain("节目调整");
     expect(entry.body.entry.id).toBeDefined();
     expect((await getScheduleState(db, activityId, "formal")).revision).toBe(3);
+  });
+
+  it("stores startsAt, preserves it on update, and freezes it into the release snapshot", async () => {
+    const activityId = await seed();
+    const first = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 0,
+      slotKey: "opening", title: "开场舞", startsAt: "2026-04-18T11:00:00.000Z",
+    });
+    expect(first.body.entry.startsAt).toBe("2026-04-18T11:00:00.000Z");
+    const second = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 1,
+      entryId: first.body.entry.id, slotKey: "opening", title: "开场舞 2",
+    });
+    expect(second.body.entry.startsAt).toBe("2026-04-18T11:00:00.000Z");
+    const cleared = await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 2,
+      entryId: first.body.entry.id, slotKey: "opening", title: "开场舞 3", startsAt: null,
+    });
+    expect(cleared.body.entry.startsAt).toBeNull();
+    await expect(upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 3,
+      slotKey: "opening", title: "坏时间", startsAt: "not-a-date",
+    })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
+  it("normalizes a legacy snapshot without startsAt", async () => {
+    const activityId = await seed();
+    await db.insertInto("schedule_release").values({
+      id: `release-legacy-${randomUUID()}`,
+      activity_id: activityId,
+      mode: "formal",
+      version: 1,
+      snapshot: JSON.stringify({
+        version: 1, schemaVersion: 1, releasedAt: "2026-04-01T10:00:00.000Z",
+        entries: [{ order: 1, slotKey: "opening", slotLabel: "开场", participantId: null, title: "旧版", note: "" }],
+      }),
+      note: "", released_at: new Date("2026-04-01T10:00:00.000Z"), revoked_at: null,
+    }).execute();
+    const activity = await db.selectFrom("activity").select("public_code")
+      .where("id", "=", activityId).executeTakeFirstOrThrow();
+    expect((await getPublicSchedule(db, activity.public_code))?.entries[0]?.startsAt).toBeNull();
+  });
+
+  it("fails the public program closed when the newest release is revoked", async () => {
+    const activityId = await seed();
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 0,
+      slotKey: "opening", title: "开场舞",
+    });
+    const first = await releaseSchedule(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 1,
+    });
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 2,
+      slotKey: "programs", title: "第二版",
+    });
+    const second = await releaseSchedule(db, deps, {
+      commandId: randomUUID(), activityId, mode: "formal", expectedRevision: 3,
+    });
+    await revokeScheduleReleaseCommand(db, deps, {
+      commandId: randomUUID(), activityId, releaseId: second.body.id, expectedRevision: 4,
+    });
+    const activity = await db.selectFrom("activity").select("public_code")
+      .where("id", "=", activityId).executeTakeFirstOrThrow();
+    expect(await getPublicSchedule(db, activity.public_code)).toBeNull();
+    expect(await getPublicProgram(db, activity.public_code)).toBeNull();
+    expect(first.body.version).toBe(1);
+  });
+
+  it("never exposes a rehearsal schedule release", async () => {
+    const activityId = await seed();
+    await upsertScheduleEntry(db, deps, {
+      commandId: randomUUID(), activityId, mode: "rehearsal", expectedRevision: 0,
+      slotKey: "opening", title: "彩排节目",
+    });
+    await releaseSchedule(db, deps, {
+      commandId: randomUUID(), activityId, mode: "rehearsal", expectedRevision: 1,
+    });
+    const activity = await db.selectFrom("activity").select("public_code")
+      .where("id", "=", activityId).executeTakeFirstOrThrow();
+    expect(await getPublicSchedule(db, activity.public_code)).toBeNull();
+    expect((await getPublicProgram(db, activity.public_code))?.entries).toEqual([]);
   });
 });

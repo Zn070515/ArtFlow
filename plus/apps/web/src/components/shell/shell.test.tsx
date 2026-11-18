@@ -73,7 +73,7 @@ describe("PortalShell and ConsoleShell", () => {
     );
 
     expect(document.querySelector('[data-shell="portal"][data-theme="afterglow"]')).not.toBeNull();
-    expect(screen.getByLabelText("ArtFlow 赛果公示首页")).toBeInTheDocument();
+    expect(screen.getByLabelText("ArtFlow 首页")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "报名" })).toBeInTheDocument();
     expect(screen.getByTestId("aurora-scene")).toBeInTheDocument();
     expect(screen.getByText("public page")).toBeInTheDocument();

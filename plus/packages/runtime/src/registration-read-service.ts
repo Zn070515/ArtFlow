@@ -9,6 +9,7 @@ import {
   findReleaseByQuestionnaireHash,
   getActivityByPublicCode,
   getActivitySummary,
+  getNewestScheduleRelease,
   getRegistration,
   getRelease,
   getRegistrationByParticipants,
@@ -16,7 +17,6 @@ import {
   listActivities,
   listMaterials,
   listRegistrations,
-  selectActiveScheduleRelease,
 } from "@artflow-plus/db";
 import { canActFor, DomainError, hasPermission } from "@artflow-plus/domain";
 import type {
@@ -32,6 +32,7 @@ export interface PublicActivity {
   readonly publicCode: string;
   readonly title: string;
   readonly status: string;
+  readonly registrationEnabled: boolean;
   readonly registrationOpen: boolean;
 }
 
@@ -94,9 +95,10 @@ export async function getPublicActivity(
   // A release written before the lifecycle existed behaves as open.
   const registrationLifecycle = registrationArtifact?.lifecycle ?? "open";
   const roster = release === null ? null : await getRoster(db, activity.id);
+  const registrationEnabled = ["registration", "questionnaire", "materials"].every((capability) =>
+    activity.enabledCapabilities.includes(capability));
   const registrationOpen = activity.status === "active" &&
-    ["registration", "questionnaire", "materials"].every((capability) =>
-      activity.enabledCapabilities.includes(capability)) &&
+    registrationEnabled &&
     release !== null &&
     registrationLifecycle === "open" &&
     roster?.status !== "final" &&
@@ -107,6 +109,7 @@ export async function getPublicActivity(
     publicCode: activity.publicCode,
     title: activity.title,
     status: activity.status,
+    registrationEnabled,
     registrationOpen,
   };
 }
@@ -226,6 +229,7 @@ export interface PublicProgramEntry {
   readonly name: string;
   readonly song: string;
   readonly note: string;
+  readonly startsAt: string | null;
 }
 
 export interface PublicProgram {
@@ -247,17 +251,23 @@ export async function getPublicProgram(
   publicCode: string,
 ): Promise<PublicProgram | null> {
   const activity = await getActivityByPublicCode(db, publicCode);
-  if (activity === null || activity.status === "archived") return null;
-  const schedule = await selectActiveScheduleRelease(db, publicCode);
-  if (schedule !== null) {
+  if (activity === null || (activity.status !== "active" && activity.status !== "closed")) {
+    return null;
+  }
+  const newest = await getNewestScheduleRelease(db, publicCode);
+  if (newest !== null) {
+    // Fail closed on the newest release: revoking it takes the public program
+    // offline instead of falling back to an older lineup or the raw roster.
+    if (newest.release.revokedAt !== null) return null;
     return {
-      activity: { publicCode: schedule.publicCode, title: schedule.activityTitle },
-      entries: schedule.release.snapshot.entries.map((entry) => ({
+      activity: { publicCode: newest.publicCode, title: newest.activityTitle },
+      entries: newest.release.snapshot.entries.map((entry) => ({
         order: entry.order,
         participantId: entry.participantId ?? `schedule-${entry.order}`,
         name: entry.title,
         song: entry.slotLabel,
         note: entry.note,
+        startsAt: entry.startsAt ?? null,
       })),
     };
   }
@@ -271,6 +281,7 @@ export async function getPublicProgram(
       name: programAnswer(registration.answers, ["name", "displayName", "title"]) || registration.participantId,
       song: programAnswer(registration.answers, ["song", "program", "program_name"]),
       note: programAnswer(registration.answers, ["description", "note"]),
+      startsAt: null,
     })),
   };
 }

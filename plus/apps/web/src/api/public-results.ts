@@ -33,6 +33,7 @@ export interface PublicProgramEntry {
   readonly name: string;
   readonly song: string;
   readonly note: string;
+  readonly startsAt: string | null;
 }
 
 export interface PublicProgram {
@@ -47,6 +48,13 @@ export class PublicResultsNotFound extends Error {
   }
 }
 
+export class PublicProgramNotFound extends Error {
+  constructor(publicCode: string) {
+    super(`No public program for ${publicCode}`);
+    this.name = "PublicProgramNotFound";
+  }
+}
+
 export async function fetchPublicProgram(
   publicCode: string,
   signal?: AbortSignal,
@@ -55,6 +63,7 @@ export async function fetchPublicProgram(
     signal,
     headers: { accept: "application/json" },
   });
+  if (response.status === 404) throw new PublicProgramNotFound(publicCode);
   if (!response.ok) throw new Error(`加载节目单失败（${response.status}）`);
   return (await response.json()) as PublicProgram;
 }

@@ -32,6 +32,21 @@ export interface ArchivePackageActivity {
   readonly activeDefinitionVersion: number;
 }
 
+export interface ArchivePackagePublicProfile {
+  readonly activityId: string;
+  readonly tagline: string;
+  readonly description: string;
+  readonly venue: string;
+  readonly startsAt: string | null;
+  readonly endsAt: string | null;
+  readonly organizer: string;
+  readonly contact: string;
+  readonly announcement: string;
+  readonly revision: number;
+  readonly updatedBy: string;
+  readonly updatedAt: string;
+}
+
 export interface ArchivePackageInput {
   readonly packageId: string;
   readonly version: number;
@@ -57,6 +72,7 @@ export interface ArchivePackageInput {
   };
   readonly archivedAt: string;
   readonly archivedBy: string;
+  readonly publicProfile?: ArchivePackagePublicProfile | null;
 }
 
 export interface ArchivePackageOutput {
@@ -146,6 +162,12 @@ export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageO
       null,
       2,
     ),
+    "application/json",
+  );
+
+  add(
+    "public-profile.json",
+    JSON.stringify(input.publicProfile ?? null, null, 2),
     "application/json",
   );
 
@@ -272,7 +294,7 @@ export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageO
       `归档时间：${input.archivedAt}`,
       `归档人：${input.archivedBy}`,
       "",
-      "包含：活动身份、正式结果 release 快照、stage result、正式执行场次、事件摘要。",
+      "包含：活动身份、活动公开资料快照（如有）、正式结果 release 快照、stage result、正式执行场次、事件摘要。",
       `排除：${ARCHIVE_EXCLUDED_FIELDS.join(", ")}。`,
       "说明：registration/material/vote/score 明细尚未带 mode 分区，本包不包含它们。",
     ].join("\n"),

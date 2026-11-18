@@ -5,6 +5,7 @@ export interface PublicActivity {
   readonly publicCode: string;
   readonly title: string;
   readonly status: string;
+  readonly registrationEnabled: boolean;
   readonly registrationOpen: boolean;
 }
 
