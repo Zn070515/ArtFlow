@@ -62,6 +62,17 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await ops.getByRole("button", { name: "定稿名单" }).click();
     await ops.getByRole("button", { name: "确认定稿 1 人" }).click();
     await expect(ops.getByText(/已定稿 · 1 人/)).toBeVisible();
+
+    await participant.goto("/me");
+    await expect(participant.getByText("2026 院十佳报名")).toBeVisible();
+    await expect(participant.getByText("已通过", { exact: true })).toBeVisible();
+    await expect(participant.getByText("报名已通过", { exact: true })).toBeVisible();
+    await participant.getByRole("link", { name: "查看详情" }).click();
+    await expect(participant).toHaveURL(/\/me\/E2E-REG$/);
+    await expect(participant.getByRole("heading", { name: "报名" })).toBeVisible();
+    await expect(participant.getByText(/demo\.mp3/)).toBeVisible();
+    await expect(participant.getByText("节目单尚未发布或没有你的条目")).toBeVisible();
+    await expect(participant.getByText("赛果尚未发布")).toBeVisible();
   } finally {
     await participantContext.close().catch(() => undefined);
     await opsContext.close().catch(() => undefined);
