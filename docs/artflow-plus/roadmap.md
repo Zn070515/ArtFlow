@@ -568,3 +568,15 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   公开节目单/报名节目生成内联样式 HTML，可直接粘贴到公众号编辑器。
 - 只读取公开面数据；无结果且无节目单时返回 `WECHAT_ARTICLE_EMPTY`；生成写审计。
 - Ops 受控导出卡片增加「微信推文 HTML」入口。
+
+
+## 2026-11-18 — 公开文章 / 往届风采（已完成）
+
+- 迁移 0038 `public_article`：slug、标题、摘要、正文、可选封面 URL、草稿/发布/归档、
+  revision、作者。
+- 公开读 `/api/public/articles` 与 `/api/public/articles/:slug`；只返回 published，
+  列表不返回正文。
+- 受权管理 `/api/articles` CRUD + publish/archive；`publishing.manage` 或
+  `studio.manage`；slug 唯一、封面仅 http(s)、每次变更写审计。
+- Web：公开 `/articles` 列表与 `/articles/:slug` 详情；Ops `/ops/articles` 编辑页，
+  Ops 风险页增加入口。

@@ -534,6 +534,21 @@ export interface PodiumCandidateRow {
   source_score_versions: ColumnType<unknown, string, string>;
 }
 
+export interface PublicArticleRow {
+  id: string;
+  slug: string;
+  title: string;
+  summary: ColumnType<string, string | undefined, string>;
+  body: ColumnType<string, string | undefined, string>;
+  cover_url: string | null;
+  status: ColumnType<string, string | undefined, string>;
+  published_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  revision: ColumnType<number, number | undefined, number>;
+  author_id: string;
+}
+
 export interface RankingSnapshotRow {
   id: string;
   activity_id: string;
@@ -865,6 +880,7 @@ export interface Database {
   performance: PerformanceRow;
   performance_score_state: PerformanceScoreStateRow;
   podium_candidate: PodiumCandidateRow;
+  public_article: PublicArticleRow;
   ranking_snapshot: RankingSnapshotRow;
   rate_limit_bucket: RateLimitBucketRow;
   registration: RegistrationRow;

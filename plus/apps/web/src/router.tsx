@@ -60,6 +60,18 @@ const printPackRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/print.js"), "PrintPackPage"),
 });
 
+const articlesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/articles",
+  component: lazyRouteComponent(() => import("./routes/articles.js"), "ArticlesPage"),
+});
+
+const articleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/articles/$slug",
+  component: lazyRouteComponent(() => import("./routes/article.js"), "ArticlePage"),
+});
+
 const meRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/me",
@@ -115,6 +127,12 @@ const accountsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/accounts",
   component: lazyRouteComponent(() => import("./routes/accounts.js"), "AccountsPage"),
+});
+
+const opsArticlesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ops/articles",
+  component: lazyRouteComponent(() => import("./routes/opsArticles.js"), "OpsArticlesPage"),
 });
 
 const opsActivityRoute = createRoute({
@@ -214,6 +232,8 @@ const routeTree = rootRoute.addChildren([
   resultsRoute,
   programRoute,
   publicEventRoute,
+  articlesRoute,
+  articleRoute,
   screenRoute,
   hostCardRoute,
   printPackRoute,
@@ -225,6 +245,7 @@ const routeTree = rootRoute.addChildren([
   joinRoute,
   joinActivityRoute,
   opsRoute,
+  opsArticlesRoute,
   accountsRoute,
   opsActivityRoute,
   opsRegistrationRoute,
