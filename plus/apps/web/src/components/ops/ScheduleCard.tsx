@@ -25,6 +25,27 @@ const MODE_LABELS: Readonly<Record<ScheduleMode, string>> = {
   formal: "正式",
 };
 
+function toLocalInput(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function fromLocalInput(value: string): string | null {
+  return value === "" ? null : new Date(value).toISOString();
+}
+
+function formatStartsAt(value: string | null): string {
+  if (value === null) return "未排时间";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "未排时间";
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 export function ScheduleCard({
   activityId,
   canManage,
@@ -37,6 +58,13 @@ export function ScheduleCard({
   const [slotKey, setSlotKey] = useState("");
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
+  const [startsAt, setStartsAt] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editSlotKey, setEditSlotKey] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [editNote, setEditNote] = useState("");
+  const [editStartsAt, setEditStartsAt] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ readonly kind: "remove" | "release" | "revoke"; readonly id?: string } | null>(null);
 
   const schedule = useQuery({
@@ -73,10 +101,12 @@ export function ScheduleCard({
         slotKey,
         title,
         note,
+        startsAt: fromLocalInput(startsAt),
       }),
     onSuccess: () => {
       setTitle("");
       setNote("");
+      setStartsAt("");
       refresh();
     },
   });
@@ -154,14 +184,65 @@ export function ScheduleCard({
             {entries.map((entry, index) => (
               <li key={entry.id} data-testid="schedule-entry">
                 <span>
-                  {entry.position + 1}. {entry.title} · {entry.slotLabel} · {entry.note || "—"}
+                  {entry.position + 1}. {entry.title} · {entry.slotLabel} · {formatStartsAt(entry.startsAt)} · {entry.note || "—"}
                 </span>
                 {canManage ? (
                   <span className="task-actions">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setEditing(entry.id);
+                        setEditSlotKey(entry.slotKey);
+                        setEditTitle(entry.title);
+                        setEditNote(entry.note);
+                        setEditStartsAt(entry.startsAt === null ? "" : toLocalInput(entry.startsAt));
+                        setEditError(null);
+                      }}
+                    >
+                      编辑
+                    </Button>
                     <Button variant="secondary" size="sm" disabled={index === 0} onClick={() => move(index, -1)}>上移</Button>
                     <Button variant="secondary" size="sm" disabled={index === entries.length - 1} onClick={() => move(index, 1)}>下移</Button>
                     <Button variant="secondary" size="sm" onClick={() => setConfirm({ kind: "remove", id: entry.id })}>删除</Button>
                   </span>
+                ) : null}
+                {editing === entry.id ? (
+                  <div className="editor-grid">
+                    <Select label="节目类型" value={editSlotKey} onChange={(event) => setEditSlotKey(event.target.value)}>
+                      {data.slots.map((slot) => (
+                        <option key={slot.key} value={slot.key}>{slot.label}（{slot.durationMinutes} 分钟）</option>
+                      ))}
+                    </Select>
+                    <Input label="节目名称" value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+                    <Input label="备注" value={editNote} onChange={(event) => setEditNote(event.target.value)} />
+                    <Input label="开始时间" type="datetime-local" value={editStartsAt} onChange={(event) => setEditStartsAt(event.target.value)} />
+                    <Button
+                      variant="primary"
+                      disabled={editTitle.trim() === ""}
+                      onClick={() => {
+                        setEditError(null);
+                        void upsertScheduleEntry(activityId, {
+                          mode,
+                          expectedRevision: data.revision,
+                          entryId: entry.id,
+                          slotKey: editSlotKey,
+                          title: editTitle,
+                          note: editNote,
+                          startsAt: fromLocalInput(editStartsAt),
+                        }).then(() => {
+                          setEditing(null);
+                          refresh();
+                        }).catch((caught) => {
+                          setEditError(apiErrorText(caught, "保存失败，请稍后重试。", "排期已更新，请刷新后重试。"));
+                        });
+                      }}
+                    >
+                      保存
+                    </Button>
+                    <Button variant="secondary" onClick={() => setEditing(null)}>取消</Button>
+                    {editError === null ? null : <p className="ui-field__error" role="alert">{editError}</p>}
+                  </div>
                 ) : null}
               </li>
             ))}
@@ -176,6 +257,7 @@ export function ScheduleCard({
               </Select>
               <Input label="节目名称" value={title} onChange={(event) => setTitle(event.target.value)} />
               <Input label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
+              <Input label="开始时间" type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
               <Button
                 variant="primary"
                 disabled={add.isPending || title.trim() === "" || slotKey === ""}

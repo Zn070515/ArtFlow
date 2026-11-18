@@ -33,6 +33,7 @@ test("organizer schedules a stage show and publishes the public program", async 
 
   await page.getByLabel("节目类型").selectOption({ index: 1 });
   await page.getByLabel("节目名称").fill("合唱《夜空中最亮的星》");
+  await page.getByLabel("开始时间").fill("2026-04-18T19:00");
   await page.getByRole("button", { name: "添加节目" }).click();
   await expect(page.getByTestId("schedule-entry")).toContainText("合唱");
 
@@ -44,4 +45,9 @@ test("organizer schedules a stage show and publishes the public program", async 
   await page.goto(`/program/${publicCode}`);
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   await expect(page.getByText("合唱《夜空中最亮的星》")).toBeVisible();
+  await expect(page.getByText(/19:00/)).toBeVisible();
+
+  await page.goto(`/e/${publicCode}`);
+  await expect(page.getByText("合唱《夜空中最亮的星》")).toBeVisible();
+  await expect(page.getByText(/19:00/)).toBeVisible();
 });
