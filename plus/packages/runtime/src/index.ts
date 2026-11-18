@@ -1,6 +1,7 @@
 export * from "./activity-service.js";
 export * from "./public-profile-service.js";
 export * from "./public-event-service.js";
+export * from "./participant-center-service.js";
 export * from "./archive-package.js";
 export * from "./archive-service.js";
 export * from "./archive-storage.js";

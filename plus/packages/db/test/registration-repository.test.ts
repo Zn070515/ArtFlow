@@ -12,6 +12,7 @@ import {
   insertRegistration,
   getRegistrationByParticipants,
   listApprovedRegistrationCount,
+  listRegistrationsByParticipant,
   migrate,
   updateRegistration,
 } from "../src/index.js";
@@ -69,6 +70,20 @@ describe.skipIf(!connectionString)("registration persistence on PostgreSQL", () 
     await closeDb(db);
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
     await admin.end();
+  });
+
+  it("lists only the participant's registrations with activity context", async () => {
+    const activityId = await seedActivity();
+    await db.updateTable("activity").set({ public_code: `REG-${randomUUID()}` })
+      .where("id", "=", activityId).execute();
+    await insertRegistration(db, registration(activityId, "participant-a"));
+    await insertRegistration(db, registration(activityId, "participant-b"));
+    const rows = await listRegistrationsByParticipant(db, "participant-a");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.registration.participantId).toBe("participant-a");
+    expect(rows[0]?.activity.publicCode).toMatch(/^REG-/);
+    expect(rows[0]?.activity.title).toBe("Registration test");
+    expect(rows[0]?.updatedAt).toEqual(expect.any(String));
   });
 
   it("reads an absent roster as unknown rather than zero", async () => {

@@ -21,6 +21,8 @@ export interface StoredMaterial {
   readonly revision: number;
   readonly current: boolean;
   readonly contentReady?: boolean;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
 }
 
 function iso(value: Date | string | null): string | null {
@@ -46,6 +48,8 @@ function material(row: Selectable<MaterialRow>): StoredMaterial {
     revision: row.revision,
     current: row.current,
     contentReady: row.content_ready,
+    createdAt: iso(row.created_at) ?? "",
+    updatedAt: iso(row.updated_at) ?? "",
   };
 }
 

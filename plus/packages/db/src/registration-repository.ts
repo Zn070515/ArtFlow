@@ -263,3 +263,46 @@ export async function upsertRoster(
   }
   return roster(row);
 }
+
+export interface ParticipantRegistrationRecord {
+  readonly registration: StoredRegistration;
+  readonly activity: {
+    readonly id: string;
+    readonly publicCode: string;
+    readonly title: string;
+    readonly status: string;
+  };
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export async function listRegistrationsByParticipant(
+  db: Kysely<Database>,
+  participantId: string,
+): Promise<readonly ParticipantRegistrationRecord[]> {
+  const rows = await db
+    .selectFrom("registration")
+    .innerJoin("activity", "activity.id", "registration.activity_id")
+    .selectAll("registration")
+    .select([
+      "activity.id as activity_join_id",
+      "activity.public_code as activity_join_public_code",
+      "activity.title as activity_join_title",
+      "activity.status as activity_join_status",
+    ])
+    .where("registration.participant_id", "=", participantId)
+    .orderBy("registration.updated_at", "desc")
+    .orderBy("registration.id", "asc")
+    .execute();
+  return rows.map((row) => ({
+    registration: registration(row),
+    activity: {
+      id: row.activity_join_id,
+      publicCode: row.activity_join_public_code,
+      title: row.activity_join_title,
+      status: row.activity_join_status,
+    },
+    createdAt: iso(row.created_at) ?? "",
+    updatedAt: iso(row.updated_at) ?? "",
+  }));
+}

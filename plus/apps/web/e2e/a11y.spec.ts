@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const authenticatedSurfaces: { path: string; ready: (page: Page) => Locator }[] = [
   { path: "/workspace", ready: (page) => page.locator(".workspace-activity-card").first() },
+  { path: "/me", ready: (page) => page.locator(".me-page") },
   { path: "/ops", ready: (page) => page.getByRole("table", { name: "活动列表" }) },
   { path: "/studio", ready: (page) => page.getByRole("table", { name: "活动列表" }) },
   { path: "/live", ready: (page) => page.getByRole("table", { name: "可执评的活动" }) },

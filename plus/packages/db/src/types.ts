@@ -445,6 +445,12 @@ export interface PanelSnapshotRow {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+export interface ParticipantNotificationReadRow {
+  actor_id: string;
+  notification_key: string;
+  read_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface PerformanceRow {
   id: string;
   activity_id: string;
@@ -802,6 +808,7 @@ export interface Database {
   outbox: OutboxRow;
   panel_member: PanelMemberRow;
   panel_snapshot: PanelSnapshotRow;
+  participant_notification_read: ParticipantNotificationReadRow;
   performance: PerformanceRow;
   performance_score_state: PerformanceScoreStateRow;
   podium_candidate: PodiumCandidateRow;

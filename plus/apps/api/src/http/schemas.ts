@@ -457,3 +457,13 @@ export const ReopenIncidentBody = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export const MarkNotificationsReadBody = Type.Object(
+  {
+    keys: Type.Array(
+      Type.String({ minLength: 1, maxLength: 300 }),
+      { minItems: 1, maxItems: 200, uniqueItems: true },
+    ),
+  },
+  { additionalProperties: false },
+);

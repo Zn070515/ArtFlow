@@ -1,5 +1,6 @@
 export * from "./activity-repository.js";
 export * from "./activity-public-profile-repository.js";
+export * from "./participant-notification-repository.js";
 export * from "./auth-repository.js";
 export * from "./account-invite-repository.js";
 export * from "./competition-repository.js";

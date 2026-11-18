@@ -31,6 +31,7 @@ export const REGISTRATION_STATUS_LABELS: Readonly<Record<string, string>> = {
   approved: "已通过",
   need_supplement: "需补充",
   rejected: "未通过",
+  withdrawn: "已撤回",
 };
 
 export const EXECUTION_MODE_LABELS: Readonly<Record<string, string>> = {
