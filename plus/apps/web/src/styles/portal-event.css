@@ -80,6 +80,125 @@
   color: var(--bone);
 }
 
+.event-now {
+  margin: 20px 0 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.event-now--idle {
+  border-style: dashed;
+}
+
+.event-now__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.event-now__freshness,
+.event-now__position {
+  color: var(--bone-subtle);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.event-now__position {
+  margin: 8px 0 0;
+  color: var(--gold);
+}
+
+.event-now__name {
+  margin: 6px 0 0;
+  font-family: var(--display);
+  font-size: clamp(1.8rem, 6vw, 2.8rem);
+  line-height: 1.1;
+}
+
+.event-now__song,
+.event-now__next {
+  margin: 6px 0 0;
+  color: var(--bone-dim);
+}
+
+.event-now__refresh {
+  margin-top: 12px;
+}
+
+.event-now__error {
+  margin: 10px 0 0;
+  color: var(--bone-dim);
+  font-size: 0.85rem;
+}
+
+.event-onsite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 20px 0 0;
+}
+
+.event-network {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--bone-dim);
+  font-size: 0.85rem;
+}
+
+.event-announcement--banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.event-announcement__text {
+  margin: 0;
+}
+
+.event-announcement__close {
+  flex: none;
+  min-width: 40px;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.event-program__row--current {
+  background: var(--gold-soft);
+}
+
+.event-program__now {
+  margin-left: 8px;
+  color: var(--gold);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+}
+
+@media (max-width: 767px) {
+  .event-button,
+  .event-now__refresh,
+  .event-announcement__close {
+    min-height: 44px;
+  }
+
+  .event-anchor-nav a,
+  .event-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
 .event-anchor-nav {
   display: flex;
   flex-wrap: wrap;
