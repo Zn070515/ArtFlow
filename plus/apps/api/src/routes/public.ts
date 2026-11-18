@@ -36,7 +36,7 @@ export function registerPublicRoutes(ctx: ApiContext): void {
   app.get(
     "/api/public/events/:publicCode",
     { schema: { params: PublicActivityParams }, config: { access: "public" } },
-    async (request, reply) => {
+    async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       const { publicCode } = request.params as { publicCode: string };
       await requirePublicRateLimit(request, `public-event:${publicCode}`, 120);
       const site = await getPublicEventSite(db, publicCode);
