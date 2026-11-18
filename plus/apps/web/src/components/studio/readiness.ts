@@ -37,7 +37,7 @@ export function deriveReadiness(state: StudioState): ReadinessView {
   const releaseStatus: ReadinessStatus = releasedCurrent
     ? "done"
     : terminal !== null
-      ? activeRelease !== undefined ? "stale" : "blocked"
+      ? "blocked"
       : activeRelease !== undefined && compiledHash !== undefined ? "stale" : "current";
 
   const steps: ReadinessStep[] = [

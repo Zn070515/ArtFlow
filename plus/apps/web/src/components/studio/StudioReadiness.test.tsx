@@ -87,7 +87,7 @@ describe("deriveReadiness", () => {
       compiled: { draftRevision: 3, contentHash: "hash-b", capabilities: [] },
     }));
     expect(view.terminal).toBe("closed");
-    expect(step(view, "release")?.status).toBe("stale");
+    expect(step(view, "release")?.status).toBe("blocked");
     expect(step(view, "release")?.href).toBeUndefined();
   });
 

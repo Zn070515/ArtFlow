@@ -111,6 +111,10 @@ function OpsContent() {
   ) ?? [];
   const riskById = new Map(riskRows.map((row) => [row.activity.id, row]));
   const summary = deriveRiskSummary(riskRows);
+  // A missing row means "no attention" only when the risk read actually
+  // succeeded. On 403/500/pending the risk cell must say unknown; otherwise
+  // every activity looks risk-free and the only-risk filter empties the list.
+  const riskReady = canUseRisk && riskQuery.data !== undefined && riskQuery.error === null;
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
   const statuses = [...new Set(query.data.map((activity) => activity.status))].sort();
   const filteredActivities = query.data
@@ -119,7 +123,7 @@ function OpsContent() {
         `${activity.title} ${activity.publicCode}`.toLocaleLowerCase().includes(normalizedSearch);
       const matchesStatus = statusFilter.length === 0 || activity.status === statusFilter;
       const risk = riskById.get(activity.id);
-      const matchesRisk = !onlyRisk || (risk?.items.length ?? 0) > 0;
+      const matchesRisk = !onlyRisk || !riskReady || (risk?.items.length ?? 0) > 0;
       return matchesSearch && matchesStatus && matchesRisk;
     })
     .sort((left, right) => {
@@ -230,6 +234,7 @@ function OpsContent() {
               <input
                 type="checkbox"
                 checked={onlyRisk}
+                disabled={!riskReady}
                 onChange={(event) => setOnlyRisk(event.target.checked)}
               />
               只看有风险
@@ -266,7 +271,11 @@ function OpsContent() {
                       <td data-label="公开码">{activity.publicCode}</td>
                       <td data-label="状态">{label(ACTIVITY_STATUS_LABELS, activity.status)}</td>
                       <td data-label="风险">
-                        {risk === undefined ? (
+                        {!riskReady ? (
+                          <span className="risk-none">
+                            {riskQuery.isPending ? "正在加载风险…" : "风险未知"}
+                          </span>
+                        ) : risk === undefined ? (
                           <span className="risk-none">—</span>
                         ) : (
                           <div className="risk-cell">

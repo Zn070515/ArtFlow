@@ -148,6 +148,8 @@ describe("OpsPage risk board", () => {
     render(<OpsPage />);
 
     expect(screen.getByText("风险看板暂时无法加载。")).toBeInTheDocument();
+    expect(screen.getAllByText("风险未知").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("只看有风险")).toBeDisabled();
     expect(screen.getByRole("link", { name: "春季赛" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "旧活动" })).toBeInTheDocument();
   });
@@ -158,6 +160,8 @@ describe("OpsPage risk board", () => {
     render(<OpsPage />);
 
     expect(screen.getByText(/风险看板需要分析权限/)).toBeInTheDocument();
+    expect(screen.getAllByText("风险未知").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("只看有风险")).toBeDisabled();
     expect(screen.getByRole("link", { name: "春季赛" })).toBeInTheDocument();
   });
 
