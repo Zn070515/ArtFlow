@@ -325,6 +325,7 @@ describe.skipIf(!connectionString)("archive service", () => {
       faq: JSON.stringify([]),
       links: JSON.stringify([]),
       participants_visible: false,
+      listed_publicly: false,
       revision: 1,
       updated_by: "staff",
       updated_at: new Date("2026-04-01T10:00:00.000Z"),

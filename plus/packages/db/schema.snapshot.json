@@ -238,6 +238,13 @@
           "nullable": false,
           "default": "false",
           "identity": false
+        },
+        {
+          "name": "listed_publicly",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "false",
+          "identity": false
         }
       ]
     },

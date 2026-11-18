@@ -75,6 +75,7 @@ function input(activityId: string, overrides: Record<string, unknown> = {}) {
     faq: [],
     links: [],
     participantsVisible: false,
+    listedPublicly: false,
     ...overrides,
   };
 }
@@ -116,9 +117,11 @@ describe.skipIf(!connectionString)("activity.public_profile.update", () => {
       faq: [{ question: "问", answer: "答" }],
       links: [{ label: "官网", url: "https://example.com" }],
       participantsVisible: true,
+      listedPublicly: true,
     }));
     expect(saved.body).toMatchObject({
       participantsVisible: true,
+      listedPublicly: true,
       faq: [{ question: "问", answer: "答" }],
     });
 

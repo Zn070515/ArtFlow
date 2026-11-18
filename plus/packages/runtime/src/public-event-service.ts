@@ -6,7 +6,9 @@ import type {
 } from "@artflow-plus/db";
 import {
   getActivityPublicProfile,
+  listListedPublicEvents,
   selectPublicResults,
+  type PublicEventSummary,
 } from "@artflow-plus/db";
 import type { Kysely } from "kysely";
 
@@ -162,4 +164,10 @@ export async function getPublicEventSite(
           })),
         },
   };
+}
+
+export async function getPublicEventList(
+  db: Kysely<Database>,
+): Promise<readonly PublicEventSummary[]> {
+  return listListedPublicEvents(db);
 }

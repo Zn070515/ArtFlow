@@ -40,6 +40,7 @@ function state(overrides: Partial<StudioState> = {}): StudioState {
       faq: [],
       links: [],
       participantsVisible: false,
+      listedPublicly: false,
       revision: 1,
       updatedBy: "ops-1",
       updatedAt: "2026-11-18T00:00:00.000Z",

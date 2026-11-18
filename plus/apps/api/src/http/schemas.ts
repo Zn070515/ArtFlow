@@ -64,6 +64,7 @@ export const UpdatePublicProfileBody = Type.Object(
       { maxItems: 10 },
     ),
     participantsVisible: Type.Boolean(),
+    listedPublicly: Type.Boolean(),
   },
   { additionalProperties: false },
 );

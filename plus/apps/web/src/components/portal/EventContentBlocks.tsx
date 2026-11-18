@@ -1,3 +1,4 @@
+import { buildCalendarEvent } from "../../api/calendar.js";
 import type { PublicEventSite } from "../../api/publicEvent.js";
 
 type Profile = PublicEventSite["profile"];
@@ -87,5 +88,31 @@ export function EventParticipants({
         ))}
       </ul>
     </section>
+  );
+}
+
+export function CalendarButton({ site }: { readonly site: PublicEventSite }) {
+  const url = new URL(
+    `/e/${encodeURIComponent(site.activity.publicCode)}`,
+    window.location.origin,
+  ).toString();
+  const calendar = buildCalendarEvent(site, url);
+  if (calendar === null) return null;
+
+  function download(): void {
+    if (calendar === null) return;
+    const blob = new Blob([calendar], { type: "text/calendar;charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `${site.activity.publicCode}.ics`;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  return (
+    <button type="button" className="event-button event-button--ghost" onClick={download}>
+      加入日历
+    </button>
   );
 }

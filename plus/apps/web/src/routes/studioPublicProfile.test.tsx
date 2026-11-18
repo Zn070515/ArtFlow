@@ -58,6 +58,7 @@ const state = {
     faq: [],
     links: [],
     participantsVisible: false,
+    listedPublicly: false,
     revision: 1,
     updatedBy: "staff",
     updatedAt: "2026-04-01T10:00:00.000Z",

@@ -15,9 +15,10 @@ export function PortalShell({ children }: { readonly children: ReactNode }) {
     void loadPortalFonts();
   }, []);
   const isEventPage = pathname.startsWith("/e/");
-  const subtitle = isEventPage ? "活动主页" : "赛果公示";
+  const isEventsPage = pathname === "/events";
+  const subtitle = isEventPage ? "活动主页" : isEventsPage ? "活动目录" : "赛果公示";
   const showAurora = pathname === "/" || pathname === "/results" || pathname.startsWith("/results/");
-  const showStaticBackdrop = pathname.startsWith("/vote/") || isEventPage;
+  const showStaticBackdrop = pathname.startsWith("/vote/") || isEventPage || isEventsPage;
 
   return (
     <div className="app-shell" data-shell="portal" data-theme="afterglow">
@@ -35,6 +36,9 @@ export function PortalShell({ children }: { readonly children: ReactNode }) {
           </span>
         </Link>
         <nav className="nav-links" aria-label="主导航">
+          <Link to="/events" className="nav-link">
+            活动
+          </Link>
           <Link to="/join" className="nav-link">
             报名
           </Link>

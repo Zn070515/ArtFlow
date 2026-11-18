@@ -168,6 +168,7 @@ await db.insertInto("activity_public_profile").values({
   faq: JSON.stringify([]),
   links: JSON.stringify([]),
   participants_visible: false,
+  listed_publicly: true,
   revision: 1,
   updated_by: "seed",
   updated_at: new Date("2026-04-01T10:00:00.000Z"),
@@ -184,6 +185,7 @@ await db.insertInto("activity_public_profile").values({
   faq: JSON.stringify([]),
   links: JSON.stringify([]),
   participants_visible: false,
+  listed_publicly: true,
   updated_by: "seed",
   updated_at: new Date("2026-04-01T10:00:00.000Z"),
 })).execute();

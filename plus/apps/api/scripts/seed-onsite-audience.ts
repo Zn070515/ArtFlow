@@ -152,6 +152,7 @@ async function seedActivity(
       url: "https://example.com/program",
     }]),
     participants_visible: true,
+    listed_publicly: true,
     revision: 1,
     updated_by: "seed",
     updated_at: new Date("2026-11-18T09:30:00.000Z"),
@@ -179,6 +180,7 @@ async function seedActivity(
       url: "https://example.com/program",
     }]),
     participants_visible: true,
+    listed_publicly: true,
     updated_by: "seed",
     updated_at: new Date("2026-11-18T09:30:00.000Z"),
   })).execute();

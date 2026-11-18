@@ -198,6 +198,7 @@ describe.skipIf(!connectionString)("Studio API", () => {
         faq: [],
         links: [],
         participantsVisible: false,
+        listedPublicly: false,
       },
     });
     expect(updated.statusCode).toBe(200);
@@ -221,6 +222,7 @@ describe.skipIf(!connectionString)("Studio API", () => {
         faq: [],
         links: [],
         participantsVisible: false,
+        listedPublicly: false,
       },
     });
     expect(forbidden.statusCode).toBe(403);

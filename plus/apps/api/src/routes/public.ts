@@ -3,7 +3,7 @@ import { sessionCookie } from "../cookies.js";
 import { JudgeEntryBodySchema, PublicResultsParamsSchema, PublicResultsQuerySchema, TicketCredentialBodySchema } from "@artflow-plus/contracts";
 import { selectPublicResults } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
-import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicCurrentProgram, getPublicEventSite, getPublicProgram, getPublicSchedule, getPublicTicketLookup, getPublicVoteEntry, getSupplementContext, readPublicVoteSession, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
+import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicCurrentProgram, getPublicEventList, getPublicEventSite, getPublicProgram, getPublicSchedule, getPublicTicketLookup, getPublicVoteEntry, getSupplementContext, readPublicVoteSession, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
 import { Type } from "@sinclair/typebox";
 import { ActivityParams, PublicActivityParams, PublicVoteParams } from "../http/schemas.js";
 import { cookieValue, requireIdempotency, sessionTokenValue, setSessionCookie } from "../http/helpers.js";
@@ -30,6 +30,16 @@ export function registerPublicRoutes(ctx: ApiContext): void {
       }
       reply.header("cache-control", "no-store");
       return activity;
+    },
+  );
+
+  app.get(
+    "/api/public/events",
+    { config: { access: "public" } },
+    async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
+      await requirePublicRateLimit(request, "public-events", 60);
+      reply.header("cache-control", "no-store");
+      return { events: await getPublicEventList(db) };
     },
   );
 

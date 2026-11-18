@@ -30,6 +30,7 @@ export interface UpdatePublicProfileInput {
   readonly faq: readonly PublicFaqItem[];
   readonly links: readonly PublicLink[];
   readonly participantsVisible: boolean;
+  readonly listedPublicly: boolean;
 }
 
 function requireText(value: string, field: string, max: number): string {
@@ -154,6 +155,7 @@ export async function updateActivityPublicProfile(
         faq: input.faq,
         links: input.links,
         participantsVisible: input.participantsVisible,
+        listedPublicly: input.listedPublicly,
       },
     },
     async (trx) => {
@@ -186,6 +188,7 @@ export async function updateActivityPublicProfile(
         faq: requireFaq(input.faq),
         links: requireLinks(input.links),
         participantsVisible: input.participantsVisible,
+        listedPublicly: input.listedPublicly,
         updatedBy: actor.actorId,
         updatedAt: deps.now(),
       }, input.expectedRevision);

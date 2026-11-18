@@ -51,6 +51,7 @@ async function seed(status: "draft" | "active" | "closed" | "archived" = "active
     faq: JSON.stringify([]),
     links: JSON.stringify([]),
     participants_visible: false,
+    listed_publicly: false,
     revision: 1,
     updated_by: "seed",
     updated_at: new Date("2026-04-01T10:00:00.000Z"),
@@ -90,6 +91,22 @@ describe.skipIf(!connectionString)("public event site route", () => {
       profile: { tagline: "春日", venue: "剧场" },
     });
     expect(response.body).not.toContain(activityId);
+  });
+
+  it("lists only opted-in public events without internal ids", async () => {
+    const listed = await seed("active");
+    await db.updateTable("activity_public_profile")
+      .set({ listed_publicly: true })
+      .where("activity_id", "=", listed.activityId)
+      .execute();
+    const hidden = await seed("active");
+
+    const response = await app.inject({ method: "GET", url: "/api/public/events" });
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { events: readonly { publicCode: string }[] };
+    expect(body.events.map((event) => event.publicCode)).toContain(listed.publicCode);
+    expect(body.events.map((event) => event.publicCode)).not.toContain(hidden.publicCode);
+    expect(response.body).not.toContain(listed.activityId);
   });
 
   it("returns 404 for missing, draft and archived activities", async () => {
