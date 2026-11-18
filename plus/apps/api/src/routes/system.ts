@@ -2,11 +2,12 @@ import type { ApiContext } from "../http/context.js";
 import { PackInstantiateBodySchema, errorResponse } from "@artflow-plus/contracts";
 import { checkReady } from "@artflow-plus/db";
 import { DomainError, instantiateActivityPack } from "@artflow-plus/domain";
+import { timingSafeEqual } from "node:crypto";
 import { PackParams } from "../http/schemas.js";
 
 export function registerSystemRoutes(ctx: ApiContext): void {
   const {
-    app, db, deps, baseDeps, registry, packs, rateLimiter, isProduction,
+    app, db, deps, baseDeps, registry, packs, rateLimiter, metrics, isProduction,
     sessionSecret, enableRuntimeFacts,
     setSessionCookies, clearSessionCookies, publicActor, requestSession,
     requestActor, requestDeps, requireStudio, requireOperationsReader,
@@ -14,6 +15,23 @@ export function registerSystemRoutes(ctx: ApiContext): void {
     requireRateLimit, requirePublicRateLimit, routeRound,
   } = ctx;
 
+  app.get("/metrics", { schema: { hide: true }, config: { access: "public" } }, async (request, reply) => {
+    const expected = process.env.ARTFLOW_PLUS_METRICS_TOKEN;
+    if (expected === undefined || expected.trim() === "") {
+      // Disabled by default; a deployment opts in with a secret.
+      return reply.status(404).send();
+    }
+    const raw = request.headers["x-artflow-metrics-token"];
+    const provided = Array.isArray(raw) ? raw[0] : raw;
+    const left = Buffer.from(provided ?? "");
+    const right = Buffer.from(expected);
+    if (left.length !== right.length || !timingSafeEqual(left, right)) {
+      // Do not reveal that the endpoint exists to an unauthenticated caller.
+      return reply.status(404).send();
+    }
+    reply.type("text/plain; version=0.0.4; charset=utf-8");
+    return metrics.render();
+  });
   app.get("/healthz", { config: { access: "public" } }, async () => ({ status: "ok" }));
   app.get("/readyz", { config: { access: "public" } }, async (_request, reply) => {
     try {

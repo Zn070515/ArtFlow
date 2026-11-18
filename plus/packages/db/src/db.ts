@@ -12,6 +12,25 @@ export interface CreateDbOptions {
   max?: number;
   /** Fail fast for readiness probes and broken hosts. */
   connectionTimeoutMillis?: number;
+  /**
+   * Server-side safety nets. They are deliberately disabled for the short-lived
+   * migration pool: a large index build must not be cancelled by a query budget
+   * that exists to protect interactive traffic.
+   */
+  statementTimeoutMs?: number;
+  lockTimeoutMs?: number;
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function nonNegativeInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 export function createDb(options: CreateDbOptions): Kysely<Database> {
@@ -20,17 +39,24 @@ export function createDb(options: CreateDbOptions): Kysely<Database> {
   const {
     connectionString,
     schema,
-    max = 5,
-    connectionTimeoutMillis = 5_000,
+    max = positiveInteger(process.env.ARTFLOW_PLUS_DB_POOL_MAX, 20),
+    connectionTimeoutMillis = positiveInteger(process.env.ARTFLOW_PLUS_DB_CONNECT_TIMEOUT_MS, 10_000),
+    statementTimeoutMs = nonNegativeInteger(process.env.ARTFLOW_PLUS_DB_STATEMENT_TIMEOUT_MS, 30_000),
+    lockTimeoutMs = nonNegativeInteger(process.env.ARTFLOW_PLUS_DB_LOCK_TIMEOUT_MS, 15_000),
   } = options;
   if (schema !== undefined && !SAFE_SCHEMA.test(schema)) {
     throw new Error(`Unsafe schema name: ${schema}`);
   }
+  const settings = [
+    ...(schema === undefined ? [] : [`search_path=${schema}`]),
+    `statement_timeout=${statementTimeoutMs}`,
+    `lock_timeout=${lockTimeoutMs}`,
+  ];
   const pool = new pg.Pool({
     connectionString,
     max,
     connectionTimeoutMillis,
-    options: schema === undefined ? undefined : `-c search_path=${schema}`,
+    options: settings.map((setting) => `-c ${setting}`).join(" "),
   });
   return new Kysely<Database>({
     dialect: new PostgresDialect({ pool }),

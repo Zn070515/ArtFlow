@@ -74,3 +74,23 @@ export function fetchExecutionState(
 export function fetchOutboxHealth(): Promise<OutboxHealthView> {
   return apiFetch<OutboxHealthView>("/api/operations/outbox");
 }
+
+export function retryProjection(
+  activityId: string,
+  mode: "test" | "rehearsal" | "formal" = "formal",
+): Promise<{ readonly retried: boolean }> {
+  return apiFetch(
+    `/api/activities/${encodeURIComponent(activityId)}/projections/${mode}/retry`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+export function rebuildProjection(
+  activityId: string,
+  mode: "test" | "rehearsal" | "formal" = "formal",
+): Promise<{ readonly lastSequence: number; readonly sessions: number }> {
+  return apiFetch(
+    `/api/activities/${encodeURIComponent(activityId)}/projections/${mode}/rebuild`,
+    { method: "POST", body: "{}" },
+  );
+}

@@ -1,6 +1,7 @@
 import type { Database, StoredBallot, StoredVoteOption, StoredVoteSession } from "@artflow-plus/db";
 import {
   countBallots,
+  getActivity,
   getActivityForUpdate,
   getTicketAccessSessionForUpdate,
   getTicketForUpdate,
@@ -150,19 +151,29 @@ export async function submitBallot(
     actor,
     payload: { sessionId: input.sessionId, optionIds, identity: identityPayload },
   }, async (trx) => {
-    const activity = await getActivityForUpdate(trx, input.activityId);
-    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
-    requireActive(activity, "Voting");
-    const voteSession = await getVoteSessionForUpdate(trx, input.sessionId);
+    // Ballots are the only high-volume command. Do every read-only check
+    // before taking a row lock, then keep the locked section to two locks and
+    // the writes. This lets a burst of ballots drain without each one holding
+    // the vote session while it validates the release, options and identity.
+    const voteSession = await getVoteSession(trx, input.sessionId);
     if (voteSession === null) throw new DomainError("NOT_FOUND", "The voting session was not found.");
     if (voteSession.activityId !== input.activityId) throw new DomainError("CROSS_ACTIVITY", "The voting session belongs to another activity.");
     if (voteSession.status !== "open") throw new DomainError("VOTE_SESSION_CLOSED", "The voting session is closed.");
-    const { session: execution } = await requireRunningCommandSession(trx, activity, "voting.ballot.submit", input.scope);
+    const activity = await getActivity(trx, input.activityId);
+    if (activity === null) throw new DomainError("NOT_FOUND", "The activity was not found.");
+    requireActive(activity, "Voting");
+    const { session: execution } = await requireRunningCommandSession(
+      trx,
+      activity,
+      "voting.ballot.submit",
+      input.scope,
+    );
     if (execution.definitionVersion !== voteSession.definitionVersion) throw new DomainError("STALE_CONTEXT", "The voting session is bound to a different execution release.");
     if (execution.mode !== voteSession.mode) throw new DomainError("STALE_CONTEXT", "The voting session belongs to another execution mode.");
     let ticketId: string | undefined;
     if (input.identity.type === "ticket") {
       if (voteSession.identityPolicy !== "ticket") throw new DomainError("BALLOT_IDENTITY_INVALID", "Ticket identity is not allowed for this voting session.");
+      // Ticket locks are per credential, so they do not serialize the session.
       const accessSession = ticketSessionDigest === null ? null : await getTicketAccessSessionForUpdate(trx, ticketSessionDigest);
       const accessExpiresAt = accessSession === null ? Number.NaN : Date.parse(String(accessSession.expires_at));
       if (accessSession === null || accessSession.activity_id !== input.activityId || accessSession.revoked_at !== null || accessExpiresAt <= Date.parse(deps.now())) {
@@ -190,6 +201,36 @@ export async function submitBallot(
     if (identityType === "ticket") duplicateQuery = duplicateQuery.where("ticket_id", "=", ticketId ?? "");
     if (identityType === "browser") duplicateQuery = duplicateQuery.where("identity_digest", "=", identityDigest ?? "");
     if (identityType !== "anonymous" && await duplicateQuery.executeTakeFirst() !== undefined) throw new DomainError("DUPLICATE_BALLOT", "This identity has already submitted a ballot.");
+
+    // Lock order: vote session, then execution session. execution.close uses
+    // activity then session; the ballot never takes the activity lock, so the
+    // two paths cannot form a cycle. A close that wins first leaves no running
+    // row for the FOR UPDATE lookup, and the ballot is rejected.
+    const lockedSession = await getVoteSessionForUpdate(trx, input.sessionId);
+    if (lockedSession === null || lockedSession.activityId !== input.activityId) {
+      throw new DomainError("NOT_FOUND", "The voting session was not found.");
+    }
+    if (lockedSession.status !== "open") throw new DomainError("VOTE_SESSION_CLOSED", "The voting session is closed.");
+    if (
+      lockedSession.definitionVersion !== voteSession.definitionVersion ||
+      lockedSession.identityPolicy !== voteSession.identityPolicy ||
+      lockedSession.maxSelections !== voteSession.maxSelections
+    ) {
+      throw new DomainError("STALE_CONTEXT", "The voting session changed while the ballot was validated.");
+    }
+    const { session: lockedExecution } = await requireRunningCommandSession(
+      trx,
+      activity,
+      "voting.ballot.submit",
+      input.scope,
+      { forUpdate: true },
+    );
+    if (
+      lockedExecution.definitionVersion !== lockedSession.definitionVersion ||
+      lockedExecution.mode !== lockedSession.mode
+    ) {
+      throw new DomainError("STALE_CONTEXT", "The execution session changed while the ballot was validated.");
+    }
     const ballot: StoredBallot = {
       id: idFromCommand("ballot", input.commandId),
       activityId: input.activityId,
@@ -217,13 +258,13 @@ export async function submitBallot(
       activityId: input.activityId,
       aggregateType: "vote_session",
       aggregateId: input.sessionId,
-      revision: voteSession.revision,
+      revision: lockedSession.revision,
       capability: "voting",
       scope: input.scope,
-      mode: execution.mode,
+      mode: lockedExecution.mode,
       payload: { sessionId: input.sessionId, ballotId: ballot.id, identityType, optionIds, selectionCount: optionIds.length },
     });
-    return { body: { ballot, mode: execution.mode }, status: 201 };
+    return { body: { ballot, mode: lockedExecution.mode }, status: 201 };
   });
 }
 

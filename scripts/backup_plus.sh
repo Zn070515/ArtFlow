@@ -160,7 +160,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-acquire_write_barrier
+# pg_dump is an MVCC-consistent snapshot; the table barrier is opt-in for
+# deployments that need byte-for-byte alignment with the file volumes and can
+# tolerate a short write freeze.
+if [[ "${ARTFLOW_BACKUP_WRITE_LOCK:-0}" == "1" ]]; then
+    acquire_write_barrier
+fi
 docker exec "$db_container" sh -c \
     'pg_dump --format=custom --no-owner --file="$1" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
     sh "$source_dump_path"

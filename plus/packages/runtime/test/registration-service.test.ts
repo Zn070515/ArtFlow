@@ -1,7 +1,7 @@
 import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 import fc from "fast-check";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -84,17 +84,33 @@ function audioBytes(length: number): Uint8Array {
   return bytes;
 }
 
+
+async function tempBytes<T>(
+  bytes: Uint8Array,
+  run: (content: { readonly tempPath: string; readonly byteLength: number }) => Promise<T>,
+): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), "artflow-upload-test-"));
+  const tempPath = join(dir, "upload.bin");
+  await writeFile(tempPath, bytes);
+  try {
+    return await run({ tempPath, byteLength: bytes.byteLength });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 async function uploadWithContent(
   actor: ActorContext,
   input: Parameters<typeof uploadMaterial>[2],
 ) {
   const uploaded = await uploadMaterial(db, deps(actor), input);
-  return attachMaterialContent(db, deps(actor), {
+  const bytes = audioBytes(input.byteLength);
+  return tempBytes(bytes, (content) => attachMaterialContent(db, deps(actor), {
     commandId: `${input.commandId}-content`,
     activityId: input.activityId,
     materialId: uploaded.body.id,
-    bytes: audioBytes(input.byteLength),
-  });
+    ...content,
+  }));
 }
 
 async function submitForReview(
@@ -293,12 +309,12 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       contentType: "audio/mpeg",
       byteLength: 10,
     });
-    await expect(attachMaterialContent(db, deps(participant), {
+    await expect(tempBytes(new Uint8Array(10).fill(1), (content) => attachMaterialContent(db, deps(participant), {
       commandId: "attach-wrong-content",
       activityId,
       materialId: material.body.id,
-      bytes: new Uint8Array(10).fill(1),
-    })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
+      ...content,
+    }))).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
   });
 
   it("keeps the previous current material when replacement content fails", async () => {
@@ -327,12 +343,12 @@ describe.skipIf(!connectionString)("registration commands on PostgreSQL", () => 
       contentType: "audio/mpeg",
       byteLength: 20,
     });
-    await expect(attachMaterialContent(db, deps(participant), {
+    await expect(tempBytes(new Uint8Array(19).fill(1), (content) => attachMaterialContent(db, deps(participant), {
       commandId: "attach-life10-b",
       activityId,
       materialId: replacement.body.id,
-      bytes: new Uint8Array(19).fill(1),
-    })).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
+      ...content,
+    }))).rejects.toMatchObject({ code: "MATERIAL_NOT_ALLOWED" });
 
     const rows = await db
       .selectFrom("material")

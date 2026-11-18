@@ -499,3 +499,19 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
 - 多租户、计费、开放生态。
 - 全量 UI 先行的重写；页面必须跟随 slice。
 - 把非比赛活动强行塞进比赛 DAG。
+
+## 2026-11-18 — 现场运行加固（已完成）
+
+- 公共面：浏览器 `x-artflow-visitor` 计数 + 写请求每 IP 上限；Compose 固定
+  `172.28.0.0/16`，`ARTFLOW_PLUS_TRUST_PROXY` 覆盖 Caddy → nginx 两跳。
+- 材料：`MAX_MATERIAL_UPLOAD_BYTES = 600 MiB`；域名、API、nginx、Caddy、k8s
+  口径一致；上传写临时文件、下载/归档支持 Range。
+- 数据库：pool 20、`statement_timeout` 30s、`lock_timeout` 15s；迁移使用独立
+  pool；ballot 改为 vote session + execution session 行锁。
+- 归档：fflate 异步 ZIP，不再阻塞 event loop；仍要求 `closed` 与 revision 不变。
+- 恢复：`projection.retry` / `projection.rebuild` 受权 API + Ops 按钮；worker
+  镜像内置 `ops.cjs`，API 镜像内置 `create-account.cjs`。
+- 运维：生产 pino 日志、`/metrics`（token 保护）、Compose 日志轮转；会话滑动
+  续期；备份默认依赖 `pg_dump` MVCC 快照。
+- 决策与后果见 [ADR-0043](../architecture/adr/0043-runtime-blocker-hardening.md)，
+  实施计划见 [2026-11-18 runtime blockers](plans/2026-11-18-runtime-blockers-plan.md)。

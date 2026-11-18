@@ -179,7 +179,8 @@ export async function uploadSupplementMaterial(
     readonly questionKey: string;
     readonly originalName: string;
     readonly contentType: string;
-    readonly bytes: Uint8Array;
+    readonly tempPath: string;
+    readonly byteLength: number;
   },
 ): Promise<{ readonly materialId: string; readonly contentReady: true }> {
   const { grant, registrationId, activityId } = await requireGrant(db, input.token, deps.now());
@@ -196,13 +197,14 @@ export async function uploadSupplementMaterial(
     questionKey: input.questionKey,
     originalName: input.originalName,
     contentType: input.contentType,
-    byteLength: input.bytes.byteLength,
+    byteLength: input.byteLength,
   });
   const attached = await attachMaterialContent(db, depsForParticipant, {
     commandId: `${input.commandId}:content`,
     activityId,
     materialId: uploaded.body.id,
-    bytes: input.bytes,
+    tempPath: input.tempPath,
+    byteLength: input.byteLength,
   });
   return { materialId: attached.body.id, contentReady: true };
 }

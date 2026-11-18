@@ -130,3 +130,24 @@ export async function findRunningSessionByScope(
     .executeTakeFirst();
   return row === undefined ? null : toSession(row);
 }
+
+/**
+ * Locks the running session row. A command that cannot take the activity lock
+ * (the ballot hot path) still serializes against execution.close: either it
+ * holds the session and commits first, or it waits and sees the closed row.
+ */
+export async function findRunningSessionByScopeForUpdate(
+  trx: Kysely<Database>,
+  activityId: string,
+  scope: string,
+): Promise<SessionRecord | null> {
+  const row = await trx
+    .selectFrom("execution_session")
+    .selectAll()
+    .where("activity_id", "=", activityId)
+    .where("scope", "=", scope)
+    .where("status", "=", "running")
+    .forUpdate()
+    .executeTakeFirst();
+  return row === undefined ? null : toSession(row);
+}

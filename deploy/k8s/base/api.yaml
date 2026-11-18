@@ -61,8 +61,10 @@ spec:
               cpu: 250m
               memory: 512Mi
             limits:
-              cpu: "1"
-              memory: 1Gi
+              cpu: "2"
+              # Streaming uploads keep RSS bounded, but fflate's async ZIP and
+              # concurrent Range downloads still need headroom over 1 GiB.
+              memory: 2Gi
       volumes:
         - name: media
           persistentVolumeClaim:

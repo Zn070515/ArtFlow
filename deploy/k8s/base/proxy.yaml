@@ -12,7 +12,7 @@ data:
     https://artflow.local {
       tls internal
       request_body {
-        max_size 128MB
+        max_size 629145600
       }
       header -Server
       reverse_proxy plus-web:8080 {

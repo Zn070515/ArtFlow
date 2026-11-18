@@ -1,7 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import type { ExecutionStateView } from "../../api/diagnostics.js";
-import { fetchExecutionState, fetchOutboxHealth, fetchRecentEvents } from "../../api/diagnostics.js";
+import {
+  fetchExecutionState,
+  fetchOutboxHealth,
+  fetchRecentEvents,
+  rebuildProjection,
+  retryProjection,
+} from "../../api/diagnostics.js";
 import { Badge, type BadgeTone } from "../ui/Badge.js";
+import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
 
 function stateTone(state: ExecutionStateView): BadgeTone {
@@ -39,6 +47,25 @@ export function DiagnosticsCard({
     enabled: canManage,
     retry: false,
   });
+  const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const refresh = async (): Promise<void> => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["ops-execution-state", activityId] }),
+      queryClient.invalidateQueries({ queryKey: ["ops-events", activityId] }),
+      queryClient.invalidateQueries({ queryKey: ["ops-outbox-health"] }),
+    ]);
+  };
+  const retry = useMutation({
+    mutationFn: () => retryProjection(activityId, "formal"),
+    onSuccess: refresh,
+    onError: (error) => setActionError(error instanceof Error ? error.message : "重试投影失败。"),
+  });
+  const rebuild = useMutation({
+    mutationFn: () => rebuildProjection(activityId, "formal"),
+    onSuccess: refresh,
+    onError: (error) => setActionError(error instanceof Error ? error.message : "重建投影失败。"),
+  });
 
   if (!canManage) return null;
   const executionState = execution.data;
@@ -52,6 +79,28 @@ export function DiagnosticsCard({
           <Badge tone={stateTone(executionState)}>{stateLabel(executionState)}</Badge>
         </p>
       )}
+      {executionState?.status === "blocked" ? (
+        <div className="ui-card__actions">
+          <p className="ui-card__description">正式投影已阻塞，可先重试当前事件；仍失败时重建投影。</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={retry.isPending || rebuild.isPending}
+            onClick={() => retry.mutate()}
+          >
+            重试投影
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={retry.isPending || rebuild.isPending}
+            onClick={() => rebuild.mutate()}
+          >
+            重建投影
+          </Button>
+        </div>
+      ) : null}
+      {actionError === null ? null : <p className="ui-field__error" role="alert">{actionError}</p>}
       <details className="definition-raw">
         <summary>高级诊断</summary>
         <div className="tasks-readiness">

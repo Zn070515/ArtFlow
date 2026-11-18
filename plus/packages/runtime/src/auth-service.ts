@@ -5,6 +5,7 @@ import {
   getLocalSessionWithAccount,
   insertLocalAccount,
   insertLocalSession,
+  touchLocalSession,
 } from "@artflow-plus/db";
 import type { Database } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
@@ -92,6 +93,18 @@ export async function resolveActorFromBearer(
   // Resolve the account on every request: the session snapshot must never
   // outlive an account change made by an administrator.
   const session = await getLocalSessionWithAccount(db, token.trim(), now.toISOString());
+  if (session !== null) {
+    const remaining = Date.parse(session.expiresAt) - now.getTime();
+    if (remaining < SESSION_TTL_MS / 2) {
+      // An event day runs longer than one fixed window. Refresh only in the
+      // second half of the session so ordinary requests do not write.
+      await touchLocalSession(
+        db,
+        session.token,
+        new Date(now.getTime() + SESSION_TTL_MS).toISOString(),
+      ).catch(() => undefined);
+    }
+  }
   return session?.actor ?? null;
 }
 
@@ -104,7 +117,19 @@ export async function resolveLocalSession(
   token: string,
   now: string,
 ) {
-  return getLocalSessionWithAccount(db, token, now);
+  const session = await getLocalSessionWithAccount(db, token, now);
+  if (session !== null) {
+    const current = Date.parse(now);
+    const remaining = Date.parse(session.expiresAt) - current;
+    if (remaining < SESSION_TTL_MS / 2) {
+      await touchLocalSession(
+        db,
+        session.token,
+        new Date(current + SESSION_TTL_MS).toISOString(),
+      ).catch(() => undefined);
+    }
+  }
+  return session;
 }
 
 /**

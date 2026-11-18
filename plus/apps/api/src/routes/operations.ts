@@ -1,8 +1,19 @@
 import { OperationsRiskResponseSchema } from "@artflow-plus/contracts";
-import { getActivityFeedback, getOperationsRiskBoard } from "@artflow-plus/runtime";
+import {
+  getActivityFeedback,
+  getOperationsRiskBoard,
+  rebuildProjection,
+  retryProjection,
+} from "@artflow-plus/runtime";
+import { Type } from "@sinclair/typebox";
 
 import type { ApiContext } from "../http/context.js";
 import { ActivityParams } from "../http/schemas.js";
+
+const ProjectionModeParams = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  mode: Type.Union([Type.Literal("test"), Type.Literal("rehearsal"), Type.Literal("formal")]),
+});
 
 export function registerOperationsRoutes(ctx: ApiContext): void {
   const { app, db, requestDeps, requireOperationsReader } = ctx;
@@ -14,6 +25,24 @@ export function registerOperationsRoutes(ctx: ApiContext): void {
       config: { access: "analytics" },
     },
     async (request) => getOperationsRiskBoard(db, await requestDeps(request)),
+  );
+
+  app.post(
+    "/api/activities/:id/projections/:mode/retry",
+    { schema: { params: ProjectionModeParams } },
+    async (request) => {
+      const { id, mode } = request.params as { id: string; mode: string };
+      return await retryProjection(db, await requestDeps(request), { activityId: id, mode });
+    },
+  );
+
+  app.post(
+    "/api/activities/:id/projections/:mode/rebuild",
+    { schema: { params: ProjectionModeParams } },
+    async (request) => {
+      const { id, mode } = request.params as { id: string; mode: string };
+      return await rebuildProjection(db, await requestDeps(request), { activityId: id, mode });
+    },
   );
 
   app.get(

@@ -10,7 +10,7 @@
 
 ## 端点
 
-| 方法 | 路径 | 用途 | 限流（每 IP/公开码） |
+| 方法 | 路径 | 用途 | 限流（每浏览器访客） |
 | --- | --- | --- | --- |
 | GET | `/api/public/events` | 公开活动目录（仅主办方列入的活动） | 60/分钟 |
 | GET | `/api/public/events/:publicCode` | 活动站聚合：介绍、内容块、节目单、赛果、参与者（可选） | 120/分钟 |
@@ -23,6 +23,10 @@
 | POST | `/api/public/activities/:publicCode/feedback` | 闭幕后反馈（`rating` 1–5、`comment` ≤1000） | 10/分钟 |
 | POST | `/api/public/tickets/lookup` | 凭入场凭证查电子票 | 30/分钟 |
 
+- 浏览器请求携带稳定、匿名的 `x-artflow-visitor` 头；限流按该值计数，因此场馆
+  NAT 下的数百名观众不会共享一个桶。写请求另有每 IP 上限
+  （`ARTFLOW_PLUS_PUBLIC_IP_CEILING_MULTIPLIER`，默认 200 倍）。服务端集成
+  不发送该头时退回按 IP 计数，应自行控制频率。
 - 目录与详情只返回 `active`/`closed`；`draft`/`archived` 一律 404。
 - 公开读不返回内部 id、联系方式、报名答案或材料字节；参与者目录需主办方显式开启。
 - 赛果只来自正式 release 快照；撤销、superseded 或 stale 的 release 不公开。
@@ -63,7 +67,8 @@
 - 活动目录/详情：60 秒。
 - 当前节目与投票入口：15 秒；页面隐藏时暂停。
 - 赛果：60 秒或回到前台时刷新；撤销的可见延迟上限约 60 秒。
-- 不要用低于 10 秒的间隔抓取；限流按公开码/IP 计。
+- 不要用低于 10 秒的间隔抓取；浏览器请求按 visitor 计数，无 visitor 的服务端
+  请求按 IP 计数。
 
 ## `.ics`
 

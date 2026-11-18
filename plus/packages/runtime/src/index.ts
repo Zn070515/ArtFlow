@@ -1,4 +1,5 @@
 export * from "./activity-service.js";
+export * from "./projection-admin-service.js";
 export * from "./public-profile-service.js";
 export * from "./public-event-service.js";
 export * from "./feedback-service.js";

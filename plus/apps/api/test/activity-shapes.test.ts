@@ -151,11 +151,12 @@ async function registerAndApprove(shape: Shape, answers: Record<string, string>,
   readonly originalName: string;
   readonly contentType: string;
   readonly byteLength: number;
-}): Promise<{ registrationId: string; participantId: string }> {
+}): Promise<{ registrationId: string; participantId: string; materialId?: string }> {
   const started = await postJson(participantApp, `/api/activities/${shape.activityId}/registrations`, {});
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const registration = started.body as unknown as { id: string; revision: number; participantId: string };
   let revision = registration.revision;
+  let materialId: string | undefined;
   for (const [questionKey, value] of Object.entries(answers)) {
     const saved = await patchJson(participantApp,
       `/api/activities/${shape.activityId}/registrations/${registration.id}/answers`,
@@ -166,6 +167,7 @@ async function registerAndApprove(shape: Shape, answers: Record<string, string>,
     const material = await postJson(participantApp,
       `/api/activities/${shape.activityId}/registrations/${registration.id}/materials`, file);
     expect(material.statusCode, JSON.stringify(material.body)).toBe(201);
+    materialId = String(material.body.id);
     const content = await participantApp.inject({
       method: "PUT",
       url: `/api/activities/${shape.activityId}/materials/${String(material.body.id)}/content`,
@@ -186,7 +188,7 @@ async function registerAndApprove(shape: Shape, answers: Record<string, string>,
     `/api/activities/${shape.activityId}/registrations/${registration.id}/review`,
     { expectedRevision: submittedRevision, status: "approved", note: "ok" });
   expect(reviewed.statusCode, JSON.stringify(reviewed.body)).toBe(200);
-  return { registrationId: registration.id, participantId: registration.participantId };
+  return { registrationId: registration.id, participantId: registration.participantId, ...(materialId === undefined ? {} : { materialId }) };
 }
 
 async function finalizeRoster(activityId: string): Promise<void> {
@@ -313,11 +315,20 @@ describe.skipIf(!connectionString)("three activity shapes", () => {
 
   it("runs a stage show through registration, review, roster, and archive", async () => {
     const shape = await createShape("stage-show", "Shape Stage");
-    await registerAndApprove(
+    const registered = await registerAndApprove(
       shape,
       { name: "导演组", program: "毕业短片" },
       { questionKey: "work_file", originalName: "film.mp4", contentType: "video/mp4", byteLength: 1024 },
     );
+    expect(registered.materialId).toBeDefined();
+    const ranged = await participantApp.inject({
+      method: "GET",
+      url: `/api/activities/${shape.activityId}/materials/${String(registered.materialId)}/content`,
+      headers: { range: "bytes=0-3" },
+    });
+    expect(ranged.statusCode, ranged.body).toBe(206);
+    expect(ranged.headers["content-range"]).toBe("bytes 0-3/1024");
+    expect(ranged.rawPayload.length).toBe(4);
     await finalizeRoster(shape.activityId);
     const activity = await getJson(opsApp, `/api/activities/${shape.activityId}`);
     const closed = await postJson(opsApp, `/api/activities/${shape.activityId}/close`, {

@@ -99,6 +99,20 @@ export async function insertLocalSession(
     .execute();
 }
 
+/** Sliding expiry: only writes when the session is close enough to matter. */
+export async function touchLocalSession(
+  db: Kysely<Database>,
+  token: string,
+  expiresAt: string,
+): Promise<void> {
+  await db
+    .updateTable("local_session")
+    .set({ expires_at: expiresAt })
+    .where("token", "=", token)
+    .where("revoked_at", "is", null)
+    .execute();
+}
+
 /**
  * Authorization reads the account, never the session snapshot. A session only
  * proves that the holder authenticated once; its roles and permissions columns

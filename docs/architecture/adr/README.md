@@ -47,6 +47,7 @@ ArtFlow-Plus 的架构决策。状态：`proposed`（规划中）、`accepted`�
 | [0040](0040-live-projection-sticky-recovery.md) | Live Projection block 必须 sticky；读面暴露 stale；显式 rebuild 恢复 | accepted |
 | [0041](0041-contract-harness.md) | 契约测试用仓库内小型 Descriptor + Adapter harness；真实 PostgreSQL；不引入 Pact Broker | accepted |
 | [0042](0042-live-account-authorization.md) | 授权读取账号当前状态；会话快照不参与授权；账号管理由 account.manage 收口 | accepted |
+| [0043](0043-runtime-blocker-hardening.md) | 公共限流按 visitor、600 MiB 流式材料、ballot 锁顺序、归档异步 ZIP、投影恢复入口、日志/指标 | accepted |
 
 新增 ADR 的规则：
 

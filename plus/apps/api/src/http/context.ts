@@ -7,6 +7,7 @@ import type {
 import type { DocumentExporter, RateLimiter, RuntimeDeps } from "@artflow-plus/runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely } from "kysely";
+import type { Metrics } from "./metrics.js";
 
 export type ReadAccess =
   | "public"
@@ -37,6 +38,7 @@ export interface ApiContext {
   readonly registry: CapabilityRegistry;
   readonly packs: readonly ActivityPack[];
   readonly rateLimiter: RateLimiter;
+  readonly metrics: Metrics;
   readonly documentExporter: DocumentExporter | null;
   readonly isProduction: boolean;
   readonly sessionSecret: string;

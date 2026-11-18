@@ -78,9 +78,17 @@ plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 
 ### 仍开放的缺口
 
-- bracket/对阵、活动报名/结果的通用二维码、现场大屏、post-event feedback。
+- bracket/对阵、活动报名/结果的通用二维码、现场大屏。
 - SSO provider；当前使用本地会话。
 - 多实例实时广播（Redis）与权限实时撤销。
+- 单 PostgreSQL/PVC 的高可用与 PITR 仍由部署方提供；应用已支持可配置连接池、
+  查询/锁超时与多副本所需的流式媒体，但 Compose 权威拓扑仍是单节点。
+
+2026-11-18 已完成一轮现场运行加固：公共限流改为按浏览器 visitor 计数并保留
+写请求的每 IP 上限；资料上限统一为 600 MiB 且上传/下载流式化、支持 Range；
+ballot 不再锁整个 activity；归档 ZIP 异步化；投影 retry/rebuild 进入 Ops；
+生产启用日志与 `/metrics`；会话滑动续期；备份默认不冻结写入。详见
+[ADR-0043](../architecture/adr/0043-runtime-blocker-hardening.md)。
 
 ## 文档与规划基线
 

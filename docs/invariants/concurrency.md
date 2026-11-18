@@ -45,6 +45,14 @@ Round → Seat/Release；乱序会死锁，锁前读取会在窗口内被并发�
 **Plus 要求**：锁顺序是显式表；锁后加载统一走 `filter().first()` 并映射为
 领域错误；禁止在锁后对外部对象做未加锁的写。
 
+**例外（投票热路径）**：`voting.ballot.submit` 不取 Activity 行锁。它先只读
+校验，再锁 `vote_session`，最后 `FOR UPDATE` 锁 `execution_session`。理由：
+投票是唯一的高频命令，按 Activity 串行会让千人投票排队；`execution.close`
+仍按 Activity → session 顺序，Activity 关闭要求所有 session 已关闭，因此
+ballot 不会在关闭后写入。双连接证据见
+`plus/packages/runtime/test/voting-ticket-service.test.ts` 的
+“serializes execution close against a ballot on the session row”。
+
 ---
 
 ## CONC-03 唯一 key/编号在聚合锁内分配并与 INSERT 同一事务

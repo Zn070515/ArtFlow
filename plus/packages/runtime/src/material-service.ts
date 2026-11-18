@@ -22,8 +22,10 @@ import type {
 import {
   canActFor,
   DomainError,
+  MAX_MATERIAL_UPLOAD_BYTES,
   requirePermission,
 } from "@artflow-plus/domain";
+import { open } from "node:fs/promises";
 import type { Kysely } from "kysely";
 
 import { executeCommand, type CommandOutcome } from "./command.js";
@@ -247,7 +249,20 @@ export interface AttachMaterialContentInput {
   readonly commandId: string;
   readonly activityId: string;
   readonly materialId: string;
-  readonly bytes: Uint8Array;
+  /** Fully received temporary file; it is adopted by the storage, not buffered. */
+  readonly tempPath: string;
+  readonly byteLength: number;
+}
+
+async function readHeader(path: string, length = 64): Promise<Uint8Array> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Stores the actual bytes for a metadata row created by `materials.upload`. */
@@ -261,6 +276,10 @@ export async function attachMaterialContent(
     throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "Material storage is not configured.");
   }
   const actor = runtimeActor(deps);
+  if (!Number.isSafeInteger(input.byteLength) || input.byteLength < 0 || input.byteLength > MAX_MATERIAL_UPLOAD_BYTES) {
+    throw new DomainError("MATERIAL_NOT_ALLOWED", "The uploaded content exceeds the 600 MiB ceiling.");
+  }
+  const header = await readHeader(input.tempPath);
   let writtenKey: string | undefined;
   try {
     return await executeCommand(
@@ -271,7 +290,7 @@ export async function attachMaterialContent(
         capability: "materials",
         commandType: "materials.content.attach",
         actor,
-        payload: { materialId: input.materialId, byteLength: input.bytes.byteLength },
+        payload: { materialId: input.materialId, byteLength: input.byteLength },
       },
       async (trx) => {
         const activity = await getActivityForUpdate(trx, input.activityId);
@@ -298,7 +317,7 @@ export async function attachMaterialContent(
         ) {
           throw new DomainError("FORBIDDEN", "The actor cannot store content for this material.");
         }
-        if (input.bytes.byteLength !== material.byteLength) {
+        if (input.byteLength !== material.byteLength) {
           throw new DomainError("MATERIAL_NOT_ALLOWED", "The uploaded content does not match the registered size.");
         }
         const { questionnaire, materials } = await releasedMaterialRules(
@@ -307,13 +326,13 @@ export async function attachMaterialContent(
           registration.questionnaireHash,
         );
         const slot = fileSlotFor(questionnaire, material.questionKey);
-        if (!matchesPurpose(input.bytes, slot.purpose)) {
+        if (!matchesPurpose(header, slot.purpose)) {
           throw new DomainError(
             "MATERIAL_NOT_ALLOWED",
             "The material content does not match the released purpose.",
           );
         }
-        await storage.put(material.storageKey, input.bytes);
+        await storage.putFile(material.storageKey, input.tempPath);
         writtenKey = material.storageKey;
         // Bytes are ready; only now does the new row replace the old current
         // one. Both statements share this transaction.
@@ -341,8 +360,17 @@ export async function attachMaterialContent(
 export async function readMaterialContent(
   db: Kysely<Database>,
   deps: RuntimeDeps,
-  input: { readonly activityId: string; readonly materialId: string; readonly actor: ReturnType<typeof runtimeActor> },
-): Promise<{ readonly material: StoredMaterial; readonly bytes: Uint8Array }> {
+  input: {
+    readonly activityId: string;
+    readonly materialId: string;
+    readonly actor: ReturnType<typeof runtimeActor>;
+    readonly range?: { readonly start: number; readonly end: number };
+  },
+): Promise<{
+  readonly material: StoredMaterial;
+  readonly stream: import("node:stream").Readable;
+  readonly size: number;
+}> {
   const material = await readMaterialForActor(db, {
     activityId: input.activityId,
     materialId: input.materialId,
@@ -353,7 +381,8 @@ export async function readMaterialContent(
     throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "Material storage is not configured.");
   }
   try {
-    return { material, bytes: await storage.read(material.storageKey) };
+    const { stream, size } = await storage.readStream(material.storageKey, input.range);
+    return { material, stream, size };
   } catch {
     throw new DomainError("MATERIAL_CONTENT_UNAVAILABLE", "The material bytes are not available.");
   }
