@@ -515,3 +515,19 @@ M8 出口证据（2026-10-26）：M8a–M8e 全部 slices 完成；E2E 覆盖注
   续期；备份默认依赖 `pg_dump` MVCC 快照。
 - 决策与后果见 [ADR-0043](../architecture/adr/0043-runtime-blocker-hardening.md)，
   实施计划见 [2026-11-18 runtime blockers](plans/2026-11-18-runtime-blockers-plan.md)。
+
+## 2026-11-18 — HA、身份与找回（已完成）
+
+- **多副本**：`deploy/k8s/overlays/ha` 运行 2 个 API/worker/web 副本，带 PDB；
+  会话、限流、outbox 都在 PostgreSQL，实时失效由每个副本独立轮询 outbox。
+- **共享存储**：新增 S3 兼容驱动；`ARTFLOW_PLUS_STORAGE_DRIVER=s3` 把媒体与归档
+  放到共享 bucket，多副本不再依赖本地 RWO 卷。
+- **数据库 PITR**：`deploy/k8s/cnpg/` 提供 CloudNativePG 三实例 + S3 WAL/数据
+  归档参考，以及“恢复到新集群再切换”的 PITR 流程。
+- **MFA/SSO**：账号可绑定 TOTP；通用 OIDC（授权码 + PKCE + state/nonce +
+  JWKS）支持已绑定账号、已验证邮箱自动绑定与可选 participant 自动开户。
+- **密码找回**：账号可选邮箱；一次性 30 分钟 token、只存摘要、消费与改密/撤销
+  会话同事务；通用 SMTP，未配置时不发信但接口不泄露账号是否存在。
+- **发布**：新增手动 `release-readiness.yml`（只跑 gate/build，不打 tag）和
+  `release-process.md`；正式发布仍由签名 tag 触发 `publish.yml`。
+- 决策与边界见 [ADR-0044](../architecture/adr/0044-ha-identity-and-recovery.md)。

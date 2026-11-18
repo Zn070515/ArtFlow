@@ -113,6 +113,18 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   a per-IP ceiling controlled by `ARTFLOW_PLUS_PUBLIC_IP_CEILING_MULTIPLIER`.
   The Nginx/Caddy transport ceiling and the domain material ceiling are both
   **600 MiB** (`MAX_MATERIAL_UPLOAD_BYTES`).
+- **Storage driver**: `ARTFLOW_PLUS_STORAGE_DRIVER=local` keeps
+  `ARTFLOW_PLUS_MEDIA_DIR` / `ARTFLOW_PLUS_ARCHIVE_DIR`. `s3` selects the
+  S3-compatible client (`ARTFLOW_PLUS_S3_*`) and moves material and archive
+  objects to a shared bucket; this is required for multi-replica API pods.
+- **Identity**: TOTP is optional per account (`/api/auth/mfa/*`). OIDC is
+  enabled only when issuer, client ID/secret and redirect URI are set; verified
+  emails link existing accounts, and auto-provisioning creates participants
+  only. Password reset needs `ARTFLOW_PLUS_SMTP_URL`,
+  `ARTFLOW_PLUS_MAIL_FROM` and `ARTFLOW_PLUS_APP_BASE_URL`; without them the
+  endpoint stays generic but sends nothing. An `account.manage` operator can
+  clear a lost authenticator with `PUT /api/admin/accounts/:username` and
+  `resetMfa: true` plus the current `expectedRevision`.
 - **Deployment**: `deploy/compose.production.yml` runs `plus-db`, `plus-api`,
   `plus-worker`, `plus-web`, and Caddy. The optional `export` profile adds
   `plus-export`, a renderer-only sidecar on the internal network with a read-only
@@ -121,6 +133,12 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   Plus images are digest-pinned. Copy `.env.production.example` and replace every
   placeholder. Backups and restores follow
   [`docs/artflow-plus/backup-restore.md`](artflow-plus/backup-restore.md).
+- **Multi-node reference**: `deploy/k8s/overlays/ha` runs two API/worker/web
+  replicas with PDBs and S3 storage; `deploy/k8s/cnpg/` documents a
+  CloudNativePG three-instance cluster with S3 WAL/data archiving and a
+  recover-to-new-cluster PITR procedure. These are references, not applied by
+  Compose. Releases are prepared with the manual `release-readiness.yml`
+  workflow and published only by a signed `v*` tag.
 
 ## Gate tooling
 
