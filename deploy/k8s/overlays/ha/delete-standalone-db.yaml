@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: plus-db
+$patch: delete
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: plus-db
+$patch: delete

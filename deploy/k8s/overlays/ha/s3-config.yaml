@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plus-config
+data:
+  ARTFLOW_PLUS_STORAGE_DRIVER: s3
+  ARTFLOW_PLUS_S3_REGION: us-east-1
+  ARTFLOW_PLUS_S3_FORCE_PATH_STYLE: "0"
+  ARTFLOW_PLUS_S3_MEDIA_PREFIX: media
+  ARTFLOW_PLUS_S3_ARCHIVE_PREFIX: archives

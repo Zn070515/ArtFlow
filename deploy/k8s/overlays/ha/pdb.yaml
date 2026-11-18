@@ -1,0 +1,31 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: plus-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: plus-api
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: plus-worker
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: plus-worker
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: plus-web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: plus-web
