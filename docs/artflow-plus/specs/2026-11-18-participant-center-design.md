@@ -101,7 +101,7 @@ interface MyEvent {
     rank: number;
     score: string;
     unit?: "score" | "percent";
-    award?: string;
+    awards: readonly string[];
   }[];
   links: {
     event: string | null;
@@ -127,8 +127,11 @@ interface MyNotification {
 - **活动资料**：复用 `getActivityPublicProfile`；`profile.startsAt/endsAt/venue/organizer` 填入活动上下文。
 - **报名时间**：`registration.created_at/updated_at`；新增 `listRegistrationsByParticipant` 查询，不修改领域 `RegistrationState`。
 - **材料**：`listMaterials` 只取 `current = true`；`StoredMaterial` 增加 `createdAt/updatedAt`（表已有列），用于通知时间。
+- **材料下载权限**：只有 `material.ownerActorId === actorId` 时返回 `contentPath`；主办方代传的材料只显示元数据与「由主办方上传」，
+  不提供下载链接。原因：现有 `readMaterialForActor` 只允许 owner 或 staff 读取，参与者会话不能下载 staff 代传的文件。
 - **个人赛程**：`selectActiveScheduleRelease`（formal、active/closed、最新 release 未撤销）后按 `entry.participantId === actorId` 过滤；没有 release 或没有我的条目 → `[]`。
-- **我的赛果**：`selectPublicResults`（active/closed、active release、未 stale）后按 `decision.contestantId === actorId` 和 `award.contestantId === actorId` 过滤；同一 release 的排名与奖项合并为一条 `results`，`award` 取该 release 中属于我的第一个奖项（没有则省略）。
+  分组/团体节目如果组织者没有为每个成员写入条目，个人赛程为空；本轮不做分组映射，页脚提示「没有你的条目」而不是猜测。
+- **我的赛果**：`selectPublicResults`（active/closed、active release、未 stale）后按 `decision.contestantId === actorId` 和 `award.contestantId === actorId` 过滤；同一 release 的排名与该 release 中属于我的全部奖项合并为一条 `results`（`awards` 数组，可为空）。
 - **可编辑性**：`editable = getPublicActivity(publicCode).registrationOpen && (status === "draft" || status === "need_supplement")`；
   这同时覆盖活动状态、报名生命周期、名单是否定稿与能力是否齐全。
 - **链接**：`event = activity.status === "active" || activity.status === "closed" ? "/e/<publicCode>" : null`；
@@ -143,15 +146,18 @@ interface MyNotification {
 
 | kind | 生成条件 | key | createdAt | title / body |
 | --- | --- | --- | --- | --- |
-| `registration` | 状态 ∈ submitted / need_supplement / approved / rejected / withdrawn | `<publicCode>:registration:<status>:<revision>` | `registration.updated_at` | 按状态；need_supplement/rejected 带 `reviewNote` |
+| `registration` | 状态 ∈ submitted / need_supplement / approved / rejected / withdrawn | 审核态：`<publicCode>:registration:<status>:<reviewedBy ?? "system">:<sha256(reviewNote).slice(0,12)>`；提交/撤回态：`<publicCode>:registration:<status>:<revision>` | `registration.updated_at` | 按状态；need_supplement/rejected 带 `reviewNote` |
 | `material` | 状态 ∈ approved / needs_supplement | `<publicCode>:material:<materialId>:<status>:<revision>` | `reviewed_at ?? updated_at` | 材料名 + 审核备注 |
-| `announcement` | `profile.announcement` 非空且活动非 archived | `<publicCode>:announcement:<sha256(announcement).slice(0,16)>` | `profile.updatedAt` | 活动公告 + 全文 |
+| `announcement` | `profile.announcement` 非空且活动 `active|closed` | `<publicCode>:announcement:<sha256(announcement).slice(0,16)>` | `profile.updatedAt` | 活动公告 + 全文 |
 | `schedule` | 我在 active formal release 中 | `<publicCode>:schedule:<releaseId>` | `release.releasedAt` | 节目单已发布 |
 | `result` | 我在 active result release 中 | `<publicCode>:result:<releaseId>` | `release.releasedAt` | 赛果已发布 + 我的名次/奖项 |
 
 - 通知按 `createdAt` 降序，同刻按 `key` 升序。
 - `read` 来自 `participant_notification_read`；`unreadCount` 是未读条目数。
+- 审核态使用 `reviewedBy + reviewNote` 哈希而不是 `registration.revision`：参与者在 `need_supplement` 下修改答案会递增 revision，
+  但审核结论没有变化，不应反复生成新通知。提交/撤回态仍用 revision，区分重新提交。
 - 同一状态/版本只产生一个条目；状态变化或新 release 产生新 key，旧条目从 feed 消失（派生模型已知取舍）。
+- 审核态条目的 `createdAt` 用 `registration.updated_at`；答案编辑会让时间前移，但 key 不变、不会重新变未读。
 - 归档活动只保留 `registration` 与 `material` 通知；不生成公告/节目单/赛果通知。
 - 通知正文是纯文本，React 负责转义；不渲染 HTML。
 
@@ -180,6 +186,8 @@ interface MyNotification {
 - 赛程/赛果严格复用公开读规则：`active|closed`、formal、active release、未撤销/未 stale；`test`/`rehearsal` 永不出现。
 - `archived` 活动：报名/材料只读可见；赛程/赛果为空；公开页链接为 `null`。
 - 已读状态不授予任何业务权限，不改变任何命令的权限判断。
+- **补充材料**：`/me` 只在 `editable` 时链接 `/join/$publicCode`；如果名单已定稿、主办方另行签发了 supplement token，
+  参与者应使用主办方发送的补交链接。`/me` 不读取、不展示、不转发 supplement token。
 - 通知 key 中的 `materialId`/`releaseId` 是内部标识，但只出现在 actor 自己的 feed key 中，不作为公开 URL；不向客户端暴露额外内部数据。
 
 ## 6. 前端
@@ -192,6 +200,8 @@ interface MyNotification {
 - 空态：无报名 → 「还没有报名任何活动」+ `/join`；无通知 → 「暂无通知」。
 - 归档卡：显示「已归档」，隐藏公开页链接，赛程/赛果显示「活动已归档」。
 - 移动端单列；390px 无横向滚动。
+- `/me` 查询使用 `staleTime: 0`；`/join` 的保存/提交与 `/me` 的标记已读都 `invalidate(["my-center"])`，避免状态更新后仍显示旧通知。
+  标记已读成功后用响应 `unreadCount` 更新本地计数，列表项乐观置为已读。
 
 ### 6.2 `/me/$publicCode`
 
@@ -315,5 +325,7 @@ pwsh -NoProfile -File scripts/check_docs.ps1
 
 - **派生通知无历史**：状态变化/撤销后旧条目消失；这是刻意取舍。若客户需要审计级通知历史，另开事件投影设计。
 - **已读状态无审计**：actor-scoped UI 偏好，非业务事实；若合规要求“谁何时读了什么”，升级为命令并写 audit。
-- **个人赛程依赖 `participantId` 匹配**：如果组织者在节目单里没有绑定参与者 ID，个人赛程为空；错误提示为“没有你的条目”，不猜测匹配。
+- **个人赛程依赖 `participantId` 匹配**：如果组织者在节目单里没有绑定参与者 ID，个人赛程为空；错误提示为“没有你的条目”，不猜测匹配。分组/团体节目同理，本轮不做分组映射。
+- **材料下载权限**：主办方代传的材料（`ownerActorId` 不是参与者）只显示元数据，不提供下载；参与者自己的上传才可下载。若客户需要“参与者可读所有自己的材料”，需扩展 `readMaterialForActor` 的参与者读规则。
+- **补充材料 token**：名单定稿后的补交依赖主办方发送的 supplement 链接；`/me` 不持有 token。若要把补交入口收进个人中心，需要新增 token 关联/重发模型。
 - **归档活动可见性**：参与者仍能看到自己的报名和材料；如果客户要求归档后完全不可见，改为排除 archived 即可，但会失去个人历史。
