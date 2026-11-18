@@ -179,8 +179,13 @@ function OpsContent() {
   return (
     <section className="ops-page">
       <header className="ops-header">
-        <h1 className="ui-page-title">运营风险</h1>
-        <p className="ui-page-meta">{query.data.length} 个活动 · {filteredActivities.length} 个匹配</p>
+        <div>
+          <h1 className="ui-page-title">运营风险</h1>
+          <p className="ui-page-meta">{query.data.length} 个活动 · {filteredActivities.length} 个匹配</p>
+        </div>
+        {session?.actor.permissions.some((permission) => ["*", "publishing.manage", "studio.manage"].includes(permission)) === true ? (
+          <Link className="ui-button ui-button--secondary ui-button--md" to="/ops/articles">文章与往届风采</Link>
+        ) : null}
       </header>
       <Card className="risk-summary" aria-labelledby="risk-summary-title">
         <div className="risk-summary__head">

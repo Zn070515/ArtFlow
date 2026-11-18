@@ -18,6 +18,7 @@ import { Metrics } from "./http/metrics.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerOperationsRoutes } from "./routes/operations.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
+import { registerArticleRoutes } from "./routes/articles.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -561,6 +562,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerCompetitionRoutes(routeContext);
   registerVotingRoutes(routeContext);
   registerArchiveRoutes(routeContext);
+  registerArticleRoutes(routeContext);
   registerPublishingRoutes(routeContext);
   registerExportRoutes(routeContext);
   registerPublicRoutes(routeContext);

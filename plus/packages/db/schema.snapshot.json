@@ -3043,6 +3043,95 @@
       ]
     },
     {
+      "name": "public_article",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "slug",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "title",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "summary",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "body",
+          "dataType": "text",
+          "nullable": false,
+          "default": "''::text",
+          "identity": false
+        },
+        {
+          "name": "cover_url",
+          "dataType": "text",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "status",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": "'draft'::character varying",
+          "identity": false
+        },
+        {
+          "name": "published_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        },
+        {
+          "name": "revision",
+          "dataType": "integer",
+          "nullable": false,
+          "default": "0",
+          "identity": false
+        },
+        {
+          "name": "author_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        }
+      ]
+    },
+    {
       "name": "ranking_snapshot",
       "columns": [
         {
