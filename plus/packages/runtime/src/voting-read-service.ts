@@ -7,6 +7,7 @@ import {
   hasBallotForTicket,
   listVoteOptions,
   listVoteSessionsForActivity,
+  selectParticipantNames,
 } from "@artflow-plus/db";
 import type { Kysely } from "kysely";
 
@@ -88,6 +89,7 @@ export interface PublicVoteSessionState {
   readonly candidates: readonly {
     readonly optionId: string;
     readonly candidateId: string;
+    readonly candidateName?: string;
   }[];
   readonly voted: boolean;
   readonly ticketReady: boolean;
@@ -108,6 +110,11 @@ export async function readPublicVoteSession(
   const activity = await getActivity(db, session.activityId);
   if (activity === null) return null;
   const options = await listVoteOptions(db, sessionId);
+  const candidateNames = await selectParticipantNames(
+    db,
+    activity.id,
+    options.map((option) => option.candidateId),
+  );
   let voted = false;
   if (
     session.identityPolicy === "browser" &&
@@ -129,10 +136,14 @@ export async function readPublicVoteSession(
     selectionType: session.selectionType,
     maxSelections: session.maxSelections,
     identityPolicy: session.identityPolicy,
-    candidates: options.map((option) => ({
-      optionId: option.id,
-      candidateId: option.candidateId,
-    })),
+    candidates: options.map((option) => {
+      const name = candidateNames.get(option.candidateId);
+      return {
+        optionId: option.id,
+        candidateId: option.candidateId,
+        ...(name === undefined || name === option.candidateId ? {} : { candidateName: name }),
+      };
+    }),
     voted,
     ticketReady,
   };

@@ -124,6 +124,7 @@ export const PublicVoteSessionSchema = Type.Object(
         {
           optionId: Type.String({ minLength: 1, maxLength: 100 }),
           candidateId: Type.String({ minLength: 1, maxLength: 100 }),
+          candidateName: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         },
         { additionalProperties: false },
       ),
