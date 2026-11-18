@@ -64,7 +64,6 @@ interface PublicTicketLookup {
     venue: string;
     organizer: string;
   };
-  vote: { sessionId: string; status: "open" } | null;
   links: {
     event: string;
     results: string;
@@ -74,7 +73,7 @@ interface PublicTicketLookup {
 
 - `ticket` 只出票号、状态、版本与时间；不回显 credential、不返回 participant/answers。
 - `activity` 来自 `getActivitySummary` + `getActivityPublicProfile`。
-- `vote` 复用公开投票入口；页面用 `sessionId` 构造 `/vote/<id>#ticket=<credential>`。
+- 投票入口**不在 lookup 内嵌**：页面按 `activity.publicCode` 调 §4.2 的公开接口，避免两个来源和过期快照。
 - 活动 `draft`/`archived` → `TICKET_ACTIVITY_NOT_PUBLIC`（404）；`closed` 可看票面，当前/投票入口为空。
 - 票据 `revoked` → `TICKET_REVOKED`；`expired` → `TICKET_EXPIRED`；签名/版本无效 → `INVALID_TICKET`。`issued`/`redeemed` 均有效。
 
@@ -100,7 +99,7 @@ parseCredential(credential, "T", credentialSecret)
 - 成功：活动标题/状态/时间/地点/主办方、票号、状态 Badge、入场二维码、credential 文本 + 复制、当前/下一节目、投票 CTA、活动主页/赛果链接。
 - 二维码：浏览器端 `qrcode.toDataURL(credential, { margin: 1, width: 240 })`，alt「入场二维码」；credential 不发给第三方。
 - 错误态：无效/已撤销/过期/活动未公开，分别给出明确文案；不生成二维码。
-- 当前/投票查询仅在活动 `active` 时启用；`closed` 显示票面但不轮询、不显示投票。
+- 票面 lookup 是一次性快照；当前/投票按 `activity.publicCode` 另行查询并 30s 轮询，仅在活动 `active` 时启用；`closed` 显示票面但不轮询、不显示投票。
 - 页面提示「此链接包含入场凭证，请勿转发」。
 - 打印：按钮触发 `window.print()`；`@media print` 隐藏导航/按钮，保留票面与二维码。
 - 移动端优先；390px 无横向滚动。
@@ -145,7 +144,8 @@ interface PublicCurrentProgram {
 type PublicVoteEntry = { sessionId: string; status: "open" } | null;
 ```
 
-- 活动 `active|closed`；`draft`/`archived` → 404。
+- 只对活动 `active` 返回 open session；`closed` 返回 `null`，`draft`/`archived` → 404。
+  原因：投票命令自身要求活动 active；`closed` 活动上的 open session 只会把 CTA 指向一个必然被拒绝的页面。
 - `listVoteSessionsForActivity` 过滤 `mode === "formal" && status === "open"`，按 `openedAt` 降序取最新；没有则 `null`。
 - 只返回 session id/status；候选人与身份策略仍由现有 `GET /api/public/vote/:sessionId` 提供。
 - session id 是 locator，不是授权凭据；投票页继续做 browser/ticket/anonymous 身份校验。
@@ -157,7 +157,8 @@ type PublicVoteEntry = { sessionId: string; status: "open" } | null;
   - `接下来：…`（最多 3 条）
   - `投票进行中 · 去投票`（`vote` 非空时）
 - 数据源：`fetchPublicCurrent` + `fetchPublicVoteEntry`；`refetchInterval: 30_000`，仅在活动 `active` 时启用；`closed` 停止轮询。
-- 无 current/next/vote → 整区隐藏，不渲染空壳。
+- 无 current/next/vote → 整区隐藏，不渲染空壳；锚点导航在有「现场」区时增加「现场」。
+- `/t` 票面页复用同一对公开接口，不内嵌投票快照。
 - 不新增 WebSocket topic；HTTP 轮询是唯一实时增强。
 
 ## 6. 快照兼容：`entryId`
