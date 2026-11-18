@@ -32,6 +32,7 @@ export * from "./score-service.js";
 export * from "./resolution-service.js";
 export * from "./voting-ticket-service.js";
 export * from "./ticket-read-service.js";
+export * from "./public-live-service.js";
 export * from "./supplement-service.js";
 export * from "./live-projection.js";
 export * from "./publishing-service.js";
