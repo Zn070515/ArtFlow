@@ -23,6 +23,12 @@ digest，并且服务已经运行：
 docker compose -f deploy/compose.production.yml --env-file .env.production ps
 ```
 
+默认情况下，脚本依赖 `pg_dump` 的 MVCC 一致快照，不再对用户表加
+`SHARE ROW EXCLUSIVE` 写屏障，因此备份期间业务写入不会被冻结。媒体/归档卷仍
+在 dump 之后打包；文件按不可变 key 写入，晚到或正在替换的文件不会破坏已有包。
+如果部署要求数据库与文件卷在字节层面严格对齐、且能接受短时写冻结，设置
+`ARTFLOW_BACKUP_WRITE_LOCK=1` 恢复旧的写屏障。
+
 执行：
 
 ```powershell

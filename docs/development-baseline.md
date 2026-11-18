@@ -89,7 +89,9 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
 
   The password is read from `ARTFLOW_PLUS_ACCOUNT_PASSWORD` so it does not have
   to appear in the command line. Running the command again updates that
-  username. The default permission set covers account administration, Studio,
+  username. The production API image also ships the bundled equivalent, so an
+  operator can run `node /app/create-account.mjs --username organizer` inside
+  the container without a source checkout. The default permission set covers account administration, Studio,
   registration review, roster finalization, competition, judge entry, ticketing,
   voting, results, archive, materials, attendance, grouping, tasks, schedule,
   and incident. Pass `--permissions a,b` to replace the set, or `--roles` to
@@ -103,10 +105,14 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   the production database URL with a secret-managed password. Do not reuse the
   development password.
 - **Production proxy boundary**: `ARTFLOW_PLUS_TRUST_PROXY` is an explicit,
-  comma-separated list of internal proxy IPs/CIDRs. It defaults to empty, so
-  public `X-Forwarded-For` headers cannot change rate-limit identity. The Plus
-  Nginx/Caddy transport ceiling is 128 MiB; released material policies remain the
-  domain authority below that ceiling.
+  comma-separated list of internal proxy IPs/CIDRs. Compose pins its networks
+  under `172.28.0.0/16` and the chain is Caddy → nginx → API, so both hops must
+  be trusted; leaving it empty makes every public visitor share the nginx
+  address. Browser public calls send a stable `x-artflow-visitor` id, so venue
+  NAT does not collapse hundreds of visitors into one limit bucket; writes keep
+  a per-IP ceiling controlled by `ARTFLOW_PLUS_PUBLIC_IP_CEILING_MULTIPLIER`.
+  The Nginx/Caddy transport ceiling and the domain material ceiling are both
+  **600 MiB** (`MAX_MATERIAL_UPLOAD_BYTES`).
 - **Deployment**: `deploy/compose.production.yml` runs `plus-db`, `plus-api`,
   `plus-worker`, `plus-web`, and Caddy. The optional `export` profile adds
   `plus-export`, a renderer-only sidecar on the internal network with a read-only

@@ -259,12 +259,15 @@ records the source round IDs, source score versions, and input fingerprint.
 Resolver output is a candidate/read model only; M5 does not confirm Awards or
 stage results.
 
-A blocked projection is recovered through the worker's operator CLI (there is no
-unauthenticated HTTP route):
+A blocked projection can be recovered from Ops (Diagnostics card) or through the
+authenticated operator routes; the worker image also ships the CLI:
 
 ```powershell
-pnpm -C plus --filter @artflow-plus/worker ops retry   --activity <id> --mode formal
-pnpm -C plus --filter @artflow-plus/worker ops rebuild --activity <id> --mode formal
+POST /api/activities/<id>/projections/formal/retry    # studio.manage
+POST /api/activities/<id>/projections/formal/rebuild  # studio.manage
+
+docker compose exec plus-worker node /app/ops.cjs retry --activity <id> --mode formal
+docker compose exec plus-worker node /app/ops.cjs rebuild --activity <id> --mode formal
 ```
 
 ## Current layout

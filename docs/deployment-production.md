@@ -67,8 +67,14 @@ $env:ARTFLOW_PLUS_ACCOUNT_PASSWORD = "<强口令，不要提交>"
 pnpm --filter @artflow-plus/api create-account --username organizer
 ```
 
-生产环境对生产库执行同一命令，口令由密钥管理提供；不要复用开发库口令。重复执行会
-更新同一用户名。默认权限覆盖 Studio、报名审核、名单定稿、比赛、评委入口、票据、
+生产环境也可以直接在 API 容器内执行同一条命令，无需源码树：
+
+```powershell
+docker compose -f deploy/compose.production.yml --env-file .env.production \
+  exec plus-api node /app/create-account.mjs --username organizer
+```
+
+口令由密钥管理提供；不要复用开发库口令。重复执行会更新同一用户名。默认权限覆盖 Studio、报名审核、名单定稿、比赛、评委入口、票据、
 投票、结果、归档、材料、签到；Tasks、Schedule、Incident 需要显式追加
 `tasks.manage`、`schedule.manage`、`incident.manage`。需要收窄时用 `--permissions a,b`。
 
@@ -85,5 +91,15 @@ pnpm --filter @artflow-plus/api create-account --username organizer
 
 - `plus-api` 的 `ARTFLOW_PLUS_INLINE_RELAY=0`；outbox 由 `plus-worker` 消费。
 - 只有 `proxy` 发布端口；内部服务只在 `artflow_internal` 网络。
-- `ARTFLOW_PLUS_TRUST_PROXY` 只填写直接反向代理的可信 IP/CIDR，默认留空。
+- Compose 网络固定为 `172.28.0.0/16`；链路是 Caddy → nginx → API，因此
+  `ARTFLOW_PLUS_TRUST_PROXY` 必须覆盖**两跳**（模板默认 `172.28.0.0/16`）。
+  留空会让所有公共访客共用 nginx 地址。
+- 公共读取按浏览器 `x-artflow-visitor` 计数；写请求另有每 IP 上限
+  （`ARTFLOW_PLUS_PUBLIC_IP_CEILING_MULTIPLIER`，默认 200），以适配场馆 NAT。
+- 资料上传的传输上限、领域上限和 nginx/Caddy 上限统一为 **600 MiB**；
+  旧活动 release 中的较小 `maxBytes` 仍然有效。
+- `ARTFLOW_PLUS_METRICS_TOKEN` 设置后，`GET /metrics`（请求头
+  `X-Artflow-Metrics-Token`）暴露 Prometheus 文本；未设置时返回 404。
+- API 日志级别由 `ARTFLOW_PLUS_LOG_LEVEL` 控制；Compose 的 json-file 驱动
+  已配置 50 MiB × 5 轮转。
 - 私有媒体和归档包只能经 `/api/.../materials/.../content`、归档下载等受控路由读取。
