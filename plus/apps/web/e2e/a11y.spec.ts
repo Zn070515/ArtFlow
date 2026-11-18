@@ -1,5 +1,15 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+interface LiveSeed {
+  readonly activityId: string;
+}
+
+const liveSeed = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../.e2e-live.json", import.meta.url)), "utf8"),
+) as LiveSeed;
 
 const authenticatedSurfaces: { path: string; ready: (page: Page) => Locator }[] = [
   { path: "/workspace", ready: (page) => page.locator(".workspace-activity-card").first() },
@@ -53,4 +63,16 @@ test("key surfaces have no serious or critical accessibility violations", async 
     await expect(surface.ready(page)).toBeVisible({ timeout: 15_000 });
     await assertNoBlockingViolations(page, surface.path);
   }
+
+  await page.goto("/live");
+  const liveHref = await page.locator('a[href^="/live/"]').first().getAttribute("href");
+  if (liveHref !== null) {
+    await page.goto(liveHref);
+    await expect(page.locator(".live-page")).toBeVisible({ timeout: 15_000 });
+    await assertNoBlockingViolations(page, liveHref);
+  }
+
+  await page.goto(`/live/${liveSeed.activityId}`);
+  await expect(page.locator(".live-command")).toBeVisible({ timeout: 15_000 });
+  await assertNoBlockingViolations(page, `/live/${liveSeed.activityId}`);
 });

@@ -45,9 +45,10 @@ function primaryAction(view: LiveCommandView, permissions: {
   }
   if (view.phase === "round_resolved") {
     const next = view.next;
-    return permissions.canManageSetup && next !== null
-      ? { href: `#round-${next.roundKey}`, label: "去下一轮" }
-      : null;
+    if (next === null) {
+      return permissions.canManageResults ? { href: "#live-result", label: "查看/发布赛果" } : null;
+    }
+    return permissions.canManageSetup ? { href: `#round-${next.roundKey}`, label: "去下一轮" } : null;
   }
   const roundKey = view.focusRoundKey;
   if (roundKey === null) return null;
@@ -70,7 +71,9 @@ function phaseDetail(view: LiveCommandView): string {
   if (view.phase === "scoring") return view.readyToScore ? "评分席位已就绪，可以开始评分。" : "等待评委席位或面板就绪。";
   if (view.phase === "round_scored") return "本轮表演已全部评分，等待锁定回合。";
   if (view.phase === "round_hold") return "排名存在并列或尚未解析，下一轮被阻塞。";
-  if (view.phase === "round_resolved") return "本轮已解析，可以进入下一轮。";
+  if (view.phase === "round_resolved") {
+    return view.next === null ? "本轮排名已就绪，等待结果发布。" : "本轮已解析，可以进入下一轮。";
+  }
   return "全部轮次已完成。";
 }
 
@@ -151,7 +154,7 @@ export function LiveCommandBar({
           ) : null}
         </div>
       </div>
-      <div className="live-command__rounds" aria-label="轮次导航">
+      <nav className="live-command__rounds" aria-label="轮次导航">
         {view.rounds.map((round) => (
           <a
             key={round.key}
@@ -163,7 +166,7 @@ export function LiveCommandBar({
             {round.hold ? " · HOLD" : ""}
           </a>
         ))}
-      </div>
+      </nav>
       <div className="live-command__footer">
         <span className="live-command__detail">{phaseDetail(view)}</span>
         {action === null ? null : (

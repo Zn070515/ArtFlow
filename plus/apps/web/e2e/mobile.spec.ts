@@ -1,4 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+interface LiveSeed {
+  readonly activityId: string;
+}
+
+const liveSeed = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../.e2e-live.json", import.meta.url)), "utf8"),
+) as LiveSeed;
 
 // Runs in the `mobile` project (iPhone 13 viewport on Chromium). These are
 // layout guarantees, not journeys: every operator and participant surface must
@@ -77,12 +87,10 @@ test("mobile console surfaces keep 44px touch targets and avoid horizontal scrol
     await assertHeaderDoesNotCoverContent(page, ".console-topbar", ".console-main");
   }
 
-  // The seeded Live activity id is timestamped, so take the first detail row
-  // the list renders rather than hard-coding it.
-  await page.goto("/live");
-  const liveDetailHref = await page.locator('a[href^="/live/"]').first().getAttribute("href");
-  expect(liveDetailHref).not.toBeNull();
-  await page.goto(liveDetailHref!);
+  // Use the seeded competition activity so the command console is covered,
+  // not an attendance-only Live detail that intentionally hides it.
+  const liveDetailHref = `/live/${liveSeed.activityId}`;
+  await page.goto(liveDetailHref);
   await expect(page.locator(".console-page")).toBeVisible({ timeout: 15_000 });
   const liveResult = await measure(page, touchTargetFloor);
   expect(liveResult.horizontalOverflow, `${liveDetailHref} scrolls horizontally`).toBe(false);

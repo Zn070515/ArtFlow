@@ -30,9 +30,11 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
 
     await staff.goto(`/live/${seed.activityId}`);
     await expect(staff.getByRole("heading", { name: seed.title, exact: true })).toBeVisible();
+    await expect(staff.getByTestId("live-command")).toContainText("未启动评分会话");
 
     await staff.getByRole("button", { name: "启动评分会话" }).click();
     await expect(staff.getByTestId("live-session-status")).toHaveText(/评分会话 · 彩排 · 运行中/);
+    await expect(staff.getByTestId("live-command")).toContainText("运行中 · 彩排");
 
     const round = staff.getByTestId("live-round-round-1");
     await round.getByRole("button", { name: "准备回合" }).click();
@@ -44,6 +46,8 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
 
     await round.getByRole("button", { name: "开表演" }).click();
     await expect(round.getByTestId("score-count-singer-a")).toHaveText("0/1");
+    await expect(staff.getByTestId("live-command")).toContainText("第 1 轮 · 第 1 位 · 林晓");
+    await expect(staff.getByTestId("live-command")).toContainText("评分 0/1");
 
     await staff.getByRole("button", { name: "生成评委入口链接" }).click();
     const link = await staff.getByLabel("评委入口链接").inputValue();
@@ -59,6 +63,7 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
     await expect(judge.getByTestId("judge-submitted")).toContainText("林晓");
 
     await expect(round.getByTestId("score-count-singer-a")).toHaveText("1/1", { timeout: 15_000 });
+    await expect(staff.getByTestId("live-command")).toContainText("评分 1/1");
 
     await round.getByRole("button", { name: "锁表演" }).click();
     await expect(round.getByRole("cell", { name: "已锁定", exact: true })).toBeVisible();
@@ -69,6 +74,7 @@ test("Live console runs the judging loop with a capability judge", async ({ brow
     await round.getByRole("button", { name: "生成排名" }).click();
     await expect(round.getByRole("table", { name: "当前排名"})).toBeVisible();
     await expect(round.getByRole("cell", { name: "273.00", exact: true })).toBeVisible();
+    await expect(staff.getByTestId("live-command")).toContainText("本轮排名已就绪");
 
     await staff.getByRole("button", { name: "关闭会话" }).click();
     await staff.getByRole("dialog").getByRole("button", { name: "关闭会话" }).click();

@@ -112,13 +112,15 @@ function LiveActivityContent() {
           )}
         </div>
       </header>
-      <LiveCommandBar
-        state={state}
-        canManageSession={canManageSession}
-        canManageSetup={canManageSetup}
-        canManageCompetition={canManageCompetition(session)}
-        canManageResults={canManageResults}
-      />
+      {state.config.rounds.length > 0 ? (
+        <LiveCommandBar
+          state={state}
+          canManageSession={canManageSession}
+          canManageSetup={canManageSetup}
+          canManageCompetition={canManageCompetition(session)}
+          canManageResults={canManageResults}
+        />
+      ) : null}
       <div className="live-workspace">
         <div className="live-main-column live-rounds">
           {state.rounds.map((live) => (
