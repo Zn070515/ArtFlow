@@ -14,8 +14,10 @@ function statusText(state: LiveState, view: LiveCommandView): string {
     if (state.activity.status === "closed") return "活动已结束";
     return "活动未激活";
   }
-  if (view.session === "none") return "未启动评分会话";
-  return `运行中 · ${label(EXECUTION_MODE_LABELS, view.mode)}`;
+  const sessionText = view.session === "none"
+    ? "未启动评分会话"
+    : `运行中 · ${label(EXECUTION_MODE_LABELS, view.mode)}`;
+  return view.phase === "completed" ? `${sessionText} · 全部轮次已完成` : sessionText;
 }
 
 function statusTone(view: LiveCommandView): "success" | "warning" | "neutral" | "danger" {
