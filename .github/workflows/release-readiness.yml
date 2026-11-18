@@ -1,0 +1,49 @@
+name: Release readiness (manual, no publish)
+
+# This workflow never tags and never pushes images. It runs the release gates
+# and prints the exact tag command so a maintainer can trigger publish.yml
+# deliberately with `git push origin <tag>`.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to prepare, e.g. v2.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Release gates
+    uses: ./.github/workflows/gates.yml
+    permissions:
+      contents: read
+
+  readiness:
+    name: Build readiness
+    needs: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.14.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: plus/pnpm-lock.yaml
+      - name: Install
+        run: pnpm -C plus install --frozen-lockfile
+      - name: Build production bundles
+        run: pnpm -C plus run build:prod
+      - name: Next step
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "Readiness passed for $VERSION."
+          echo "publish.yml is tag-driven and was NOT triggered."
+          echo "To release: git tag -s $VERSION -m '$VERSION' && git push origin $VERSION"

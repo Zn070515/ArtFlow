@@ -2,6 +2,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type SubmitEvent } from "react";
 
 import { ApiError } from "../api/client.js";
+import { fetchOidcConfig } from "../api/auth.js";
 import { defaultLanding, useSession } from "../auth/SessionProvider.js";
 import { Button } from "../components/ui/Button.js";
 import { Input } from "../components/ui/Input.js";
@@ -15,16 +16,24 @@ function safeNext(next: string | undefined): string | null {
 
 export function LoginPage() {
   const { next } = useSearch({ from: "/login" });
-  const { session, login, register } = useSession();
+  const { session, login, verifyMfa, register } = useSession();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaChallenge, setMfaChallenge] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [oidc, setOidc] = useState<{ enabled: boolean; label?: string }>({ enabled: false });
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const target = safeNext(next);
+
+  useEffect(() => {
+    void fetchOidcConfig().then(setOidc).catch(() => setOidc({ enabled: false }));
+  }, []);
 
   useEffect(() => {
     if (session === null) return;
@@ -40,8 +49,19 @@ export function LoginPage() {
     }
     setBusy(true);
     try {
-      const session = mode === "login" ? await login(username, password) : await register(username, password);
-      await navigate({ to: target ?? defaultLanding(session) });
+      if (mfaChallenge !== null) {
+        const verified = await verifyMfa(mfaChallenge, mfaCode);
+        await navigate({ to: target ?? defaultLanding(verified) });
+        return;
+      }
+      const result = mode === "login"
+        ? await login(username, password)
+        : await register(username, password, email.trim() === "" ? undefined : email.trim());
+      if ("mfaRequired" in result) {
+        setMfaChallenge(result.challenge);
+        return;
+      }
+      await navigate({ to: target ?? defaultLanding(result) });
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError(
@@ -80,6 +100,28 @@ export function LoginPage() {
             maxLength={64}
             required
           />
+          {mfaChallenge === null ? null : (
+            <Input
+              label="两步验证码"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={mfaCode}
+              onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              minLength={6}
+              maxLength={6}
+              required
+            />
+          )}
+          {mode === "register" && mfaChallenge === null ? (
+            <Input
+              label="邮箱（用于找回密码，可选）"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              maxLength={320}
+            />
+          ) : null}
           <Input
             label="密码"
             type="password"
@@ -111,7 +153,7 @@ export function LoginPage() {
             </p>
           )}
           <Button variant="primary" type="submit" disabled={busy}>
-            {busy ? "请稍候…" : mode === "login" ? "登录" : "创建账号"}
+            {busy ? "请稍候…" : mfaChallenge === null ? (mode === "login" ? "登录" : "创建账号") : "验证并登录"}
           </Button>
         </form>
         <button
@@ -119,11 +161,20 @@ export function LoginPage() {
           type="button"
           onClick={() => {
             setMode(mode === "login" ? "register" : "login");
+            setMfaChallenge(null);
             setError(null);
           }}
         >
           {mode === "login" ? "没有账号？创建一个" : "已有账号？去登录"}
         </button>
+        {mode === "login" ? (
+          <a className="auth-switch" href="/forgot">忘记密码？</a>
+        ) : null}
+        {oidc.enabled && mfaChallenge === null ? (
+          <a className="auth-switch" href="/api/auth/oidc/start">
+            {oidc.label ?? "统一身份登录"}
+          </a>
+        ) : null}
       </div>
     </section>
   );

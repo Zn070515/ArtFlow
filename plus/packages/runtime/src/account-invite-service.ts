@@ -207,10 +207,14 @@ export async function claimInvite(
     }, "account.claim", { username: invite.username });
   });
 
-  return authenticateLocalAccount(db, {
+  const result = await authenticateLocalAccount(db, {
     username: invite.username,
     password: input.password,
   }, now);
+  if (result.kind === "mfa") {
+    throw new DomainError("MFA_REQUIRED", "This account requires a verification code.");
+  }
+  return result;
 }
 
 export async function revokeAccountInvite(

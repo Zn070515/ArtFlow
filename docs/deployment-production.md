@@ -103,3 +103,12 @@ docker compose -f deploy/compose.production.yml --env-file .env.production \
 - API 日志级别由 `ARTFLOW_PLUS_LOG_LEVEL` 控制；Compose 的 json-file 驱动
   已配置 50 MiB × 5 轮转。
 - 私有媒体和归档包只能经 `/api/.../materials/.../content`、归档下载等受控路由读取。
+- 多副本/多节点部署设置 `ARTFLOW_PLUS_STORAGE_DRIVER=s3` 并配置
+  `ARTFLOW_PLUS_S3_BUCKET`、`ARTFLOW_PLUS_S3_REGION`、可选 endpoint 与
+  `ARTFLOW_PLUS_S3_FORCE_PATH_STYLE=1`（MinIO）；本地卷只适用于单节点。
+- 密码找回需要 `ARTFLOW_PLUS_SMTP_URL`、`ARTFLOW_PLUS_MAIL_FROM` 与
+  `ARTFLOW_PLUS_APP_BASE_URL`；OIDC 需要 issuer、client ID/secret、redirect
+  URI，默认自动开户关闭（`ARTFLOW_PLUS_OIDC_AUTO_PROVISION=0`）。
+- k8s 高可用参考：`deploy/k8s/overlays/ha`（2 副本 + PDB + S3）与
+  `deploy/k8s/cnpg/`（三实例 CloudNativePG + S3 WAL/PITR）。Compose 仍是单节点
+  权威部署；HA 清单不会自动应用。

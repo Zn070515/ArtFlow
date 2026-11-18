@@ -1,0 +1,31 @@
+# Point-in-time recovery target. Apply only after the operator and the S3
+# credentials exist. `targetTime` is an RFC 3339 timestamp before the incident.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: plus-db-recovered
+  namespace: artflow-dev
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.0
+  storage:
+    size: 20Gi
+  externalClusters:
+    - name: plus-db-backup
+      barmanObjectStore:
+        destinationPath: s3://REPLACE-WITH-BACKUP-BUCKET/artflow-pg
+        s3Credentials:
+          accessKeyId:
+            name: plus-db-s3
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: plus-db-s3
+            key: SECRET_ACCESS_KEY
+          region:
+            name: plus-db-s3
+            key: REGION
+  bootstrap:
+    recovery:
+      source: plus-db-backup
+      recoveryTarget:
+        targetTime: "2026-11-18T12:00:00Z"

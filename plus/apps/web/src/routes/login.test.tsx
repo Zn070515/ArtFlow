@@ -6,9 +6,12 @@ vi.mock("@tanstack/react-router", () => ({
   useSearch: () => ({ next: undefined }),
 }));
 
+vi.mock("../api/auth.js", () => ({
+  fetchOidcConfig: async () => ({ enabled: false }),
+}));
 vi.mock("../auth/SessionProvider.js", () => ({
   defaultLanding: () => "/join",
-  useSession: () => ({ session: null, login: vi.fn(), register: vi.fn() }),
+  useSession: () => ({ session: null, login: vi.fn(), verifyMfa: vi.fn(), register: vi.fn() }),
 }));
 
 import { LoginPage } from "./login.js";

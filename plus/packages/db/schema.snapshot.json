@@ -2071,6 +2071,41 @@
           "nullable": false,
           "default": "0",
           "identity": false
+        },
+        {
+          "name": "email",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mfa_secret",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "mfa_enabled",
+          "dataType": "boolean",
+          "nullable": false,
+          "default": "false",
+          "identity": false
+        },
+        {
+          "name": "oidc_issuer",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "oidc_subject",
+          "dataType": "character varying",
+          "nullable": true,
+          "default": null,
+          "identity": false
         }
       ]
     },
@@ -2648,6 +2683,46 @@
         },
         {
           "name": "read_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()",
+          "identity": false
+        }
+      ]
+    },
+    {
+      "name": "password_reset_token",
+      "columns": [
+        {
+          "name": "token_digest",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "character varying",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "timestamp with time zone",
+          "nullable": false,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "used_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
+        },
+        {
+          "name": "created_at",
           "dataType": "timestamp with time zone",
           "nullable": false,
           "default": "now()",

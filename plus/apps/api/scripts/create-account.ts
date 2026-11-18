@@ -35,6 +35,7 @@ const permissions = (argument("--permissions") ?? [
   "incident.manage",
   "tasks.manage",
 ].join(",")).split(",").map((permission) => permission.trim()).filter(Boolean);
+const email = argument("--email");
 const roles = (argument("--roles") ?? "admin").split(",").map((role) => role.trim()).filter(Boolean);
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
@@ -62,6 +63,7 @@ if (existing === null) {
       permissions,
     },
     active: true,
+    ...(email === undefined ? {} : { email }),
   });
   console.log(`Created account ${username}.`);
 } else {
@@ -74,6 +76,7 @@ if (existing === null) {
     // Re-running the provisioning command must not silently re-enable an
     // account that was deactivated in the console. Use --activate explicitly.
     active: activate ? true : existing.active,
+    ...(email === undefined ? {} : { email }),
   }).where("username", "=", username.trim()).execute();
   // A password rotation ends every session that was issued under the old one.
   await revokeLocalSessionsForActor(db, existing.actor.actorId, new Date().toISOString());

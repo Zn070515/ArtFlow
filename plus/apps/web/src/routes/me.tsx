@@ -11,6 +11,7 @@ import {
 import { RequireSession } from "../auth/RequireSession.js";
 import { MyEventCard } from "../components/me/MyEventCard.js";
 import { NotificationList } from "../components/me/NotificationList.js";
+import { SecurityCard } from "../components/me/SecurityCard.js";
 import { EmptyState } from "../components/ui/EmptyState.js";
 import { ErrorState } from "../components/ui/ErrorState.js";
 
@@ -94,6 +95,7 @@ function MeContent() {
             onOpen={open}
             onMarkAll={() => markRead.mutate(center.notifications.items.map((item) => item.key))}
           />
+          <SecurityCard />
         </aside>
       </div>
     </section>

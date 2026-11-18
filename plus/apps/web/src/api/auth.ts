@@ -12,6 +12,7 @@ export interface SessionResponse {
   readonly csrfToken: string;
   readonly expiresAt: string;
   readonly token?: string;
+  readonly mfaEnabled?: boolean;
 }
 
 export async function fetchMe(): Promise<SessionResponse | null> {
@@ -23,18 +24,68 @@ export async function fetchMe(): Promise<SessionResponse | null> {
   }
 }
 
-export function login(username: string, password: string): Promise<SessionResponse> {
-  return apiFetch<SessionResponse>("/api/auth/login", {
+export type LoginResult =
+  | SessionResponse
+  | { readonly mfaRequired: true; readonly challenge: string };
+
+export function login(username: string, password: string): Promise<LoginResult> {
+  return apiFetch<LoginResult>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
 }
 
-export function registerParticipant(username: string, password: string): Promise<SessionResponse> {
+export function verifyMfa(challenge: string, code: string): Promise<SessionResponse> {
+  return apiFetch<SessionResponse>("/api/auth/mfa", {
+    method: "POST",
+    body: JSON.stringify({ challenge, code }),
+  });
+}
+
+export function registerParticipant(
+  username: string,
+  password: string,
+  email?: string,
+): Promise<SessionResponse> {
   return apiFetch<SessionResponse>("/api/auth/register", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, ...(email === undefined ? {} : { email }) }),
   });
+}
+
+export function fetchOidcConfig(): Promise<{ enabled: boolean; label?: string }> {
+  return apiFetch("/api/auth/oidc/config");
+}
+
+export function forgotPassword(identifier: string): Promise<{ ok: boolean }> {
+  return apiFetch("/api/auth/password/forgot", {
+    method: "POST",
+    body: JSON.stringify({ identifier }),
+  });
+}
+
+export function resetPassword(token: string, password: string): Promise<{ ok: boolean }> {
+  return apiFetch("/api/auth/password/reset", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+export interface MfaEnrollment {
+  readonly secret: string;
+  readonly otpauthUrl: string;
+}
+
+export function enrollMfa(): Promise<MfaEnrollment> {
+  return apiFetch("/api/auth/mfa/enroll", { method: "POST", body: "{}" });
+}
+
+export function confirmMfa(code: string): Promise<{ ok: boolean }> {
+  return apiFetch("/api/auth/mfa/confirm", { method: "POST", body: JSON.stringify({ code }) });
+}
+
+export function disableMfa(password: string, code: string): Promise<{ ok: boolean }> {
+  return apiFetch("/api/auth/mfa/disable", { method: "POST", body: JSON.stringify({ password, code }) });
 }
 
 export interface InvitePreview {

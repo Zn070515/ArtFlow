@@ -1,5 +1,5 @@
 import type { ActorContext, ActorType } from "@artflow-plus/domain";
-import { sql, type Kysely, type Selectable } from "kysely";
+import { sql, type Kysely, type Selectable, type SqlBool } from "kysely";
 
 import { listOpenInviteUsernames } from "./account-invite-repository.js";
 import type { Database, LocalAccountRow } from "./types.js";
@@ -9,6 +9,11 @@ export interface StoredLocalAccount {
   readonly passwordDigest: string;
   readonly actor: ActorContext;
   readonly active: boolean;
+  readonly email?: string;
+  readonly mfaSecret?: string;
+  readonly mfaEnabled?: boolean;
+  readonly oidcIssuer?: string;
+  readonly oidcSubject?: string;
 }
 
 export interface StoredLocalSession {
@@ -37,6 +42,11 @@ function account(row: Selectable<LocalAccountRow>): StoredLocalAccount {
     username: row.username,
     passwordDigest: row.password_digest,
     active: row.active,
+    mfaEnabled: row.mfa_enabled,
+    ...(row.email === null ? {} : { email: row.email }),
+    ...(row.mfa_secret === null ? {} : { mfaSecret: row.mfa_secret }),
+    ...(row.oidc_issuer === null ? {} : { oidcIssuer: row.oidc_issuer }),
+    ...(row.oidc_subject === null ? {} : { oidcSubject: row.oidc_subject }),
     actor: {
       actorId: row.actor_id,
       actorType: row.actor_type as ActorType,
@@ -62,6 +72,11 @@ export async function insertLocalAccount(
       permissions: JSON.stringify([...input.actor.permissions]),
       auth_context: input.actor.authContext ?? null,
       active: input.active,
+      email: input.email ?? null,
+      mfa_secret: input.mfaSecret ?? null,
+      mfa_enabled: input.mfaEnabled ?? false,
+      oidc_issuer: input.oidcIssuer ?? null,
+      oidc_subject: input.oidcSubject ?? null,
       created_at: new Date(),
     })
     .execute();
@@ -164,6 +179,8 @@ export interface StoredLocalAccountSummary {
   readonly invited: boolean;
   readonly accessRevision: number;
   readonly createdAt: string;
+  readonly email?: string;
+  readonly mfaEnabled: boolean;
 }
 
 function summary(
@@ -179,6 +196,8 @@ function summary(
     invited,
     accessRevision: row.access_revision,
     createdAt: iso(row.created_at),
+    mfaEnabled: row.mfa_enabled,
+    ...(row.email === null ? {} : { email: row.email }),
   };
 }
 
@@ -338,4 +357,142 @@ export async function revokeLocalSession(
     .where("revoked_at", "is", null)
     .executeTakeFirst();
   return Number(result.numUpdatedRows) > 0;
+}
+
+export async function getLocalAccountByIdentifier(
+  db: Kysely<Database>,
+  identifier: string,
+): Promise<StoredLocalAccount | null> {
+  const value = identifier.trim();
+  if (value === "") return null;
+  const row = await db
+    .selectFrom("local_account")
+    .selectAll()
+    .where(sql<SqlBool>`(username = ${value} or lower(email) = ${value.toLowerCase()})`)
+    .executeTakeFirst();
+  return row === undefined ? null : account(row);
+}
+
+export async function getLocalAccountByOidc(
+  db: Kysely<Database>,
+  issuer: string,
+  subject: string,
+): Promise<StoredLocalAccount | null> {
+  const row = await db
+    .selectFrom("local_account")
+    .selectAll()
+    .where("oidc_issuer", "=", issuer)
+    .where("oidc_subject", "=", subject)
+    .executeTakeFirst();
+  return row === undefined ? null : account(row);
+}
+
+export async function getLocalAccountByEmail(
+  db: Kysely<Database>,
+  email: string,
+): Promise<StoredLocalAccount | null> {
+  const row = await db
+    .selectFrom("local_account")
+    .selectAll()
+    .where(sql<SqlBool>`lower(email) = ${email.trim().toLowerCase()}`)
+    .executeTakeFirst();
+  return row === undefined ? null : account(row);
+}
+
+export async function setLocalAccountMfa(
+  db: Kysely<Database>,
+  username: string,
+  secret: string | null,
+  enabled: boolean,
+): Promise<void> {
+  await db
+    .updateTable("local_account")
+    .set({ mfa_secret: secret, mfa_enabled: enabled })
+    .where("username", "=", username)
+    .execute();
+}
+
+export async function linkLocalAccountOidc(
+  db: Kysely<Database>,
+  username: string,
+  issuer: string,
+  subject: string,
+): Promise<void> {
+  await db
+    .updateTable("local_account")
+    .set({ oidc_issuer: issuer, oidc_subject: subject })
+    .where("username", "=", username)
+    .execute();
+}
+
+export async function updateLocalAccountPassword(
+  trx: Kysely<Database>,
+  actorId: string,
+  passwordDigest: string,
+): Promise<number> {
+  const result = await trx
+    .updateTable("local_account")
+    .set({
+      password_digest: passwordDigest,
+      access_revision: sql`access_revision + 1`,
+    })
+    .where("actor_id", "=", actorId)
+    .returning("access_revision")
+    .executeTakeFirst();
+  return result?.access_revision ?? 0;
+}
+
+export interface StoredPasswordResetToken {
+  readonly digest: string;
+  readonly actorId: string;
+  readonly expiresAt: string;
+}
+
+export async function insertPasswordResetToken(
+  trx: Kysely<Database>,
+  token: StoredPasswordResetToken,
+): Promise<void> {
+  await trx
+    .deleteFrom("password_reset_token")
+    .where("actor_id", "=", token.actorId)
+    .where("used_at", "is", null)
+    .execute();
+  await trx
+    .insertInto("password_reset_token")
+    .values({
+      token_digest: token.digest,
+      actor_id: token.actorId,
+      expires_at: new Date(token.expiresAt),
+      created_at: new Date(),
+    })
+    .execute();
+}
+
+/** Marks the token used and returns its actor. The caller owns the transaction. */
+export async function consumePasswordResetToken(
+  trx: Kysely<Database>,
+  digest: string,
+  now: Date,
+): Promise<string | null> {
+  const row = await trx
+    .updateTable("password_reset_token")
+    .set({ used_at: now })
+    .where("token_digest", "=", digest)
+    .where("used_at", "is", null)
+    .where("expires_at", ">", now)
+    .returning("actor_id")
+    .executeTakeFirst();
+  return row?.actor_id ?? null;
+}
+
+export async function getLocalAccountByActorId(
+  db: Kysely<Database>,
+  actorId: string,
+): Promise<StoredLocalAccount | null> {
+  const row = await db
+    .selectFrom("local_account")
+    .selectAll()
+    .where("actor_id", "=", actorId)
+    .executeTakeFirst();
+  return row === undefined ? null : account(row);
 }
