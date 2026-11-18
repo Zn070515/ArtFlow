@@ -26,9 +26,11 @@ function defaultText(state: StudioState): string {
 export function DefinitionEditor({
   state,
   onChanged,
+  readOnly = false,
 }: {
   readonly state: StudioState;
   readonly onChanged: () => void;
+  readonly readOnly?: boolean;
 }) {
   const [tab, setTab] = useState<EditorTab>("structured");
   const [pkg, setPkg] = useState<unknown>(() => defaultPackage(state));
@@ -95,7 +97,7 @@ export function DefinitionEditor({
   const enabled = state.activity.enabledCapabilities;
 
   return (
-    <Card className="studio-editor">
+    <Card className="studio-editor" id="definition-editor">
       <div className="studio-card-head">
         <h2 className="ui-card__title">Definition Package</h2>
         <span className="ui-card__description">
@@ -169,10 +171,13 @@ export function DefinitionEditor({
         </div>
       )}
       <div className="studio-toolbar">
-        <Button variant="primary" disabled={busy} onClick={() => void compile()}>
+        <Button variant="primary" disabled={busy || readOnly} onClick={() => void compile()}>
           {busy ? "正在编译…" : "编译定义"}
         </Button>
       </div>
+      {readOnly ? (
+        <p className="ui-card__description">活动已结束或归档，定义只读。</p>
+      ) : null}
       {message === null ? null : <p className="form-success">{message}</p>}
       {error === null ? null : (
         <div className="studio-issue" role="alert">

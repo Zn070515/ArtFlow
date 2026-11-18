@@ -89,6 +89,12 @@ export async function compileDefinition(
       if (activity === null) {
         throw new DomainError("NOT_FOUND", `Activity ${input.activityId} was not found.`);
       }
+      if (activity.status === "archived") {
+        throw new DomainError("ACTIVITY_ARCHIVED", "An archived activity cannot change its definition.");
+      }
+      if (activity.status !== "draft" && activity.status !== "active") {
+        throw new DomainError("INVALID_TRANSITION", "A closed activity cannot change its definition.");
+      }
       // Compilation happens after the receipt claim: a replay of an accepted
       // compile never depends on the current compiler implementation.
       const compiled = compileActivityDefinitionPackage(input.package, registry.compilers);

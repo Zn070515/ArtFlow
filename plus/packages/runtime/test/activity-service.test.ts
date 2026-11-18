@@ -1,4 +1,4 @@
-import { COMPETITION_COMMAND_SCOPES } from "@artflow-plus/domain";
+import { COMPETITION_COMMAND_SCOPES, createDefaultCapabilityRegistry } from "@artflow-plus/domain";
 import { randomUUID } from "node:crypto";
 
 import { closeDb, createDb, insertRelease, insertSession, migrate, readEventsSince } from "@artflow-plus/db";
@@ -8,7 +8,7 @@ import { Client } from "pg";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { closeActivity, renameActivity } from "../src/index.js";
+import { closeActivity, compileDefinition, renameActivity } from "../src/index.js";
 import type { RuntimeDeps } from "../src/index.js";
 
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
@@ -135,6 +135,26 @@ describe.skipIf(!connectionString)("activity lifecycle commands", () => {
       title: "改名",
       expectedRevision: 1,
     })).rejects.toMatchObject({ code: "ACTIVITY_ARCHIVED" });
+  });
+
+  it("rejects compiling a definition on closed or archived activities", async () => {
+    const registry = createDefaultCapabilityRegistry();
+    const pkg = {
+      schemaVersion: 1 as const,
+      manifest: { key: "closed", title: "closed" },
+      capabilities: {},
+      bindings: [],
+    };
+    for (const status of ["closed", "archived"] as const) {
+      const activityId = await seed(status);
+      await expect(compileDefinition(db, registry, deps(), {
+        commandId: randomUUID(),
+        activityId,
+        package: pkg,
+      })).rejects.toMatchObject({
+        code: status === "archived" ? "ACTIVITY_ARCHIVED" : "INVALID_TRANSITION",
+      });
+    }
   });
 
   it("requires studio.manage to close or rename an activity", async () => {
