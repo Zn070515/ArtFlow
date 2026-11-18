@@ -5,6 +5,7 @@ import { fetchRegistrationDetail, type RegistrationDetail } from "../api/registr
 import { RequireSession } from "../auth/RequireSession.js";
 import { hasOpsAccess, useSession } from "../auth/SessionProvider.js";
 import { MaterialsReviewPanel } from "../components/ops/MaterialsReviewPanel.js";
+import { MaterialPreview } from "../components/materials/MaterialPreview.js";
 import { ReviewPanel } from "../components/ops/ReviewPanel.js";
 import { SupplementPanel } from "../components/ops/SupplementPanel.js";
 import { label, REGISTRATION_STATUS_LABELS } from "../components/format/labels.js";
@@ -55,8 +56,14 @@ function DetailView({ detail }: { readonly detail: RegistrationDetail }) {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            播放 / 下载
+                            下载
                           </a>
+                          <MaterialPreview
+                            src={`/api/activities/${detail.activity.id}/materials/${material.id}/content`}
+                            contentType={material.contentType}
+                            name={material.originalName}
+                            compact
+                          />
                         </>
                       ) : (
                         " · 字节未保存"
