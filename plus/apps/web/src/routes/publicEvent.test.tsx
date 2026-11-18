@@ -43,7 +43,11 @@ const site = {
     organizer: "学生会",
     contact: "联系",
     announcement: "公告",
+    announcements: [],
+    faq: [],
+    links: [],
   },
+  participants: null,
   schedule: {
     entries: [{
       order: 1,

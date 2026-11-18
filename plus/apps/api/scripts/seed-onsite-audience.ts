@@ -137,6 +137,21 @@ async function seedActivity(
     organizer: "校学生会文艺部",
     contact: "学生会办公室",
     announcement,
+    announcements: JSON.stringify([{
+      id: "onsite-a1",
+      title: "开场提醒",
+      body: "请提前 30 分钟入场。",
+      publishedAt: "2026-11-18T09:00:00.000Z",
+    }]),
+    faq: JSON.stringify([{
+      question: "在哪里入场？",
+      answer: "大学生活动中心东门。",
+    }]),
+    links: JSON.stringify([{
+      label: "节目册",
+      url: "https://example.com/program",
+    }]),
+    participants_visible: true,
     revision: 1,
     updated_by: "seed",
     updated_at: new Date("2026-11-18T09:30:00.000Z"),
@@ -149,6 +164,21 @@ async function seedActivity(
     organizer: "校学生会文艺部",
     contact: "学生会办公室",
     announcement,
+    announcements: JSON.stringify([{
+      id: "onsite-a1",
+      title: "开场提醒",
+      body: "请提前 30 分钟入场。",
+      publishedAt: "2026-11-18T09:00:00.000Z",
+    }]),
+    faq: JSON.stringify([{
+      question: "在哪里入场？",
+      answer: "大学生活动中心东门。",
+    }]),
+    links: JSON.stringify([{
+      label: "节目册",
+      url: "https://example.com/program",
+    }]),
+    participants_visible: true,
     updated_by: "seed",
     updated_at: new Date("2026-11-18T09:30:00.000Z"),
   })).execute();

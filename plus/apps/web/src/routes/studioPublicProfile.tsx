@@ -66,6 +66,10 @@ function StudioPublicProfileContent() {
         organizer: draft.organizer,
         contact: draft.contact,
         announcement: draft.announcement,
+        announcements: draft.announcements,
+        faq: draft.faq,
+        links: draft.links,
+        participantsVisible: draft.participantsVisible,
       });
       setRevision(saved.revision);
       setMessage("已保存");

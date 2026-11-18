@@ -31,6 +31,39 @@ export const UpdatePublicProfileBody = Type.Object(
     organizer: Type.String({ maxLength: 200 }),
     contact: Type.String({ maxLength: 200 }),
     announcement: Type.String({ maxLength: 2000 }),
+    announcements: Type.Array(
+      Type.Object(
+        {
+          id: Type.String({ minLength: 1, maxLength: 100 }),
+          title: Type.String({ maxLength: 120 }),
+          body: Type.String({ maxLength: 1000 }),
+          publishedAt: Type.String({ minLength: 1, maxLength: 40 }),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 20 },
+    ),
+    faq: Type.Array(
+      Type.Object(
+        {
+          question: Type.String({ maxLength: 200 }),
+          answer: Type.String({ maxLength: 1000 }),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 20 },
+    ),
+    links: Type.Array(
+      Type.Object(
+        {
+          label: Type.String({ maxLength: 80 }),
+          url: Type.String({ maxLength: 500 }),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 10 },
+    ),
+    participantsVisible: Type.Boolean(),
   },
   { additionalProperties: false },
 );

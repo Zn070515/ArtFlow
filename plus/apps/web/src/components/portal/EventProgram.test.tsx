@@ -21,7 +21,11 @@ const site: PublicEventSite = {
     organizer: "",
     contact: "",
     announcement: "",
+    announcements: [],
+    faq: [],
+    links: [],
   },
+  participants: null,
   schedule: {
     entries: [
       { order: 1, slotLabel: "开场", title: "开场舞", note: "", startsAt: null },

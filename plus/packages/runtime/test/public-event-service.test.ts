@@ -52,7 +52,7 @@ async function seed(status: "draft" | "active" | "closed" | "archived") {
   return { id, publicCode };
 }
 
-function input(activityId: string) {
+function input(activityId: string, overrides: Record<string, unknown> = {}) {
   return {
     commandId: randomUUID(),
     activityId,
@@ -65,6 +65,11 @@ function input(activityId: string) {
     organizer: "学生会",
     contact: "联系",
     announcement: "公告",
+    announcements: [],
+    faq: [],
+    links: [],
+    participantsVisible: false,
+    ...overrides,
   };
 }
 
@@ -99,6 +104,49 @@ describe.skipIf(!connectionString)("public event site read model", () => {
     expect(site?.profile.tagline).toBe("春日");
     expect(site?.activity.publicCode).toBe(activity.publicCode);
     expect(JSON.stringify(site)).not.toContain(activity.id);
+  });
+
+  it("returns content blocks and only approved participants when visible", async () => {
+    const activity = await seed("active");
+    await updateActivityPublicProfile(db, deps(), input(activity.id, {
+      announcements: [{
+        id: "a1",
+        title: "公告",
+        body: "内容",
+        publishedAt: "2026-04-01T10:00:00.000Z",
+      }],
+      faq: [{ question: "问", answer: "答" }],
+      links: [{ label: "官网", url: "https://example.com" }],
+      participantsVisible: true,
+    }));
+    await db.insertInto("registration").values({
+      id: "participant-approved",
+      activity_id: activity.id,
+      participant_id: "participant-approved",
+      questionnaire_version: "v1",
+      questionnaire_hash: "hash",
+      status: "approved",
+      answers: JSON.stringify({ name: "林晓", song: "《后来》" }),
+      revision: 1,
+      reviewed_by: null,
+    }).execute();
+    await db.insertInto("registration").values({
+      id: "participant-pending",
+      activity_id: activity.id,
+      participant_id: "participant-pending",
+      questionnaire_version: "v1",
+      questionnaire_hash: "hash",
+      status: "submitted",
+      answers: JSON.stringify({ name: "未审核" }),
+      revision: 1,
+      reviewed_by: null,
+    }).execute();
+
+    const site = await getPublicEventSite(db, activity.publicCode);
+    expect(site?.profile.announcements).toHaveLength(1);
+    expect(site?.profile.faq).toEqual([{ question: "问", answer: "答" }]);
+    expect(site?.profile.links).toEqual([{ label: "官网", url: "https://example.com" }]);
+    expect(site?.participants).toEqual([{ name: "林晓", program: "《后来》" }]);
   });
 
   it("returns default profile and null sections when nothing is published", async () => {
