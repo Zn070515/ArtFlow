@@ -154,5 +154,31 @@ for (const [participantId, name] of [["singer-a", "林晓"], ["singer-b", "周�
   }
 }
 
+await db.insertInto("activity_public_profile").values({
+  activity_id: activityId,
+  tagline: "春日声场",
+  description: "2026 院十佳公开活动介绍。",
+  venue: "大学生活动中心剧场",
+  starts_at: new Date("2026-04-18T11:00:00.000Z"),
+  ends_at: new Date("2026-04-18T13:30:00.000Z"),
+  organizer: "校学生会文艺部",
+  contact: "学生会办公室",
+  announcement: "初赛抽签结果已公布，请选手确认曲目。",
+  revision: 1,
+  updated_by: "seed",
+  updated_at: new Date("2026-04-01T10:00:00.000Z"),
+}).onConflict((conflict) => conflict.column("activity_id").doUpdateSet({
+  tagline: "春日声场",
+  description: "2026 院十佳公开活动介绍。",
+  venue: "大学生活动中心剧场",
+  starts_at: new Date("2026-04-18T11:00:00.000Z"),
+  ends_at: new Date("2026-04-18T13:30:00.000Z"),
+  organizer: "校学生会文艺部",
+  contact: "学生会办公室",
+  announcement: "初赛抽签结果已公布，请选手确认曲目。",
+  updated_by: "seed",
+  updated_at: new Date("2026-04-01T10:00:00.000Z"),
+})).execute();
+
 await closeDb(db);
 console.log("Seeded public results for E2E-DEMO");
