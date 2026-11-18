@@ -1,9 +1,9 @@
 import type { ApiContext } from "../http/context.js";
 import { sessionCookie } from "../cookies.js";
-import { JudgeEntryBodySchema, PublicResultsParamsSchema, PublicResultsQuerySchema } from "@artflow-plus/contracts";
+import { JudgeEntryBodySchema, PublicResultsParamsSchema, PublicResultsQuerySchema, TicketCredentialBodySchema } from "@artflow-plus/contracts";
 import { selectPublicResults } from "@artflow-plus/db";
 import { DomainError } from "@artflow-plus/domain";
-import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicEventSite, getPublicProgram, getPublicSchedule, getSupplementContext, readPublicVoteSession, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
+import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicCurrentProgram, getPublicEventSite, getPublicProgram, getPublicSchedule, getPublicTicketLookup, getPublicVoteEntry, getSupplementContext, readPublicVoteSession, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
 import { Type } from "@sinclair/typebox";
 import { ActivityParams, PublicActivityParams, PublicVoteParams } from "../http/schemas.js";
 import { cookieValue, requireIdempotency, sessionTokenValue, setSessionCookie } from "../http/helpers.js";
@@ -45,6 +45,49 @@ export function registerPublicRoutes(ctx: ApiContext): void {
         return reply.status(404).send({ code: "NOT_FOUND", message: "The public event was not found." });
       }
       return site;
+    },
+  );
+
+  app.post(
+    "/api/public/tickets/lookup",
+    { schema: { body: TicketCredentialBodySchema }, config: { access: "public" } },
+    async (request, reply) => {
+      await requirePublicRateLimit(request, "ticket-lookup", 30);
+      const body = request.body as { credential: string };
+      const lookup = await getPublicTicketLookup(db, publicDeps(), body.credential);
+      reply.header("cache-control", "no-store");
+      return lookup;
+    },
+  );
+
+  app.get(
+    "/api/public/activities/:publicCode/current",
+    { schema: { params: PublicActivityParams }, config: { access: "public" } },
+    async (request, reply) => {
+      const { publicCode } = request.params as { publicCode: string };
+      await requirePublicRateLimit(request, `public-current:${publicCode}`, 120);
+      const view = await getPublicCurrentProgram(db, publicCode);
+      reply.header("cache-control", "no-store");
+      if (view === null) {
+        return reply.status(404).send({ code: "NOT_FOUND", message: "The current program was not found." });
+      }
+      return view;
+    },
+  );
+
+  app.get(
+    "/api/public/activities/:publicCode/voting",
+    { schema: { params: PublicActivityParams }, config: { access: "public" } },
+    async (request, reply) => {
+      const { publicCode } = request.params as { publicCode: string };
+      await requirePublicRateLimit(request, `public-vote-entry:${publicCode}`, 120);
+      const activity = await getPublicActivity(db, publicCode);
+      if (activity === null || (activity.status !== "active" && activity.status !== "closed")) {
+        return reply.status(404).send({ code: "NOT_FOUND", message: "The activity was not found." });
+      }
+      const entry = await getPublicVoteEntry(db, publicCode);
+      reply.header("cache-control", "no-store");
+      return entry;
     },
   );
 
