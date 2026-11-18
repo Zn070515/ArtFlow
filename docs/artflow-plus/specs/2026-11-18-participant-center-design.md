@@ -85,7 +85,9 @@ interface MyEvent {
     status: "uploaded" | "approved" | "needs_supplement";
     reviewNote: string;
     revision: number;
-    contentPath: string;
+    contentPath: string | null;
+    reviewedAt: string | null;
+    updatedAt: string | null;
   }[];
   schedule: readonly {
     order: number;
