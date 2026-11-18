@@ -51,7 +51,7 @@ export function registerPublicRoutes(ctx: ApiContext): void {
   app.post(
     "/api/public/tickets/lookup",
     { schema: { body: TicketCredentialBodySchema }, config: { access: "public" } },
-    async (request, reply) => {
+    async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       await requirePublicRateLimit(request, "ticket-lookup", 30);
       const body = request.body as { credential: string };
       const lookup = await getPublicTicketLookup(db, publicDeps(), body.credential);
@@ -63,7 +63,7 @@ export function registerPublicRoutes(ctx: ApiContext): void {
   app.get(
     "/api/public/activities/:publicCode/current",
     { schema: { params: PublicActivityParams }, config: { access: "public" } },
-    async (request, reply) => {
+    async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       const { publicCode } = request.params as { publicCode: string };
       await requirePublicRateLimit(request, `public-current:${publicCode}`, 120);
       const view = await getPublicCurrentProgram(db, publicCode);
@@ -78,7 +78,7 @@ export function registerPublicRoutes(ctx: ApiContext): void {
   app.get(
     "/api/public/activities/:publicCode/voting",
     { schema: { params: PublicActivityParams }, config: { access: "public" } },
-    async (request, reply) => {
+    async (request, reply) => { // codeql[js/missing-rate-limiting] requirePublicRateLimit enforces the route budget.
       const { publicCode } = request.params as { publicCode: string };
       await requirePublicRateLimit(request, `public-vote-entry:${publicCode}`, 120);
       const activity = await getPublicActivity(db, publicCode);
