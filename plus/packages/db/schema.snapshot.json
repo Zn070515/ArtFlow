@@ -3306,6 +3306,13 @@
           "nullable": false,
           "default": "now()",
           "identity": false
+        },
+        {
+          "name": "starts_at",
+          "dataType": "timestamp with time zone",
+          "nullable": true,
+          "default": null,
+          "identity": false
         }
       ]
     },

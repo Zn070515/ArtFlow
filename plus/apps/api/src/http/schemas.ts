@@ -304,6 +304,10 @@ export const ScheduleEntryBody = Type.Object(
     ])),
     title: Type.String({ minLength: 1, maxLength: 200 }),
     note: Type.Optional(Type.String({ maxLength: 500 })),
+    startsAt: Type.Optional(Type.Union([
+      Type.String({ minLength: 1, maxLength: 40 }),
+      Type.Null(),
+    ])),
     position: Type.Optional(Type.Integer({ minimum: 0 })),
   },
   { additionalProperties: false },

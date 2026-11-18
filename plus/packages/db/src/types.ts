@@ -577,6 +577,7 @@ export interface ScheduleEntryRow {
   revision: ColumnType<number, number | undefined, number>;
   created_at: ColumnType<Date, Date | string | undefined, never>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  starts_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
 }
 
 export interface ScheduleReleaseRow {

@@ -18,6 +18,7 @@ export interface StoredScheduleEntry {
   readonly participantId: string | null;
   readonly title: string;
   readonly note: string;
+  readonly startsAt: string | null;
   readonly revision: number;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -30,6 +31,7 @@ export interface ScheduleSnapshotEntry {
   readonly participantId: string | null;
   readonly title: string;
   readonly note: string;
+  readonly startsAt: string | null;
 }
 
 export interface ScheduleSnapshot {
@@ -72,6 +74,7 @@ function entry(row: Selectable<ScheduleEntryRow>): StoredScheduleEntry {
     participantId: row.participant_id,
     title: row.title,
     note: row.note,
+    startsAt: iso(row.starts_at),
     revision: row.revision,
     createdAt: iso(row.created_at) ?? "",
     updatedAt: iso(row.updated_at) ?? "",
@@ -83,12 +86,19 @@ function snapshot(value: unknown): ScheduleSnapshot {
 }
 
 function release(row: Selectable<ScheduleReleaseRow>): StoredScheduleRelease {
+  const stored = snapshot(row.snapshot);
   return {
     id: row.id,
     activityId: row.activity_id,
     mode: row.mode as ScheduleMode,
     version: row.version,
-    snapshot: snapshot(row.snapshot),
+    snapshot: {
+      ...stored,
+      entries: stored.entries.map((entry) => ({
+        ...entry,
+        startsAt: entry.startsAt ?? null,
+      })),
+    },
     note: row.note,
     releasedAt: iso(row.released_at) ?? "",
     revokedAt: iso(row.revoked_at),
@@ -207,6 +217,7 @@ export async function insertScheduleEntry(
       participant_id: value.participantId,
       title: value.title,
       note: value.note,
+      starts_at: value.startsAt === null ? null : new Date(value.startsAt),
       revision: value.revision,
       created_at: new Date(),
       updated_at: new Date(),
@@ -229,6 +240,7 @@ export async function updateScheduleEntry(
       participant_id: value.participantId,
       title: value.title,
       note: value.note,
+      starts_at: value.startsAt === null ? null : new Date(value.startsAt),
       revision: sql`revision + 1`,
       updated_at: new Date(),
     })
@@ -369,7 +381,7 @@ export async function setScheduleCurrent(
     .execute();
 }
 
-export async function selectActiveScheduleRelease(
+export async function getNewestScheduleRelease(
   db: Kysely<Database>,
   publicCode: string,
 ): Promise<ActiveScheduleRelease | null> {
@@ -379,17 +391,25 @@ export async function selectActiveScheduleRelease(
     .selectAll("schedule_release")
     .select(["activity.public_code", "activity.title"])
     .where("activity.public_code", "=", publicCode)
-    .where("activity.status", "!=", "archived")
+    .where("activity.status", "in", ["active", "closed"])
     .where("schedule_release.mode", "=", "formal")
     .orderBy("schedule_release.version", "desc")
     .executeTakeFirst();
-  // Fail closed on the newest version: revoking it takes the public page
-  // offline instead of silently falling back to an older lineup.
-  if (row === undefined || row.revoked_at !== null) return null;
+  if (row === undefined) return null;
   return {
     activityId: row.activity_id,
     publicCode: row.public_code,
     activityTitle: row.title,
     release: release(row),
   };
+}
+
+export async function selectActiveScheduleRelease(
+  db: Kysely<Database>,
+  publicCode: string,
+): Promise<ActiveScheduleRelease | null> {
+  const newest = await getNewestScheduleRelease(db, publicCode);
+  // Fail closed on the newest version: revoking it takes the public page
+  // offline instead of silently falling back to an older lineup.
+  return newest === null || newest.release.revokedAt !== null ? null : newest;
 }
