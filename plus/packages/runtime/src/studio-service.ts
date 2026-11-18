@@ -1,5 +1,6 @@
-import type { Database, SessionRecord } from "@artflow-plus/db";
+import type { Database, SessionRecord, StoredActivityPublicProfile } from "@artflow-plus/db";
 import {
+  getActivityPublicProfile,
   getActivitySummary,
   getCompiled,
   getDraft,
@@ -44,6 +45,7 @@ export interface StudioState {
   } | null;
   readonly releases: readonly StudioReleaseSummary[];
   readonly sessions: readonly SessionRecord[];
+  readonly publicProfile: StoredActivityPublicProfile;
 }
 
 export async function getStudioState(
@@ -57,6 +59,7 @@ export async function getStudioState(
   const draft = await getDraft(db, activityId);
   const compiled = draft === null ? null : await getCompiled(db, activityId, draft.revision);
   const releases = await listReleases(db, activityId);
+  const publicProfile = await getActivityPublicProfile(db, activityId);
   return {
     activity: {
       id: activity.id,
@@ -90,5 +93,6 @@ export async function getStudioState(
       active: release.version === activity.activeDefinitionVersion,
     })),
     sessions: await listExecutions(db, activityId),
+    publicProfile,
   };
 }

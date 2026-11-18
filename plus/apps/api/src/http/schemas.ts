@@ -20,6 +20,21 @@ export const CreateActivityBody = Type.Object(
   { additionalProperties: false },
 );
 
+export const UpdatePublicProfileBody = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    tagline: Type.String({ maxLength: 160 }),
+    description: Type.String({ maxLength: 4000 }),
+    venue: Type.String({ maxLength: 200 }),
+    startsAt: Type.Union([Type.String({ minLength: 1, maxLength: 40 }), Type.Null()]),
+    endsAt: Type.Union([Type.String({ minLength: 1, maxLength: 40 }), Type.Null()]),
+    organizer: Type.String({ maxLength: 200 }),
+    contact: Type.String({ maxLength: 200 }),
+    announcement: Type.String({ maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+
 export const ActivityParams = Type.Object(
   { id: Type.String({ minLength: 1 }) },
   { additionalProperties: false },

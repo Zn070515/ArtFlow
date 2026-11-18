@@ -162,4 +162,59 @@ describe.skipIf(!connectionString)("Studio API", () => {
     expect(closed.statusCode).toBe(200);
     expect(closed.json()).toMatchObject({ status: "closed" });
   });
+
+  it("reads and updates the activity public profile", async () => {
+    const created = await studioApp.inject({
+      method: "POST",
+      url: "/api/activities",
+      headers: headers(),
+      payload: { title: "公开资料", capabilities: ["publishing"] },
+    });
+    expect(created.statusCode).toBe(201);
+    const activity = created.json() as { id: string };
+
+    const initial = await studioApp.inject({
+      method: "GET",
+      url: `/api/activities/${activity.id}/studio`,
+    });
+    expect((initial.json() as { publicProfile: { revision: number; tagline: string } }).publicProfile)
+      .toMatchObject({ revision: 0, tagline: "" });
+
+    const updated = await studioApp.inject({
+      method: "POST",
+      url: `/api/activities/${activity.id}/public-profile`,
+      headers: headers(),
+      payload: {
+        expectedRevision: 0,
+        tagline: "春日声场",
+        description: "介绍",
+        venue: "剧场",
+        startsAt: "2026-04-18T11:00:00.000Z",
+        endsAt: "2026-04-18T13:30:00.000Z",
+        organizer: "学生会",
+        contact: "联系",
+        announcement: "公告",
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ tagline: "春日声场", revision: 1 });
+
+    const forbidden = await participantApp.inject({
+      method: "POST",
+      url: `/api/activities/${activity.id}/public-profile`,
+      headers: headers(),
+      payload: {
+        expectedRevision: 1,
+        tagline: "越权",
+        description: "",
+        venue: "",
+        startsAt: null,
+        endsAt: null,
+        organizer: "",
+        contact: "",
+        announcement: "",
+      },
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
 });

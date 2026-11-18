@@ -44,12 +44,28 @@ export interface StudioSession {
   readonly closedAt?: string;
 }
 
+export interface StudioPublicProfile {
+  readonly activityId: string;
+  readonly tagline: string;
+  readonly description: string;
+  readonly venue: string;
+  readonly startsAt: string | null;
+  readonly endsAt: string | null;
+  readonly organizer: string;
+  readonly contact: string;
+  readonly announcement: string;
+  readonly revision: number;
+  readonly updatedBy: string;
+  readonly updatedAt: string;
+}
+
 export interface StudioState {
   readonly activity: StudioActivity;
   readonly draft: StudioDraft | null;
   readonly compiled: StudioCompiled | null;
   readonly releases: readonly StudioRelease[];
   readonly sessions: readonly StudioSession[];
+  readonly publicProfile: StudioPublicProfile;
 }
 
 export interface PackQuestion {
@@ -197,5 +213,29 @@ export function closeStudioSession(
     method: "POST",
     headers: { "idempotency-key": commandId },
     body: JSON.stringify({ expectedRevision }),
+  });
+}
+
+export function savePublicProfile(
+  activityId: string,
+  input: {
+    readonly expectedRevision: number;
+    readonly tagline: string;
+    readonly description: string;
+    readonly venue: string;
+    readonly startsAt: string | null;
+    readonly endsAt: string | null;
+    readonly organizer: string;
+    readonly contact: string;
+    readonly announcement: string;
+  },
+): Promise<StudioPublicProfile> {
+  return apiFetch<StudioPublicProfile>(`/api/activities/${activityId}/public-profile`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": crypto.randomUUID(),
+    },
+    body: JSON.stringify(input),
   });
 }
