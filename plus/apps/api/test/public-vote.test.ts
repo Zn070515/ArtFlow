@@ -174,6 +174,31 @@ describe.skipIf(!connectionString)("public vote session", () => {
     expect(JSON.stringify(response.json())).not.toContain("counts");
   });
 
+  it("resolves candidate display names from registrations without inventing one", async () => {
+    const { activityId, sessionId } = await seed();
+    await db.insertInto("registration").values({
+      id: "registration-alice",
+      activity_id: activityId,
+      participant_id: "alice",
+      questionnaire_version: "v1",
+      questionnaire_hash: "hash",
+      status: "approved",
+      answers: JSON.stringify({ name: "林晓" }),
+      revision: 1,
+      reviewed_by: null,
+    }).execute();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/public/vote/${sessionId}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { candidates: readonly Record<string, unknown>[] };
+    expect(body.candidates[0]).toMatchObject({ candidateId: "alice", candidateName: "林晓" });
+    expect(body.candidates[1]).not.toHaveProperty("candidateName");
+  });
+
   it("reports voted for the same browser identity only", async () => {
     const { sessionId } = await seed();
     const fingerprint = "a".repeat(43);

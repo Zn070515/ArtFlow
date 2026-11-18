@@ -6,6 +6,7 @@ import type {
 } from "@artflow-plus/domain";
 import type { Kysely, Selectable } from "kysely";
 
+import { selectParticipantNames } from "./participant-names.js";
 import type {
   Database,
   ResultPublicationRow,
@@ -20,16 +21,6 @@ function iso(value: Date | string | null): string | null {
 
 function json(value: unknown): unknown {
   return typeof value === "string" ? (JSON.parse(value) as unknown) : value;
-}
-
-function participantName(answers: unknown, fallback: string): string {
-  const parsed = json(answers);
-  if (parsed === null || typeof parsed !== "object") return fallback;
-  for (const key of ["name", "displayName", "title", "program"]) {
-    const value = (parsed as Record<string, unknown>)[key];
-    if (typeof value === "string" && value.trim() !== "") return value.trim();
-  }
-  return fallback;
 }
 
 export interface StoredResultSource {
@@ -474,17 +465,7 @@ export async function selectPublicResults(
     for (const decision of snapshot.decisions) contestantIds.add(decision.contestantId);
     for (const award of snapshot.awards) contestantIds.add(award.contestantId);
   }
-  const names = new Map<string, string>();
-  if (contestantIds.size > 0) {
-    const registrations = await db.selectFrom("registration")
-      .select(["participant_id", "answers"])
-      .where("activity_id", "=", activity.id)
-      .where("participant_id", "in", [...contestantIds])
-      .execute();
-    for (const registration of registrations) {
-      names.set(registration.participant_id, participantName(registration.answers, registration.participant_id));
-    }
-  }
+  const names = await selectParticipantNames(db, activity.id, [...contestantIds]);
   const results = visible.map((row) => {
     const snapshot = json(row.snapshot) as ResultSnapshot;
     return {

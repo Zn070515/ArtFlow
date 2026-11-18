@@ -117,6 +117,13 @@ test("mobile portal surfaces avoid horizontal scroll and 44px violations", async
   expect(result.undersized, "/ has controls shorter than 44px").toEqual([]);
   await assertHeaderDoesNotCoverContent(page, ".site-header", ".site-main");
 
+  await page.goto("/e/E2E-ONSITE");
+  await expect(page.locator(".event-page")).toBeVisible();
+  result = await measure(page, touchTargetFloor);
+  expect(result.horizontalOverflow, "/e/E2E-ONSITE scrolls horizontally").toBe(false);
+  expect(result.undersized, "/e/E2E-ONSITE has controls shorter than 44px").toEqual([]);
+  await assertHeaderDoesNotCoverContent(page, ".site-header", ".site-main");
+
   await page.goto("/results/E2E-DEMO");
   await expect(page.getByRole("heading", { name: "2026 院十佳 · 正式赛果" })).toBeVisible();
   result = await measure(page, touchTargetFloor);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { PublicEventSite } from "../../api/publicEvent.js";
 
@@ -14,11 +14,28 @@ function formatEntryTime(value: string | null): string {
   }).format(date);
 }
 
-export function EventProgram({ site }: { readonly site: PublicEventSite }) {
+export function EventProgram({
+  site,
+  currentOrder = null,
+}: {
+  readonly site: PublicEventSite;
+  readonly currentOrder?: number | null;
+}) {
   const [hostMode, setHostMode] = useState(false);
+  const currentRow = useRef<HTMLLIElement>(null);
   const schedule = site.schedule;
   const program = site.program;
   if (schedule === null && (program === null || program.entries.length === 0)) return null;
+  const entries = schedule !== null ? schedule.entries : program?.entries ?? [];
+  const hasCurrent = currentOrder !== null && entries.some((entry) => entry.order === currentOrder);
+
+  function scrollToCurrent(): void {
+    const row = currentRow.current;
+    if (row !== null && typeof row.scrollIntoView === "function") {
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
   return (
     <section className="event-section" id="program" aria-labelledby="event-program-title">
       <div className="event-section__head">
@@ -26,6 +43,11 @@ export function EventProgram({ site }: { readonly site: PublicEventSite }) {
           节目单
         </h2>
         <div className="event-section__actions">
+          {hasCurrent ? (
+            <button type="button" className="event-button event-button--ghost" onClick={scrollToCurrent}>
+              回到现在
+            </button>
+          ) : null}
           <label className="event-toggle">
             <input
               type="checkbox"
@@ -45,28 +67,51 @@ export function EventProgram({ site }: { readonly site: PublicEventSite }) {
       </div>
       <ol className={hostMode ? "event-program event-program--host" : "event-program"}>
         {schedule !== null
-          ? schedule.entries.map((entry) => (
-              <li className="event-program__row" key={`${entry.order}-${entry.title}`}>
-                <span className="event-program__time">
-                  {formatEntryTime(entry.startsAt) || entry.slotLabel}
-                </span>
-                <span className="event-program__title">{entry.title}</span>
-                {entry.note === "" ? null : (
-                  <span className="event-program__note">{entry.note}</span>
-                )}
-              </li>
-            ))
-          : program?.entries.map((entry) => (
-              <li className="event-program__row" key={`${entry.order}-${entry.name}`}>
-                <span className="event-program__title">{entry.name}</span>
-                {entry.song === "" ? null : (
-                  <span className="event-program__note">{entry.song}</span>
-                )}
-                {entry.note === "" ? null : (
-                  <span className="event-program__note">{entry.note}</span>
-                )}
-              </li>
-            ))}
+          ? schedule.entries.map((entry) => {
+              const current = entry.order === currentOrder;
+              return (
+                <li
+                  className={current ? "event-program__row event-program__row--current" : "event-program__row"}
+                  aria-current={current ? "true" : undefined}
+                  ref={current ? currentRow : undefined}
+                  key={`${entry.order}-${entry.title}`}
+                >
+                  <span className="event-program__time">
+                    {formatEntryTime(entry.startsAt) || entry.slotLabel}
+                  </span>
+                  <span className="event-program__title">
+                    {entry.title}
+                    {current ? <span className="event-program__now">现在</span> : null}
+                  </span>
+                  {entry.note === "" ? null : (
+                    <span className="event-program__note">{entry.note}</span>
+                  )}
+                </li>
+              );
+            })
+          : program?.entries.map((entry) => {
+              const current = entry.order === currentOrder;
+              return (
+                <li
+                  className={current ? "event-program__row event-program__row--current" : "event-program__row"}
+                  aria-current={current ? "true" : undefined}
+                  ref={current ? currentRow : undefined}
+                  key={`${entry.order}-${entry.name}`}
+                >
+                  <span className="event-program__time">{formatEntryTime(entry.startsAt)}</span>
+                  <span className="event-program__title">
+                    {entry.name}
+                    {current ? <span className="event-program__now">现在</span> : null}
+                  </span>
+                  {entry.song === "" ? null : (
+                    <span className="event-program__note">{entry.song}</span>
+                  )}
+                  {entry.note === "" ? null : (
+                    <span className="event-program__note">{entry.note}</span>
+                  )}
+                </li>
+              );
+            })}
       </ol>
     </section>
   );

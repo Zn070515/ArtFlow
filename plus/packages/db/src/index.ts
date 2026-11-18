@@ -6,6 +6,7 @@ export * from "./account-invite-repository.js";
 export * from "./competition-repository.js";
 export * from "./material-repository.js";
 export * from "./material-check-repository.js";
+export * from "./participant-names.js";
 export * from "./registration-repository.js";
 export * from "./command-receipt.js";
 export * from "./db.js";

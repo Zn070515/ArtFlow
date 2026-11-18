@@ -58,7 +58,8 @@ test("organizer schedules a stage show and publishes the public program", async 
   await expect(page.getByText(/19:00/)).toBeVisible();
 
   await page.goto(`/e/${publicCode}`);
-  await expect(page.getByText("合唱《夜空中最亮的星》")).toBeVisible();
+  await expect(page.getByText("合唱《夜空中最亮的星》").first()).toBeVisible();
   await expect(page.getByText(/19:00/)).toBeVisible();
-  await expect(page.getByText(/当前：/)).toBeVisible();
+  await expect(page.locator(".event-now")).toContainText("合唱《夜空中最亮的星》");
+  await expect(page.locator(".event-now")).toContainText("NOW · 01");
 });
