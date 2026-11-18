@@ -20,6 +20,7 @@ import { DiagnosticsCard } from "../components/ops/DiagnosticsCard.js";
 import { ExportCard } from "../components/ops/ExportCard.js";
 import { TicketsCard } from "../components/ops/TicketsCard.js";
 import { FeedbackCard } from "../components/ops/FeedbackCard.js";
+import { PresentationCard } from "../components/ops/PresentationCard.js";
 import { Card } from "../components/ui/Card.js";
 
 function can(permissions: readonly string[] | undefined, permission: string): boolean {
@@ -115,6 +116,7 @@ function OpsActivityContent() {
         ) : analytics.data === undefined ? null : (
           <ActivityAnalyticsCard analytics={analytics.data} />
         )}
+        {activity === undefined ? null : <PresentationCard publicCode={activity.publicCode} />}
         {canSeeRegistrations ? (
           <>
             <Card id="registration">
