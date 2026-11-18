@@ -137,6 +137,16 @@
   text-decoration: underline;
 }
 
+.event-live__current {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.event-live__next {
+  margin: 0 0 16px;
+  color: var(--bone-dim);
+}
+
 .event-about__copy {
   max-width: 72ch;
   margin: 0;
