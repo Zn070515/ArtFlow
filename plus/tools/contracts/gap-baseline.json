@@ -362,6 +362,22 @@
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
     {
+      "id": "manifest:event-no-consumer:ResourceBookingCancelled",
+      "reason": "Resource bookings are activity-level planning facts; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:ResourceBookingConfirmed",
+      "reason": "Resource bookings are activity-level planning facts; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:ResourceBookingCreated",
+      "reason": "Resource bookings are activity-level planning facts; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:ResourceBookingUpdated",
+      "reason": "Resource bookings are activity-level planning facts; no projection or delivery consumer yet."
+    },
+    {
       "id": "manifest:event-no-consumer:ResultPublicationEdited",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
     },
@@ -420,6 +436,38 @@
     {
       "id": "manifest:event-no-consumer:StageResultUnlocked",
       "reason": "Manifest/consumer declaration gap; accepted in the 2026-11-11 baseline."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamCreated",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamMemberAdded",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamMemberRemoved",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamRosterCorrected",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamRosterFrozen",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamRosterImportedFromGrouping",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamUpdated",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
+    },
+    {
+      "id": "manifest:event-no-consumer:TeamWithdrawn",
+      "reason": "Team roster facts feed the Ops read model; no projection or delivery consumer yet."
     },
     {
       "id": "manifest:event-no-consumer:TicketAccessSessionRevoked",

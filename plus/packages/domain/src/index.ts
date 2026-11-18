@@ -11,6 +11,7 @@ export * from "./capabilities/archive.js";
 export * from "./capabilities/grouping.js";
 export * from "./capabilities/tasks.js";
 export * from "./capabilities/resources.js";
+export * from "./capabilities/teams.js";
 export * from "./capabilities/attendance.js";
 export * from "./capabilities/schedule.js";
 export * from "./capabilities/incident.js";

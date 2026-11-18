@@ -821,6 +821,33 @@ export interface TieDecisionRow {
   created_at: ColumnType<Date, Date | string | undefined, never>;
 }
 
+export interface TournamentTeamRow {
+  id: string;
+  activity_id: string;
+  team_key: string;
+  name: string;
+  status: ColumnType<string, string | undefined, string>;
+  source: ColumnType<string, string | undefined, string>;
+  source_grouping_stage_id: string | null;
+  source_revision: number | null;
+  revision: ColumnType<number, number | undefined, number>;
+  created_by: string;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  withdrawn_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  withdraw_reason: string | null;
+}
+
+export interface TournamentTeamMemberRow {
+  id: string;
+  activity_id: string;
+  team_id: string;
+  participant_id: string;
+  role: ColumnType<string, string | undefined, string>;
+  added_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  removed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+}
+
 export interface VoteOptionRow {
   id: string;
   activity_id: string;
@@ -919,6 +946,8 @@ export interface Database {
   ticket: TicketRow;
   ticket_access_session: TicketAccessSessionRow;
   tie_decision: TieDecisionRow;
+  tournament_team: TournamentTeamRow;
+  tournament_team_member: TournamentTeamMemberRow;
   vote_option: VoteOptionRow;
   vote_record: VoteRecordRow;
   vote_session: VoteSessionRow;

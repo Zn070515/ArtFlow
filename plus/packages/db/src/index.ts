@@ -4,6 +4,7 @@ export * from "./participant-notification-repository.js";
 export * from "./notification-repository.js";
 export * from "./public-article-repository.js";
 export * from "./resource-booking-repository.js";
+export * from "./team-repository.js";
 export * from "./auth-repository.js";
 export * from "./account-invite-repository.js";
 export * from "./competition-repository.js";

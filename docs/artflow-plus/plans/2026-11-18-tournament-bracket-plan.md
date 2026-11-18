@@ -1,6 +1,6 @@
 # Tournament / Teams 实施计划
 
-状态：待评审（2026-11-18）
+状态：已接受（2026-11-18）；Slice 1 已完成
 
 对应设计：[2026-11-18-tournament-bracket-design.md](../specs/2026-11-18-tournament-bracket-design.md)
 
@@ -61,6 +61,17 @@ challenge → Pack/公开面」推进。每一片都必须先写失败测试，�
 
 验证：domain/runtime/db/api/web 测试；contracts；schema:check；graph:check；
 结构门禁；E2E（建队 → 冻结 → 修正）。
+
+实施记录（2026-11-18）：
+
+- 迁移 0040 新增 `tournament_team` 与 `tournament_team_member`（活动内
+  活跃队员 partial unique index）；schema snapshot 67 表。
+- `teams` capability：manual/grouping 两种来源、整体冻结、管理员修正、
+  退赛释放队员；Ops「队伍与名册」卡片 + Studio 队伍编辑器。
+- `teams.roster.import_grouping` 从 frozen grouping 导入为 draft 队伍。
+- 契约 adapter 覆盖 draft→frozen→corrected→withdrawn 与 draft→withdrawn。
+- 全量 1,261 tests；Playwright 41/41；graph 0 unresolved；结构门禁 29；
+  Golden 6/81；audit 124 accepted；`check_docs` 281；`build:prod` 绿。
 
 ## Slice 2 — elimination bracket core
 
@@ -176,6 +187,27 @@ contracts（result 确认与 stale）；publishing 集成；E2E（权重 → 确
 
 验证：全量 `pnpm run test`；Web E2E 全套；`graph:check` 0 unresolved；
 `schema:check`；结构门禁；Golden；`check_docs`；`build:prod`。
+
+## Test architecture
+
+- **Contracts / capabilities touched**：`teams` 与 `tournament` 各自复用共享
+  lifecycle 契约，不新增业务契约；`competition` 只增加 `round.kind` 过滤。
+- **Consumers**：Ops 赛事卡、Live 比赛控制、Studio 编辑器、公开 bracket、
+  publishing `tournament_result`、归档包；Consumer Graph 必须保持 0 unresolved。
+- **Lifecycle**：teams 的 draft/frozen/withdrawn；bracket 的
+  draft/locked/running/completed/cancelled；match 的
+  pending/ready/scoring/awaiting_decision/decided/void；终态只读，
+  test/rehearsal/formal 分区。
+- **Adapters**：新增 `teams` 与 `tournament` 两个 contract adapter，跑共享
+  生命周期模板；不按命令复制模板。
+- **Fault injection**：并发 decide、重复 commandId、锁分后上游更正、
+  reopen 级联、退赛中途、outbox 失败、rehearsal reset 竞争；断言故障期间
+  行为与恢复后的最终状态。
+- **Anti-bloat**：两个 adapter + 共享模板；bracket 生成器与 composite 计算用
+  性质测试；不新增逐命令测试族，不复用 competition 的 UI 测试。
+- **Focused gates**：domain/runtime/db/api/web/contracts test、双连接并发、
+  `schema:check`、`graph:check`、结构门禁、Golden、`check_docs`、`build:prod`、
+  Web E2E。
 
 ## 每片的固定门禁
 

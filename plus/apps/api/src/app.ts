@@ -20,6 +20,7 @@ import { registerOperationsRoutes } from "./routes/operations.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
 import { registerArticleRoutes } from "./routes/articles.js";
 import { registerResourcesRoutes } from "./routes/resources.js";
+import { registerTeamsRoutes } from "./routes/teams.js";
 import { registerAttendanceRoutes } from "./routes/attendance.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -215,6 +216,19 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   EXPORT_TOO_LARGE: 413,
   PAYLOAD_TOO_LARGE: 413,
   RESOURCE_CONFLICT: 409,
+  TEAM_EXISTS: 409,
+  TEAM_WITHDRAWN: 409,
+  TEAM_NOT_DRAFT: 409,
+  TEAM_MEMBER_EXISTS: 409,
+  TEAM_MEMBER_NOT_FOUND: 404,
+  TEAM_MEMBER_UNKNOWN: 422,
+  TEAM_SIZE_INVALID: 422,
+  TEAM_CAPTAIN_REQUIRED: 422,
+  TEAM_ROSTER_FROZEN: 409,
+  TEAM_ROSTER_NOT_FROZEN: 409,
+  TEAM_SOURCE_MISMATCH: 409,
+  TEAM_IMPORT_CONFLICT: 409,
+  GROUPING_STAGE_NOT_FROZEN: 409,
 };
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
@@ -566,6 +580,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerArchiveRoutes(routeContext);
   registerArticleRoutes(routeContext);
   registerResourcesRoutes(routeContext);
+  registerTeamsRoutes(routeContext);
   registerPublishingRoutes(routeContext);
   registerExportRoutes(routeContext);
   registerPublicRoutes(routeContext);
