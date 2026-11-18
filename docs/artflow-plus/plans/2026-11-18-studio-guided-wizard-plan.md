@@ -108,7 +108,7 @@ git commit -m "fix(studio): reject definition edits on closed or archived activi
 ## Task 2: `deriveReadiness` 与就绪清单
 
 **Files:**
-- Create: `plus/apps/web/src/components/studio/studioReadiness.ts`
+- Create: `plus/apps/web/src/components/studio/readiness.ts`
 - Create: `plus/apps/web/src/components/studio/StudioReadiness.tsx`
 - Modify: `plus/apps/web/src/components/studio/DefinitionEditor.tsx`
 - Modify: `plus/apps/web/src/components/studio/ReleasePanel.tsx`
@@ -117,7 +117,7 @@ git commit -m "fix(studio): reject definition edits on closed or archived activi
 
 - [ ] **Step 1: 写只读纯函数**
 
-`studioReadiness.ts`：
+`readiness.ts`：
 
 ```ts
 import type { StudioState } from "../../api/studio.js";
@@ -237,7 +237,7 @@ import type { StudioState } from "../../api/studio.js";
 import { Badge, type BadgeTone } from "../ui/Badge.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
-import { deriveReadiness, type ReadinessStatus } from "./studioReadiness.js";
+import { deriveReadiness, type ReadinessStatus } from "./readiness.js";
 
 const TONES: Readonly<Record<ReadinessStatus, BadgeTone>> = {
   done: "success",
@@ -332,7 +332,7 @@ export function StudioReadiness({
 import { describe, expect, it } from "vitest";
 
 import type { StudioState } from "../../api/studio.js";
-import { deriveReadiness } from "./studioReadiness.js";
+import { deriveReadiness } from "./readiness.js";
 
 function state(overrides: Partial<StudioState> = {}): StudioState {
   return {

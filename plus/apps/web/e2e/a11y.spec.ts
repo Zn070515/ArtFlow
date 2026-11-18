@@ -6,6 +6,7 @@ const authenticatedSurfaces: { path: string; ready: (page: Page) => Locator }[] 
   { path: "/me", ready: (page) => page.locator(".me-page") },
   { path: "/ops", ready: (page) => page.getByRole("table", { name: "活动列表" }) },
   { path: "/studio", ready: (page) => page.getByRole("table", { name: "活动列表" }) },
+  { path: "/studio/new", ready: (page) => page.locator(".studio-wizard") },
   { path: "/live", ready: (page) => page.getByRole("table", { name: "可执评的活动" }) },
   { path: "/results/E2E-DEMO", ready: (page) => page.locator(".results") },
 ];

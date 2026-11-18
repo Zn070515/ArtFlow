@@ -12,10 +12,18 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   await page.goto("/studio");
   await page.getByRole("link", { name: "新建活动" }).click();
   await expect(page).toHaveURL(/\/studio\/new$/);
+  await expect(page.getByRole("heading", { name: "选择模板" })).toBeVisible();
+  await page.getByRole("button", { name: "下一步" }).click();
   await page.getByLabel("活动标题").fill(title);
+  await page.getByRole("button", { name: "下一步" }).click();
+  await page.getByRole("button", { name: "下一步" }).click();
+  await page.getByRole("button", { name: "下一步" }).click();
+  await page.getByRole("button", { name: "下一步" }).click();
+  await expect(page.getByRole("heading", { name: "检查与创建" })).toBeVisible();
   await page.getByRole("button", { name: "创建活动" }).click();
   await expect(page).toHaveURL(/\/studio\/act/);
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "上线就绪度" })).toBeVisible();
 
   // Professional Mode: edit a capability structurally, then confirm the JSON
   // view still carries the change and the rest of the package.
@@ -25,7 +33,7 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   await expect(page.getByLabel("Definition Package JSON")).toHaveValue(/"lifecycle": "review"/);
   await page.getByRole("tab", { name: "结构化" }).click();
 
-  await page.getByRole("button", { name: "激活活动" }).click();
+  await page.getByRole("button", { name: "激活活动" }).first().click();
   // Activation removes the draft-only control instead of rendering a status line.
   await expect(page.getByRole("button", { name: "激活活动" })).toHaveCount(0);
 
@@ -34,6 +42,7 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
 
   await page.getByRole("button", { name: "发布当前编译" }).click();
   await expect(page.getByText("ACTIVE", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/活动已就绪/)).toBeVisible();
 
   await page.getByLabel("Mode").selectOption("rehearsal");
   await page.getByRole("button", { name: "启动会话" }).click();
@@ -45,10 +54,12 @@ test("Studio creates, releases, and runs a definition", async ({ page }) => {
   // A list row must navigate to the detail route (regression: rows rendered
   // the right href but clicks did not change the URL).
   await page.goto("/studio");
+  await page.getByLabel("搜索活动").fill(title);
   await page.getByRole("link", { name: title, exact: true }).click();
   await expect(page).toHaveURL(/\/studio\/act/);
 
   await page.goto("/live");
+  await page.getByLabel("搜索活动").fill(title);
   await page.getByRole("link", { name: title, exact: true }).click();
   await expect(page).toHaveURL(/\/live\/act/);
 });

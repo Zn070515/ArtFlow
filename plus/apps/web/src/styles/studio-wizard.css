@@ -4,6 +4,10 @@
   padding: 48px 24px 72px;
 }
 
+.studio-wizard__header {
+  margin-bottom: 16px;
+}
+
 .studio-wizard__steps {
   display: flex;
   flex-wrap: wrap;

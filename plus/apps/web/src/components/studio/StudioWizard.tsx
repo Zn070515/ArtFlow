@@ -103,6 +103,9 @@ export function StudioWizard({ packs }: { readonly packs: readonly ActivityPackS
 
   return (
     <section className="studio-wizard">
+      <header className="studio-wizard__header">
+        <h1 className="ui-page-title">新建活动</h1>
+      </header>
       <ol className="studio-wizard__steps" aria-label="创建步骤">
         {WIZARD_STEPS.map((item, index) => (
           <li key={item.id} className={item.id === step ? "is-current" : index < stepIndex ? "is-done" : ""}>
