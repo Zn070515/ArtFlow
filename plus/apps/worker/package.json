@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:bundle": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/main.cjs --external:pg-native",
+    "build:ops": "esbuild src/ops.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/ops.cjs --external:pg-native",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/main.ts",
     "ops": "tsx src/ops.ts",

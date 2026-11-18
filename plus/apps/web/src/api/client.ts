@@ -1,3 +1,5 @@
+import { withVisitor } from "./visitor.js";
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -23,7 +25,7 @@ export async function apiFetch<T>(
   query?: Readonly<Record<string, string | number | boolean | undefined>>,
 ): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
-  const headers = new Headers(init.headers);
+  const headers = withVisitor(init.headers);
   if (method !== "GET" && method !== "HEAD") {
     const csrf = csrfFromCookie();
     if (csrf !== undefined) headers.set("x-csrf-token", csrf);

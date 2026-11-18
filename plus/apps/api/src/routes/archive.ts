@@ -3,6 +3,7 @@ import { ArchiveActivityBodySchema, ArchiveFileQuerySchema, UnarchiveActivityBod
 import { archiveActivity, getArchiveState, readArchiveFile, unarchiveActivity } from "@artflow-plus/runtime";
 import { ActivityParams } from "../http/schemas.js";
 import { requireIdempotency } from "../http/helpers.js";
+import { parseRange } from "../http/range.js";
 
 export function registerArchiveRoutes(ctx: ApiContext): void {
   const {
@@ -63,16 +64,42 @@ export function registerArchiveRoutes(ctx: ApiContext): void {
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const query = request.query as { version?: number };
-      const file = await readArchiveFile(db, await requestDeps(request), {
+      // The size must be known before the range decision; a stat is cheap and
+      // the integrity check only runs once per download.
+      const probe = await readArchiveFile(db, await requestDeps(request), {
         activityId: id,
         ...(query.version === undefined ? {} : { version: query.version }),
       });
-      return reply
+      const range = parseRange(request.headers.range, probe.size);
+      if (range === "invalid") {
+        probe.stream.destroy();
+        return reply.code(416).header("content-range", `bytes */${probe.size}`).send();
+      }
+      // Without a Range header the probe stream is the response. With one, the
+      // probe's descriptor is closed before a second, partial stream is opened.
+      const file = range === null
+        ? probe
+        : await (async () => {
+            probe.stream.destroy();
+            return await readArchiveFile(db, await requestDeps(request), {
+              activityId: id,
+              ...(query.version === undefined ? {} : { version: query.version }),
+              range,
+            });
+          })();
+      reply
         .type("application/zip")
         .header("content-disposition", `attachment; filename="${file.filename}"`)
-        .header("content-length", String(file.bytes.byteLength))
-        .header("cache-control", "no-store")
-        .send(Buffer.from(file.bytes));
+        .header("accept-ranges", "bytes")
+        .header("cache-control", "no-store");
+      if (range === null) {
+        return reply.header("content-length", String(file.size)).send(file.stream);
+      }
+      return reply
+        .code(206)
+        .header("content-range", `bytes ${range.start}-${range.end}/${file.size}`)
+        .header("content-length", String(range.end - range.start + 1))
+        .send(file.stream);
     },
   );
 }

@@ -150,8 +150,8 @@ describe("archive package", () => {
     await storage.remove(key);
   });
 
-  it("builds a whitelist-only ZIP with a manifest and legacy snapshot handling", () => {
-    const output = buildArchivePackage({
+  it("builds a whitelist-only ZIP with a manifest and legacy snapshot handling", async () => {
+    const output = await buildArchivePackage({
       packageId: "archive-1",
       version: 1,
       activity: {
@@ -233,8 +233,8 @@ describe("archive package", () => {
     expect(allText).not.toContain("fp-legacy");
   });
 
-  it("freezes the public profile when supplied", () => {
-    const output = buildArchivePackage({
+  it("freezes the public profile when supplied", async () => {
+    const output = await buildArchivePackage({
       packageId: "archive-profile",
       version: 1,
       activity: {
@@ -272,7 +272,7 @@ describe("archive package", () => {
     });
   });
 
-  it("neutralizes spreadsheet formulas in CSV exports", () => {
+  it("neutralizes spreadsheet formulas in CSV exports", async () => {
     const dangerous: StoredResultRelease = {
       ...releases[1]!,
       snapshot: {
@@ -283,7 +283,7 @@ describe("archive package", () => {
         ],
       },
     };
-    const output = buildArchivePackage({
+    const output = await buildArchivePackage({
       packageId: "archive-formula",
       version: 1,
       activity: {
@@ -308,7 +308,7 @@ describe("archive package", () => {
     expect(csvText).not.toMatch(/,=/);
   });
 
-  it("produces byte-identical ZIPs for identical content", () => {
+  it("produces byte-identical ZIPs for identical content", async () => {
     const input = {
       packageId: "archive-stable",
       version: 1,
@@ -329,9 +329,9 @@ describe("archive package", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-10-21T00:00:00.000Z"));
-      const first = buildArchivePackage(input);
+      const first = await buildArchivePackage(input);
       vi.setSystemTime(new Date("2026-10-21T00:00:03.000Z"));
-      const second = buildArchivePackage(input);
+      const second = await buildArchivePackage(input);
       expect(second.bytes).toEqual(first.bytes);
       expect(second.manifest).toEqual(first.manifest);
     } finally {

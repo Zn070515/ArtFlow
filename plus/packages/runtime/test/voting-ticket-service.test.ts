@@ -27,6 +27,7 @@ import {
   authenticateTicketSession,
   authenticateJudgeSession,
   claimJudgeSeat,
+  closeExecution,
   closeJudgeEntry,
   closeVoteSession,
   getClosedVoteScores,
@@ -813,6 +814,49 @@ describe.skipIf(!connectionString)("M6 voting and ticketing runtime", () => {
     expect(claims.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(claims.filter((result) => result.status === "rejected").map((result) => (result as PromiseRejectedResult).reason.code)).toContain("SEAT_UNAVAILABLE");
     expect(Number((await db.selectFrom("judge_session").select(({ fn }) => fn.countAll<number>().as("count")).where("activity_id", "=", judgeActivity).executeTakeFirstOrThrow()).count)).toBe(1);
+  });
+
+  it("serializes execution close against a ballot on the session row", async () => {
+    const activityId = await seedActivity("act-m6-close-race", false, "anonymous");
+    const opened = await openVoteSession(dbA, deps(staff), {
+      commandId: "m6-close-race-open",
+      activityId,
+      sessionId: "m6-close-race-session",
+      scope: "voting",
+      candidateIds: ["singer-a"],
+    });
+
+    const lock = await dbA.startTransaction().execute();
+    try {
+      await lock
+        .selectFrom("execution_session")
+        .selectAll()
+        .where("id", "=", `execution-${activityId}`)
+        .forUpdate()
+        .execute();
+      let closed = false;
+      const closePromise = closeExecution(dbB, deps(staff), {
+        commandId: "m6-close-race-close",
+        activityId,
+        sessionId: `execution-${activityId}`,
+        expectedRevision: 0,
+      }).finally(() => { closed = true; });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(closed).toBe(false);
+      await lock.rollback().execute();
+      await closePromise;
+    } finally {
+      await lock.rollback().execute().catch(() => undefined);
+    }
+
+    await expect(submitBallot(dbA, deps(judgeA), {
+      commandId: "m6-close-race-ballot",
+      activityId,
+      sessionId: opened.body.session.id,
+      scope: "voting",
+      optionIds: [opened.body.options[0]?.id ?? ""],
+      identity: { type: "anonymous" },
+    })).rejects.toMatchObject({ code: "SESSION_NOT_RUNNING" });
   });
 
   it("binds ballots and closing to the vote session mode", async () => {

@@ -186,7 +186,7 @@ export async function archiveActivity(
         )
       ).flat();
       const publicProfile = await findActivityPublicProfile(trx, activity.id);
-      const built = buildArchivePackage({
+      const built = await buildArchivePackage({
         packageId,
         version,
         publicProfile,
@@ -364,14 +364,25 @@ export async function getArchiveState(
 }
 
 export interface ArchiveFile {
-  readonly bytes: Uint8Array;
+  readonly stream: import("node:stream").Readable;
+  readonly size: number;
   readonly filename: string;
+}
+
+async function digestStream(stream: import("node:stream").Readable): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of stream) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 export async function readArchiveFile(
   db: Kysely<Database>,
   deps: RuntimeDeps,
-  input: { readonly activityId: string; readonly version?: number },
+  input: {
+    readonly activityId: string;
+    readonly version?: number;
+    readonly range?: { readonly start: number; readonly end: number };
+  },
 ): Promise<ArchiveFile> {
   requirePermission(runtimeActor(deps), "archive.manage");
   const storage = requireStorage(deps);
@@ -379,15 +390,20 @@ export async function readArchiveFile(
     ? await getCurrentArchivePackage(db, input.activityId)
     : await getArchivePackage(db, input.activityId, input.version);
   if (stored === null) throw new DomainError("ARCHIVE_NOT_FOUND", "The archive package was not found.");
-  let bytes: Uint8Array;
   try {
-    bytes = await storage.read(stored.key);
-  } catch {
+    const info = await storage.stat(stored.key);
+    const digest = await digestStream((await storage.readStream(stored.key)).stream);
+    if (info.size !== stored.sizeBytes || digest !== stored.sha256) {
+      throw new DomainError("ARCHIVE_INTEGRITY_FAILED", "The archive package failed its integrity check.");
+    }
+    const { stream } = await storage.readStream(stored.key, input.range);
+    return {
+      stream,
+      size: info.size,
+      filename: `archive-${input.activityId}-v${stored.version}.zip`,
+    };
+  } catch (error) {
+    if (error instanceof DomainError) throw error;
     throw new DomainError("ARCHIVE_INTEGRITY_FAILED", "The archive package file is missing or unreadable.");
   }
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  if (bytes.byteLength !== stored.sizeBytes || digest !== stored.sha256) {
-    throw new DomainError("ARCHIVE_INTEGRITY_FAILED", "The archive package failed its integrity check.");
-  }
-  return { bytes, filename: `archive-${input.activityId}-v${stored.version}.zip` };
 }

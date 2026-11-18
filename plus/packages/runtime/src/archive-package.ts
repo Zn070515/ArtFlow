@@ -13,7 +13,7 @@ import type {
   ArchiveSummary,
   RuntimeEvent,
 } from "@artflow-plus/domain";
-import { zipSync } from "fflate";
+import { zip } from "fflate";
 
 export const ARCHIVE_EXCLUDED_FIELDS = [
   "input_fingerprint",
@@ -123,7 +123,7 @@ function releaseRecord(release: StoredResultRelease) {
 }
 
 /** Builds the sealed ZIP. Every entry is a whitelist; no payload/fingerprint/token is copied. */
-export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageOutput {
+export async function buildArchivePackage(input: ArchivePackageInput): Promise<ArchivePackageOutput> {
   const encoder = new TextEncoder();
   const entries: Record<string, Uint8Array> = {};
   const artifacts: ArchiveManifestArtifact[] = [];
@@ -337,10 +337,15 @@ export function buildArchivePackage(input: ArchivePackageInput): ArchivePackageO
   };
 
   return {
-    // A fixed DOS epoch keeps the sealed bytes a pure function of the archived
-    // content; otherwise fflate stamps each entry with Date.now() and the same
-    // data produces a different sha256 on every seal.
-    bytes: zipSync(entries, { level: 6, mtime: new Date("1980-01-01T00:00:00Z") }),
+    // The async ZIP runs in fflate's worker, so a large event history does not
+    // stop the API event loop while the package is sealed. A fixed DOS epoch
+    // keeps the bytes a pure function of the archived content.
+    bytes: await new Promise<Uint8Array>((resolve, reject) => {
+      zip(entries, { level: 6, mtime: new Date("1980-01-01T00:00:00Z") }, (error, data) => {
+        if (error !== null) reject(error);
+        else resolve(data);
+      });
+    }),
     manifest,
     summary,
   };

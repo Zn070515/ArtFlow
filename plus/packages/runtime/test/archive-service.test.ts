@@ -33,6 +33,12 @@ import {
 import type { RuntimeDeps } from "../src/index.js";
 import { createLocalArchiveStorage } from "../src/archive-storage.js";
 
+async function readAll(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
 if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
   throw new Error("REQUIRE_DB=1 but ARTFLOW_PLUS_DATABASE_URL is unset.");
@@ -262,7 +268,7 @@ describe.skipIf(!connectionString)("archive service", () => {
       note: "活动结束归档",
     });
     const file = await readArchiveFile(db, deps(), { activityId });
-    const entries = unzipSync(file.bytes);
+    const entries = unzipSync(await readAll(file.stream));
     expect(Object.keys(entries)).toContain("grouping.json");
     expect(strFromU8(entries["grouping.json"] ?? new Uint8Array())).toContain("A 组");
     expect(strFromU8(entries["grouping.csv"] ?? new Uint8Array())).toContain("p1");
@@ -295,7 +301,7 @@ describe.skipIf(!connectionString)("archive service", () => {
     expect("key" in state.packages[0]!).toBe(false);
 
     const file = await readArchiveFile(db, deps(), { activityId });
-    const entries = unzipSync(file.bytes);
+    const entries = unzipSync(await readAll(file.stream));
     expect(Object.keys(entries)).toContain("manifest.json");
     expect(strFromU8(entries["activity.json"] ?? new Uint8Array())).toContain('"status": "archived"');
     expect(strFromU8(entries["sessions.json"] ?? new Uint8Array())).toContain("session-formal");
@@ -338,7 +344,7 @@ describe.skipIf(!connectionString)("archive service", () => {
     });
     const file = await readArchiveFile(db, deps(), { activityId });
     const profile = JSON.parse(
-      strFromU8(unzipSync(file.bytes)["public-profile.json"] ?? new Uint8Array()),
+      strFromU8(unzipSync(await readAll(file.stream))["public-profile.json"] ?? new Uint8Array()),
     ) as { tagline: string; revision: number };
     expect(profile).toMatchObject({ tagline: "春日", revision: 1 });
   });
@@ -379,7 +385,7 @@ describe.skipIf(!connectionString)("archive service", () => {
     });
     expect(archived.body.package.manifest.counts.events).toBe(eventCount);
     const file = await readArchiveFile(db, deps(), { activityId });
-    const manifest = JSON.parse(strFromU8(unzipSync(file.bytes)["manifest.json"] ?? new Uint8Array())) as {
+    const manifest = JSON.parse(strFromU8(unzipSync(await readAll(file.stream))["manifest.json"] ?? new Uint8Array())) as {
       counts: { events: number };
     };
     expect(manifest.counts.events).toBe(eventCount);

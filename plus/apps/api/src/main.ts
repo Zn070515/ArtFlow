@@ -10,15 +10,30 @@ async function main(): Promise<void> {
   }
   assertReleaseProvenance();
   const schema = process.env.ARTFLOW_PLUS_DB_SCHEMA;
-  const db = createDb({
+  const schemaOption = schema === undefined || schema === "" ? {} : { schema };
+  // Migrations get their own short-lived pool without interactive query
+  // timeouts: a legitimate index build must not be cancelled by the guard that
+  // protects request traffic.
+  const migrationDb = createDb({
     connectionString,
-    ...(schema === undefined || schema === "" ? {} : { schema }),
+    ...schemaOption,
+    max: 1,
+    statementTimeoutMs: 0,
+    lockTimeoutMs: 0,
   });
-  await migrate(db);
+  try {
+    await migrate(migrationDb);
+  } finally {
+    await closeDb(migrationDb);
+  }
+  const db = createDb({ connectionString, ...schemaOption });
 
   const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
   const app = await buildApp({
     db,
+    logger: {
+      level: process.env.ARTFLOW_PLUS_LOG_LEVEL ?? "info",
+    },
     ...(isProduction ? { rateLimiter: new PostgresRateLimiter(db) } : {}),
   });
   const port = Number(process.env.PORT ?? 3000);

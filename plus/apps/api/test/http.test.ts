@@ -565,7 +565,32 @@ dbIt("uses a process-local judge-entry rate-limit bucket keyed by IP", async () 
       });
       expect(response.statusCode).toBeLessThan(500);
     }
-    expect(keys).toEqual(["judge-entry:127.0.0.1", "judge-entry:127.0.0.1"]);
+    expect(keys).toEqual(["judge-entry:v:127.0.0.1", "judge-entry:v:127.0.0.1"]);
+  } finally {
+    await limited.close();
+  }
+});
+
+dbIt("keys public limits by visitor id and keeps a per-IP ceiling for writes", async () => {
+  const keys: string[] = [];
+  const limited = await buildApp({
+    db,
+    deps,
+    rateLimiter: { allow: ({ key }) => { keys.push(key); return true; } },
+  });
+  try {
+    for (const [index, visitor] of ["visitor-aaaaaaaa", "visitor-bbbbbbbb"].entries()) {
+      const response = await limited.inject({
+        method: "POST",
+        url: "/api/judge-entry/claim",
+        headers: { ...headers(`judge-visitor-${index}`), "x-artflow-visitor": visitor },
+        payload: { publicCode: "guess-a", capability: null },
+      });
+      expect(response.statusCode).toBeLessThan(500);
+    }
+    expect(keys).toContain("judge-entry:v:visitor-aaaaaaaa");
+    expect(keys).toContain("judge-entry:v:visitor-bbbbbbbb");
+    expect(keys.some((key) => key.startsWith("judge-entry:ip:127.0.0.1"))).toBe(true);
   } finally {
     await limited.close();
   }
@@ -731,4 +756,43 @@ dbIt("publishes the OpenAPI document to operations readers", async () => {
   });
   expect(response.statusCode).toBe(200);
   expect(response.json().openapi).toBeDefined();
+});
+
+dbIt("lets studio operators retry a blocked projection without a shell", async () => {
+  const activityId = await createReleasedActivity();
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/activities/${activityId}/projections/formal/retry`,
+    headers: { authorization: `Bearer ${studioToken}` },
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual({ retried: false });
+  const audits = await db
+    .selectFrom("audit_entry")
+    .selectAll()
+    .where("command_type", "=", "projection.retry")
+    .where("activity_id", "=", activityId)
+    .execute();
+  expect(audits).toHaveLength(1);
+});
+
+dbIt("serves metrics only when the deployment opted in with a token", async () => {
+  const saved = process.env.ARTFLOW_PLUS_METRICS_TOKEN;
+  try {
+    delete process.env.ARTFLOW_PLUS_METRICS_TOKEN;
+    expect((await app.inject({ method: "GET", url: "/metrics" })).statusCode).toBe(404);
+
+    process.env.ARTFLOW_PLUS_METRICS_TOKEN = "metrics-secret";
+    expect((await app.inject({ method: "GET", url: "/metrics" })).statusCode).toBe(404);
+    const response = await app.inject({
+      method: "GET",
+      url: "/metrics",
+      headers: { "x-artflow-metrics-token": "metrics-secret" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("artflow_http_requests_total");
+  } finally {
+    if (saved === undefined) delete process.env.ARTFLOW_PLUS_METRICS_TOKEN;
+    else process.env.ARTFLOW_PLUS_METRICS_TOKEN = saved;
+  }
 });

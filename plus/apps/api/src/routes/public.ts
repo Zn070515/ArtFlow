@@ -2,11 +2,13 @@ import type { ApiContext } from "../http/context.js";
 import { sessionCookie } from "../cookies.js";
 import { JudgeEntryBodySchema, PublicResultsParamsSchema, PublicResultsQuerySchema, TicketCredentialBodySchema } from "@artflow-plus/contracts";
 import { selectPublicResults } from "@artflow-plus/db";
-import { DomainError } from "@artflow-plus/domain";
+import { DomainError, MAX_MATERIAL_UPLOAD_BYTES } from "@artflow-plus/domain";
 import { authenticateTicketSession, claimJudgeSeat, getJudgeContext, getLiveState as getLiveActivityState, getPublicActivity, getPublicCurrentProgram, getPublicEventList, getPublicEventSite, getPublicProgram, getPublicSchedule, getPublicTicketLookup, getPublicVoteEntry, getSupplementContext, readPublicVoteSession, submitActivityFeedback, submitSupplement, uploadSupplementMaterial } from "@artflow-plus/runtime";
 import { Type } from "@sinclair/typebox";
 import { ActivityParams, PublicActivityParams, PublicVoteParams } from "../http/schemas.js";
 import { cookieValue, requireIdempotency, sessionTokenValue, setSessionCookie } from "../http/helpers.js";
+import { receiveUpload, removeUpload } from "../http/upload.js";
+import type { Readable } from "node:stream";
 
 const FeedbackBodySchema = Type.Object(
   {
@@ -199,19 +201,25 @@ export function registerPublicRoutes(ctx: ApiContext): void {
       if (token === undefined) throw new DomainError("INVALID_SUPPLEMENT", "A supplement capability is required.");
       const { questionKey } = request.params as { questionKey: string };
       const body = request.body;
-      if (!Buffer.isBuffer(body)) {
+      if (body === null || typeof body !== "object" || !("pipe" in body)) {
         throw new DomainError("INVALID_INPUT", "Material content must be sent as application/octet-stream.");
       }
-      const query = request.query as { name?: string; type?: string };
-      const outcome = await uploadSupplementMaterial(db, deps, {
-        token,
-        commandId: requireIdempotency(request),
-        questionKey,
-        originalName: query.name ?? questionKey,
-        contentType: query.type ?? "application/octet-stream",
-        bytes: body,
-      });
-      return reply.status(201).send(outcome);
+      const upload = await receiveUpload(body as Readable, MAX_MATERIAL_UPLOAD_BYTES);
+      try {
+        const query = request.query as { name?: string; type?: string };
+        const outcome = await uploadSupplementMaterial(db, deps, {
+          token,
+          commandId: requireIdempotency(request),
+          questionKey,
+          originalName: query.name ?? questionKey,
+          contentType: query.type ?? "application/octet-stream",
+          tempPath: upload.path,
+          byteLength: upload.size,
+        });
+        return reply.status(201).send(outcome);
+      } finally {
+        await removeUpload(upload);
+      }
     },
   );
 

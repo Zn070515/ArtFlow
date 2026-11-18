@@ -5,11 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const fetchRecentEventsMock = vi.hoisted(() => vi.fn());
 const fetchExecutionStateMock = vi.hoisted(() => vi.fn());
 const fetchOutboxHealthMock = vi.hoisted(() => vi.fn());
+const retryProjectionMock = vi.hoisted(() => vi.fn());
+const rebuildProjectionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/diagnostics.js", () => ({
   fetchRecentEvents: fetchRecentEventsMock,
   fetchExecutionState: fetchExecutionStateMock,
   fetchOutboxHealth: fetchOutboxHealthMock,
+  retryProjection: retryProjectionMock,
+  rebuildProjection: rebuildProjectionMock,
 }));
 
 import { DiagnosticsCard } from "./DiagnosticsCard.js";
@@ -58,6 +62,22 @@ describe("DiagnosticsCard", () => {
     expect(await screen.findByText("待发布 2")).toBeInTheDocument();
     expect(await screen.findByText("投影落后")).toBeInTheDocument();
     expect((await screen.findAllByTestId("diagnostic-event-row"))[0]).toHaveTextContent("#42 · RoundLocked · competition · formal");
+  });
+
+  it("offers retry and rebuild when the formal projection is blocked", async () => {
+    fetchExecutionStateMock.mockResolvedValue({
+      lastSequence: 40,
+      headSequence: 42,
+      stale: true,
+      status: "blocked",
+      blockedSequence: 41,
+      blockedReason: "projection failed",
+    });
+    retryProjectionMock.mockResolvedValue({ retried: true });
+    renderCard();
+    expect(await screen.findByText("投影阻塞")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "重试投影" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重建投影" })).toBeInTheDocument();
   });
 
   it("renders nothing without an operations permission", () => {

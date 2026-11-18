@@ -24,6 +24,12 @@ import { archiveActivity, readArchiveFile, renameActivity } from "../src/index.j
 import type { RuntimeDeps } from "../src/index.js";
 import { createLocalArchiveStorage } from "../src/archive-storage.js";
 
+async function readAll(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
 const connectionString = process.env.ARTFLOW_PLUS_DATABASE_URL;
 if (process.env.REQUIRE_DB === "1" && connectionString === undefined) {
   throw new Error("REQUIRE_DB=1 but ARTFLOW_PLUS_DATABASE_URL is unset.");
@@ -207,7 +213,7 @@ describe.skipIf(!connectionString)("archive-identity golden", () => {
     );
 
     const file = await readArchiveFile(db, deps(), { activityId });
-    const entries = unzipSync(file.bytes);
+    const entries = unzipSync(await readAll(file.stream));
     const activityJson = JSON.parse(strFromU8(entries["activity.json"] ?? new Uint8Array())) as {
       title: string;
       status: string;

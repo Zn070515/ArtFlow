@@ -1,6 +1,6 @@
 import { createCompetitionDefinition } from "./capabilities/competition.js";
 import { createGroupingDefinition } from "./capabilities/grouping.js";
-import { createMaterialsDefinition } from "./capabilities/materials.js";
+import { createMaterialsDefinition, MAX_MATERIAL_UPLOAD_BYTES } from "./capabilities/materials.js";
 import { createPublishingDefinition } from "./capabilities/publishing.js";
 import { createQuestionnaireDefinition } from "./capabilities/questionnaire.js";
 import { createVotingDefinition } from "./capabilities/voting.js";
@@ -127,11 +127,11 @@ export const SINGER_COMPETITION_PACK: ActivityPack = deepFreeze({
           slot: "audio",
           purpose: "audio",
           accepts: [".mp3", ".m4a", ".wav"],
-          maxBytes: 25 * 1024 * 1024,
+          maxBytes: MAX_MATERIAL_UPLOAD_BYTES,
         },
       },
     ]),
-    materials: createMaterialsDefinition(25 * 1024 * 1024, ["audio"]),
+    materials: createMaterialsDefinition(MAX_MATERIAL_UPLOAD_BYTES, ["audio"]),
     voting: createVotingDefinition({
       purpose: "popularity",
       selectionType: "single",
@@ -195,11 +195,11 @@ export const STAGE_SHOW_PACK: ActivityPack = deepFreeze({
           slot: "work",
           purpose: "video",
           accepts: [".mp4", ".mov"],
-          maxBytes: 100 * 1024 * 1024,
+          maxBytes: MAX_MATERIAL_UPLOAD_BYTES,
         },
       },
     ]),
-    materials: createMaterialsDefinition(100 * 1024 * 1024, ["video", "image", "document"]),
+    materials: createMaterialsDefinition(MAX_MATERIAL_UPLOAD_BYTES, ["video", "image", "document"]),
     voting: createVotingDefinition({
       purpose: "popularity",
       selectionType: "single",
@@ -309,11 +309,11 @@ export const REVIEW_AWARDS_PACK: ActivityPack = deepFreeze({
           slot: "work",
           purpose: "video",
           accepts: [".mp4", ".mov", ".jpg", ".png"],
-          maxBytes: 100 * 1024 * 1024,
+          maxBytes: MAX_MATERIAL_UPLOAD_BYTES,
         },
       },
     ]),
-    materials: createMaterialsDefinition(100 * 1024 * 1024, ["video", "image", "document"]),
+    materials: createMaterialsDefinition(MAX_MATERIAL_UPLOAD_BYTES, ["video", "image", "document"]),
     voting: createVotingDefinition({
       purpose: "popularity",
       selectionType: "single",

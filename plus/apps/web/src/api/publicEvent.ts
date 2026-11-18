@@ -1,4 +1,5 @@
 import { apiFetch } from "./client.js";
+import { withVisitor } from "./visitor.js";
 
 export interface PublicEventSummary {
   readonly publicCode: string;
@@ -106,7 +107,7 @@ export async function fetchPublicEvent(
 ): Promise<PublicEventSite> {
   const response = await fetch(`/api/public/events/${encodeURIComponent(publicCode)}`, {
     signal,
-    headers: { accept: "application/json" },
+    headers: withVisitor({ accept: "application/json" }),
   });
   if (response.status === 404) throw new PublicEventNotFound(publicCode);
   if (!response.ok) throw new Error(`加载活动失败（${response.status}）`);

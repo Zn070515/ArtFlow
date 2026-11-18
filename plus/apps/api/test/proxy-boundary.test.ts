@@ -73,8 +73,8 @@ describe("Plus proxy boundary", () => {
     });
     await untrusted.close();
     expect(keys.filter((key) => key.startsWith("auth-login:"))).toEqual([
-      "auth-login:127.0.0.1",
-      "auth-login:127.0.0.1",
+      "auth-login:v:127.0.0.1",
+      "auth-login:v:127.0.0.1",
     ]);
 
     keys.length = 0;
@@ -100,8 +100,8 @@ describe("Plus proxy boundary", () => {
     });
     await trusted.close();
     expect(keys.filter((key) => key.startsWith("auth-login:"))).toEqual([
-      "auth-login:198.51.100.1",
-      "auth-login:198.51.100.2",
+      "auth-login:v:198.51.100.1",
+      "auth-login:v:198.51.100.2",
     ]);
   });
 });

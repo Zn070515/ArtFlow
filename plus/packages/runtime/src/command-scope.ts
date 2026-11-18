@@ -1,5 +1,5 @@
 import type { Database, SessionRecord, StoredRelease } from "@artflow-plus/db";
-import { findRunningSessionByScope, getRelease } from "@artflow-plus/db";
+import { findRunningSessionByScope, findRunningSessionByScopeForUpdate, getRelease } from "@artflow-plus/db";
 import { DomainError, type ExecutionPolicy } from "@artflow-plus/domain";
 import type { Kysely } from "kysely";
 
@@ -43,8 +43,11 @@ export async function requireRunningCommandSession(
   activity: { readonly id: string },
   commandType: string,
   scope: string,
+  options: { readonly forUpdate?: boolean } = {},
 ): Promise<RunningCommandSession> {
-  const session = await findRunningSessionByScope(trx, activity.id, scope);
+  const session = options.forUpdate === true
+    ? await findRunningSessionByScopeForUpdate(trx, activity.id, scope)
+    : await findRunningSessionByScope(trx, activity.id, scope);
   if (session === null) {
     throw new DomainError("SESSION_NOT_RUNNING", `Scope ${scope} has no running execution session.`);
   }

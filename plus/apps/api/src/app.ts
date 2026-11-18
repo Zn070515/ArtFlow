@@ -14,6 +14,7 @@ import { isProductionEnvironment, sessionCookie } from "./cookies.js";
 import { createActivityRealtimeTopic, createVotingRealtimeTopic } from "./realtime-topics.js";
 import type { ApiContext, ReadAccess } from "./http/context.js";
 import { bearerToken, cookieValue, errorCode, errorDetails, publicErrorMessage } from "./http/helpers.js";
+import { Metrics } from "./http/metrics.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import { registerOperationsRoutes } from "./routes/operations.js";
 import { registerArchiveRoutes } from "./routes/archive.js";
@@ -48,6 +49,9 @@ export interface AppOptions {
   readonly documentExporter?: DocumentExporter | null;
   /** Explicit trusted proxy addresses/CIDRs; empty by default. */
   readonly trustProxy?: FastifyServerOptions["trustProxy"];
+  /** Tests stay silent; production wiring passes a pino configuration. */
+  readonly logger?: FastifyServerOptions["logger"];
+  readonly metrics?: Metrics;
 }
 
 export function parseTrustedProxy(value = process.env.ARTFLOW_PLUS_TRUST_PROXY): string[] {
@@ -56,6 +60,25 @@ export function parseTrustedProxy(value = process.env.ARTFLOW_PLUS_TRUST_PROXY):
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+/**
+ * Venue WiFi and mobile carriers put hundreds of people behind one address, so
+ * an IP is not a user. Browsers send a stable per-browser id; writes still keep
+ * a much higher per-IP ceiling to bound abuse and forged ids.
+ */
+export const PUBLIC_VISITOR_HEADER = "x-artflow-visitor";
+const PUBLIC_VISITOR_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
+function publicVisitorId(request: FastifyRequest): string | undefined {
+  const raw = request.headers[PUBLIC_VISITOR_HEADER];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value !== undefined && PUBLIC_VISITOR_PATTERN.test(value) ? value : undefined;
+}
+
+function publicIpCeilingMultiplier(): number {
+  const parsed = Number(process.env.ARTFLOW_PLUS_PUBLIC_IP_CEILING_MULTIPLIER);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 200;
 }
 
 export function selectRateLimiter(
@@ -188,22 +211,44 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   EXPORT_UNAVAILABLE: 503,
   EXPORT_INVALID: 422,
   EXPORT_TOO_LARGE: 413,
+  PAYLOAD_TOO_LARGE: 413,
 };
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: false,
+    logger: options.logger ?? false,
     trustProxy: options.trustProxy ?? parseTrustedProxy(),
+    // 600 MiB uploads on slow home connections need more than Node's default
+    // five-minute request budget. Header parsing keeps its short default.
+    requestTimeout: 30 * 60 * 1000,
   });
-  // Material bytes are uploaded as a raw body; keep the limit aligned with the
-  // released materials policy and reject oversize bodies before the handler.
+  const metrics = options.metrics ?? new Metrics();
+  // Material bytes are streamed to a temporary file by the route. Handing the
+  // raw stream to the handler keeps memory bounded at the 600 MiB ceiling.
   app.addContentTypeParser(
     "application/octet-stream",
-    // The transport limit is a global safety ceiling; the released materials
-    // policy is the authority and may allow up to 100 MiB (stage shows).
-    { parseAs: "buffer", bodyLimit: 128 * 1024 * 1024 },
-    (_request, body, done) => done(null, body),
+    (_request, payload, done) => done(null, payload),
   );
+  const requestStarted = new WeakMap<object, bigint>();
+  app.addHook("onRequest", async (request) => {
+    requestStarted.set(request, process.hrtime.bigint());
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    const started = requestStarted.get(request);
+    const route = request.routeOptions?.url ?? "unknown";
+    metrics.inc("artflow_http_requests_total", {
+      method: request.method,
+      route,
+      status: String(reply.statusCode),
+    });
+    if (started !== undefined) {
+      metrics.observe(
+        "artflow_http_request_duration_seconds",
+        { method: request.method, route },
+        Number(process.hrtime.bigint() - started) / 1_000_000_000,
+      );
+    }
+  });
   const { db } = options;
   const registry = options.registry ?? defaultCapabilityRegistry;
   const packs = options.packs ?? [
@@ -380,7 +425,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (route.method !== "GET") return;
     // Swagger's documentation routes and the WebSocket upgrade endpoint are not
     // part of the HTTP read surface.
-    if (!route.url.startsWith("/api/") && route.url !== "/healthz" && route.url !== "/readyz" && route.url !== "/openapi.json") {
+    if (!route.url.startsWith("/api/") && route.url !== "/healthz" && route.url !== "/readyz" && route.url !== "/openapi.json" && route.url !== "/metrics") {
       return;
     }
     if (route.url === "/api/realtime") return;
@@ -422,7 +467,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   async function requireRateLimit(key: string, limit: number): Promise<void> {
     try {
       const allowed = await rateLimiter.allow({ key, limit, windowMs: 60_000 });
-      if (!allowed) throw new DomainError("RATE_LIMITED", "The public action is rate limited.");
+      if (!allowed) {
+        metrics.inc("artflow_rate_limited_total");
+        throw new DomainError("RATE_LIMITED", "The public action is rate limited.");
+      }
     } catch (error) {
       if (error instanceof DomainError) throw error;
       throw new DomainError("RATE_LIMITED", "The public action is temporarily unavailable.");
@@ -430,7 +478,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   }
 
   async function requirePublicRateLimit(request: FastifyRequest, key: string, limit: number): Promise<void> {
-    await requireRateLimit(`${key}:${request.ip}`, limit);
+    const visitor = publicVisitorId(request);
+    await requireRateLimit(`${key}:v:${visitor ?? request.ip}`, limit);
+    if (visitor !== undefined && request.method !== "GET" && request.method !== "HEAD") {
+      // Per-browser limits make a venue usable; the per-IP ceiling still stops a
+      // client that mints unlimited visitor ids.
+      await requireRateLimit(
+        `${key}:ip:${request.ip}`,
+        Math.max(limit * publicIpCeilingMultiplier(), limit),
+      );
+    }
   }
 
   async function routeRound(activityId: string, roundKey: string) {
@@ -483,7 +540,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   const routeContext: ApiContext = {
-    app, db, deps, baseDeps, registry, packs, rateLimiter, documentExporter, isProduction,
+    app, db, deps, baseDeps, registry, packs, rateLimiter, metrics, documentExporter, isProduction,
     sessionSecret, enableRuntimeFacts: options.enableRuntimeFacts === true,
     setSessionCookies, clearSessionCookies, publicActor, requestSession,
     requestActor, requestDeps, requireStudio, requireOperationsReader,

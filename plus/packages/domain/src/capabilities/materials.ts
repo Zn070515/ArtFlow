@@ -9,6 +9,12 @@ import type {
 import { deepFreeze } from "../model.js";
 import type { CapabilityRegistration } from "../registry.js";
 
+/**
+ * Hard ceiling for a single material file. The transport, storage and release
+ * policy all use this number; a release may only lower it, never raise it.
+ */
+export const MAX_MATERIAL_UPLOAD_BYTES = 600 * 1024 * 1024;
+
 export interface MaterialsDefinition {
   readonly schemaVersion: 1;
   readonly maxBytes: number;
@@ -37,6 +43,12 @@ export function compileMaterialsDefinition(
   if (candidate.schemaVersion !== 1) issues.push(issue("SCHEMA_VERSION", "Only schemaVersion 1 is supported.", "schemaVersion"));
   if (!Number.isInteger(candidate.maxBytes) || (candidate.maxBytes ?? 0) < 1) {
     issues.push(issue("MAX_BYTES_INVALID", "maxBytes must be a positive integer.", "maxBytes"));
+  } else if ((candidate.maxBytes as number) > MAX_MATERIAL_UPLOAD_BYTES) {
+    issues.push(issue(
+      "MAX_BYTES_TOO_LARGE",
+      `maxBytes must not exceed the ${MAX_MATERIAL_UPLOAD_BYTES}-byte upload ceiling.`,
+      "maxBytes",
+    ));
   }
   if (!Array.isArray(candidate.allowedPurposes) || candidate.allowedPurposes.some((item) => typeof item !== "string" || !item.trim())) {
     issues.push(issue("PURPOSES_INVALID", "allowedPurposes must contain non-empty strings.", "allowedPurposes"));

@@ -23,7 +23,7 @@ ROUTES = ROOT / "plus" / "apps" / "api" / "src" / "routes"
 
 ROUTE_CALL = re.compile(r"\bapp\.(get|post|patch|put|delete)\(")
 REGISTER = re.compile(r"export function register(\w+)Routes\(ctx: ApiContext\): void")
-URL_LITERAL = re.compile(r'"(/(?:api|healthz|readyz|openapi)[^"]*)"')
+URL_LITERAL = re.compile(r'"(/(?:api|healthz|readyz|openapi|metrics)[^"]*)"')
 
 # One surface per file; the number is a review aid, not a target.
 MAX_APP_LINES = 800

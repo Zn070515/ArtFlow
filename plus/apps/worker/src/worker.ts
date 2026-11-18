@@ -120,11 +120,25 @@ async function stopRelay(loop: RelayLoopStop, timeoutMs: number): Promise<void> 
 
 export async function startWorker(config: WorkerConfig): Promise<WorkerHandle> {
   assertReleaseProvenance();
+  const schemaOption = config.schema === undefined ? {} : { schema: config.schema };
+  // Migrations are the only long-running statements in the system; keep them
+  // off the interactive pool's statement/lock budget.
+  const migrationDb = createDb({
+    connectionString: config.connectionString,
+    ...schemaOption,
+    max: 1,
+    statementTimeoutMs: 0,
+    lockTimeoutMs: 0,
+  });
+  try {
+    await migrate(migrationDb);
+  } finally {
+    await closeDb(migrationDb);
+  }
   const db = createDb({
     connectionString: config.connectionString,
-    ...(config.schema === undefined ? {} : { schema: config.schema }),
+    ...schemaOption,
   });
-  await migrate(db);
 
   const boss = new PgBoss({ connectionString: config.connectionString, schema: "pgboss" });
   boss.on("error", (error) => {

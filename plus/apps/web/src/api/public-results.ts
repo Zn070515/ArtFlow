@@ -1,3 +1,5 @@
+import { withVisitor } from "./visitor.js";
+
 export interface PublicDecision {
   readonly rank: number;
   readonly contestantId: string;
@@ -61,7 +63,7 @@ export async function fetchPublicProgram(
 ): Promise<PublicProgram> {
   const response = await fetch(`/api/public/programs/${encodeURIComponent(publicCode)}`, {
     signal,
-    headers: { accept: "application/json" },
+    headers: withVisitor({ accept: "application/json" }),
   });
   if (response.status === 404) throw new PublicProgramNotFound(publicCode);
   if (!response.ok) throw new Error(`加载节目单失败（${response.status}）`);
@@ -74,7 +76,7 @@ export async function fetchPublicResults(
 ): Promise<PublicResults> {
   const response = await fetch(`/api/public/results/${encodeURIComponent(publicCode)}`, {
     signal,
-    headers: { accept: "application/json" },
+    headers: withVisitor({ accept: "application/json" }),
   });
   if (response.status === 404) throw new PublicResultsNotFound(publicCode);
   if (!response.ok) throw new Error(`加载赛果失败（${response.status}）`);

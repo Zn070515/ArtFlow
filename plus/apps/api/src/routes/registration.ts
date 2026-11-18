@@ -1,8 +1,11 @@
 import type { ApiContext } from "../http/context.js";
-import { DomainError } from "@artflow-plus/domain";
+import { DomainError, MAX_MATERIAL_UPLOAD_BYTES } from "@artflow-plus/domain";
 import { attachMaterialContent, finalizeRoster, getMyRegistration, getRegistrationDetail, getRosterForReview, issueSupplementGrant, listRegistrationsForReview, readMaterialContent, readMaterialForActor, reopenRoster, reviewMaterial, reviewRegistration, saveRegistrationAnswer, startRegistration, submitRegistration, uploadMaterial } from "@artflow-plus/runtime";
 import { ActivityParams, AnswerBody, MaterialBody, MaterialParams, RegistrationBody, RegistrationMaterialParams, RegistrationParams, ReopenRosterBody, ReviewMaterialBody, ReviewRegistrationBody, SubmitBody } from "../http/schemas.js";
 import { requireIdempotency } from "../http/helpers.js";
+import { parseRange } from "../http/range.js";
+import { receiveUpload, removeUpload } from "../http/upload.js";
+import type { Readable } from "node:stream";
 
 export function registerRegistrationRoutes(ctx: ApiContext): void {
   const {
@@ -273,16 +276,36 @@ export function registerRegistrationRoutes(ctx: ApiContext): void {
     { schema: { params: MaterialParams }, config: { access: "session" } },
     async (request, reply) => {
       const { id, materialId } = request.params as { id: string; materialId: string };
-      const { material, bytes } = await readMaterialContent(db, await requestDeps(request), {
+      const size = (await readMaterialForActor(db, {
         activityId: id,
         materialId,
         actor: await requestActor(request),
+      })).byteLength;
+      const range = parseRange(request.headers.range, size);
+      if (range === "invalid") {
+        return reply
+          .code(416)
+          .header("content-range", `bytes */${size}`)
+          .send();
+      }
+      const { material, stream } = await readMaterialContent(db, await requestDeps(request), {
+        activityId: id,
+        materialId,
+        actor: await requestActor(request),
+        ...(range === null ? {} : { range }),
       });
-      return reply
+      reply
         .type(material.contentType)
-        .header("content-length", String(bytes.byteLength))
-        .header("cache-control", "private, no-store")
-        .send(Buffer.from(bytes));
+        .header("accept-ranges", "bytes")
+        .header("cache-control", "private, no-store");
+      if (range === null) {
+        return reply.header("content-length", String(size)).send(stream);
+      }
+      return reply
+        .code(206)
+        .header("content-range", `bytes ${range.start}-${range.end}/${size}`)
+        .header("content-length", String(range.end - range.start + 1))
+        .send(stream);
     },
   );
 
@@ -293,16 +316,22 @@ export function registerRegistrationRoutes(ctx: ApiContext): void {
       const commandId = requireIdempotency(request);
       const { id, materialId } = request.params as { id: string; materialId: string };
       const body = request.body;
-      if (!Buffer.isBuffer(body)) {
+      if (body === null || typeof body !== "object" || !("pipe" in body)) {
         throw new DomainError("INVALID_INPUT", "Material content must be sent as application/octet-stream.");
       }
-      const outcome = await attachMaterialContent(db, await requestDeps(request), {
-        commandId,
-        activityId: id,
-        materialId,
-        bytes: body,
-      });
-      return reply.status(outcome.status).send(outcome.body);
+      const upload = await receiveUpload(body as Readable, MAX_MATERIAL_UPLOAD_BYTES);
+      try {
+        const outcome = await attachMaterialContent(db, await requestDeps(request), {
+          commandId,
+          activityId: id,
+          materialId,
+          tempPath: upload.path,
+          byteLength: upload.size,
+        });
+        return reply.status(outcome.status).send(outcome.body);
+      } finally {
+        await removeUpload(upload);
+      }
     },
   );
 
