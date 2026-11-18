@@ -122,6 +122,8 @@ def test_plus_worker_runs_the_outbox_relay() -> None:
     dockerfile = (ROOT / "deploy" / "plus" / "Dockerfile").read_text(encoding="utf-8")
     assert "FROM ${NODE_IMAGE} AS worker" in dockerfile
     assert "apps/worker/dist/main.cjs" in dockerfile
+    assert "apps/worker/dist/ops.cjs" in dockerfile
+    assert "apps/api/dist/create-account.mjs" in dockerfile
 
 
 def test_plus_proxy_trust_and_body_limits_are_explicit() -> None:
@@ -131,8 +133,9 @@ def test_plus_proxy_trust_and_body_limits_are_explicit() -> None:
     caddy = (ROOT / "deploy" / "caddy" / "sites" / "v2.caddy").read_text(encoding="utf-8")
     assert "resolver ${ARTFLOW_NGINX_RESOLVER}" in nginx_template
     assert "set $plus_api ${ARTFLOW_NGINX_API_HOST}" in nginx_template
-    assert "client_max_body_size 128m" in nginx_template
-    assert "max_size 128MB" in caddy
+    assert "client_max_body_size 600m" in nginx_template
+    assert "max_size 629145600" in caddy
+    assert "proxy_request_buffering off;" in nginx_template
 
 
 def test_plus_web_image_reads_the_resolver_from_the_environment() -> None:

@@ -23,6 +23,7 @@ ARG ARTFLOW_BUILD_SHA
 WORKDIR /app
 LABEL org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"
 COPY --from=build /src/apps/api/dist/main.cjs ./main.cjs
+COPY --from=build /src/apps/api/dist/create-account.mjs ./create-account.mjs
 COPY --from=build /src/ARTFLOW_RELEASE_SHA /app/ARTFLOW_RELEASE_SHA
 ENV NODE_ENV=production \
     APP_ENV=production \
@@ -38,6 +39,7 @@ ARG ARTFLOW_BUILD_SHA
 WORKDIR /app
 LABEL org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"
 COPY --from=build /src/apps/worker/dist/main.cjs ./main.cjs
+COPY --from=build /src/apps/worker/dist/ops.cjs ./ops.cjs
 COPY --from=build /src/ARTFLOW_RELEASE_SHA /app/ARTFLOW_RELEASE_SHA
 ENV NODE_ENV=production \
     APP_ENV=production

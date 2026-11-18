@@ -16,7 +16,7 @@ http://127.0.0.1:8081 {
 
 https://{$CADDY_SITE_ADDRESS} {
 	request_body {
-		max_size 128MB
+		max_size 629145600
 	}
 	header -Server
 	header {

@@ -4,7 +4,7 @@ server {
 
   root /usr/share/nginx/html;
   index index.html;
-  client_max_body_size 128m;
+  client_max_body_size 600m;
 
   # Resolve at request time so an API restart never leaves a stale upstream.
   # Compose supplies the Docker embedded resolver; Kubernetes supplies cluster DNS.
@@ -12,9 +12,11 @@ server {
   set $plus_api ${ARTFLOW_NGINX_API_HOST};
 
   # Caddy's health probe uses /healthz/; Fastify only registers the bare paths.
-  location ~ ^/(healthz|readyz)/?$ {
+  # /metrics stays on the API (token-gated) instead of falling through to the SPA.
+  location ~ ^/(healthz|readyz|metrics)/?$ {
     proxy_pass http://$plus_api/$1;
     proxy_set_header Host $host;
+    proxy_set_header X-Artflow-Metrics-Token $http_x_artflow_metrics_token;
   }
 
   location /api/ {
@@ -29,6 +31,7 @@ server {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_buffering off;
+    proxy_request_buffering off;
     proxy_cache off;
     proxy_read_timeout 3600s;
   }
