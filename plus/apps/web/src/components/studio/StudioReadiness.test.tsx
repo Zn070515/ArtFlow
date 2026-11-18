@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StudioState } from "../../api/studio.js";
-import { deriveReadiness } from "./studioReadiness.js";
+import { deriveReadiness } from "./readiness.js";
 
 function state(overrides: Partial<StudioState> = {}): StudioState {
   return {

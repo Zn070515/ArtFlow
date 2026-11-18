@@ -4,7 +4,7 @@ import type { StudioState } from "../../api/studio.js";
 import { Badge, type BadgeTone } from "../ui/Badge.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/Card.js";
-import { deriveReadiness, type ReadinessStatus } from "./studioReadiness.js";
+import { deriveReadiness, type ReadinessStatus } from "./readiness.js";
 
 const TONES: Readonly<Record<ReadinessStatus, BadgeTone>> = {
   done: "success",

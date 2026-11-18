@@ -15,6 +15,7 @@ import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { DefinitionEditor } from "../components/studio/DefinitionEditor.js";
 import { ReleasePanel } from "../components/studio/ReleasePanel.js";
 import { SessionPanel } from "../components/studio/SessionPanel.js";
+import { StudioReadiness } from "../components/studio/StudioReadiness.js";
 import { Button } from "../components/ui/Button.js";
 import { Card } from "../components/ui/Card.js";
 import { apiErrorText } from "../components/ui/apiError.js";
@@ -229,6 +230,7 @@ function StudioActivityContent() {
           {error}
         </p>
       )}
+      <StudioReadiness state={state} onActivate={() => void activate()} />
       <FormDialog
         open={duplicateOpen}
         title="复制活动"
@@ -246,7 +248,11 @@ function StudioActivityContent() {
       </FormDialog>
       <div className="studio-grid studio-workspace">
         <div className="studio-main-column">
-          <DefinitionEditor state={state} onChanged={refresh} />
+          <DefinitionEditor
+            state={state}
+            onChanged={refresh}
+            readOnly={state.activity.status === "closed" || state.activity.status === "archived"}
+          />
         </div>
         <aside className="studio-rail" aria-label="Studio 操作栏">
           <ReleasePanel state={state} onChanged={refresh} />
