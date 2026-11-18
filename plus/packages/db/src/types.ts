@@ -28,6 +28,21 @@ export interface ActivityRow {
   judge_entry_version: ColumnType<number, number | undefined, number | undefined>;
 }
 
+export interface ActivityPublicProfileRow {
+  activity_id: string;
+  tagline: ColumnType<string, string | undefined, string>;
+  description: ColumnType<string, string | undefined, string>;
+  venue: ColumnType<string, string | undefined, string>;
+  starts_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  ends_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  organizer: ColumnType<string, string | undefined, string>;
+  contact: ColumnType<string, string | undefined, string>;
+  announcement: ColumnType<string, string | undefined, string>;
+  revision: ColumnType<number, number | undefined, number>;
+  updated_by: ColumnType<string, string | undefined, string>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface AdvancementDecisionRow {
   id: string;
   activity_id: string;
@@ -755,6 +770,7 @@ export interface VoteSessionRow {
 export interface Database {
   account_invite: AccountInviteRow;
   activity: ActivityRow;
+  activity_public_profile: ActivityPublicProfileRow;
   advancement_decision: AdvancementDecisionRow;
   archive_package: ArchivePackageRow;
   attendance_current: AttendanceCurrentRow;
