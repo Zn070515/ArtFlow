@@ -342,3 +342,27 @@ a.primary-button {
   min-height: 44px;
   color: var(--color-text);
 }
+
+.embed-snippet__code {
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--bone-dim);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.embed-snippet__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.embed-snippet__hint {
+  margin: 8px 0 0;
+  color: var(--bone-subtle);
+  font-size: 0.8rem;
+}

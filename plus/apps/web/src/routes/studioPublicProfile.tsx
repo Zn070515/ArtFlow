@@ -7,6 +7,7 @@ import { RequireSession } from "../auth/RequireSession.js";
 import { hasStudioAccess, useSession } from "../auth/SessionProvider.js";
 import { EventAbout } from "../components/portal/EventAbout.js";
 import { EventHero } from "../components/portal/EventHero.js";
+import { EmbedSnippet } from "../components/studio/EmbedSnippet.js";
 import {
   fromLocalInput,
   PublicProfileEditor,
@@ -150,6 +151,10 @@ function StudioPublicProfileContent() {
               resultsAvailable={false}
             />
             <EventAbout description={draft.description} />
+          </Card>
+          <Card>
+            <h2 className="ui-card__title">嵌入代码</h2>
+            <EmbedSnippet publicCode={state.activity.publicCode} />
           </Card>
         </aside>
       </div>

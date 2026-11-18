@@ -54,6 +54,9 @@ plus/packages/contracts 共享 TypeBox schema
 plus/packages/realtime  受保护的 WebSocket 核心（见 CORE.md）
 ```
 
+公开面（活动目录、公开活动站、投票/电子票、嵌入 widget）的读取端点、限流与嵌入方式见
+[public-api.md](public-api.md)。
+
 ### 已验证的边界
 
 - 单写路径：receipt + audit + fact + outbox 同事务；replay 先于校验。
