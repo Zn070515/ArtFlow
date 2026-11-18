@@ -122,9 +122,12 @@ bundle import, operational adoption, participant claim, or v1 media bridge). See
   emails link existing accounts, and auto-provisioning creates participants
   only. Password reset needs `ARTFLOW_PLUS_SMTP_URL`,
   `ARTFLOW_PLUS_MAIL_FROM` and `ARTFLOW_PLUS_APP_BASE_URL`; without them the
-  endpoint stays generic but sends nothing. An `account.manage` operator can
-  clear a lost authenticator with `PUT /api/admin/accounts/:username` and
-  `resetMfa: true` plus the current `expectedRevision`.
+  endpoint stays generic but sends nothing. Activity email notifications are a
+  separate opt-in: the worker sends registration/review/schedule/result mail
+  only when `ARTFLOW_PLUS_EMAIL_NOTIFICATIONS=1` and SMTP is configured. An
+  `account.manage` operator can clear a lost authenticator with
+  `PUT /api/admin/accounts/:username` and `resetMfa: true` plus the current
+  `expectedRevision`.
 - **Deployment**: `deploy/compose.production.yml` runs `plus-db`, `plus-api`,
   `plus-worker`, `plus-web`, and Caddy. The optional `export` profile adds
   `plus-export`, a renderer-only sidecar on the internal network with a read-only
