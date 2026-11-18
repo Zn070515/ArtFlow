@@ -429,6 +429,7 @@ export async function releaseSchedule(
           version: 1,
           schemaVersion: 1,
           entries: entries.map((entry, index) => ({
+            entryId: entry.id,
             order: index + 1,
             slotKey: entry.slotKey,
             slotLabel:

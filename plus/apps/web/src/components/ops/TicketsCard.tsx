@@ -43,6 +43,7 @@ export function TicketsCard({
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
   const [issued, setIssued] = useState<IssuedTicket | undefined>();
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const state = useQuery({
     queryKey: ["ops-ticketing", activityId],
     queryFn: () => fetchTicketingState(activityId),
@@ -54,6 +55,21 @@ export function TicketsCard({
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: ["ops-ticketing", activityId] });
   };
+  async function copyEntryLink(credential: string): Promise<void> {
+    const link = `${window.location.origin}/t#ticket=${encodeURIComponent(credential)}`;
+    if (navigator.clipboard === undefined) {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    window.setTimeout(() => setCopyState("idle"), 2000);
+  }
   const issue = useMutation({
     mutationFn: () => issueTicket(activityId, crypto.randomUUID()),
     onSuccess: (result) => {
@@ -123,7 +139,15 @@ export function TicketsCard({
             请立即记录：{issued.ticket.publicCode} · 凭证版本 {issued.ticket.credentialVersion}
           </p>
           <code className="ticket-credential__value">{issued.credential}</code>
-          <p className="ui-card__description">凭证只显示一次；轮换后旧凭证立即失效。</p>
+          <div className="task-actions">
+            <Button variant="secondary" size="sm" onClick={() => void copyEntryLink(issued.credential)}>
+              复制入场链接
+            </Button>
+            <span role="status">
+              {copyState === "copied" ? "入场链接已复制" : copyState === "failed" ? "复制失败，请手动复制" : ""}
+            </span>
+          </div>
+          <p className="ui-card__description">请私下发送给持票人；轮换后旧链接立即失效。</p>
         </div>
       )}
       {tickets.length === 0 ? (

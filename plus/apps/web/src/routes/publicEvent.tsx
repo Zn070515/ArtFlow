@@ -3,7 +3,9 @@ import { useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { fetchPublicEvent, PublicEventNotFound } from "../api/publicEvent.js";
+import { fetchPublicCurrent, fetchPublicVoteEntry } from "../api/tickets-public.js";
 import { EventAbout } from "../components/portal/EventAbout.js";
+import { EventLive } from "../components/portal/EventLive.js";
 import { EventHero } from "../components/portal/EventHero.js";
 import { EventProgram } from "../components/portal/EventProgram.js";
 import { EventResults } from "../components/portal/EventResults.js";
@@ -16,6 +18,20 @@ export function PublicEventPage() {
     queryFn: ({ signal }) => fetchPublicEvent(publicCode, signal),
     retry: false,
     staleTime: 60_000,
+  });
+  const current = useQuery({
+    queryKey: ["public-current", publicCode],
+    queryFn: ({ signal }) => fetchPublicCurrent(publicCode, signal),
+    enabled: query.data?.activity.status === "active",
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const vote = useQuery({
+    queryKey: ["public-vote-entry", publicCode],
+    queryFn: ({ signal }) => fetchPublicVoteEntry(publicCode, signal),
+    enabled: query.data?.activity.status === "active",
+    refetchInterval: 30_000,
+    retry: false,
   });
 
   useEffect(() => {
@@ -62,6 +78,10 @@ export function PublicEventPage() {
   const hasProgram = site.schedule !== null
     || (site.program !== null && site.program.entries.length > 0);
   const hasResults = site.results !== null && site.results.results.length > 0;
+  const hasLive = site.activity.status === "active" &&
+    (current.data?.current != null ||
+      (current.data?.next.length ?? 0) > 0 ||
+      vote.data != null);
   return (
     <article className="event-page">
       <EventHero
@@ -84,9 +104,11 @@ export function PublicEventPage() {
       )}
       <nav className="event-anchor-nav" aria-label="活动导航">
         {hasAbout ? <a href="#about">概览</a> : null}
+        {hasLive ? <a href="#live">现场</a> : null}
         {hasProgram ? <a href="#program">节目单</a> : null}
         {hasResults ? <a href="#results">赛果</a> : null}
       </nav>
+      <EventLive current={current.data} vote={vote.data} />
       <EventAbout description={site.profile.description} />
       <EventProgram site={site} />
       <EventResults site={site} />

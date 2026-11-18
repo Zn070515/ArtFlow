@@ -58,13 +58,35 @@ const site = {
   },
 };
 
+function mockQueries(options: {
+  readonly site: unknown;
+  readonly error?: unknown;
+  readonly isPending?: boolean;
+  readonly current?: unknown;
+  readonly vote?: unknown;
+}): void {
+  useQueryMock.mockImplementation(({ queryKey }: { readonly queryKey: readonly unknown[] }) => {
+    if (queryKey[0] === "public-current") {
+      return { data: options.current, error: null, isPending: false };
+    }
+    if (queryKey[0] === "public-vote-entry") {
+      return { data: options.vote, error: null, isPending: false };
+    }
+    return {
+      data: options.site,
+      error: options.error ?? null,
+      isPending: options.isPending ?? false,
+    };
+  });
+}
+
 describe("PublicEventPage", () => {
   beforeEach(() => {
     useParamsMock.mockReturnValue({ publicCode: "SPRING-1" });
   });
 
   it("renders the event home", () => {
-    useQueryMock.mockReturnValue({ data: site, error: null, isPending: false });
+    mockQueries({ site });
     render(<PublicEventPage />);
     expect(screen.getByRole("heading", { name: "春日声场" })).toBeInTheDocument();
     expect(screen.getByText("关于本次活动")).toBeInTheDocument();
@@ -73,12 +95,25 @@ describe("PublicEventPage", () => {
   });
 
   it("shows the not-found state", () => {
-    useQueryMock.mockReturnValue({
-      data: undefined,
-      error: new PublicEventNotFound("SPRING-1"),
-      isPending: false,
-    });
+    mockQueries({ site: undefined, error: new PublicEventNotFound("SPRING-1") });
     render(<PublicEventPage />);
     expect(screen.getByText("活动不存在或尚未公开")).toBeInTheDocument();
+  });
+
+  it("renders the live current program and vote entry", () => {
+    mockQueries({
+      site,
+      current: {
+        activity: { publicCode: "SPRING-1", title: "春日声场", status: "active" },
+        current: { order: 2, slotLabel: "第一轮", title: "第一首", note: "", startsAt: null },
+        next: [{ order: 3, slotLabel: "第一轮", title: "第二首", note: "", startsAt: null }],
+      },
+      vote: { sessionId: "vote-1", status: "open" },
+    });
+    render(<PublicEventPage />);
+    expect(screen.getByText(/当前：第一首/)).toBeInTheDocument();
+    expect(screen.getByText(/接下来：第二首/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /去投票/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "现场" })).toBeInTheDocument();
   });
 });

@@ -25,6 +25,7 @@ export interface StoredScheduleEntry {
 }
 
 export interface ScheduleSnapshotEntry {
+  readonly entryId: string | null;
   readonly order: number;
   readonly slotKey: string;
   readonly slotLabel: string;
@@ -96,6 +97,7 @@ function release(row: Selectable<ScheduleReleaseRow>): StoredScheduleRelease {
       ...stored,
       entries: stored.entries.map((entry) => ({
         ...entry,
+        entryId: entry.entryId ?? null,
         startsAt: entry.startsAt ?? null,
       })),
     },

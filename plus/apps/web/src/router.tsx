@@ -42,6 +42,12 @@ const meEventRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/meEvent.js"), "MeEventPage"),
 });
 
+const ticketRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/t",
+  component: lazyRouteComponent(() => import("./routes/ticket.js"), "TicketPage"),
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -178,6 +184,7 @@ const routeTree = rootRoute.addChildren([
   publicEventRoute,
   meRoute,
   meEventRoute,
+  ticketRoute,
   loginRoute,
   claimRoute,
   joinRoute,

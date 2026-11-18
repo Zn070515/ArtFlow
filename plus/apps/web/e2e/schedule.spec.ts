@@ -42,6 +42,10 @@ test("organizer schedules a stage show and publishes the public program", async 
   await page.getByRole("dialog", { name: "发布节目单？" }).getByRole("button", { name: "发布" }).click();
   await expect(page.getByText(/第 1 版/)).toBeVisible();
 
+  await page.getByRole("button", { name: "启动排期会话" }).click();
+  await expect(page.getByRole("button", { name: "下一位" })).toBeEnabled();
+  await page.getByRole("button", { name: "下一位" }).click();
+
   await page.goto(`/program/${publicCode}`);
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   await expect(page.getByText("合唱《夜空中最亮的星》")).toBeVisible();
@@ -50,4 +54,5 @@ test("organizer schedules a stage show and publishes the public program", async 
   await page.goto(`/e/${publicCode}`);
   await expect(page.getByText("合唱《夜空中最亮的星》")).toBeVisible();
   await expect(page.getByText(/19:00/)).toBeVisible();
+  await expect(page.getByText(/当前：/)).toBeVisible();
 });

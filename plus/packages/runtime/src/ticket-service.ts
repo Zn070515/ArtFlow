@@ -215,6 +215,35 @@ export async function resolveTicketCredentialForAttendance(
   return { ticketId: candidate.id, activityId: candidate.activityId };
 }
 
+/**
+ * Read-only credential check for the public e-ticket page. It validates the
+ * signature and the current credential version, rejects terminal ticket
+ * states, and never changes the ticket or creates an access session.
+ */
+export async function lookupTicketByCredential(
+  db: Kysely<Database>,
+  deps: RuntimeDeps,
+  rawCredential: string,
+): Promise<StoredTicket> {
+  const signingSecret = secret(deps);
+  const parsed = parseCredential(rawCredential, "T", signingSecret);
+  if (parsed === null) throw new DomainError("INVALID_TICKET", "The ticket credential is invalid.");
+  const candidate = await findTicketByCredential(db, parsed.publicCode, parsed.version);
+  if (
+    candidate === null ||
+    !validCredentialForRow(rawCredential, "T", candidate.publicCode, candidate.credentialVersion, signingSecret)
+  ) {
+    throw new DomainError("INVALID_TICKET", "The ticket credential is invalid.");
+  }
+  if (candidate.state === "revoked") {
+    throw new DomainError("TICKET_REVOKED", "The ticket has been revoked.");
+  }
+  if (candidate.state === "expired") {
+    throw new DomainError("TICKET_EXPIRED", "The ticket has expired.");
+  }
+  return candidate;
+}
+
 export interface RedeemTicketInput {
   readonly commandId: string;
   readonly credential: string;
