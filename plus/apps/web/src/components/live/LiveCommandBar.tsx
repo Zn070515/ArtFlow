@@ -39,7 +39,9 @@ function primaryAction(view: LiveCommandView, permissions: {
     return permissions.canManageSession ? { href: "#live-session", label: "去启动会话" } : null;
   }
   if (view.phase === "round_hold") {
-    return permissions.canManageCompetition ? { href: "#live-tie", label: "去处理 HOLD" } : null;
+    return permissions.canManageCompetition && view.focusRoundKey !== null
+      ? { href: `#live-tie-${view.focusRoundKey}`, label: "去处理 HOLD" }
+      : null;
   }
   if (view.phase === "round_resolved") {
     const next = view.next;
@@ -141,10 +143,10 @@ export function LiveCommandBar({
           {canManageSession ? (
             <a className="ui-button ui-button--secondary ui-button--sm" href="#live-session">评委入口/会话</a>
           ) : null}
-          {canManageCompetition ? (
+          {canManageCompetition && view.focusRoundKey !== null ? (
             <>
-              <a className="ui-button ui-button--secondary ui-button--sm" href="#live-tie">平局推进</a>
-              <a className="ui-button ui-button--secondary ui-button--sm" href="#live-exception">异常与修正</a>
+              <a className="ui-button ui-button--secondary ui-button--sm" href={`#live-tie-${view.focusRoundKey}`}>平局推进</a>
+              <a className="ui-button ui-button--secondary ui-button--sm" href={`#live-exception-${view.focusRoundKey}`}>异常与修正</a>
             </>
           ) : null}
         </div>

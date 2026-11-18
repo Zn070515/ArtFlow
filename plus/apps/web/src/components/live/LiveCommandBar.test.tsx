@@ -160,7 +160,7 @@ describe("LiveCommandBar", () => {
     const bar = screen.getByTestId("live-command");
     expect(bar).toHaveTextContent("HOLD");
     expect(bar).toHaveTextContent("先处理 HOLD/解析排名");
-    expect(within(bar).getByRole("link", { name: "去处理 HOLD" })).toHaveAttribute("href", "#live-tie");
+    expect(within(bar).getByRole("link", { name: "去处理 HOLD" })).toHaveAttribute("href", "#live-tie-round-1");
   });
 
   it("hides the hold action without competition manage permission", () => {

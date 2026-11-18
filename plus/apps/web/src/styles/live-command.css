@@ -97,9 +97,9 @@
 }
 
 #live-session,
-#live-tie,
-#live-exception,
 #live-result,
+[id^="live-tie-"],
+[id^="live-exception-"],
 [id^="round-"] {
   scroll-margin-top: 24px;
 }
