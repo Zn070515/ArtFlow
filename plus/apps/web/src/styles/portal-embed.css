@@ -1,0 +1,100 @@
+/* Embeddable public widget: /embed/$publicCode. No portal shell. */
+
+.embed-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100vh;
+  padding: 20px;
+  background: var(--ink);
+  color: var(--bone);
+  font-size: 14px;
+}
+
+.embed-page__head {
+  padding-bottom: 4px;
+}
+
+.embed-page__eyebrow {
+  margin: 0;
+  color: var(--gold);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.embed-page__title {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-size: 1.6rem;
+  line-height: 1.15;
+}
+
+.embed-page__tagline {
+  margin: 6px 0 0;
+  color: var(--bone-dim);
+}
+
+.embed-page__meta {
+  margin: 6px 0 0;
+  color: var(--bone-subtle);
+  font-size: 0.8rem;
+}
+
+.embed-now,
+.embed-results {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.embed-now__name {
+  margin: 6px 0 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.embed-now__song,
+.embed-now__next {
+  margin: 4px 0 0;
+  color: var(--bone-dim);
+}
+
+.embed-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.embed-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.embed-page__link {
+  margin-top: auto;
+  color: var(--gold);
+  text-decoration: none;
+}
+
+.embed-page__state {
+  margin: auto;
+  color: var(--bone-subtle);
+}
+
+@media (max-width: 420px) {
+  .embed-page {
+    padding: 14px;
+  }
+
+  .embed-page__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}

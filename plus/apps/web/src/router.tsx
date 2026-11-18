@@ -18,6 +18,12 @@ const eventsRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/events.js"), "EventsPage"),
 });
 
+const embedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/embed/$publicCode",
+  component: lazyRouteComponent(() => import("./routes/embed.js"), "EmbedPage"),
+});
+
 const resultsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/results/$publicCode",
@@ -186,6 +192,7 @@ const tokensRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   eventsRoute,
+  embedRoute,
   resultsRoute,
   programRoute,
   publicEventRoute,
