@@ -38,6 +38,9 @@ export function PortalShell({ children }: { readonly children: ReactNode }) {
           <Link to="/join" className="nav-link">
             报名
           </Link>
+          <Link to="/me" className="nav-link">
+            我的
+          </Link>
           {hasOpsAccess(session) ? (
             <Link to="/ops" className="nav-link">
               Ops

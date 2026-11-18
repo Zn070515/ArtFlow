@@ -133,6 +133,7 @@ function JoinActivityContent() {
         onChanged={() => {
           void queryClient.invalidateQueries({ queryKey: ["registration-detail", activity.id, registrationId] });
           void queryClient.invalidateQueries({ queryKey: ["registration-mine", activity.id] });
+          void queryClient.invalidateQueries({ queryKey: ["my-center"] });
         }}
       />
       <p className="state-copy">
