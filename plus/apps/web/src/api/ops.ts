@@ -1,4 +1,12 @@
+import type { OperationsRiskResponse } from "@artflow-plus/contracts";
+
 import { apiFetch } from "./client.js";
+
+export type { OperationsRiskResponse } from "@artflow-plus/contracts";
+
+export function fetchOperationsRisks(): Promise<OperationsRiskResponse> {
+  return apiFetch<OperationsRiskResponse>("/api/operations/risks");
+}
 
 export interface OpsActivitySummary {
   readonly id: string;

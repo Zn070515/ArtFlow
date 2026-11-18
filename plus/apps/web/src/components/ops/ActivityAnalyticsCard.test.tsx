@@ -24,13 +24,46 @@ const analytics: ActivityAnalyticsResponse = {
 };
 
 describe("ActivityAnalyticsCard", () => {
-  it("renders aggregate cards and stable attention labels", () => {
+  it("renders aggregate cards and the shared risk copy", () => {
     render(<ActivityAnalyticsCard analytics={analytics} />);
 
     expect(screen.getByRole("heading", { name: "准备度与活动统计" })).toBeInTheDocument();
     expect(screen.getByText("报名总数")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("报名仍有待审核项")).toBeInTheDocument();
+    expect(screen.getByText("报名待审核")).toBeInTheDocument();
+    expect(screen.getByText(/审核后才能定稿名单/)).toBeInTheDocument();
+  });
+
+  it("hides pre-event items on a closed activity", () => {
+    render(
+      <ActivityAnalyticsCard
+        analytics={{
+          ...analytics,
+          activity: { ...analytics.activity, status: "closed" },
+          attention: [
+            { code: "REGISTRATION_REVIEW_PENDING", severity: "warning", count: 1 },
+            { code: "ARCHIVE_MISSING", severity: "warning" },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("报名待审核")).not.toBeInTheDocument();
+    expect(screen.getByText("尚未归档")).toBeInTheDocument();
+  });
+
+  it("keeps an unknown attention code visible", () => {
+    render(
+      <ActivityAnalyticsCard
+        analytics={{
+          ...analytics,
+          attention: [{ code: "NEW_CODE", severity: "warning" }],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("NEW_CODE")).toBeInTheDocument();
+    expect(screen.getByText(/未识别的运营注意项/)).toBeInTheDocument();
   });
 
   it("renders a clear empty state", () => {

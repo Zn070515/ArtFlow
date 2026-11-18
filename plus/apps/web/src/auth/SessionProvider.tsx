@@ -108,6 +108,34 @@ export function hasOpsAccess(session: SessionResponse | null): boolean {
   );
 }
 
+const ANALYTICS_READ_PERMISSIONS = [
+  "studio.manage",
+  "competition.manage",
+  "judge.manage",
+  "registration.manage",
+  "registration.review",
+  "registration.roster.finalize",
+  "materials.manage",
+  "materials.review",
+  "grouping.manage",
+  "voting.manage",
+  "result.manage",
+  "archive.manage",
+  "ticket.manage",
+] as const;
+
+/**
+ * The risk board reads aggregate analytics. hasOpsAccess is wider than this
+ * list (score writing, attendance, tasks), so the board must gate separately
+ * and the /ops list must keep working when the risk read is unavailable.
+ */
+export function hasAnalyticsAccess(session: SessionResponse | null): boolean {
+  if (session === null) return false;
+  const { permissions } = session.actor;
+  return permissions.includes("*") ||
+    ANALYTICS_READ_PERMISSIONS.some((permission) => permissions.includes(permission));
+}
+
 export function canManageAccounts(session: SessionResponse | null): boolean {
   if (session === null) return false;
   const { permissions } = session.actor;

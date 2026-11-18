@@ -45,11 +45,25 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await ops.getByLabel("密码").fill("e2e-ops-password");
     await ops.getByRole("button", { name: "登录" }).click();
     await expect(ops).toHaveURL(/\/workspace$/);
+
+    await ops.goto("/ops");
+    await ops.getByLabel("搜索活动").fill("2026 院十佳报名");
+    const riskRow = ops.getByRole("row", { name: /2026 院十佳报名/ });
+    await expect(riskRow).toContainText("需关注");
+    await riskRow.getByText("查看原因").click();
+    await expect(riskRow).toContainText("报名待审核");
+    await expect(riskRow.getByRole("link", { name: "去审核" })).toHaveAttribute(
+      "href",
+      /#registration$/,
+    );
+
+    await ops.goto("/workspace");
     const activityCard = ops.locator(".workspace-activity-card").filter({ hasText: "2026 院十佳报名" });
     await activityCard.getByRole("link", { name: "打开活动工作台" }).click();
     await expect(ops).toHaveURL(/\/workspace\/[^/]+$/);
     await ops.getByRole("link", { name: "处理报名审核" }).click();
     await expect(ops).toHaveURL(/\/ops\/[^/]+$/);
+    await expect(ops.locator("#registration")).toBeVisible();
     await expect(ops.getByRole("table")).toBeVisible();
     await ops.getByRole("table").getByRole("link").first().click();
     await expect(
@@ -62,6 +76,10 @@ test("participant submits and Ops approves the registration", async ({ browser }
     await ops.getByRole("button", { name: "定稿名单" }).click();
     await ops.getByRole("button", { name: "确认定稿 1 人" }).click();
     await expect(ops.getByText(/已定稿 · 1 人/)).toBeVisible();
+
+    await ops.goto("/ops");
+    await ops.getByLabel("搜索活动").fill("2026 院十佳报名");
+    await expect(ops.getByRole("row", { name: /2026 院十佳报名/ })).not.toContainText("报名待审核");
 
     await participant.goto("/me");
     await expect(participant.getByText("2026 院十佳报名")).toBeVisible();

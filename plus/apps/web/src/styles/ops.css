@@ -364,6 +364,123 @@
   white-space: pre-wrap;
 }
 
+#registration,
+#roster,
+#voting,
+#archive {
+  scroll-margin-top: 24px;
+}
+
+.analytics-attention-reason {
+  margin: 4px 0 0;
+  color: var(--bone-subtle);
+  font-size: 0.75rem;
+}
+
+.risk-summary {
+  margin-bottom: 16px;
+}
+
+.risk-summary__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.risk-summary__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+
+.risk-stat {
+  color: var(--bone-dim);
+  font-size: 0.85rem;
+}
+
+.risk-stat strong {
+  color: var(--bone);
+  margin-left: 4px;
+}
+
+.risk-stat--blocked strong {
+  color: var(--color-danger);
+}
+
+.risk-stat--attention strong {
+  color: var(--gold);
+}
+
+.risk-stat--ready strong {
+  color: var(--color-success);
+}
+
+.risk-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--bone-dim);
+  font-size: 0.85rem;
+}
+
+.risk-cell {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.risk-counts {
+  color: var(--bone-subtle);
+  font-size: 0.75rem;
+}
+
+.risk-top {
+  color: var(--bone-dim);
+  font-size: 0.85rem;
+}
+
+.risk-none {
+  color: var(--bone-subtle);
+}
+
+.risk-items {
+  margin-top: 6px;
+}
+
+.risk-items summary {
+  cursor: pointer;
+  color: var(--gold);
+  font-size: 0.8rem;
+}
+
+.risk-items ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.risk-items li {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.risk-item-title {
+  font-weight: 600;
+}
+
+.risk-item-reason {
+  margin: 0;
+  color: var(--bone-subtle);
+  font-size: 0.8rem;
+}
+
 @media (max-width: 900px) {
   .ops-grid {
     grid-template-columns: 1fr;

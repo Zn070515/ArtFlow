@@ -1,21 +1,7 @@
 import type { ActivityAnalyticsResponse } from "../../api/analytics.js";
 import { AGGREGATE_STATUS_LABELS, label } from "../format/labels.js";
 import { Card } from "../ui/Card.js";
-
-const ATTENTION_LABELS: Readonly<Record<string, string>> = {
-  REGISTRATION_REVIEW_PENDING: "报名仍有待审核项",
-  REQUIRED_MATERIALS_PENDING: "必交材料尚未全部通过",
-  ROSTER_NOT_FINAL: "最终名单尚未定稿",
-  FORMAL_VOTE_OPEN: "正式投票仍处于开放状态",
-  COMPETITION_ROUND_NOT_LOCKED: "仍有比赛回合未锁定",
-  RESULT_STALE: "已确认赛果的来源发生变化",
-  RESULT_RELEASE_PENDING: "仍有赛果需要确认或发布",
-  ARCHIVE_MISSING: "活动已关闭但尚无当前归档包",
-};
-
-function attentionLabel(code: string): string {
-  return ATTENTION_LABELS[code] ?? code;
-}
+import { describeRisk } from "./riskCatalog.js";
 
 function statusSummary(values: Readonly<Record<string, number>>): string {
   const entries = Object.entries(values);
@@ -47,18 +33,29 @@ export function ActivityAnalyticsCard({
       </div>
       <div className="analytics-attention">
         <h3>运营注意项</h3>
-        {analytics.attention.length === 0 ? (
-          <p className="analytics-clear">当前没有由聚合事实生成的注意项。</p>
-        ) : (
-          <ul>
-            {analytics.attention.map((item) => (
-              <li key={item.code}>
-                <span>{attentionLabel(item.code)}</span>
-                {item.count === undefined ? null : <strong>{item.count}</strong>}
-              </li>
-            ))}
-          </ul>
-        )}
+        {(() => {
+          const riskActivity = {
+            ...analytics.activity,
+            publicCode: "",
+          };
+          const items = analytics.attention
+            .map((item) => describeRisk(item.code, riskActivity, item.count))
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+          if (items.length === 0) {
+            return <p className="analytics-clear">当前没有由聚合事实生成的注意项。</p>;
+          }
+          return (
+            <ul>
+              {items.map((item) => (
+                <li key={item.code}>
+                  <span>{item.title}</span>
+                  {item.count === undefined ? null : <strong>{item.count}</strong>}
+                  <p className="analytics-attention-reason">{item.reason}</p>
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
       </div>
     </Card>
   );
