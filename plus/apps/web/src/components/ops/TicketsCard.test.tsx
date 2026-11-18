@@ -64,6 +64,25 @@ describe("TicketsCard", () => {
     expect(await screen.findByText("T.PUBLIC-2.1.signature")).toBeInTheDocument();
   });
 
+  it("copies the e-ticket entry link after issuing", async () => {
+    issueTicketMock.mockResolvedValue({
+      ticket: { ...state.tickets[0], id: "ticket-2", publicCode: "PUBLIC-2" },
+      credential: "T.PUBLIC-2.1.signature",
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderCard();
+    await screen.findByTestId("tickets-card");
+    fireEvent.click(screen.getByRole("button", { name: "签发新票据" }));
+    await screen.findByText("T.PUBLIC-2.1.signature");
+    fireEvent.click(screen.getByRole("button", { name: "复制入场链接" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining("/t#ticket=")));
+    expect(await screen.findByText("入场链接已复制")).toBeInTheDocument();
+  });
+
   it("requires a reason before revoking a ticket", async () => {
     revokeTicketMock.mockResolvedValue({ ...state.tickets[0], state: "revoked" });
     renderCard();
