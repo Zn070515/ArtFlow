@@ -21,7 +21,7 @@
     "@artflow-plus/runtime": "workspace:*",
     "@fastify/swagger": "9.9.4",
     "@sinclair/typebox": "0.34.52",
-    "fastify": "5.12.7",
+    "fastify": "5.12.8",
     "kysely": "0.29.8"
   },
   "devDependencies": {
