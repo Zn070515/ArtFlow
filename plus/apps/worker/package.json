@@ -17,7 +17,7 @@
     "@artflow-plus/db": "workspace:*",
     "@artflow-plus/domain": "workspace:*",
     "@artflow-plus/runtime": "workspace:*",
-    "pg-boss": "12.38.2"
+    "pg-boss": "12.39.0"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
