@@ -48,7 +48,7 @@ jobs:
 
       - name: Derive API image tags and labels
         id: meta-api
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.PLUS_IMAGE_BASE }}/artflow-plus-api
           tags: |
@@ -63,7 +63,7 @@ jobs:
 
       - name: Derive Worker image tags and labels
         id: meta-worker
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.PLUS_IMAGE_BASE }}/artflow-plus-worker
           tags: |
@@ -78,7 +78,7 @@ jobs:
 
       - name: Derive Web image tags and labels
         id: meta-web
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.PLUS_IMAGE_BASE }}/artflow-plus-web
           tags: |
